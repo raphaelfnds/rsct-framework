@@ -94,7 +94,7 @@ context matters when reading old PRs.
   - Any change to API endpoints they consume (contract changes require 30-day notice per contract Cláusula 7.2)
   - Maintenance windows on their tenant (must be > 7 days advance, never on month-end)
 - **Cares about:** API uptime, audit log delivery to their SIEM, response time on `/reports/financial`.
-- **Reach via:** customer-success channel (Bia owns); Largo's technical contact is Engenheiro Hugo Tavares (hugo@largo.com.br).
+- **Reach via:** customer-success channel (Bia owns); Largo's technical contact is Engenheiro Hugo Tavares (hugo@example.com).
 - **Escalation when unavailable:** customer-success leadership; never reach customer directly without Bia's handoff.
 - **Do NOT bring them:** product roadmap discussion (sales handles), pricing (sales handles), other customers' issues.
 - **Captured:** 2025-10-15 by alice
