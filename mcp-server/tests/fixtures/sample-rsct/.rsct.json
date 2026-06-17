@@ -1,0 +1,15 @@
+{
+  "rsct_version": "1.0.0",
+  "app": {
+    "name": "sample-app",
+    "org": "sample-org"
+  },
+  "protected_branches": ["main", "test"],
+  "test_framework": "JUnit 5",
+  "install": {
+    "applied_at": "2026-06-03T12:00:00Z",
+    "mode": "CREATE",
+    "setup_commit_sha_before": "abc1234",
+    "canonical_source_added": false
+  }
+}

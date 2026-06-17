@@ -1,0 +1,132 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: stakeholder-map
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Stakeholder map — [APP_NAME]
+
+Who approves what. Who is impacted by what. Where to escalate when blocked.
+
+This file is read by `rsct_get_knowledge(category="stakeholder-map")` during
+spec phase when the task touches areas with named approval gates. The phase
+brief will surface the relevant stakeholder so the dev knows up-front "this
+needs Marcos before it can ship" — instead of discovering it at merge time.
+
+A senior engineer knows who to loop in before starting work; a junior
+discovers it the hard way. This file closes that gap.
+
+---
+
+## When to capture an entry here
+
+Capture a stakeholder when **any** of the following is true:
+
+- A person/role has **explicit approval authority** over a class of changes
+("all auth changes pass through Carla", "fiscal/tax changes require Marcos
+sign-off").
+- An approval was missed and caused rework or rollback. Capture the lesson.
+- A new hire, contractor, vendor PM, or board member acquires a formal scope.
+- A regulator, auditor, or compliance officer must be looped in for specific
+operations (LGPD DPO for data processing changes, fiscal auditor for invoicing).
+- A customer is a named stakeholder (large account with single-tenant SLAs,
+strategic pilot, or veto right by contract).
+
+## When NOT to capture here
+
+- Team members without approval scope → `team-capabilities.md` (their skills
+and current load).
+- People mentioned in passing without authority → don't capture; mention
+in the relevant ADR or incident if needed.
+- Personal info (private phone numbers, home addresses) → never. Channels
+only.
+- Stakeholders of other projects → keep this file scoped to [APP_NAME].
+Cross-project stakeholders live in `universe/applications/<app>/README.md`
+or `universe/docs/governance/document-control.md`.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### SH-NNN — <Name or Role>
+- **Role:** <title; if internal, include team; if external, include org>
+- **Approves:** <bullet list of change classes they sign off on. Be specific —
+  not "anything backend" but "schema migrations affecting financial tables",
+  not "frontend" but "public-facing brand and copy changes">
+- **Cares about:** <modules, flows, metrics they actively track — used by
+  rsct_persona_review to surface their concerns even when approval isn't needed>
+- **Reach via:** <primary channel, expected response time>
+- **Escalation when unavailable:** <fallback person or process>
+- **Do NOT bring them:** <changes outside their scope that they'd find noise.
+  Optional but powerful — protects everyone's time>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: SH-001, SH-002, ... sequential, append-only. When someone leaves
+a role, mark `Status: archived YYYY-MM-DD` rather than deleting — historical
+context matters when reading old PRs.
+
+---
+
+## Example entries (✅ good — keep this style)
+
+### SH-002 — Marcos Andrade
+- **Role:** CFO (Acme Corp) — financial operations and tax compliance owner
+- **Approves:**
+  - Any change to invoicing, billing, fiscal-document generation (NFe, NFSe)
+  - Any change to tax calculation rules (PIS/COFINS/ISS/ICMS rates and rules)
+  - Migration of any financial table schema (anything in `finance.*` namespace)
+  - New payment provider integration or change in capture/refund flow
+- **Cares about:** monthly close timeline (5th business day), audit-trail completeness, deferred-revenue accuracy.
+- **Reach via:** Slack #finance-eng channel; response within ~4 business hours; for urgent: WhatsApp via Sara (CFO's EA).
+- **Escalation when unavailable:** João (Accounting Lead) for pre-approval on routine; defer non-urgent to Marcos return.
+- **Do NOT bring them:** UI copy changes, non-fiscal report tweaks, dev-environment configuration, anything in modules outside `finance.*` or `tax.*`.
+- **Captured:** 2025-10-15 by alice
+
+### SH-005 — Customer: Largo Brasil S.A. (single-tenant SLA)
+- **Role:** Strategic enterprise account; signed single-tenant DB requirement (see [[anti-decisions]] AD-003 context)
+- **Approves:**
+  - Any change to API endpoints they consume (contract changes require 30-day notice per contract Cláusula 7.2)
+  - Maintenance windows on their tenant (must be > 7 days advance, never on month-end)
+- **Cares about:** API uptime, audit log delivery to their SIEM, response time on `/reports/financial`.
+- **Reach via:** customer-success channel (Bia owns); Largo's technical contact is Engenheiro Hugo Tavares (hugo@largo.com.br).
+- **Escalation when unavailable:** customer-success leadership; never reach customer directly without Bia's handoff.
+- **Do NOT bring them:** product roadmap discussion (sales handles), pricing (sales handles), other customers' issues.
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### SH-XXX — John from the QA team
+- Role: QA engineer
+- Approves: nothing specifically, but reviews PRs sometimes
+- Cares about: testing
+```
+
+**Why this is wrong:** John is not a stakeholder with formal authority. He's
+a team member. His skills, current load, and review interests belong in
+`team-capabilities.md` so that planning respects team capacity. This file
+is for **named approval gates**, not for everyone with an opinion.
+
+If John genuinely has veto right over something specific (e.g., "no release
+without QA sign-off") — then capture that **role-level** authority
+("QA Lead approves release readiness") and note that John currently holds
+the role. When John leaves, the role survives.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential SH-NNN numbering. -->
+<!-- First-time setup: capture roles with formal approval authority. Start
+     with finance, security/compliance, public-facing product, and any
+     contractually-named external stakeholders. -->
+
+<TODO: add first stakeholder entry following the schema above>

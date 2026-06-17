@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas (Discussions)
+    url: https://github.com/raphaelfnds/rsct-framework/discussions
+    about: Ask questions, share setups, or discuss ideas.
+  - name: RSCT Workflow Framework — the concept (Medium)
+    url: https://medium.com/@raphael.fnds/rsct-workflow-framework-turning-ai-into-a-real-engineering-copilot-2f4a44bd7117
+    about: The theory and motivation behind the framework.

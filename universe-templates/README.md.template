@@ -1,0 +1,29 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] kind=universe-readme -->
+# [ORG_SLUG]-universe
+
+Central repository for the [ORG_SLUG] software ecosystem: architecture,
+governance, application inventory, host inventory.
+
+## What's here
+
+- **CLAUDE.md** — read first if you're an AI agent (operational protocol §0)
+- **docs/governance/** — LGPD, naming, DNS, retention rules
+- **docs/diagrams/** — C4, deployment, DFD diagrams (drawio files)
+- **applications/** — one folder per app
+- **hosts/** — one folder per production host
+- **.universe.json** — metadata (org, registered apps)
+
+## How to use as a developer
+
+When working on any project of [ORG_SLUG]:
+1. Run `/rsct-setup` in that project (installs governance protocol)
+2. Run `/rsct-canonical-source` (wires the project's CLAUDE.md to this universe)
+
+## How to use as an AI agent
+
+Read CLAUDE.md first. Never fetch remote artifacts without user OK
+(see §0 in CLAUDE.md).
+
+---
+
+Bootstrapped by RSCT Framework v1.0.0 on [CREATED_AT].

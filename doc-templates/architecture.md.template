@@ -1,0 +1,60 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Architecture — [APP_NAME]
+
+## Stack
+
+| Layer | Technology | Version |
+|---|---|---|
+| Language | <TODO> | <TODO> |
+| Framework | <TODO> | <TODO> |
+| Build | <TODO> | <TODO> |
+| Database | <TODO> | <TODO> |
+| Data access | <TODO> | — |
+| Migrations | <TODO> | <TODO> |
+| Auth | <TODO> | — |
+| Tests | <TODO> | — |
+| Docs | <TODO> | <TODO> |
+
+## Entrypoints
+
+| File | Purpose |
+|---|---|
+| <TODO: main bootstrap file> | <TODO> |
+| <TODO: base config file> | <TODO> |
+
+## Runtime flow
+
+```
+<TODO: describe the request flow from entry point to data store —
+e.g., client → reverse proxy → app server → security filter → controller →
+service → repository → database>
+```
+
+## Persistence
+
+<TODO: describe the persistence patterns in use and when each applies>
+
+## Build and environments
+
+| Environment | How to activate | Key differences |
+|---|---|---|
+| dev | <TODO> | <TODO> |
+| test | <TODO> | <TODO> |
+| prod | <TODO> | <TODO> |
+
+## Environment variables
+
+| Variable | Description | Required |
+|---|---|---|
+| <TODO> | <TODO> | <TODO> |
+
+## Source code directories
+
+| Path | Responsibility |
+|---|---|
+| <TODO> | <TODO> |
+
+## Cross-cutting concerns
+
+<TODO: describe project-specific concerns such as multi-tenancy, i18n,
+feature flags, observability — only if applicable>

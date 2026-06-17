@@ -1,0 +1,34 @@
+# Applications — [ORG_SLUG]
+
+Inventory of all software applications owned by [ORG_SLUG].
+
+## Structure
+
+One folder per app:
+```
+applications/
+├── <app-1>/
+│   └── README.md
+├── <app-2>/
+│   └── README.md
+└── ...
+```
+
+## Per-app README content
+
+Each app folder's `README.md` should contain:
+- Purpose (1-2 sentences)
+- Stack (Java/Node/Rust/etc.)
+- Repository URL
+- Production host(s)
+- Owner / team
+- LGPD relevance (yes/no, link to matrix row)
+- Key documents in the app's own repo (architecture.md, decisions.md, etc.)
+
+## Auto-registration
+
+When a developer runs `/rsct-setup` in an app's repository and this universe
+is detected locally, the framework can register the app here automatically.
+
+(Auto-registration is planned for RSCT v1.1; in v1.0 manually create
+`applications/<app>/README.md` using `_app.md.template`.)

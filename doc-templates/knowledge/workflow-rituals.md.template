@@ -1,0 +1,145 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: workflow-rituals
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Workflow rituals — [APP_NAME]
+
+How work actually flows here. The rituals (formal and informal) around PRs,
+deploys, incidents, releases, decisions. Both the documented process and
+the customary one — when they differ, capture the **actual** flow, not the
+aspirational one.
+
+This file is read by `rsct_get_knowledge(category="workflow-rituals")` and
+by `rsct_persona_review` (DevOps + Senior Dev personas). When Claude
+proposes "let's deploy this", the relevant ritual surfaces — so the
+proposal becomes "let's deploy via the canary ritual (WR-003): tag staging,
+wait 30min for synthetic checks, then production".
+
+**Bias correction:** Without this file, Claude proposes whatever shipping
+process the training data favored (often "open PR → merge → deploy"). With
+it, Claude respects the actual org process — including the unwritten parts
+(the Slack ping to Carla, the changelog blurb before merge, the staging
+soak window).
+
+---
+
+## When to capture an entry here
+
+Capture or update a ritual when **any** of the following is true:
+
+- A ritual was violated and that caused rework, escalation, or an incident.
+The fix isn't "be more careful" — it's writing down the ritual so a future
+session can follow it.
+- A new ritual is established (process change, new tool, regulatory
+requirement).
+- An existing ritual changes meaningfully (timing, tools, owners).
+- Documented process and actual process drift. Capture what actually
+happens, not what the wiki says.
+
+## When NOT to capture here
+
+- One-off coordinations — not rituals.
+- Generic engineering principles ("test before deploy") — those are
+defaults, not rituals.
+- Personal habits — workflows shared by the team, not individuals.
+- Tool-specific configuration — that lives in the tool's own docs; this
+file captures the **flow**, not the tool screens.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### WR-NNN — <ritual name>
+- **Trigger:** <what kicks this flow off — a PR opens, a sev1 page,
+  the 1st of the month, a customer report>
+- **Goal:** <what the ritual achieves — "release with rollback safety",
+  "ADR consensus", "incident closure">
+- **Steps:**
+  1. <action> — <owner role> — <expected timing>
+  2. ...
+- **Owners (overall):** <role responsible end-to-end>
+- **SLA / timing:** <total expected duration; sharp edges (e.g., "must
+  complete same business day")>
+- **Variations:**
+  - <when and how the ritual changes — e.g., "for hotfix, skip step 2 with
+    on-call lead's verbal OK">
+- **Common skips and their cost:** <known shortcuts people take and what
+  has gone wrong because of them>
+- **Tools used:** <list, with link/path to the tool's own runbook if any>
+- **Related:** <ADRs that govern the ritual, BRs that constrain it,
+  incidents that shaped it>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: WR-001+ sequential, append-only. Mark superseded rituals
+`Status: superseded by WR-XXX on YYYY-MM-DD` and keep them for context.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### WR-003 — Production deploy (standard, non-hotfix)
+- **Trigger:** PR merged to `main` after review approvals; or manual re-deploy of a prior tag.
+- **Goal:** Ship to production with canary safety and rollback path within ≤90 minutes of merge.
+- **Steps:**
+  1. CI builds image and pushes to ECR — automated — ~6 min after merge.
+  2. CD promotes image to staging cluster — automated — ~2 min after image push.
+  3. Synthetic smoke (Datadog Synthetics suite "prod-readiness") runs against staging — automated — ~15 min wall clock.
+  4. **Manual gate**: deployer reviews #deploys Slack thread; verifies smoke green; pings on-call engineer for awareness — deployer + on-call — ~5-30 min depending on availability.
+  5. CD promotes image to production canary (10% traffic) — manual click in CD tool by deployer — instant.
+  6. Soak 30 minutes; deployer watches "prod-canary" Datadog dashboard for error-rate, p95, custom-metric anomalies — deployer — 30 min.
+  7. Promote canary to 100% — manual click — instant.
+  8. Update `documentation/release-notes.md` with PR list and tag — deployer — same business day.
+  9. Post `✅ deploy <tag> live` in #releases — deployer — same business day.
+- **Owners (overall):** Deployer (the engineer who merged) is the owner from step 4 onward; on-call backstops if deployer goes offline mid-flow.
+- **SLA / timing:** ≤90 min from merge to 100% rollout; if soak (step 6) reveals concern, rollback in <5 min by reverting CD promotion.
+- **Variations:**
+  - **Hotfix:** skip step 3 wait (run synthetics in parallel with step 5); requires explicit on-call OK in #deploys.
+  - **Friday after 16h:** no deploys without on-call lead approval (reduces weekend risk).
+  - **During customer-named blackout window:** deploys to that customer's tenant suspended (see [[stakeholder-map]] SH-005).
+- **Common skips and their cost:**
+  - Skipping step 4's on-call ping → on-call discovers issue from PagerDuty instead of from teammate; resolution 2× slower. Mandatory now.
+  - Posting "deploy live" before soak completes → false signal; do not skip step 6 even when "it's an obvious change".
+- **Tools used:** GitHub Actions (CI), ArgoCD (CD), Datadog Synthetics (smoke), Datadog APM (soak).
+- **Related:** ADR-014 (canary deploy strategy), BR-008 (no production change without rollback path), [[incident-log]] INC-011 (the 2024 incident that established mandatory step 4 ping).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### WR-XXX — How to git
+- Steps:
+  1. git clone
+  2. git checkout -b branch
+  3. make changes
+  4. git push
+```
+
+**Why this is wrong:** Generic version-control mechanics are not a ritual
+specific to this project. Anyone who works with git already knows this.
+Capture only flows that are **specific to how this org operates** — the
+PR template, the labels required, the review SLAs, the conventional
+commit prefixes — those are the rituals worth writing down.
+
+If a ritual entry could be lifted verbatim into any other project's docs
+without losing meaning, it's not a ritual, it's a tutorial.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential WR-NNN numbering. -->
+<!-- First-time setup: capture the rituals where deviation has the highest
+     cost — usually: PR review, production deploy, incident response, ADR
+     proposal, release tagging. Then add others as friction surfaces. -->
+
+<TODO: add first workflow ritual following the schema above>

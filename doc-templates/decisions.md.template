@@ -1,0 +1,42 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Architectural decisions — [APP_NAME]
+
+## Firm premises (non-negotiable)
+
+### #1 — <TODO: name>
+<TODO: description + reason>
+<!-- Optional metadata (any order, recognised by rsct-mcp):
+     **Status**: active | superseded | deprecated
+     **Tags**: comma, separated, tags
+     Omit either line if not applicable. -->
+
+---
+
+## Durable architectural decisions (ADRs)
+
+<!-- Append-only. New ADRs always at the end, with sequential numbering. -->
+<!-- Never rewrite an existing ADR — record revision as a new ADR. -->
+
+### ADR-001 — <TODO: name> (<YYYY-MM-DD>, ref: <PR/issue>)
+**Status**: active
+**Tags**: <TODO: comma, separated, tags — or omit this line>
+**Context**: <TODO>
+**Alternatives considered**: <TODO>
+**Decision**: <TODO>
+**Consequences**: <TODO>
+
+---
+
+## Out of scope
+<TODO: explicitly list what this project does not do>
+
+---
+
+## How to contribute new decisions
+- Firm premise: append to "#N" section, sequential numbering
+- ADR: append to end of "ADRs" section, ADR-NNN sequential numbering
+- Chronological history lives in `git log`, not here — this doc is current state
+- Optional `**Status**:` / `**Tags**:` lines on any entry are recognised by
+  the `rsct_get_decisions` tool's `filter.status` / `filter.tag` arguments.
+  Status values: `active`, `superseded`, `deprecated`. Tags are
+  comma-separated free-form strings.

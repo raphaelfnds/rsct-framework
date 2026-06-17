@@ -1,0 +1,48 @@
+{
+  "name": "rsct-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for the RSCT framework — institutional consciousness layer (recall + phase machine + personas) for Claude Code",
+  "type": "module",
+  "bin": {
+    "rsct-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "verify:dist": "tsup && git diff --exit-code -- dist",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node dist/index.js < /dev/null"
+  },
+  "keywords": [
+    "mcp",
+    "rsct",
+    "claude",
+    "claude-code",
+    "ai-governance",
+    "workflow"
+  ],
+  "author": "raphaelfnds <raphaelfnds@users.noreply.github.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "pino": "^9.5.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.8"
+  }
+}

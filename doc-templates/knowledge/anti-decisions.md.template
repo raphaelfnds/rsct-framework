@@ -1,0 +1,118 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: anti-decisions
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Anti-decisions — [APP_NAME]
+
+The graveyard. Things that were tried and abandoned. Approaches considered
+and explicitly rejected. The institutional memory that prevents the next
+session of Claude (or the next new hire) from proposing X again — without
+at least knowing X was already attempted and why it died.
+
+This file is read by `rsct_get_knowledge(category="anti-decisions")` and by
+`rsct_check_premise`. Spec phase warns if an option matches an anti-decision
+and refuses to mark it Recommended unless the dev acknowledges and provides
+a `revisit_reason` explaining what changed since.
+
+**Why this file matters more than `decisions.md`:** Decisions captures "what
+we do". Anti-decisions captures "what we tried and learned not to do" — the
+shape that is invisible from looking at current code. A new contributor
+reading only `decisions.md` will keep suggesting the abandoned approaches.
+
+---
+
+## When to capture an entry here
+
+Capture an anti-decision when **any** of the following is true:
+
+- An experiment was conducted (proof-of-concept, spike, partial migration)
+and abandoned.
+- A plan option was formally rejected by the dev with a stated reason.
+- A `§A-§H` rule was overridden — capture the override AND the underlying
+tacit rule it revealed.
+- During discussion, someone said "we already tried that" — get the story
+and write it down so the next person doesn't have to ask.
+- A vendor/library/framework was adopted then dropped (the choice goes in
+`vendor-relationships.md`; the *why-we-dropped-it* goes here).
+- A pattern was used in some modules then explicitly NOT extended to others.
+
+## When NOT to capture here
+
+- Decisions to **adopt** something → `decisions.md` (ADRs).
+- Bugs and their fixes → `incident-log.md`. (But: if a bug fix revealed
+that a previously chosen approach is fundamentally unsuitable, the
+abandonment of that approach belongs here.)
+- Hypothetical paths that were never seriously evaluated — this file is
+for things that consumed time/effort, not for armchair dismissals.
+- Personal preferences without evidence ("I don't like X") — capture only
+when there's concrete reasoning.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### AD-NNN — <short noun phrase: what was tried>
+- **Tried:** <1-2 sentences describing the attempt: scope, who, when started>
+- **Hoped to gain:** <what problem this was supposed to solve>
+- **Abandoned because:** <concrete evidence — incident, cost, time, team
+constraint. Cite numbers or specific events when possible>
+- **Period:** <YYYY-MM-DD to YYYY-MM-DD>
+- **Do not revisit unless:** <conditions that would make this worth
+re-evaluating. Be specific — "the team grows past 5 backend devs", not
+"the team is bigger">
+- **Related:** <ADRs that govern the current alternative, business rules,
+incidents, other anti-decisions>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: AD-001, AD-002, ... sequential, append-only.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### AD-003 — Multi-tenancy via separate database per tenant
+- **Tried:** Provisioned isolated PostgreSQL database per customer-org for the first 4 paying tenants. Tenant-aware routing layer dispatched per-request connections.
+- **Hoped to gain:** Strong data isolation for LGPD audit, easier per-tenant backup/restore, no risk of cross-tenant query leak.
+- **Abandoned because:** Provisioning a new DB took 14 minutes including replica setup; onboarding flow timed out. Schema migrations had to run N times serially (~6h for 50 tenants in projection). Per-DB backup retention cost projected at $4.2k/mo at 200 tenants vs $180/mo for shared-DB-with-tenant_id. Customer-isolation requirement was satisfiable via row-level security + audited tenant_id column, validated with legal team 2024-08-22.
+- **Period:** 2024-06-15 to 2024-08-30.
+- **Do not revisit unless:** A regulator (LGPD authority, sector-specific) issues binding guidance that row-level isolation does not satisfy data segregation requirements; OR we land an enterprise customer with contractual single-tenant DB requirement and they pay >$8k/mo to cover the cost delta.
+- **Related:** ADR-005 (row-level security + tenant_id chosen instead); BR-014 (tenant_id is mandatory on every business-domain row); [[incident-log]] entry 2024-07-18 (cross-tenant query incident during the experiment).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### AD-XXX — Never use jQuery
+- Tried: never.
+- Abandoned because: it's old.
+```
+
+**Why this is wrong:** This is not an anti-decision, this is a prejudice.
+There was no attempt, no measurement, no learning. If there's a real reason
+the project avoids jQuery (e.g., bundle size budget, security audit of
+versions, team skill on modern alternatives), then either (a) it's a business
+rule about bundle policy (`business-rules.md`), or (b) it's a vendor decision
+(`vendor-relationships.md` explaining why React/Vue/Svelte was chosen).
+
+Empty grievances dilute this file's signal. Each entry must carry a story
+that took real engineering time.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential AD-NNN numbering. -->
+<!-- First-time setup: capture experiments the team has already abandoned.
+     Dig in old PRs, archived branches, retrospective notes. -->
+
+<TODO: add first anti-decision following the schema above>

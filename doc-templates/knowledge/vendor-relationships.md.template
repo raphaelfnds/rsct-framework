@@ -1,0 +1,143 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: vendor-relationships
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Vendor relationships — [APP_NAME]
+
+Third-party services and libraries this project relies on, why they were
+chosen, what they replaced, and the cost (effort, contractual, technical) of
+swapping them out.
+
+This file is read by `rsct_get_knowledge(category="vendor-relationships")`
+and by `rsct_persona_review` (Architect + DevOps personas). Spec phase
+surfaces relevant vendors when proposing functionality they cover — so
+Claude proposes "use SendGrid" instead of "set up SMTP server", because
+SendGrid is already in the stack and paid for.
+
+**Bias correction:** Without this file, Claude defaults to whatever has the
+most documentation in its training set. With this file, Claude proposes
+what the org already pays for and operates.
+
+---
+
+## When to capture an entry here
+
+Capture or update when **any** of the following is true:
+
+- A new third-party (SaaS, library, API, infrastructure provider) is
+adopted in this project.
+- A vendor is dropped (the drop reason goes here too; the abandoned
+approach goes in `anti-decisions.md`).
+- A vendor undergoes material change: acquisition, pricing model shift,
+deprecation announcement, security incident affecting our usage.
+- A vendor's lock-in surface grows (new feature adopted that increases
+churn cost). Update the entry.
+- During a session, someone asks "why are we using X?" and the answer
+isn't already here. Capture the answer.
+
+## When NOT to capture here
+
+- Internal tools, services, or libraries built by the team — those are part
+of the architecture, not vendors.
+- Generic open-source dependencies pinned via package manager without
+explicit decision (e.g., `lodash`) — capture only if there's a story
+(security incident, performance issue, version pin reason).
+- Personal services used by individuals (a dev's local IDE plugin) —
+unrelated to project state.
+- Pricing details that are sensitive — keep tier/scale-band, not exact
+quotes. This file may end up in a public repo; do not leak commercial terms.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### VR-NNN — <vendor / service name>
+- **Role in this project:** <specific, concrete — "transactional email for
+  password reset and order confirmation", not just "email">
+- **Adopted:** <YYYY-MM-DD> (replaces: <prior solution or "none">)
+- **Chosen because:**
+  - <reason 1 — with measurement or anchor>
+  - <reason 2>
+  - <reason 3>
+- **Alternatives considered:**
+  - <alt 1 — why discarded>
+  - <alt 2 — why discarded>
+- **Lock-in surface:** <which features/APIs/data formats we depend on. The
+  more specific, the better the churn-cost estimate>
+- **Churn cost (estimated):** <low | medium | high | very high — with a
+  one-line reason; ideally person-weeks of swap effort>
+- **Cost tier (sanitized):** <free / sub-$100/mo / sub-$1k/mo / sub-$10k/mo /
+  higher — DO NOT write exact dollar amounts>
+- **Account owner (internal):** <name or role; how to reach for renewal/escalation>
+- **Vendor contact (if applicable):** <named CSM / support tier>
+- **Risk watch:** <known concerns — pricing trajectory, acquisition rumors,
+  competitor in our space, etc.>
+- **Related:** <ADRs that govern this choice, BRs that constrain usage,
+  AD entries describing prior abandoned vendors>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: VR-001+ sequential, append-only. Dropped vendors stay in the
+file with `Status: dropped YYYY-MM-DD — reason: <>; replaced by VR-NNN`.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### VR-002 — SendGrid (Twilio)
+- **Role in this project:** Transactional email delivery — password reset, order confirmation, refund notification, monthly customer statement. NOT marketing campaigns (those go through HubSpot per VR-007).
+- **Adopted:** 2023-04-12 (replaces: in-house SMTP via Postfix on a managed VM — see [[anti-decisions]] AD-001 for why)
+- **Chosen because:**
+  - Delivery rate to .br domains measured at 98.4% over a 30-day spike vs 89% for in-house SMTP (gmail.com inboxing was the main pain).
+  - Webhook event stream for bounce/spam-report integrated with our customer-quality service in 2 days; alternative providers required custom polling.
+  - Native template editor lets non-engineers (marketing ops) iterate copy without engineering PRs.
+- **Alternatives considered:**
+  - AWS SES — 30% cheaper but deliverability to .br consumer domains weaker in our test; lacks per-template analytics UI.
+  - Mailgun — comparable feature set, but 2022 security incident (subprocessor breach) made legal hesitant.
+- **Lock-in surface:** Dynamic Template engine (~14 templates use SendGrid handlebars helpers), Event Webhook subscriber, suppression list managed in SendGrid UI by marketing-ops (not in our DB), inbound parse for `replies@`.
+- **Churn cost (estimated):** medium — ~3 person-weeks to migrate templates + rewire event webhook + reproduce suppression-list authority; legal review of new provider DPA adds 1-2 weeks.
+- **Cost tier (sanitized):** sub-$1k/mo at current volume; pricing scales linearly with sends.
+- **Account owner (internal):** Bia (Customer Success) holds the SendGrid login; renewal annually each March.
+- **Vendor contact (if applicable):** standard support tier (no dedicated CSM).
+- **Risk watch:** Twilio's broader cost-cutting since 2023 — keep an eye on SendGrid feature deprecations or pricing rebrands. Migration plan should be revisited if Twilio announces SendGrid spin-off or restructure.
+- **Related:** ADR-009 (transactional vs marketing email separation), BR-019 (LGPD: any email about a customer's data triggers a log entry in `customer_communication_log`), [[anti-decisions]] AD-001 (in-house Postfix), [[incident-log]] INC-004 (Postfix relay outage that triggered this migration).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### VR-XXX — npm
+- Role: package manager
+- Cost: free
+- Churn cost: low
+```
+
+**Why this is wrong:** npm as the Node package manager isn't a vendor
+decision — it's a default. Capture an entry only if there's a real story:
+- "We chose **pnpm** over npm in 2024 because monorepo deduplication saved
+12s on CI install time" → that's a vendor-style decision worth capturing.
+- "We pin **node@20.11** specifically because vendor X requires it" →
+that's worth a note (maybe in `business-rules.md` if it's a constraint).
+
+A vendor entry must carry a **why** that informs future planning. Without
+that, it's noise.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential VR-NNN numbering. -->
+<!-- First-time setup: capture the 3-7 vendors whose loss would most disrupt
+     this project (payment, email, hosting, observability, auth, data store
+     beyond primary DB). -->
+
+<TODO: add first vendor entry following the schema above>

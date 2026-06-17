@@ -1,0 +1,42 @@
+# Naming Standards — [ORG_SLUG]
+
+Canonical naming conventions for projects, branches, environments, infrastructure.
+
+## Project / repository naming
+
+- Backend APIs: `api-<domain>` — e.g., `api-billing`, `api-users`
+- Frontend apps: `app-<domain>` — e.g., `app-dashboard`, `app-mobile`
+- Libraries: `lib-<domain>` — e.g., `lib-shared-types`
+- Tools/scripts: `tool-<purpose>` — e.g., `tool-migration-runner`
+- <TODO: any custom prefixes for your org>
+
+## Git branch naming
+
+- `feat/<short-description>` — new feature
+- `fix/<short-description>` — bug fix
+- `chore/<short-description>` — maintenance, dependency bumps
+- `docs/<short-description>` — documentation only
+- `hotfix/<short-description>` — urgent production fix
+- Protected branches: `main`, `test` (or `staging`, depending on org)
+
+## Environment naming
+
+- `dev` — local developer environment
+- `test` — automated integration / CI
+- `staging` — pre-production for manual QA
+- `prod` — production
+- <TODO: any custom envs>
+
+## Infrastructure naming
+
+- Hosts: `<role>-<env>-<n>` — e.g., `app-prod-01`, `db-staging-01`
+- Containers: same as host where it runs, plus `-<service>`
+- <TODO: any custom rules>
+
+## Database object naming
+
+<TODO: tables, schemas, columns — your conventions here>
+
+## Migration files
+
+<TODO: e.g., Flyway `V<N>__<description>.sql` or `<timestamp>_<description>.sql`>

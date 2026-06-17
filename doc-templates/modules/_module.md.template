@@ -1,0 +1,44 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Module: [MODULE_NAME]
+
+## Purpose
+
+<TODO: one paragraph describing what this module is responsible for and
+what it deliberately is NOT responsible for>
+
+## Files involved
+
+```
+<TODO: list the file structure of this module — e.g.,
+src/main/java/com/[org]/[app]/[module_name]/
+├── [Controller].java
+├── [Service].java
+├── [Repository].java
+└── dto/
+    ├── [Request].java
+    └── [Response].java
+>
+```
+
+## API exposed
+
+| Method | Path | Auth required | Description |
+|---|---|---|---|
+| <TODO> | <TODO> | <TODO> | <TODO> |
+
+## Main flows
+
+**<TODO: flow name>:**
+1. <TODO>
+2. <TODO>
+3. <TODO>
+
+## Consumers
+
+- <TODO: list other modules or external systems that depend on this module
+  and how they depend on it>
+
+## Points of attention
+
+- **<TODO: gotcha or constraint>**: <TODO: description, impact, and what to
+  watch out for when changing this module>

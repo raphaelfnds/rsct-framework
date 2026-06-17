@@ -1,0 +1,31 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Impact: [MODULE_NAME]
+
+See module: [modules/[MODULE_NAME].md](../modules/[MODULE_NAME].md).
+
+## Typical changes
+
+- <TODO: list common change types for this module>
+
+## Who depends on this module
+
+- **<TODO: consumer name>**: <TODO: how they depend on this module>
+
+## Risk by change type
+
+| Change | Risk | What can break |
+|---|---|---|
+| <TODO: change type> | Low / Medium / High | <TODO: what breaks and how it surfaces> |
+
+## Non-obvious couplings
+
+- **<TODO: coupling name>**: <TODO: description of the hidden dependency or
+  order-of-operations issue; symptoms appear where, root cause is here>
+
+## Checklist before merging any [MODULE_NAME] change
+
+- [ ] <TODO: relevant tests pass — list specific test classes/files>
+- [ ] <TODO: integration sanity check — describe the manual smoke test>
+- [ ] <TODO: contract review with consumers if signature changed>
+- [ ] No secrets committed (`git diff --cached` inspected)
+- [ ] <TODO: any module-specific check, e.g., migration script reviewed>

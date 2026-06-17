@@ -1,0 +1,16 @@
+# [ORG_SLUG]-universe — Documentation Index
+
+## Governance
+- [governance/document-control.md](governance/document-control.md)
+- [governance/canonical-sources-map.md](governance/canonical-sources-map.md)
+- [governance/dns-governance-survey.md](governance/dns-governance-survey.md)
+- [governance/lgpd-system-matrix.md](governance/lgpd-system-matrix.md)
+- [governance/naming-standards.md](governance/naming-standards.md)
+- [governance/retention-technical-annexes/](governance/retention-technical-annexes/)
+
+## Diagrams
+- [diagrams/README.md](diagrams/README.md) — list of diagrams and conventions
+
+## Inventory
+- [../applications/](../applications/) — applications of [ORG_SLUG]
+- [../hosts/](../hosts/) — production hosts

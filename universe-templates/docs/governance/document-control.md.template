@@ -1,0 +1,18 @@
+# Document Control — [ORG_SLUG]
+
+Status matrix of governance documents.
+
+| Document | Status | Owner | Last review |
+|---|---|---|---|
+| canonical-sources-map.md | <TODO: draft / under review / approved> | <TODO> | <TODO: YYYY-MM-DD> |
+| dns-governance-survey.md | <TODO> | <TODO> | <TODO> |
+| lgpd-system-matrix.md | <TODO> | <TODO> | <TODO> |
+| naming-standards.md | <TODO> | <TODO> | <TODO> |
+
+Status legend: draft / under review / approved / deprecated.
+
+## How to update
+
+When a governance document changes meaningfully (new system, policy update,
+ownership change), update the row above. Keep the matrix accurate — it is the
+first thing AI agents and new team members check.

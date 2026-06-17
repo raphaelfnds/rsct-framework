@@ -1,0 +1,45 @@
+# Operational state — [HOST_NAME]
+
+## Identity
+
+- **Hostname**: [HOST_NAME]
+- **Public IP**: <TODO>
+- **Private IP**: <TODO>
+- **Cloud / region**: <TODO: e.g., AWS us-east-1, on-prem São Paulo>
+
+## Specs
+
+| Resource | Value |
+|---|---|
+| vCPU | <TODO> |
+| RAM | <TODO> |
+| Disk | <TODO> |
+| OS | <TODO: e.g., Ubuntu 22.04 LTS> |
+| Kernel | <TODO> |
+
+## What runs here
+
+| Service | Port | Owner app | Notes |
+|---|---|---|---|
+| <TODO> | <TODO> | <TODO> | <TODO> |
+
+## Environment variables (names only)
+
+<TODO: list env var names that must be set on this host — never the values>
+
+## Monitoring
+
+- <TODO: Grafana / Datadog / CloudWatch URL>
+- <TODO: alerting rules location>
+
+## Backup / recovery
+
+- **Backup schedule**: <TODO>
+- **Restore runbook**: <TODO: URL or path>
+- **Last restore drill**: <TODO: date>
+
+## Access
+
+- **SSH**: <TODO: jumpbox? direct? key-based?>
+- **Who has access**: <TODO: list or role>
+- **Audit log**: <TODO: where SSH events are logged>

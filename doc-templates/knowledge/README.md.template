@@ -1,0 +1,201 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+
+# Knowledge graph — [APP_NAME]
+
+This folder is the **tacit institutional knowledge** of [APP_NAME] —
+the things a senior engineer who has been here for years knows, that a
+new contributor (human or AI) cannot derive from reading the code alone.
+
+It is **the** ingredient that makes Claude (via rsct-mcp) propose
+solutions a senior architect would propose, instead of generic ones.
+Without these files populated, the framework still works mechanically
+but cannot deliver the "AI participated in the company's evolution"
+experience.
+
+---
+
+## What lives here
+
+Ten files, each a different facet of the tacit knowledge. All
+append-only, all read by `rsct_get_knowledge(category=<name>)`.
+
+| File | What it captures | Read most when |
+|---|---|---|
+| [business-glossary.md](./business-glossary.md) | Domain vocabulary — terms and their canonical meaning here | Planning, code review, naming things |
+| [business-rules.md](./business-rules.md) | Invariants of the domain — non-negotiable rules | Spec phase, schema/migration design |
+| [anti-decisions.md](./anti-decisions.md) | Graveyard — what was tried and abandoned, with why | Research phase, before proposing options |
+| [incident-log.md](./incident-log.md) | Outages and near-misses + prevention reflexes | Any task touching incident-prone areas |
+| [stakeholder-map.md](./stakeholder-map.md) | Who approves what, how to reach them | Before any change that needs sign-off |
+| [team-capabilities.md](./team-capabilities.md) | What the team can build and maintain | Spec phase — proposing achievable options |
+| [vendor-relationships.md](./vendor-relationships.md) | Third parties, why chosen, churn cost | Research — propose what we already pay for |
+| [cost-constraints.md](./cost-constraints.md) | Where money bleeds, design reflexes around cost | Spec — weigh operational cost |
+| [workflow-rituals.md](./workflow-rituals.md) | How PRs/deploys/incidents actually flow | Anything that ships or escalates |
+| [domain-edge-cases.md](./domain-edge-cases.md) | The weird scenarios the domain loves | Spec + test strategy |
+
+Plus, at the project root (not in this folder):
+- [`documentation/decisions.md`](../decisions.md) — formal ADRs and firm premises (existed before the knowledge graph; complementary).
+- [`documentation/architecture.md`](../architecture.md) — current architecture, modules, impact maps.
+- [`documentation/infrastructure.md`](../infrastructure.md) — current runtime infrastructure inventory.
+
+---
+
+## "Which file does this belong in?" — decision tree
+
+When you've learned something worth capturing, work down this tree:
+
+1. **Is it a formal decision to adopt or commit to something?**
+   → `documentation/decisions.md` (ADR or firm premise).
+
+2. **Is it a decision NOT to do something, with a story behind it?**
+   → `anti-decisions.md`.
+
+3. **Is it a constraint that holds regardless of implementation?**
+   → `business-rules.md`.
+
+4. **Is it the **definition** of a word?**
+   → `business-glossary.md`.
+
+5. **Is it a scenario that breaks naïve code?**
+   → `domain-edge-cases.md`.
+
+6. **Did something break in production (or nearly)?**
+   → `incident-log.md`.
+
+7. **Is it about who has authority to approve?**
+   → `stakeholder-map.md`.
+
+8. **Is it about what the team can build and sustain?**
+   → `team-capabilities.md`.
+
+9. **Is it about a third party we depend on?**
+   → `vendor-relationships.md` (the why) and/or `infrastructure.md` (the what).
+
+10. **Is it about money?**
+    → `cost-constraints.md`.
+
+11. **Is it about how work flows here?**
+    → `workflow-rituals.md`.
+
+12. **None of the above?**
+    → it probably doesn't belong in the knowledge graph. Code comments,
+    architecture.md, or the relevant PR description likely fit better.
+
+---
+
+## Capture etiquette
+
+The graph rewards **sharp, specific, story-bearing** entries and **punishes
+vagueness**. A few rules that hold across all files:
+
+- **Specific beats general.** "Customer p95 latency exceeded 14s during
+Black Friday traffic spike" beats "the site was slow once".
+- **Stories beat opinions.** Capture the situation, the choice, the
+outcome. Avoid bare assertions.
+- **Cross-link generously.** Use `[[file-name]]` syntax to wire entries
+together. The graph is more than the sum of its files.
+- **Append-only.** Never delete an entry that captured a real learning,
+even if conditions change. Mark superseded entries and link to their
+replacement.
+- **Date everything.** Future readers (including you) need to know when
+this was true.
+- **Sanitize secrets, sanitize people.** No credentials, no salaries,
+no performance opinions about named individuals.
+
+---
+
+## When NOT to capture
+
+The graph degrades when it accumulates noise. Skip capturing when:
+
+- The fact is already true in code (e.g., the list of API endpoints —
+read the code).
+- The "learning" has no forward-looking reflex (just "stuff happened").
+- The detail is one-off and won't recur.
+- The entry is a vent, not a finding.
+
+Empty space in a file is honest. Fake entries to "look prepared" are
+worse than empty — they dilute the signal Claude reads.
+
+---
+
+## MCP integration (how the graph is consumed)
+
+Claude (via rsct-mcp) reads this folder through:
+
+- `rsct_get_knowledge(category)` — returns the requested file, optionally
+filtered by a query string.
+- `rsct_check_premise(claim, against)` — heuristically matches a planning
+claim against `business-rules.md` + `decisions.md` + `anti-decisions.md`.
+- Phase brief auto-loading — `rsct_phase_research_start` and
+`rsct_phase_spec_start` automatically pull relevant categories based on
+the task's classification.
+- Persona reviews — each persona has a `knowledge_categories[]` list
+declaring which graph files it consults during review.
+
+Capture tools (called by phase tools when triggers fire):
+
+- `rsct_capture_anti_decision`, `rsct_capture_incident`,
+`rsct_capture_vendor_choice`, `rsct_capture_glossary_term`,
+`rsct_capture_business_rule`, `rsct_capture_workflow`,
+`rsct_capture_override` — each appends a well-formed entry to the
+appropriate file. See `mcp-server/README.md` for the full list and
+JSON schemas.
+
+---
+
+## Capture model — just-in-time, not a separate ritual
+
+The graph stays current through **capture inside the normal
+conversation flow**, not via a scheduled daily ritual. An earlier
+"15-minute daily ritual" framing was overstated and was retired
+2025-10-15 — it implied a recurring chore the framework never actually
+required.
+
+How it actually works:
+
+1. **During regular work — just-in-time.** When Claude detects a
+   capture trigger (new domain term, new business rule, vendor choice,
+   dev override, plan rejection, incident, anti-pattern), it proposes
+   a structured entry inline. The dev confirms / refines / declines
+   in 5-30 seconds. Captures happen inside the existing dialogue, not
+   as a separate sit-down.
+
+2. **One-time bootstrap (1-3 hours).** When adopting the framework on
+   an existing project, backfill the categories in the bootstrap order
+   below. This is the only sit-down session required, and only once
+   per project.
+
+3. **Optional quarterly review (15-30 minutes).** Re-read the graph
+   end-to-end. Mark obsolete entries `Status: superseded`. Add
+   cross-links you've noticed since the last review. Quarterly is
+   recommended but not load-bearing.
+
+Real continuous cost is near-zero overhead. The graph decays only if
+capture triggers are routinely ignored — not because a daily ritual
+was skipped.
+
+---
+
+## Bootstrap order (for empty projects)
+
+When starting from a fresh `/rsct-setup` install, the templates land
+empty. Fill them in this order — easiest to hardest:
+
+1. `business-glossary.md` — domain terms you already say out loud.
+2. `vendor-relationships.md` — your stack is already known.
+3. `team-capabilities.md` — current snapshot of skills + capacity.
+4. `workflow-rituals.md` — your existing PR/deploy flow.
+5. `business-rules.md` — invariants you've stated to customers or
+auditors.
+6. `stakeholder-map.md` — current approval chain.
+7. `infrastructure.md` (at `documentation/infrastructure.md`) — current
+deployed services.
+8. `cost-constraints.md` — top line items in your bill.
+9. `incident-log.md` — backfill the last 3-5 significant incidents.
+10. `anti-decisions.md` — the hardest one; requires digging through PRs,
+retros, archived branches.
+11. `domain-edge-cases.md` — emerges over time as bugs are fixed.
+
+Don't try to fill everything in one sitting. 1-2 entries per file is a
+respectable bootstrap; the rest grows organically through the capture
+ritual.

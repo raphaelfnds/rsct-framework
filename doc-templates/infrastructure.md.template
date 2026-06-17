@@ -1,0 +1,159 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: infrastructure
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Infrastructure inventory — [APP_NAME]
+
+What runs where. Databases, caches, queues, storage, CDNs, third-party
+SaaS that the app **operationally consumes** at runtime. Current state,
+not narrative.
+
+This file is read by `rsct_get_environments(scope="infrastructure")` and
+returned as a structured list. Spec phase surfaces relevant infrastructure
+when proposing functionality — so "we should add image upload" gets
+"infrastructure already includes S3 bucket `[APP_NAME]-uploads`; reuse
+that path before proposing a new bucket".
+
+**Relationship to other files:**
+- `vendor-relationships.md` — captures **why** a vendor was chosen and what
+it replaces. Decision history.
+- `infrastructure.md` (this file) — captures **what's running now** and the
+operational facts a design needs. Current-state inventory.
+- A SaaS that's part of the stack typically appears in both: a VR entry
+explaining the choice, and an INFRA entry describing how it's currently
+configured/consumed.
+
+---
+
+## When to capture an entry here
+
+Capture or update infrastructure when **any** of the following is true:
+
+- A new piece of infrastructure is provisioned (database, cache, queue,
+storage bucket, SaaS subscription) and consumed by the app at runtime.
+- Existing infrastructure changes provider, version, region, or
+operational SKU (e.g., RDS upgraded from t3.medium to m5.large; Redis
+moves from single-node to cluster mode).
+- Connection topology changes (new replica, new region, failover path
+established).
+- Retention, quota, or limit changes that designers should know about
+(S3 lifecycle moves from 90 days to 30 days; DB max_connections raised
+from 100 to 200; rate limit on third-party API tightened).
+
+## When NOT to capture here
+
+- Vendor choice rationale → `vendor-relationships.md`.
+- App-internal modules and services → `architecture.md`.
+- Per-environment config diffs (dev/test/prod values) → those are read
+directly from `application-{profile}.properties` / `.env.example` by
+`rsct_get_environments(scope="profiles")`. This file is for **what the
+infrastructure is**, not for per-profile config.
+- Secrets, credentials, real connection strings — **never**. This file may
+be public; redact host names, IDs, tokens. Use placeholders.
+- One-off operational fixes — those are runbook entries.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### INFRA-NNN — <component name>
+- **Type:** database | cache | queue | storage | search | cdn | email |
+  payment | observability | auth | other:<type>
+- **Provider + region:** <e.g., "AWS RDS PostgreSQL, us-east-1"; "Cloudflare,
+  global">
+- **Version / SKU:** <PostgreSQL 16.2; Redis 7.2 cluster mode;
+  S3 Standard-IA>
+- **Used by:** <which modules / services / flows consume it. Be concrete —
+  "OrderEventService, PaymentService" not "the backend">
+- **Operational facts designers need:**
+  - <e.g., "max_connections: 200; reserve 20 for ops/migrations">
+  - <"retention: 30 days then S3 IA, 365 days then Glacier">
+  - <"rate limit: 50 req/s per API key, hard-capped — burst handling via SQS">
+  - <"backup window: 03:00-04:00 UTC daily; PITR: 7 days">
+- **HA / failover:** <multi-AZ enabled | single AZ | active-passive | none>
+- **Connection point (sanitized):** <host placeholder — never the real
+  endpoint. e.g., "<env>-db.<region>.rds.amazonaws.com; resolved via env
+  var `DB_HOST`">
+- **Owner (internal):** <role responsible for the runtime, paging, renewal>
+- **Cost dependency:** <link to cost-constraints CC-NNN if material>
+- **Related:** <vendor entries (VR-NNN), ADRs, incidents>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: INFRA-001+ sequential, append-only. Decommissioned components
+stay with `Status: decommissioned YYYY-MM-DD` for historical context.
+
+---
+
+## Example entries (✅ good — keep this style)
+
+### INFRA-001 — Primary application database
+- **Type:** database
+- **Provider + region:** AWS RDS PostgreSQL, us-east-1
+- **Version / SKU:** PostgreSQL 16.2, db.m5.large, gp3 200GB
+- **Used by:** all backend services (`finance.*`, `orders.*`, `customers.*` schemas); read-only consumers via dedicated replica
+- **Operational facts designers need:**
+  - `max_connections: 200`; reserve 20 for migrations and dba — apps share 180 via PgBouncer (`statement` mode).
+  - All financial tables (schema `finance.*`) are append-only — UPDATE/DELETE revoked at DB level (see BR-001).
+  - Backup window: 03:00-04:00 UTC daily; PITR retention: 7 days; cross-region snapshot weekly to us-west-2.
+  - Replicas: 1 read-replica in same AZ; designs for read-heavy workloads should target the replica explicitly via separate connection string.
+- **HA / failover:** Multi-AZ enabled; automatic failover ~60-90s; client app retries handled at HikariCP layer.
+- **Connection point (sanitized):** `<env>-db.<region>.rds.amazonaws.com:5432`; resolved via `DB_HOST` env var (see `application-{profile}.properties`).
+- **Owner (internal):** alice (DBA-equivalent); on-call for paging events.
+- **Cost dependency:** [[cost-constraints]] CC-003 (RDS storage scaling).
+- **Related:** [[vendor-relationships]] VR-001 (AWS as cloud provider), ADR-006 (single primary DB vs distributed), BR-001 (append-only events), [[incident-log]] INC-002 (2024 failover incident that established the 60-90s expectation).
+- **Captured:** 2025-10-15 by alice
+
+### INFRA-005 — S3 uploads bucket
+- **Type:** storage
+- **Provider + region:** AWS S3, us-east-1 (primary)
+- **Version / SKU:** S3 Standard for first 90 days, Standard-IA after 90, Glacier after 365
+- **Used by:** UploadService for customer-uploaded documents (KYC IDs, invoice attachments); read by AdminPortal for audit
+- **Operational facts designers need:**
+  - Lifecycle: 90d Standard → IA → 365d Glacier; **never** delete (LGPD audit requirement; see BR-019).
+  - Object-key convention: `<tenant_id>/<yyyy>/<mm>/<uuid>-<sanitized-filename>`; never expose raw key in URLs (signed URLs only, 15-min TTL).
+  - Cross-region replication to us-west-2 enabled for KYC subfolder only (regulatory).
+  - Bucket policy: deny `s3:DeleteObject` for all principals except `dba-break-glass` role.
+- **HA / failover:** S3 native; no client failover logic needed.
+- **Connection point (sanitized):** `s3://<env>-<app>-uploads/`; resolved via `S3_UPLOADS_BUCKET` env var.
+- **Owner (internal):** alice; renewal N/A (per-request pricing).
+- **Cost dependency:** [[cost-constraints]] CC-004 (S3 lifecycle cost; cross-region replication cost watch).
+- **Related:** [[vendor-relationships]] VR-001 (AWS), BR-019 (LGPD upload retention), ADR-011 (signed URL pattern for uploads).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### INFRA-XXX — The cloud
+- Provider: AWS
+- Region: USA
+- Used by: everything
+```
+
+**Why this is wrong:** No granularity, no operational facts, no actionable
+signal. A reading session learns nothing it didn't already infer. Each
+entry should be **specific enough** that a designer can plan correctly
+without asking for clarification.
+
+If the inventory is truly small ("we run one EC2"), say so concretely:
+provider + region + SKU + what runs there + how it's exposed. Vagueness
+is worse than empty.
+
+---
+
+## Inventory
+
+<!-- Append entries below this line, with sequential INFRA-NNN numbering.
+     Group conceptually similar entries if it helps readability, but
+     keep each entry self-contained for MCP parsing. -->
+
+<TODO: add first infrastructure entry following the schema above>

@@ -1,0 +1,42 @@
+# Branch-local plan tracking (per §B item 6)
+# spec_*.md is treated as an accepted alias of plan_*.md (a dev may name
+# the artefact "spec" instead of "plan"; same gitignore semantics apply).
+plan_*.md
+progress_*.md
+spec_*.md
+# Exception: test fixtures under mcp-server/tests/fixtures/ must be tracked
+!mcp-server/tests/fixtures/**/plan_*.md
+!mcp-server/tests/fixtures/**/progress_*.md
+!mcp-server/tests/fixtures/**/spec_*.md
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# Per-machine MCP server config (rsct-mcp etc.)
+.mcp.json
+
+# Logs
+*.log
+
+# MCP server build artifacts (rsct-mcp Node binary)
+mcp-server/node_modules/
+# CAP-57: dist/ is now TRACKED — the prebuilt artifact ships to users so the
+# install needs no build toolchain (keeps `npm audit` clean, since tsup/esbuild
+# never land on the user machine). Only the sourcemaps stay ignored: they are
+# not used at runtime and would add ~620KB of git bloat per release.
+mcp-server/dist/**/*.map
+mcp-server/coverage/
+mcp-server/.vitest-cache/
+
+# CAP-31: tests that exercise status/load_context against fixtures stamp
+# .rsct/phase-state.json into the fixture directory. The fixture's .rsct.json
+# is tracked, but the runtime stamp file MUST stay untracked or every test
+# run dirties the working tree.
+mcp-server/tests/fixtures/**/.rsct/phase-state.json
+mcp-server/tests/fixtures/**/.rsct/phase-state.lock
+mcp-server/tests/fixtures/**/.rsct/audit.log
+mcp-server/tests/fixtures/**/.rsct/approvals-seen.json
+
+# OS noise
+.DS_Store
+Thumbs.db

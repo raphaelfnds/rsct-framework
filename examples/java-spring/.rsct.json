@@ -1,0 +1,20 @@
+{
+  "rsct_version": "1.0.0",
+  "app": {
+    "name": "api-example",
+    "org": "acme-org"
+  },
+  "universe": {
+    "name": "acme-universe",
+    "local": "~/projects/acme-universe",
+    "remote": "https://github.com/acme-org/acme-universe"
+  },
+  "protected_branches": ["main", "test"],
+  "test_framework": "JUnit 5 + Testcontainers + MockMvc",
+  "install": {
+    "applied_at": "2026-04-12T10:00:00Z",
+    "mode": "CREATE",
+    "setup_commit_sha_before": "INITIAL",
+    "canonical_source_added": true
+  }
+}

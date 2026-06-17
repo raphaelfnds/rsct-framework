@@ -1,0 +1,7 @@
+node_modules/
+# CAP-57: dist/ is tracked (prebuilt artifact shipped to users). Ignore only
+# the sourcemaps — not needed at runtime, avoids per-release git bloat.
+dist/**/*.map
+coverage/
+*.tsbuildinfo
+.vitest-cache/

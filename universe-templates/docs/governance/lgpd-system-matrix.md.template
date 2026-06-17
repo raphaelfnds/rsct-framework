@@ -1,0 +1,22 @@
+# LGPD System Matrix — [ORG_SLUG]
+
+Per-system compliance matrix for the Brazilian General Data Protection Law (LGPD).
+For other jurisdictions (GDPR/CCPA), adapt the columns as needed.
+
+## Systems
+
+| System | Processes personal data? | Categories | Legal basis | Retention | DPO contact |
+|---|---|---|---|---|---|
+| <TODO: app name> | yes / no | <TODO: e.g., name, email, CPF, financial> | <TODO: consent / contract / legitimate interest> | <TODO: e.g., 5 years post-account-closure> | <TODO> |
+
+## Cross-cutting
+
+- **DPO (Data Protection Officer)**: <TODO: name + contact>
+- **Privacy policy**: <TODO: URL>
+- **Incident response runbook**: <TODO: URL or path>
+- **Data subject request flow**: <TODO: how a user requests deletion/portability>
+
+## Review cadence
+
+LGPD matrix must be reviewed: <TODO: e.g., annually, or whenever a system
+starts/stops processing personal data>.

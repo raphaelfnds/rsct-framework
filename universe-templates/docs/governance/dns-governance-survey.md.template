@@ -1,0 +1,22 @@
+# DNS / Subdomain Governance — [ORG_SLUG]
+
+Inventory of subdomains, owners, and naming conventions.
+
+## Active subdomains
+
+| Subdomain | Type (A/CNAME/MX) | Points to | App | Owner | Environment |
+|---|---|---|---|---|---|
+| <TODO> | <TODO> | <TODO> | <TODO> | <TODO> | prod / staging / dev |
+
+## Naming convention
+
+See [naming-standards.md](naming-standards.md) for the canonical naming rules.
+
+Quick reference (fill in as you adopt the convention):
+- Production: `<app>.[ORG_SLUG].com` (or `<app>.<custom-domain>`)
+- Staging: `staging-<app>.[ORG_SLUG].com`
+- Dev (per-developer): `dev-<initial>-<app>.[ORG_SLUG].com` — <TODO: confirm>
+
+## Reserved / blocked subdomains
+
+<TODO: list any subdomains that should never be used (legacy, brand-protected)>

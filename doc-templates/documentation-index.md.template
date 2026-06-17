@@ -1,0 +1,28 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Documentation — [APP_NAME]
+
+Navigational index of internal project documents.
+
+## Core documents
+
+- [architecture.md](architecture.md) — high-level architectural overview
+- [decisions.md](decisions.md) — firm premises + ADRs + out of scope
+- [setupdeveloper.md](setupdeveloper.md) — developer onboarding
+
+## Modules and impact
+
+- [modules/](modules/) — one file per source code module
+- [impact/](impact/) — impact analysis paired 1:1 with each module
+- [impact/README.md](impact/README.md) — risk convention (Low/Medium/High)
+
+## Tests
+
+- [tests/README.md](tests/README.md) — how to run the suite + critical flows covered
+
+## How to maintain this documentation
+
+- New module added → create pair `modules/<name>.md` + `impact/<name>.md`
+- Permanent architectural decision made → append to `decisions.md` (ADR-NNN)
+- Stack or dependency changed → update `architecture.md`
+- Setup process changed → update `setupdeveloper.md`
+- New test flow added → update `tests/README.md`

@@ -1,0 +1,16 @@
+{
+  "rsct_version": "1.0.0",
+  "app": {
+    "name": "[APP_NAME]",
+    "org": "[ORG_SLUG]"
+  },
+  "protected_branches": [PROTECTED_BRANCHES_JSON_ARRAY],
+  "test_framework": "[TEST_FRAMEWORK]",
+  "secrets_extra_patterns": [],
+  "install": {
+    "applied_at": "[APPLIED_AT]",
+    "mode": "[MODE]",
+    "setup_commit_sha_before": "[SETUP_COMMIT_SHA_BEFORE]",
+    "canonical_source_added": false
+  }
+}

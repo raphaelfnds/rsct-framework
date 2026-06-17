@@ -1,0 +1,31 @@
+# Architectural Diagrams — [ORG_SLUG]
+
+Diagrams live as `.drawio` files (draw.io / diagrams.net format) in this folder.
+PNG/SVG exports may be alongside but the source of truth is the `.drawio`.
+
+## Expected diagrams
+
+| File | Description | Required? |
+|---|---|---|
+| `c4-context-ecosystem.drawio` | C4 Level 1 — [ORG_SLUG] in its ecosystem | Yes |
+| `c4-containers-<app>.drawio` | C4 Level 2 — one per app | Per app |
+| `deployment-macro.drawio` | Deployment topology (hosts, networks) | Yes |
+| `dfd-macro.drawio` | Data flow diagram (level 0) | Yes |
+| `security-map-iso-lgpd.drawio` | Security/compliance mapping | If LGPD applies |
+
+## Convention
+
+- Each diagram has a date in the corner: `last updated YYYY-MM-DD`
+- Authoritative copy is this repo — copies in slides, wikis are derivatives
+- When changing a diagram, also update the corresponding date
+
+## How to view
+
+- Online: open the `.drawio` URL on https://app.diagrams.net/
+- VS Code: install the "Draw.io Integration" extension
+- Desktop: draw.io desktop app
+
+## Bootstrap state
+
+`/rsct-init-universe` does not create `.drawio` files (they are binary).
+Create empty ones manually with draw.io and place here as the org grows.

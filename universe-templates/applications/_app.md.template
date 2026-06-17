@@ -1,0 +1,36 @@
+# [APP_NAME]
+
+## Purpose
+
+<TODO: 1-2 sentences describing what this app does>
+
+## Stack
+
+<TODO: e.g., Java 21 + Spring Boot 3.2 + PostgreSQL 15>
+
+## Repository
+
+<TODO: URL, e.g., https://github.com/[ORG_SLUG]/[APP_NAME]>
+
+## Production hosts
+
+<TODO: list hosts from ../../hosts/, e.g., app-prod-01>
+
+## Owner / team
+
+<TODO: name + contact>
+
+## LGPD relevance
+
+<TODO: yes / no + link to docs/governance/lgpd-system-matrix.md row>
+
+## Key documents in the app repo
+
+- `CLAUDE.md` — AI operational protocol (installed by RSCT)
+- `documentation/architecture.md`
+- `documentation/decisions.md`
+- `documentation/setupdeveloper.md`
+
+## Notes
+
+<TODO: any app-specific context — known limitations, future plans, dependencies>

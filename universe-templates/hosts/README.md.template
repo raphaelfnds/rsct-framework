@@ -1,0 +1,37 @@
+# Hosts — [ORG_SLUG]
+
+Inventory of production hosts.
+
+## Structure
+
+One folder per host:
+```
+hosts/
+├── <host-1>/
+│   └── operational-state.md
+├── <host-2>/
+│   └── operational-state.md
+└── ...
+```
+
+## Per-host operational-state.md content
+
+Each host folder's `operational-state.md` should contain:
+- Hostname and public/private IPs
+- Cloud provider / region (if applicable)
+- Specs (CPU, RAM, disk)
+- OS + version
+- What's running (apps, services, ports)
+- Environment variables (names only — no values!)
+- Monitoring URLs (Grafana, Datadog, etc.)
+- Backup / recovery runbook
+- Access (who can SSH, jumpbox required?)
+
+Use `_host.md.template` as a starting point for new hosts.
+
+## What goes here vs in app repos
+
+- **Universe (here)**: facts about the host itself — what is it, what's installed
+- **App repos**: how the app uses the host — config, deploy scripts, env vars
+
+Avoid duplication: link from app repo → host operational-state.md.

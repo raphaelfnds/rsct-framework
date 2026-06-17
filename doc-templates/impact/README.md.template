@@ -1,0 +1,30 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Impact analysis
+
+This folder pairs 1:1 with `modules/`. For every `modules/<name>.md` there is
+an `impact/<name>.md` describing what can break when that module changes,
+who depends on it, and what to check before merging.
+
+## Risk convention
+
+| Risk | What it means |
+|---|---|
+| **Low** | Additive change; no consumer breaks if applied carefully |
+| **Medium** | Behavior change with mitigated breakage; consumers may need adjustments |
+| **High** | Breaking change; coordinated rollout required; can invalidate sessions, drop data, or break public contracts |
+
+## How to maintain this folder
+
+- New module created → create the paired `impact/<name>.md` using `_impact.md.template`
+- Module signature changed → update the corresponding `impact/<name>.md`
+- New non-obvious coupling discovered → record it in the affected module's impact file under "Non-obvious couplings"
+- Change in risk assessment → update the risk table for the affected change types
+
+## How to read an impact file
+
+Each file documents:
+- **Typical changes** — the change types developers most often make to the module
+- **Who depends on this module** — direct and indirect consumers
+- **Risk by change type** — Low/Medium/High classification per change category
+- **Non-obvious couplings** — hidden dependencies that surface as bugs in unexpected places
+- **Checklist before merging** — concrete checks to run before opening a PR or merging

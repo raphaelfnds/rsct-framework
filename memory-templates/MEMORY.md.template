@@ -1,0 +1,15 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Memory index — [APP_NAME]
+
+## Feedback (durable behavior rules)
+
+- **Bug mode — sequential tutor** — in bug diagnosis, 1 inspection step at a time until root cause confirmed by evidence → `feedback_bug-tutor-mode.md`
+- **Architect before editing code** — every code change requires plan with 2+ options (one marked Recommended) + reuse analysis + explicit OK; exceptions: active debug and trivial docs → `feedback_architect-code-changes.md`
+- **Commit/push/merge — authorization does not reuse** — each mutating git operation requires updated OK, even if similar action was authorized in the same session → `feedback_commit-reauthorize.md`
+- **Protected branches + active verification** — never work on protected branch without OK; verify current branch at task boundaries and after pauses → `feedback_branch-protection.md`
+- **Secrets and sensitive info leak prevention** — before commit/push/external output, review credentials, local paths, personal data and copied content → `feedback_secrets-leak-prevention.md`
+- **State reversibility (IDA/VOLTA)** — in every plan that changes persistent state, evaluate reverse operation and user permissions → `feedback_flow-ida-volta.md`
+- **Testing — QA planning integrated into §B** — tests evaluated at planning time; without tests: suggest once; with tests: update/create after every change → `feedback_testing-qa-mode.md`
+- **ADR auto-learning** — when identifying a permanent decision, ask if dev wants to record in decisions.md (append-only ADR-lite) → `feedback_adr-autolearning.md`
+- **Plan tracking — branch-local files** — after every approved plan, write `plan_<slug>.md` + `progress_<slug>.md` (or `spec_<slug>.md` as alias) at project root; gitignored; remind dev about `git add --force` to track; NEVER on main/test → `feedback_plan-tracking.md`
+- **Session bootstrap — rsct-mcp entry point before §B** — at session start (and on every new task above tier=trivial), call rsct_status + rsct_load_context + rsct_classify_task before §B; then open the matching phase via rsct_phase_*_start. Skipping is the most common drift away from the framework → `feedback_session-bootstrap.md`

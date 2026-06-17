@@ -1,0 +1,113 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: business-rules
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Business rules — [APP_NAME]
+
+Invariants of this project's domain. Rules that hold regardless of UI, code
+language, or storage technology. Violating one of these is a **business
+bug**, not just a code bug.
+
+This file is read by `rsct_get_knowledge(category="business-rules")` and by
+`rsct_check_premise` before any spec is approved. Spec phase MUST refuse
+options that violate a captured rule unless explicit `override_reason` is
+given (which itself triggers an anti-decision capture).
+
+---
+
+## When to capture an entry here
+
+Capture a rule when **any** of the following is true:
+
+- A bug fix revealed that an implicit assumption was being violated. Capture
+the rule before closing the bug.
+- A stakeholder stated a constraint in a meeting/Slack/email
+("never...", "always...", "only when...").
+- A regulation imposes the rule (LGPD article, fiscal code, payment-network
+acceptance, ISO requirement).
+- A founder/CTO/architect made an explicit decision that constrains future
+work ("we will never store X in plaintext").
+- A reasoning step in a plan keeps referencing an unwritten assumption.
+Write it down.
+
+## When NOT to capture here
+
+- Technology constraints ("we use PostgreSQL", "we use Redis for cache") →
+`architecture.md` or `vendor-relationships.md`.
+- Process rules ("PRs need 2 reviewers") → `workflow-rituals.md`.
+- One-off edge cases ("if user is born on Feb 29") → `domain-edge-cases.md`.
+- Generic best practices ("validate user input") → those are baseline, not
+project-specific.
+
+A good test: if a competitor in the same industry would likely follow the
+same rule (LGPD compliance, double-entry bookkeeping, payment authorization
+before capture) → it belongs here. If only this team would phrase it that
+way → maybe `domain-edge-cases.md` instead.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### BR-NNN — <short imperative statement>
+- **Rule:** <declarative — what MUST or MUST NOT happen>
+- **Scope:** <which entities, flows, modules this applies to>
+- **Source:** <regulation X / contract Y / decision by Z on YYYY-MM-DD / discovered via bug N>
+- **When violated:** <what breaks, how detected, who notices first>
+- **Enforcement:** <DB constraint at file:line | app validation at file:line | manual review by role | not yet enforced — captured as gap>
+- **Related:** <ADR-NNN, glossary terms, other rules>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: BR-001, BR-002, ... sequential, append-only. Never reuse a number.
+If a rule changes meaning, write a new BR-NNN that supersedes the old one
+(reference the old number in the new entry's `Related:` field) and append
+a one-line note to the old entry: "Superseded by BR-XXX on YYYY-MM-DD."
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### BR-001 — Financial events are append-only
+- **Rule:** Any row in `order_events`, `payment_events`, or `refund_events` MUST NOT be UPDATEd or DELETEd once committed. Corrections happen via compensating events (an `order_cancelled` event, never deletion of the original `order_created`).
+- **Scope:** All tables suffixed `_events`. Applies to ORM repositories, migrations, ETL jobs, and ad-hoc DB scripts.
+- **Source:** Founder decision 2024-09-12 for audit-trail compliance (LGPD Art. 37 + internal financial audit requirements).
+- **When violated:** Audit log diverges from materialized view. Detected by nightly `audit-reconcile` job; reported to #ops-alerts. First noticed externally by finance team during month-end close.
+- **Enforcement:** PostgreSQL `REVOKE UPDATE, DELETE ON <table> FROM app_user` at [`db/migrations/2024_09_15_lock_events.sql:12`](db/migrations/2024_09_15_lock_events.sql#L12). Application layer additionally rejects via `EventsRepository.deny_mutation()`.
+- **Related:** ADR-007 (event sourcing for finance), [[anti-decisions]] entry 2025-03-04 (tried soft-delete column, broke audit reconciliation).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### BR-XXX — We use JWT for auth
+- Rule: All API requests carry a JWT.
+```
+
+**Why this is wrong:** "JWT" is a technology choice, not a business invariant.
+The actual business invariant is something like "all API requests must be
+authenticated to an identifiable user account before any read or write of
+PII" — which IS a business rule (LGPD-derived). The mechanism (JWT vs
+session vs OAuth) is `architecture.md`.
+
+Rule of thumb: if you can swap the technology and the rule still holds,
+the rule is in the right shape. If the rule names a specific library/protocol,
+it's misplaced.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential BR-NNN numbering. -->
+<!-- First-time setup: capture 1-3 obvious invariants stated by stakeholders
+     or imposed by regulation. Don't speculate — only capture what is real. -->
+
+<TODO: add first business rule following the schema above>

@@ -1,0 +1,133 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: domain-edge-cases
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Domain edge cases — [APP_NAME]
+
+The gotchas of this project's domain. Not business rules (those are in
+`business-rules.md`) — these are the **weird scenarios** that look like
+ordinary cases but break ordinary code. Each entry names the case, why
+it's tricky, how this project handles it, and the anti-pattern that's
+been tried.
+
+This file is read by `rsct_get_knowledge(category="domain-edge-cases")`
+and by `rsct_persona_review` (QA persona). Spec phase surfaces relevant
+edge cases when proposing functionality in their area — so the proposal
+acknowledges "this needs to handle the PJ-without-state-registration case"
+before code is written.
+
+**Bias correction:** Without this file, Claude proposes happy-path
+solutions that pass demos but break on real data. With it, the spec
+phase enumerates the cases up front and the testing strategy covers them.
+
+---
+
+## When to capture an entry here
+
+Capture an edge case when **any** of the following is true:
+
+- A bug was caused by an assumption that turned out to be wrong (timezone,
+nullability, character set, document format, identity uniqueness, etc.).
+- A customer report exposed a scenario the team didn't think of.
+- Design review surfaces a case that requires explicit handling (don't
+just decide — capture it so the next session knows).
+- A test was added specifically to cover a non-obvious case. Cross-reference
+the test here.
+- A regulatory or contractual obligation creates a case (e.g., "international
+customers without CPF require alternate identification").
+
+## When NOT to capture here
+
+- Business invariants that hold across all cases → `business-rules.md`.
+- Generic programming gotchas (null checks, integer overflow) — those are
+baseline craftsmanship.
+- One-off data quality issues — those are runbook entries, not domain edge
+cases (unless they recur or signal a structural issue, then capture).
+- Performance edge cases ("query is slow when N>10k") → those usually
+belong in incident log or architecture notes.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### DEC-NNN — <short case name>
+- **Case:** <the scenario in concrete terms — "customer is a foreign
+  legal entity (PJ Estrangeira) without Brazilian CPF/CNPJ">
+- **Why it's tricky:** <what makes ordinary code break — "validation
+  assumed all customers have CPF; foreign customers have only passport
+  + tax-id of origin country">
+- **This project handles it by:** <the chosen approach, with file:line
+  pointers — "`Customer.taxId` is a sealed-class union of `CPF | CNPJ |
+  ForeignTaxId(country, value)`; serialization at
+  [`CustomerSerializer.kt:88`](src/.../CustomerSerializer.kt#L88)">
+- **Tests covering it:** <file:line of the test that asserts the handling.
+  If no test yet, mark `<no test — gap captured 2026-XX-XX>` so the
+  testing strategy in §G picks it up>
+- **Anti-pattern (do NOT do this):** <the wrong way someone has tried or
+  would naturally try — "do NOT add a `country == 'BR'` check to coerce
+  foreign taxId into CPF format; that loses the foreign tax-id and
+  re-introduces bug fixed in INC-XXX">
+- **Related:** <BRs that govern this case, INC entries that revealed it,
+  glossary terms, vendor entries (e.g., a KYC vendor that has its own
+  handling)>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: DEC-001+ sequential, append-only.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### DEC-004 — Refund partial: order has refunded line items mixed with active items
+- **Case:** A `Pedido` (see [[business-glossary]]) was confirmed, payment captured, and then refunded for **some** items but not all. The order remains in state `partially_refunded` with `items[].refund_status` per line.
+- **Why it's tricky:** Ordinary "show order totals" and "compute commission" code assumes order total = sum of items. With partial refunds, the total **for display** is original, **for commission** is original-minus-refunded, **for accounting** is the net at any point in time (since refund is a separate event). Three different "totals" all called "total" in casual conversation.
+- **This project handles it by:**
+  - Sealed total computation: `OrderTotals { displayTotal, commissionableTotal, accountingNetAt(timestamp) }` at [`OrderTotals.kt:34`](src/.../OrderTotals.kt#L34).
+  - UI always shows `displayTotal` with a "(R$ X refunded)" annotation when `refunded > 0`.
+  - Commission service consumes `commissionableTotal`, never raw `items.sum`.
+  - Finance reports use `accountingNetAt(reportDate)` — never the live computed value.
+- **Tests covering it:** [`OrderTotalsTest.partialRefundDifferentiatesTotals`](src/test/.../OrderTotalsTest.kt#L102), [`CommissionServiceTest.excludesRefundedItems`](src/test/.../CommissionServiceTest.kt#L48).
+- **Anti-pattern (do NOT do this):**
+  - Do NOT add a `totalAfterRefunds()` convenience method that returns "the right total". There is **no single right total** — the method name lies and reintroduces the original bug.
+  - Do NOT compute commission from `OrderTotals.displayTotal` even if a quick fix tempts ("just subtract the refunded amount") — accounting cutoff dates make this incorrect; use `commissionableTotal`.
+- **Related:** BR-014 (order events are append-only — refunds never mutate the original order), [[incident-log]] INC-009 (the 2024 commission overpayment that surfaced this case), [[business-glossary]] terms "Pedido", "Reembolso".
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### DEC-XXX — Some users have null names
+- Case: nameless users
+- Handling: check for null before display
+```
+
+**Why this is wrong:** Null-checking display fields is baseline craftsmanship,
+not a domain edge case. If "nameless user" is actually meaningful in the
+domain (e.g., "guest checkout creates a user with no name until they
+register"), then **that's** the case — capture the guest-checkout flow,
+not the technical null check.
+
+A good domain edge case explains a **business or regulatory scenario**.
+If your entry reads like a code-review nit ("remember to handle empty
+strings"), it doesn't belong here.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential DEC-NNN numbering. -->
+<!-- First-time setup: capture the cases that have already burned the team
+     in production. Look at the last 5-10 bug-fix PRs — each one likely
+     reveals an unwritten edge case. -->
+
+<TODO: add first domain edge case following the schema above>

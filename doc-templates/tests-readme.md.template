@@ -1,0 +1,41 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Tests — [APP_NAME]
+
+## Test framework
+
+<TODO: framework name and version — e.g., JUnit 5 + Testcontainers 1.19>
+
+## How to run
+
+```bash
+# Full suite
+<TODO: command>
+
+# Unit tests only
+<TODO: command>
+
+# Integration tests only
+<TODO: command>
+
+# Single test class
+<TODO: command>
+```
+
+## Prerequisites for integration tests
+
+<TODO: e.g., Docker running for Testcontainers; local DB; environment variables>
+
+## Critical flows covered
+
+| Flow | Test class / file | Type |
+|---|---|---|
+| <TODO: e.g., User login> | <TODO: AuthIntegrationTest> | Integration |
+| <TODO: e.g., Quote generation> | <TODO: QuoteServiceTest> | Unit |
+
+## Flows not yet covered (known gaps)
+
+<TODO: list flows that should have tests but don't yet>
+
+## CI pipeline
+
+<TODO: where tests run in CI, how to check results, what blocks merge>

@@ -1,0 +1,19 @@
+# Canonical sources map — [ORG_SLUG]
+
+For each topic, which document is the canonical authority?
+
+| Topic | Canonical document | Notes |
+|---|---|---|
+| Application inventory | `../../applications/` | One folder per app |
+| Host inventory | `../../hosts/` | Production hosts only; dev/staging are per-app |
+| Subdomain ownership | `dns-governance-survey.md` | — |
+| LGPD compliance | `lgpd-system-matrix.md` | Per-system rows |
+| Data retention | `retention-technical-annexes/` | Per-app annexes |
+| Naming conventions | `naming-standards.md` | Projects, branches, envs |
+| Architecture diagrams | `../diagrams/` | C4, DFD, deployment |
+| <TODO: add topic> | <TODO: doc> | <TODO: notes> |
+
+## Rule
+
+If two documents conflict on the same topic, the one listed here as canonical
+wins. The other must be updated to match or marked deprecated.

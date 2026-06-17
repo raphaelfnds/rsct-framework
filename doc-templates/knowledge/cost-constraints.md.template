@@ -1,0 +1,132 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: cost-constraints
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Cost constraints — [APP_NAME]
+
+What's expensive in this project — and the design reflexes that protect the
+budget. Per-unit pricing structures, cost-traps that have already burned us,
+and the defaults Claude should reach for when proposing functionality.
+
+This file is read by `rsct_get_knowledge(category="cost-constraints")` and
+by `rsct_persona_review` (DevOps + Architect personas). Spec phase
+surfaces relevant cost reflexes when a proposed option touches a
+cost-sensitive area — so "we should add CloudWatch logs" gets a "you
+already pay for Datadog, and CloudWatch retention has a cliff at 14 days"
+response before the dev signs off.
+
+**Bias correction:** Without this file, Claude proposes functionally
+optimal solutions without weighing operational cost. With this file, it
+weighs cost as a constraint alongside correctness and maintainability.
+
+---
+
+## When to capture an entry here
+
+Capture or update when **any** of the following is true:
+
+- A bill surprised us. Capture the cause + the reflex to avoid the surprise
+again.
+- A measurable optimization landed (we reduced a line item by $X/mo).
+Capture the technique so it doesn't get reversed by a future "simplification".
+- A new vendor or service onboarded; document its pricing structure
+(per-request, per-GB, per-host, per-user, tiered, etc.).
+- A scaling event is approaching that will change the cost picture (10×
+traffic event, new market launch, dataset growth).
+- A design decision was made specifically to control cost ("we batch every
+60s instead of streaming because per-event cost would 5× the bill").
+
+## When NOT to capture here
+
+- Vendor identity and lock-in — that's `vendor-relationships.md` (which can
+cross-reference here for cost detail).
+- Sales/pricing strategy for your **own** product — out of scope; this file
+is about **operating cost**.
+- Generic frugality ("be careful with resources") — capture only when there
+is a measured cost driver and a concrete reflex.
+- Detailed financial reports — keep them in finance tools; this file
+captures **design-relevant** cost insight only.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### CC-NNN — <cost area or resource>
+- **What costs:** <unit and scale — e.g., "per S3 PUT request",
+  "per Datadog host-month", "per OpenAI 1k input tokens">
+- **Current spend tier:** <sub-$100/mo / sub-$1k/mo / sub-$10k/mo / higher>
+  (sanitized — never write exact bill numbers)
+- **Sensitivity to design choices:** <low | medium | high | critical>
+  — i.e., how much can a poor design 10× this line?
+- **Cost-traps observed (us or industry):** <concrete patterns that bleed
+  money — e.g., "writing one log line per HTTP request to CloudWatch with
+  default retention">
+- **Default reflex when designing in this area:** <the rule of thumb. Be
+  specific — "batch writes at 60s", "cap retention at 14 days",
+  "always paginate over 100 items">
+- **Threshold for revisit:** <when does the cost picture change enough to
+  re-evaluate this entry? — e.g., "if user count > 10k", "if monthly
+  spend > $X", "when contract renews YYYY-MM">
+- **Related:** <ADRs, vendor entries, incidents tied to cost events>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: CC-001+ sequential, append-only.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### CC-002 — Datadog hosts and custom metrics
+- **What costs:** per Datadog host-month + per 100 custom metrics per host
+- **Current spend tier:** sub-$1k/mo (12 production hosts + 4 staging)
+- **Sensitivity to design choices:** high — adding 1 host = +$X/mo flat; adding ~150 custom metrics across the fleet pushes us into the next billing tier.
+- **Cost-traps observed:**
+  - Per-pod metrics in Kubernetes deployments (each replica counted as a host) — bit us in 2024-Q3 when autoscaler briefly hit 28 pods overnight; one bill jumped 2.3×.
+  - High-cardinality tags (per-user_id, per-tenant_id) explode the custom-metric count silently.
+  - Tracing on staging duplicates trace storage costs without business value.
+- **Default reflex when designing in this area:**
+  - For new services: stay under 100 custom metrics per host, use `_dist` distributions instead of N gauges where possible.
+  - For new metrics: avoid tagging with high-cardinality fields; if a per-tenant view is needed, use logs + log-based metric.
+  - Disable APM tracing on staging; rely on the smaller free-tier integration there.
+  - When scaling out: count the per-host cost in the rollout doc, not just compute cost.
+- **Threshold for revisit:** if monthly spend crosses sub-$10k/mo tier OR if production host count > 20.
+- **Related:** [[vendor-relationships]] VR-005 (Datadog adoption rationale), [[incident-log]] INC-014 (autoscaler-induced bill spike), ADR-018 (observability split: Datadog for prod, Sentry-only for staging).
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### CC-XXX — Cloud is expensive
+- Reflex: be careful with cloud.
+```
+
+**Why this is wrong:** No measurement, no specific resource, no actionable
+reflex. A future planning session reading this gets zero signal — every
+proposal touches "cloud", every reader knows cloud isn't free.
+
+If the team has actually been burned by a specific cloud line item — egress
+fees from cross-region, NAT gateway costs, idle GPU instances, snapshot
+proliferation — capture **that** specifically. The narrower the entry, the
+sharper the reflex.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential CC-NNN numbering. -->
+<!-- First-time setup: capture the top 3-5 line items in your monthly bill,
+     the ones a single bad design choice could 5× overnight. If costs are
+     not yet a real concern (early-stage / pre-revenue), leave this file
+     sparse — fake entries dilute later signal. -->
+
+<TODO: add first cost constraint following the schema above, or note "not yet a concern" if early-stage>

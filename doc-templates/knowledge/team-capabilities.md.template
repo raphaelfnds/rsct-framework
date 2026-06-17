@@ -1,0 +1,157 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: team-capabilities
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Team capabilities — [APP_NAME]
+
+What the team can build and **maintain**. What stack/skills are present.
+Where capacity is constrained. What proposing requires (because "build X
+in Rust" without a Rust dev is really "hire a Rust dev + build X").
+
+This file is read by `rsct_get_knowledge(category="team-capabilities")` and
+by `rsct_persona_review` (Senior Dev + Architect personas). Spec phase
+should refuse to mark Recommended an option that requires capability the
+team doesn't have, unless the dev explicitly signals "we will hire/train
+for this".
+
+**Bias correction:** Without this file, Claude proposes whatever is
+technically optimal — frequently a stack nobody on the team has used. With
+this file, Claude proposes what is **maintainable by the actual humans
+who will live with the code**.
+
+---
+
+## When to capture an entry here
+
+Capture or update when **any** of the following is true:
+
+- A hire, departure, or role change alters skill coverage.
+- A learning initiative formally starts ("Q3 goal: 2 backend devs ramp on
+TypeScript").
+- An option was rejected because the team couldn't sustain it. The
+maintainability gap belongs here (the abandoned approach belongs in
+`anti-decisions.md`).
+- Team load shifts materially — a hiring freeze, a major customer migration,
+parental leave, contractor ending — anything that changes capacity for the
+next 1-3 sprints.
+- A new tech is adopted that requires capability uplift (the decision is in
+`decisions.md`; the capability gap to close is here).
+
+## When NOT to capture here
+
+- Performance reviews, ratings, or personal evaluations — **never**.
+- Specific HR/contract data (salary, employment status) — never.
+- Per-person task lists — that's project management, not capability.
+- Speculative skills ("we should learn X someday") — capture only when
+there's a concrete plan or budgeted time.
+
+---
+
+## Entry schemas
+
+This file has **two sections**: skills inventory and current capacity.
+Both update over time.
+
+### Skills inventory entry schema
+
+```
+### TC-NNN — <skill/area name>
+- **Coverage:** none | basic | proficient | expert
+- **Headcount at each level:** <e.g., "expert: 1 (alice), proficient: 2,
+  basic: 1, none: 0">
+- **Currently maintained in this project:** <yes/no — does this skill
+  actually touch this codebase today?>
+- **Constraint on proposing:** <when planning, what does this coverage
+  imply? e.g., "Rust modules cannot exceed what 1 expert can support solo —
+  expanding requires hiring or training plan">
+- **Trajectory:** <stable | ramping up | sunsetting | hiring for>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+### Current capacity entry schema
+
+```
+### CAP-YYYY-Qn — Capacity snapshot
+- **Period:** <YYYY-MM-DD to YYYY-MM-DD>
+- **Headcount available:** <by area or full-time-equivalent>
+- **Load level:** low | normal | high | overload
+- **Constraints active:** <vacation overlap, hiring freeze, major migration,
+  customer escalation>
+- **What this means for planning:** <propose smaller scopes, defer
+  exploratory work, focus reuse>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: TC-001+ for skills, CAP-YYYY-Qn (or YYYY-MM) for snapshots.
+Append-only; mark stale entries with `Status: outdated YYYY-MM-DD` rather
+than deleting.
+
+---
+
+## Example entries (✅ good — keep this style)
+
+### TC-003 — TypeScript / Node backend
+- **Coverage:** proficient
+- **Headcount at each level:** expert: 0, proficient: 2 (alice, bob), basic: 1 (carol), none: 0
+- **Currently maintained in this project:** yes — `mcp-server/` and the React frontend share TS basics; rsct-mcp is the team's first production Node service.
+- **Constraint on proposing:** small-to-medium scopes acceptable; avoid Node-specific patterns that demand expert-level depth (deep async-hooks, custom V8 instrumentation, native addons) until skill ramps. Performance-critical paths still belong in Java where the team is strongest.
+- **Trajectory:** ramping up — Q3 goal is to lift carol from basic to proficient via pairing on rsct-mcp.
+- **Captured:** 2025-10-15 by alice
+
+### TC-009 — Rust
+- **Coverage:** none
+- **Headcount at each level:** none across all levels — no one on the team has shipped Rust to production.
+- **Currently maintained in this project:** no.
+- **Constraint on proposing:** **do not propose Rust** unless the proposal explicitly bundles a hiring or 3-month training plan; flag this clearly in spec options if a Rust option is the technical optimum so the dev can weigh capability cost against benefit.
+- **Trajectory:** stable (not hiring or training for Rust currently).
+- **Captured:** 2025-10-15 by alice
+
+### CAP-2026-Q2 — Capacity snapshot
+- **Period:** 2026-04-01 to 2026-06-30
+- **Headcount available:** 3.0 FTE backend (alice 0.6 — split with strategy; bob 1.0; carol 1.0; contractor 0.4 part-time)
+- **Load level:** high — concurrent rsct-mcp development, Acme Corp prod support, Project Atlas MVP
+- **Constraints active:** alice split-focus until rsct-mcp ships; bob on parental leave starting 2025-11-30; carol leading Project Atlas MVP — limited rsct-mcp bandwidth
+- **What this means for planning:** rsct-mcp milestones must be sized to fit alice solo from 2025-11-30; defer non-critical exploratory work to Q3; favor reuse aggressively in any production-app change
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### TC-XXX — Bob Silva
+- Skill: backend dev
+- Performance: great, very productive
+- Salary: ~R$ 15k
+- Sometimes pushes back too hard in code review
+```
+
+**Why this is wrong:** Personal data, performance opinions, salary info, and
+behavioral characterization have no place in this file. Capability entries
+are about **what the team can collectively maintain**, not about
+individuals' performance or personalities.
+
+If Bob's experience matters for a decision, capture the **role-level skill**
+("React expert: 1 — currently Bob") and let the org's HR/management handle
+the rest. When Bob leaves, the file's signal degrades to "React expert: 0"
+which is exactly the information planning needs.
+
+---
+
+## Skills inventory
+
+<!-- Append TC-NNN entries below this line. -->
+
+<TODO: list current team skills relevant to this project>
+
+---
+
+## Current capacity snapshots
+
+<!-- Append CAP-YYYY-Qn snapshots below; newest at top. -->
+
+<TODO: current quarter's capacity snapshot>

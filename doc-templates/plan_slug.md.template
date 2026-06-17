@@ -1,0 +1,89 @@
+# Plan: [TASK_NAME]
+
+> ⚠️ **Branch-local file** — gitignored by default. To track on this feature
+> branch: `git add --force plan_[TASK_SLUG].md` (or
+> `spec_[TASK_SLUG].md` if you preferred the "spec" alias from §B item 6).
+> **NEVER on main/test branches.**
+
+## Metadata
+
+| Field | Value |
+|---|---|
+| Slug | [TASK_SLUG] |
+| Branch | [BRANCH_NAME] |
+| Created | [CREATED_AT] |
+| Status | draft \| approved \| in-progress \| paused \| completed |
+| Last update | [UPDATED_AT] |
+
+## Goal — why this task
+
+<TODO: 1-2 sentences>
+
+## Context read (audit trail — what was loaded before planning)
+
+- documentation/decisions.md — premises checked: <TODO: #N which apply>
+- documentation/architecture.md — sections relevant: <TODO>
+- documentation/modules/<module>.md — modules touched: <TODO>
+- documentation/impact/<module>.md — impact reviewed: <TODO>
+- Other source files: <TODO>
+
+## Reuse analysis (two-pass)
+
+### Pass 1 — existing candidates
+- <TODO: function/class/service at file:line — how it covers the need>
+
+### Pass 2 — cross-check
+<TODO: re-read with focus on the candidates above; flag any missed couplings>
+
+### Decision
+- Reuse: <TODO>
+- New: <TODO>
+- No-reuse justification: <TODO or N/A>
+
+## Options considered
+
+### Option A — <TODO: short name>
+- Approach: <TODO>
+- Impact: <TODO>
+- Risk: <TODO>
+
+### Option B — <TODO: short name>
+- Approach: <TODO>
+- Impact: <TODO>
+- Risk: <TODO>
+
+### ✅ Recommended: Option <X>
+**Why:** <TODO: 1-2 sentences justifying preference over alternatives>
+
+## §F — Reversibility check
+
+- Changes persistent state? <TODO: yes / no>
+- If yes:
+  - User permission to execute: <TODO: RBAC at file:line | dev confirmed>
+  - Reverse operation needed: <TODO: yes / no>
+  - Reverse defined as: <TODO description or N/A>
+  - User permission to reverse: <TODO>
+
+## §G — Testing strategy
+
+- Existing tests covering this area: <TODO: list>
+- Tests to update: <TODO>
+- Tests to create: <TODO>
+- Manual tests planned: <TODO>
+
+## Plan steps
+
+1. <TODO>
+2. <TODO>
+3. <TODO>
+
+## Open questions for dev
+
+- <TODO: pending decisions>
+
+## Approval
+
+- [ ] Plan approved by dev (date: ____)
+- [ ] §F check answered
+- [ ] §G check answered
+- [ ] Branch confirmed: [BRANCH_NAME]

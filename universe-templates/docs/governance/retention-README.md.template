@@ -1,0 +1,19 @@
+# Retention Technical Annexes
+
+One file per application that processes data subject to retention rules
+(LGPD, GDPR, contractual, regulatory).
+
+## Naming
+`<app-name>.md` — matches the app folder name in `applications/`.
+
+## Per-app annex content
+
+Each annex should specify:
+- **Data categories** stored by the app
+- **Retention period** per category
+- **Deletion mechanism** (automatic job, manual, on-request)
+- **Anonymization or hard-delete** policy
+- **Legal basis** (links to LGPD matrix row)
+- **Audit trail** (where deletions are logged)
+
+See `_template.md` (when added) for the per-app template.

@@ -1,0 +1,8 @@
+{
+  "universe_version": "1.0.0",
+  "org": "[ORG_SLUG]",
+  "name": "[ORG_SLUG]-universe",
+  "created_at": "[CREATED_AT]",
+  "github_remote": "[GITHUB_REMOTE]",
+  "registered_apps": []
+}

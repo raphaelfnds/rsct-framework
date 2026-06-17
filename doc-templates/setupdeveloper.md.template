@@ -1,0 +1,60 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+# Developer setup — [APP_NAME]
+
+## Prerequisites
+
+- <TODO: required runtime versions — e.g., JDK 21, Node 20, Python 3.12>
+- <TODO: required tools — e.g., Maven, Docker, Make>
+- <TODO: required services running locally — e.g., PostgreSQL, Redis>
+
+## Initial setup
+
+```bash
+# Clone repository
+<TODO: clone command>
+
+# Install dependencies
+<TODO: install command>
+
+# Configure environment
+cp .env.example .env
+# Edit .env with local values (see "Environment variables" in architecture.md)
+```
+
+## Running locally
+
+```bash
+<TODO: run command>
+```
+
+The application starts at <TODO: URL or port>.
+
+## Running tests
+
+See [tests/README.md](tests/README.md) for the full test guide.
+
+Quick reference:
+```bash
+<TODO: quick command to run the full suite>
+```
+
+## Common operations
+
+| Task | Command |
+|---|---|
+| <TODO: e.g., Run linter> | <TODO> |
+| <TODO: e.g., Run migrations> | <TODO> |
+| <TODO: e.g., Generate API docs> | <TODO> |
+| <TODO: e.g., Format code> | <TODO> |
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| <TODO> | <TODO> | <TODO> |
+
+## Project-specific conventions
+
+See [architecture.md](architecture.md) for technology choices and
+[decisions.md](decisions.md) for firm premises and ADRs that constrain
+implementation choices.

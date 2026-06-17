@@ -1,0 +1,99 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: business-glossary
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Business glossary — [APP_NAME]
+
+Canonical vocabulary of this project's domain. One term, one definition,
+visible synonyms, anti-synonyms to prevent confusion.
+
+This file is read by `rsct_get_knowledge(category="business-glossary")` and by
+`rsct_check_premise` before any spec is approved. A term defined here is the
+**only** way Claude should refer to that concept in plans, code, comments,
+commits, and conversation.
+
+---
+
+## When to capture an entry here
+
+Capture a term when **any** of the following is true:
+
+- A domain word appeared 3+ times in this project (code, conversations, docs)
+without a shared definition.
+- Two team members (or dev + Claude) used the same word for different things,
+or different words for the same thing.
+- A term has a specific meaning in this project that differs from its common
+industry meaning (e.g., "tenant" might mean "customer org" here, not
+"deployment isolation unit").
+- A new domain concept was introduced by a feature, vendor, or regulation.
+- An external term (LGPD article, ISO clause, payment-network jargon) is
+referenced in code or decisions.
+
+## When NOT to capture here
+
+This file is for **domain vocabulary**, not for:
+
+- Technology terms — those live in code comments or `architecture.md`.
+- Process terms (how PRs flow, who approves what) — that's `workflow-rituals.md`.
+- Stakeholder roles — that's `stakeholder-map.md`.
+- Regulatory rules themselves — that's `business-rules.md` (this file just
+defines the **words** the rules use).
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### <term>
+- **Definition:** <1-3 sentences, concrete, in this project's voice>
+- **Synonyms (this project uses these interchangeably):** <comma-separated, or "none">
+- **Anti-synonyms (look similar but mean something else):** <term — why different. Or "none">
+- **Examples in this project:** <1-2 concrete uses, with file:line if applicable>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Append-only. To revise an entry, append a new revision dated and reference
+the prior one ("supersedes <term> entry of YYYY-MM-DD because ...").
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### Pedido
+- **Definition:** Intent of purchase issued by a customer before payment confirmation. A `Pedido` is reversible until it transitions to `Compra`. It is NOT a database row — it is an event aggregate persisted as `order_events` in append-only fashion.
+- **Synonyms (this project uses these interchangeably):** order intent, pre-order (internal only — never use with customer)
+- **Anti-synonyms (look similar but mean something else):** Compra (confirmed purchase, irreversible without explicit cancellation flow); Carrinho (cart — pre-Pedido state, not yet committed).
+- **Examples in this project:** `OrderEventService.createPedido()` at `src/main/java/.../OrderEventService.java:42`; UI uses "Seu pedido" copy on `/checkout/review`.
+- **Captured:** 2025-10-15 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### Repository
+- Definition: Spring Data interface for DB access.
+```
+
+**Why this is wrong:** "Repository" is a technology pattern, not a business
+domain term. It belongs in `architecture.md` or inline code comments. The
+glossary captures the **vocabulary of the problem space**, not the
+**vocabulary of the solution space**.
+
+If you find yourself defining: Controller, Service, Repository, DTO, Bean,
+Component, Module, Class, Function — stop. None of those go here.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, newest at top. -->
+<!-- First-time setup: leave this section empty or seed 1-2 obvious terms. -->
+
+<TODO: add first glossary entry following the schema above>

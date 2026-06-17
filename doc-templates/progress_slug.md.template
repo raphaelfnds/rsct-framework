@@ -1,0 +1,53 @@
+# Progress: [TASK_NAME]
+
+> ⚠️ **Branch-local file** — gitignored by default. To track on this feature
+> branch: `git add --force progress_[TASK_SLUG].md` (or
+> `spec_[TASK_SLUG].md` if you used the "spec" alias from §B item 6).
+> **NEVER on main/test branches.**
+
+Plan: `plan_[TASK_SLUG].md` (or `spec_[TASK_SLUG].md` if alias is in use).
+Started: [CREATED_AT]
+
+## Execution log
+
+(Reverse chronological — newest entries at top)
+
+### [DATE_TIME] — <TODO: action description>
+- Status: started | progressing | blocked | completed
+- Result: <TODO>
+- Files touched: <TODO: list>
+- Commit: <TODO: hash or "not committed yet">
+- Notes: <TODO>
+
+---
+
+## Discoveries during execution
+
+(Things found that were NOT in the original plan)
+
+### [DATE_TIME] — <TODO: discovery name>
+- Description: <TODO>
+- Impact on current plan: <TODO: blocks / sidetrack / no impact>
+- Decision: <TODO: resolve here | defer to separate issue | ignore>
+- Tracking: <TODO: issue ID, or "in this plan now", or "memory entry pending dev OK">
+
+---
+
+## Final report
+
+(Filled when status reaches completed)
+
+### Completed steps
+<TODO>
+
+### Skipped or changed steps (with reason)
+<TODO>
+
+### Lessons learned
+<TODO>
+
+### Follow-ups (separate issues to create)
+<TODO>
+
+### Memory entries to write (with dev OK)
+<TODO: list candidate memory entries discovered during work, awaiting dev decision>

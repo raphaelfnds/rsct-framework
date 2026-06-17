@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a problem with the RSCT Framework or the rsct-mcp companion
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The **operating system** and **AI tool** fields
+        are required — most issues in this project hinge on cross-OS behavior.
+  - type: input
+    id: version
+    attributes:
+      label: Framework / rsct-mcp version
+      description: From `mcp-server/package.json`, or the `rsct_status` tool output.
+      placeholder: e.g. 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows (Git Bash / MSYS2)
+        - Windows + WSL
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: aitool
+    attributes:
+      label: AI tool
+      options:
+        - Claude Code
+        - Cursor
+        - Other (describe in steps below)
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Install scope
+      options:
+        - User scope
+        - Project scope (.mcp.json)
+        - Not sure
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands / slash commands and what you did.
+      placeholder: |
+        1. Ran `/rsct-setup` in project X
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Paste any error output or `.rsct/audit.log` excerpts.
+      render: shell

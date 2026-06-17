@@ -1,0 +1,4 @@
+# YAML config — should be detected but not parsed in F2.3 v1
+spring:
+  jpa:
+    show-sql: false

@@ -1,0 +1,129 @@
+<!-- RSCT-GENERATED v=1.0.0 created=[CREATED_AT] sha256-body=[SHA_PLACEHOLDER] -->
+---
+rsct_template_version: 1.0.0
+rsct_category: incident-log
+rsct_schema_version: 1
+last_capture: [CREATED_AT]
+---
+
+# Incident log — [APP_NAME]
+
+Production incidents, near-misses, and the reflexes they leave behind. Each
+entry is a story: symptom → root cause → fix → what we'll do differently.
+
+This file is read by `rsct_get_knowledge(category="incident-log")` and by
+phase tools when a task touches an area with prior incidents. The recall is
+not just "what broke" — it's the **prevention reflex** that should shape
+future plans in that area.
+
+A senior engineer recognizes "this smells like the March outage" before the
+junior even finishes reading the ticket. That reflex is what we capture.
+
+---
+
+## When to capture an entry here
+
+Capture an incident when **any** of the following is true:
+
+- A production incident occurred at S1 or S2 severity (your scale; if
+unspecified, default: S1 = user-facing outage; S2 = degraded service;
+S3 = internal-only issue).
+- A near-miss was caught by canary, staging, code review, or test, but
+would have hit production if missed.
+- A security issue was discovered (even minor — credential exposure,
+permission leak, log scrubbing miss).
+- A customer-reported severe bug was confirmed and root-caused.
+- A regression hit a previously-incident area — append the recurrence to
+the original entry rather than creating a new one, then re-strengthen the
+prevention reflex.
+
+## When NOT to capture here
+
+- Minor bugs caught in dev → just fix them, no log entry needed.
+- Test flakes without a clear root cause → CI noise, not incidents.
+- Issues where there is **no prevention reflex** to capture. If the
+takeaway is "stuff happens" or "fixed it, moving on", the entry has no
+forward value. Either find a real reflex or skip the capture.
+- Operational learning that belongs to a runbook → put it in `workflow-rituals.md`
+or a dedicated runbook; cross-reference here only if the runbook was created
+in response to this incident.
+
+---
+
+## Entry schema
+
+Each entry follows this exact structure:
+
+```
+### INC-NNN — <short symptom name>
+- **When:** <YYYY-MM-DD HH:MM TZ start> to <... end> (duration: <N> min/h)
+- **Severity:** S1 | S2 | S3 | near-miss
+- **Symptom:** <what users/operators actually saw — error message, behavior,
+  metric anomaly. Concrete, no jargon>
+- **Affected:** <which users, modules, services, percentage of traffic>
+- **Root cause:** <the actual underlying cause — not the trigger, the cause.
+  E.g., "DB connection pool exhaustion caused by N+1 query in /search
+  introduced by PR #482, exposed under traffic spike from marketing email">
+- **Trigger:** <what made the latent cause manifest — separated from root
+  cause because reflex differs>
+- **Fix (immediate):** <what stopped the bleeding — rollback, hotfix,
+  config flip>
+- **Fix (durable):** <what addressed the root cause — PR/commit links,
+  monitoring added, test added>
+- **Prevention reflex:** <the rule for next time — "before merging any
+  PR that touches /search, check query count via X-DB-QUERIES header in
+  staging">
+- **Related:** <ADRs, BRs, AD entries, glossary terms, vendor entries.
+  Be generous with cross-references — this is how reflexes wire to context>
+- **Captured:** <YYYY-MM-DD> by <dev|claude>
+```
+
+Numbering: INC-001, INC-002, ... sequential, append-only. Recurrences append
+to the existing entry under a `Recurrence YYYY-MM-DD:` subsection.
+
+---
+
+## Example entry (✅ good — keep this style)
+
+### INC-007 — Checkout p95 latency spike to 14s during Black Friday campaign
+- **When:** 2024-11-29 13:42 UTC-3 to 14:18 UTC-3 (duration: 36 min)
+- **Severity:** S1 — paid traffic could not complete purchase
+- **Symptom:** Frontend `POST /checkout/complete` returned 504 Gateway Timeout for ~40% of requests; conversion dropped from 8.2% to 0.9%; Sentry breadcrumbs showed user retry-then-abandon pattern; Stripe webhook backlog grew to 12k events.
+- **Affected:** ~3,800 checkout sessions; revenue impact ~R$ 142k (recovered ~85% via abandoned-cart email campaign over next 48h).
+- **Root cause:** N+1 query in `OrderEventService.materializeCart()` introduced by PR #482 (refactor to "simplify" cart loading); each cart item triggered a separate `SELECT` against `product_variants`. Under normal load 8 items × 80ms = 640ms — acceptable. Under campaign load DB connection pool (size 20) saturated, queueing reached request timeout.
+- **Trigger:** Marketing email campaign sent at 13:40 produced ~6x normal traffic over 5 minutes.
+- **Fix (immediate):** Rolled back PR #482 at 14:11; recovery by 14:18.
+- **Fix (durable):** [PR #498](url) reintroduced batched loading via `IN` query; added integration test asserting `cart_size <= 100 ⇒ db_queries <= 3` at [`test/integration/CartMaterializationTest.java:88`](test/integration/CartMaterializationTest.java#L88); added Datadog dashboard panel "checkout.db.queries_per_request" with alert at >10.
+- **Prevention reflex:** Any PR touching `OrderEventService`, `CartService`, or `materializeCart()` MUST include a query-count assertion in tests. Code review checklist updated. The phrase "simplify cart loading" is a 🚩 — verify it doesn't unbatch.
+- **Related:** ADR-012 (cart materialization strategy), BR-021 (checkout must complete in <2s p95), [[vendor-relationships]] Stripe entry (webhook backlog handling), [[anti-decisions]] AD-011 (in-memory cart cache experiment that increased complexity without solving root issue).
+- **Captured:** 2024-08-20 by alice
+
+---
+
+## Anti-example (❌ do NOT capture this kind of entry here)
+
+```
+### INC-XXX — Server was slow today
+- Symptom: things felt slow.
+- Fix: restarted the server.
+- Captured: 2025-10-15 by alice
+```
+
+**Why this is wrong:** No measurement, no root cause, no reflex. "Restart"
+is not a fix, it's a symptom-masking. This entry teaches nothing to a
+future reader and pollutes the log.
+
+If the symptom was real but cause wasn't found: the incident is **still
+open** — leave the entry in progress and resolve it before capturing.
+Capturing unresolved incidents devalues the file.
+
+---
+
+## Entries
+
+<!-- Append entries below this line, with sequential INC-NNN numbering. -->
+<!-- First-time setup: capture the last 3-5 significant incidents. If the
+     project hasn't had production incidents yet, leave empty — DO NOT
+     fabricate entries to "look prepared". Empty is honest; fake is harmful. -->
+
+<TODO: add first incident entry following the schema above, or leave empty if project has no incident history yet>

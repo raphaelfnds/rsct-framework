@@ -1,0 +1,54 @@
+# CONVENTIONS — [APP_NAME]
+
+Mandatory conventions for all **new** code in this project. The goal: anything
+new is born identical in shape to the established mold, so the codebase stays
+consistent across domains and contributors.
+
+> **What this file is — and what it is NOT.**
+> CONVENTIONS is the **prescriptive *how*** — standing rules you consult
+> **before** writing code. Distinguish it from its neighbours:
+> - `documentation/decisions.md` — the ***why / when*** of a choice (durable
+>   ADRs + firm premises; point-in-time, supersedable). A convention often
+>   *derives* from a decision (ADR "schema-per-domain" → the schema convention
+>   below).
+> - `documentation/knowledge/anti-decisions.md` — approaches the team **tried
+>   and abandoned**, with evidence.
+>
+> Keep this file short and prescriptive. When a convention changes, edit it here
+> **and** record the rationale as an ADR in `decisions.md`.
+
+<!--
+  Fill the sections that apply to this project and delete the rest. The bullets
+  below are PROMPTS, not rules yet — replace each `<…>` with this project's
+  actual standard (look at an existing, already-correct module and codify it).
+-->
+
+## 1. Language
+
+- Identifiers (classes, methods, variables, packages): `<e.g. English, no exceptions in new code>`
+- Comments / docstrings: `<e.g. English preferred; legacy pt-BR tolerated>`
+- API surface (endpoints, DTOs, error codes): `<…>`
+
+## 2. Structure & naming
+
+- Module / package layout: `<e.g. one package per business domain>`
+- Naming patterns: `<e.g. <schema>.<table>, seq_<table>, DTO suffixes>`
+
+## 3. Persistence & migrations (if applicable)
+
+- Schema ownership: `<e.g. Flyway owns the schema; ORM ddl-auto=none>`
+- Migration file naming: `<e.g. V<YYYYMMDDHHmm>__<domain>_<action>.sql>`
+- IDs / keys: `<e.g. BIGINT via sequence>`
+
+## 4. Tests
+
+- Required coverage / style / fixtures: `<…>`
+
+## 5. API / DTO conventions (if applicable)
+
+- Request/response shape, error format, pagination, versioning: `<…>`
+
+## 6. How a new <domain / module> is born
+
+- The step-by-step mold to copy when adding a new unit, pointing at an existing
+  reference implementation to clone: `<…>`
