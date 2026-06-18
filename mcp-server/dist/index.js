@@ -9,6 +9,7 @@ import { join, resolve, dirname, isAbsolute, relative, basename } from 'path';
 import { cwd } from 'process';
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
+import { homedir } from 'os';
 
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
@@ -563,6 +564,106 @@ function stampClassifyVerdict(projectRoot, args) {
 
 // src/lib/version.ts
 var RSCT_MCP_VERSION = "1.0.0";
+var NONE_BLOCK = {
+  available: false,
+  name: null,
+  local_path: null,
+  registered_apps_count: 0,
+  this_app_registered: false,
+  note: null
+};
+var MAX_UNIVERSE_JSON_BYTES = 1e6;
+function isUniverseDir(dir) {
+  try {
+    return statSync(dir).isDirectory() && existsSync(join(dir, ".universe.json"));
+  } catch {
+    return false;
+  }
+}
+function resolveUniverseRoot(config, projectRoot, opts = {}) {
+  const uni = config?.universe;
+  const home = opts.home ?? process.env.HOME ?? homedir();
+  if (uni?.local && uni.local.trim().length > 0) {
+    const local = isAbsolute(uni.local) ? uni.local : resolve(projectRoot, uni.local);
+    return isUniverseDir(local) ? { kind: "found", path: local } : { kind: "configured-missing", path: local };
+  }
+  const name = uni?.name ?? null;
+  const org = config?.app?.org ?? null;
+  const candidates = [];
+  const pushNamed = (base) => {
+    if (name) candidates.push(`${base}/${name}-universe`);
+    if (org && org !== name) candidates.push(`${base}/${org}-universe`);
+  };
+  candidates.push(resolve(projectRoot, "..", name ? `${name}-universe` : ""));
+  if (org && org !== name) candidates.push(resolve(projectRoot, "..", `${org}-universe`));
+  candidates.push(resolve(projectRoot, "..", "universe"));
+  for (const sub of ["projetos", "projects", "dev", "workspace"]) pushNamed(join(home, sub));
+  for (const c of candidates) {
+    if (c && isUniverseDir(c)) return { kind: "found", path: c };
+  }
+  return { kind: "none" };
+}
+function readUniverse(universeRoot) {
+  try {
+    const jsonPath = join(universeRoot, ".universe.json");
+    if (statSync(jsonPath).size > MAX_UNIVERSE_JSON_BYTES) return null;
+    const parsed = JSON.parse(readFileSync(jsonPath, "utf8"));
+    const name = typeof parsed.name === "string" ? parsed.name : null;
+    const registeredFromJson = Array.isArray(parsed.registered_apps) ? parsed.registered_apps.filter((x) => typeof x === "string") : [];
+    let registeredFromDirs = [];
+    try {
+      registeredFromDirs = readdirSync(join(universeRoot, "applications"), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && !e.name.startsWith("_")).map((e) => e.name);
+    } catch {
+      registeredFromDirs = [];
+    }
+    return { name, registeredFromJson, registeredFromDirs };
+  } catch {
+    return null;
+  }
+}
+function getUniverse(config, projectRoot, opts = {}) {
+  if (!config) return { block: NONE_BLOCK, hint: null };
+  let resolution;
+  try {
+    resolution = resolveUniverseRoot(config, projectRoot, opts);
+  } catch {
+    return { block: NONE_BLOCK, hint: null };
+  }
+  if (resolution.kind === "none") return { block: NONE_BLOCK, hint: null };
+  if (resolution.kind === "configured-missing") {
+    const note2 = `universe configured but not found at ${resolution.path}`;
+    return {
+      block: { ...NONE_BLOCK, name: config.universe?.name ?? null, local_path: resolution.path, note: note2 },
+      hint: `Universe configured at ${resolution.path} but not found there \u2014 fix .rsct.json universe.local or re-run /rsct-canonical-source.`
+    };
+  }
+  const data = readUniverse(resolution.path);
+  if (!data) {
+    const note2 = `universe found but unreadable at ${resolution.path}`;
+    return {
+      block: { ...NONE_BLOCK, name: config.universe?.name ?? null, local_path: resolution.path, note: note2 },
+      hint: `Universe at ${resolution.path} is present but its .universe.json is missing/corrupt \u2014 inspect it.`
+    };
+  }
+  const appName = config.app?.name ?? null;
+  const inDirs = appName !== null && data.registeredFromDirs.includes(appName);
+  const inJson = appName !== null && data.registeredFromJson.includes(appName);
+  const thisAppRegistered = inDirs || inJson;
+  let note = null;
+  if (appName !== null && inJson !== inDirs) {
+    note = inJson ? `app "${appName}" is listed in .universe.json but has no applications/${appName}/ dir` : `app "${appName}" has an applications/${appName}/ dir but is missing from .universe.json registered_apps`;
+  }
+  const block = {
+    available: true,
+    name: data.name ?? config.universe?.name ?? null,
+    local_path: resolution.path,
+    registered_apps_count: data.registeredFromDirs.length,
+    this_app_registered: thisAppRegistered,
+    note
+  };
+  const hint = !thisAppRegistered && appName !== null ? `Universe found at ${resolution.path}; this app ("${appName}") is not registered there. Run /rsct-setup to register it.` : null;
+  return { block, hint };
+}
 
 // src/tools/status.ts
 var statusInputSchema = z.object({
@@ -591,6 +692,8 @@ async function statusHandler(rawInput) {
     stampBootstrapMarker(resolution.root);
   }
   const hints = buildStatusHints(resolution, git);
+  const universe = getUniverse(resolution.config, resolution.root);
+  if (universe.hint) hints.push(universe.hint);
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION },
     rsct_installed: resolution.rsct_installed,
@@ -603,6 +706,7 @@ async function statusHandler(rawInput) {
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
+    universe: universe.block,
     hints
   };
 }
@@ -960,6 +1064,9 @@ async function loadContextHandler(rawInput) {
   const excerptCount = input.decisions_excerpt_count;
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse();
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse();
+  const universe = getUniverse(resolution.config, resolution.root);
+  const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
+  if (universe.hint) next_action_hints.push(universe.hint);
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION2 },
     rsct_installed: resolution.rsct_installed,
@@ -982,7 +1089,8 @@ async function loadContextHandler(rawInput) {
       recent_adrs
     },
     knowledge,
-    next_action_hints: buildHints({ resolution, git, active_plan, active_phase, knowledge })
+    universe: universe.block,
+    next_action_hints
   };
 }
 function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {

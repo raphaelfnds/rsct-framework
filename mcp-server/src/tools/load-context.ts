@@ -7,6 +7,7 @@ import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import { readPhaseState, stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
+import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 
 export const loadContextInputSchema = z
   .object({
@@ -60,6 +61,7 @@ export interface LoadContextOutput {
     recent_adrs: DecisionEntry[]
   }
   knowledge: KnowledgeIndex
+  universe: UniverseBlock
   next_action_hints: string[]
 }
 
@@ -134,6 +136,11 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse()
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse()
 
+  // T1.a: org-level universe via the single source (same getUniverse as status).
+  const universe = getUniverse(resolution.config, resolution.root)
+  const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge })
+  if (universe.hint) next_action_hints.push(universe.hint)
+
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },
     rsct_installed: resolution.rsct_installed,
@@ -156,7 +163,8 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
       recent_adrs,
     },
     knowledge,
-    next_action_hints: buildHints({ resolution, git, active_plan, active_phase, knowledge }),
+    universe: universe.block,
+    next_action_hints,
   }
 }
 

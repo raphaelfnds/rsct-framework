@@ -30,6 +30,17 @@ If either call returns `rsct_installed: false`, the rsct-mcp is not
 configured for this project — proceed with the §A–§H prose only, and
 suggest the dev run `/rsct-setup` to enable the enforcement layer.
 
+**Universe (org layer).** Both calls return a `universe` block. When
+`universe.available` is `true`, this project belongs to an org-level
+**universe** repository: consult its governance / naming standards
+before proposing new structure (modules, services, naming, ownership),
+and treat those org-level standards as **authoritative over local
+guesses**. If the block carries a `note` (e.g. "configured but not
+found", "found but unreadable", or a registry mismatch) or a hint that
+this app is not registered, surface it to the dev — do not silently
+ignore it. When `available` is `false` and there is no note, there is no
+universe in play; proceed normally.
+
 ### 2. Task classification (any non-trivial request)
 
 Before §B (presenting a plan):

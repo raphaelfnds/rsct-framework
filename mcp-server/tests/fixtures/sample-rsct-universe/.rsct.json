@@ -1,0 +1,5 @@
+{
+  "rsct_version": "1.0.0",
+  "app": { "name": "registered-app", "org": "acme" },
+  "universe": { "name": "acme-universe", "local": "../sample-universe" }
+}

@@ -4,6 +4,7 @@ import { resolveProjectRoot } from '../lib/project-root.js'
 import { readGitState } from '../lib/git.js'
 import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
+import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 
 export const statusInputSchema = z
   .object({
@@ -28,6 +29,7 @@ export interface StatusOutput {
     test_framework: string | null
   }
   git: ReturnType<typeof readGitState>
+  universe: UniverseBlock
   hints: string[]
 }
 
@@ -64,6 +66,12 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
 
   const hints = buildStatusHints(resolution, git)
 
+  // T1.a: surface the org-level universe (single source — load_context calls the
+  // same getUniverse). Fail-graceful: never throws; absent universe → behaves as
+  // before (available:false, no hint).
+  const universe = getUniverse(resolution.config, resolution.root)
+  if (universe.hint) hints.push(universe.hint)
+
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },
     rsct_installed: resolution.rsct_installed,
@@ -76,6 +84,7 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
       test_framework: resolution.config?.test_framework ?? null,
     },
     git,
+    universe: universe.block,
     hints,
   }
 }
