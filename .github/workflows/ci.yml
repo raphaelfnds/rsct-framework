@@ -28,3 +28,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+        # T0.a: the bash lint's `bash -n` gate must FAIL (not silently skip) if a
+        # runner lacks bash. All three runners ship bash (Git Bash on Windows).
+        env:
+          RSCT_REQUIRE_BASH: '1'

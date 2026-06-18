@@ -75,6 +75,24 @@ bash scripts/install.sh
 After install (and restart), four slash commands are available in **any**
 project on this machine — no path needed.
 
+### Unattended / non-interactive install (CI, provisioning)
+
+Both `install.sh` and `uninstall-framework.sh` accept a non-interactive mode:
+
+```bash
+# Framework files only — no prompts, no rsct-mcp companion, no global side effects:
+RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
+# equivalently: bash scripts/install.sh --yes --skip-mcp
+```
+
+- `RSCT_ASSUME_YES=1` (or `--yes` / `-y`) — answer every prompt with its default.
+- `RSCT_SKIP_MCP=1` (or `--skip-mcp`) — skip the rsct-mcp companion entirely
+  (no global `npm install -g`, no `claude mcp add`). Omit it to install and
+  register the companion non-interactively too (user scope by default).
+
+The same flags work for `uninstall-framework.sh` (`--skip-mcp` there leaves the
+global companion and any user-scope registration untouched).
+
 ### Registering rsct-mcp with Claude Code
 
 The install script (`scripts/install.sh`) asks where to register the
