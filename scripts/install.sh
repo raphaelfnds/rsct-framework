@@ -47,6 +47,35 @@ if [ ! -f "$SOURCE_DIR/prompts/01-setup.md" ]; then
   exit 1
 fi
 
+# --- Non-interactive mode (CI / provisioning / smoke tests) ---
+# RSCT_ASSUME_YES=1 (or -y / --yes) answers every [y/N]/[Y/n]/menu prompt with
+# its documented default, so the installer runs unattended. RSCT_SKIP_MCP=1
+# (or --skip-mcp) skips the rsct-mcp companion entirely — framework files only,
+# no global `npm install -g` / `claude mcp add` side effects.
+ASSUME_YES="${RSCT_ASSUME_YES:-}"
+SKIP_MCP="${RSCT_SKIP_MCP:-}"
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes)   ASSUME_YES=1 ;;
+    --skip-mcp) SKIP_MCP=1 ;;
+  esac
+done
+
+# read_or_default <varname> <prompt> <default>
+# Interactive: prints the prompt and reads stdin into <varname>.
+# Non-interactive (ASSUME_YES): assigns <default> and echoes the choice.
+read_or_default() {
+  __rod_var="$1"; __rod_prompt="$2"; __rod_def="$3"
+  if [ -n "$ASSUME_YES" ]; then
+    printf '%s%s   (RSCT non-interactive default)\n' "$__rod_prompt" "$__rod_def"
+    eval "$__rod_var=\$__rod_def"
+  else
+    printf '%s' "$__rod_prompt"
+    read -r __rod_reply
+    eval "$__rod_var=\$__rod_reply"
+  fi
+}
+
 # --- Compute target paths ---
 RSCT_HOME="$HOME/.rsct"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
@@ -159,8 +188,7 @@ fi
 echo "════════════════════════════════════════════════════════"
 
 # --- Confirmation ---
-printf "Proceed? [y/N] "
-read -r confirm
+read_or_default confirm "Proceed? [y/N] " "y"
 case "$confirm" in
   y|Y|yes|YES) ;;
   *) echo "Cancelled."; exit 0 ;;
@@ -250,7 +278,9 @@ echo "  /rsct-uninstall          — reverse setup in a project"
 echo ""
 
 # --- Optional: install rsct-mcp companion ---
-if [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.json" ]; then
+if [ -n "$SKIP_MCP" ]; then
+  echo "Skipping rsct-mcp companion (RSCT_SKIP_MCP set) — framework files only."
+elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.json" ]; then
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp (Model Context Protocol server)"
   echo "────────────────────────────────────────────────────────"
@@ -261,8 +291,7 @@ if [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.json"
 
   case "$MCP_INSTALLABLE" in
     yes)
-      printf "Install rsct-mcp now? [Y/n] "
-      read -r mcp_confirm
+      read_or_default mcp_confirm "Install rsct-mcp now? [Y/n] " "y"
       case "$mcp_confirm" in
         n|N|no|NO)
           echo "Skipped. To install later:"
@@ -312,8 +341,7 @@ if [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.json"
             echo "      → must be added per project; instructions printed."
             echo "  [3] Skip — I'll register manually later."
             echo ""
-            printf "Choice [1/2/3] (default: 1): "
-            read -r mcp_scope
+            read_or_default mcp_scope "Choice [1/2/3] (default: 1): " "1"
 
             case "$mcp_scope" in
               2)

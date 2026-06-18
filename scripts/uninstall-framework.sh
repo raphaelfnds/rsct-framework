@@ -34,6 +34,33 @@ if [ -f /proc/sys/kernel/osrelease ] && \
   exit 1
 fi
 
+# --- Non-interactive mode (CI / provisioning / smoke tests) ---
+# Symmetric with install.sh. RSCT_ASSUME_YES=1 (or -y / --yes) answers every
+# prompt with its documented default. RSCT_SKIP_MCP=1 (or --skip-mcp) leaves the
+# global rsct-mcp install and any Claude Code user-scope registration untouched
+# (removes framework files only — no `npm uninstall -g` / `claude mcp remove`).
+ASSUME_YES="${RSCT_ASSUME_YES:-}"
+SKIP_MCP="${RSCT_SKIP_MCP:-}"
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes)   ASSUME_YES=1 ;;
+    --skip-mcp) SKIP_MCP=1 ;;
+  esac
+done
+
+# read_or_default <varname> <prompt> <default>
+read_or_default() {
+  __rod_var="$1"; __rod_prompt="$2"; __rod_def="$3"
+  if [ -n "$ASSUME_YES" ]; then
+    printf '%s%s   (RSCT non-interactive default)\n' "$__rod_prompt" "$__rod_def"
+    eval "$__rod_var=\$__rod_def"
+  else
+    printf '%s' "$__rod_prompt"
+    read -r __rod_reply
+    eval "$__rod_var=\$__rod_reply"
+  fi
+}
+
 RSCT_HOME="$HOME/.rsct"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 
@@ -103,8 +130,7 @@ echo "to clean a project first, run /rsct-uninstall in that project BEFORE"
 echo "running this script."
 echo "════════════════════════════════════════════════════════"
 
-printf "Proceed with framework removal? [y/N] "
-read -r confirm
+read_or_default confirm "Proceed with framework removal? [y/N] " "y"
 case "$confirm" in
   y|Y|yes|YES) ;;
   *) echo "Cancelled."; exit 0 ;;
@@ -124,7 +150,7 @@ done
 # Asked separately because some devs may want to keep the MCP server
 # (e.g., for projects that already wire it via `.mcp.json`) even after
 # removing the framework files. Symmetric to install.sh's mcp prompt.
-if [ -n "$PRESENT_RSCT_MCP" ]; then
+if [ -n "$PRESENT_RSCT_MCP" ] && [ -z "$SKIP_MCP" ]; then
   echo ""
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp"
@@ -133,8 +159,7 @@ if [ -n "$PRESENT_RSCT_MCP" ]; then
   echo "Projects with rsct registered in .mcp.json will stop seeing"
   echo "the rsct__* tools after this is removed."
   echo ""
-  printf "Also remove the global rsct-mcp install? [Y/n] "
-  read -r mcp_confirm
+  read_or_default mcp_confirm "Also remove the global rsct-mcp install? [Y/n] " "y"
   case "$mcp_confirm" in
     n|N|no|NO)
       echo "Kept: $RSCT_MCP_BIN"
@@ -181,7 +206,7 @@ if command -v claude >/dev/null 2>&1 && \
     USER_SCOPE_HAS_RSCT="yes"
   fi
 fi
-if [ "$USER_SCOPE_HAS_RSCT" = "yes" ]; then
+if [ "$USER_SCOPE_HAS_RSCT" = "yes" ] && [ -z "$SKIP_MCP" ]; then
   echo ""
   echo "────────────────────────────────────────────────────────"
   echo "Claude Code: rsct registered at user scope"
@@ -191,8 +216,7 @@ if [ "$USER_SCOPE_HAS_RSCT" = "yes" ]; then
   echo "this machine that relies on user scope. Project-scope"
   echo ".mcp.json files are untouched and listed under MANUAL STEPS below."
   echo ""
-  printf "Also unregister rsct from Claude Code (user scope)? [Y/n] "
-  read -r mcp_unreg_confirm
+  read_or_default mcp_unreg_confirm "Also unregister rsct from Claude Code (user scope)? [Y/n] " "y"
   case "$mcp_unreg_confirm" in
     n|N|no|NO)
       echo "Kept user-scope registration."
