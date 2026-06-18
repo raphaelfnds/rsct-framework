@@ -1,0 +1,20 @@
+# Dependabot — Option A: SECURITY updates only (no routine version-bump PRs).
+#
+# Routine version-update PRs are disabled via `open-pull-requests-limit: 0`.
+# Vulnerability fixes still arrive because the repo-level setting
+# "Dependabot security updates" is enabled (must be toggled on in
+# Settings → Code security; it is NOT controlled by this file).
+#
+# esbuild is ignored: it is a build-time-only dependency (pulled in by tsup)
+# that never ships to users — `dist/` is prebuilt and committed (CAP-57), so
+# esbuild never lands on a user machine. Its security PRs would be pure noise;
+# the alert stays visible in the dependency graph, only the PR is suppressed.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/mcp-server"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "esbuild"
