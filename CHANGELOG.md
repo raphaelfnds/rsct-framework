@@ -10,6 +10,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-18
+
+Universe-aware runtime + a cross-OS **test foundation** for the prompt/install
+bash. Protocol and code versions bump together to `1.1.0` (per the v1.0.0
+versioning policy). The embedded RSCT **marker schema stays at `v=1.0.0`** — its
+format is unchanged, so existing installs keep marker idempotency (a marker-version
+bump would make `/rsct-setup` re-runs duplicate blocks in already-configured
+projects).
+
+### Added
+
+- **Universe-aware `rsct_status` / `rsct_load_context` (T1.a).** The org-level
+  universe (universe repo, `.universe.json`, `applications/` registry) was populated
+  by `/rsct-canonical-source` but never read at runtime. A new `lib/universe.ts` —
+  the single source both tools call, so they cannot drift — resolves the universe
+  (configured path → candidate paths → none), reads it (dirs are the registry ground
+  truth, JSON is the index), and surfaces an always-present `universe` block
+  (`available`, `name`, `registered_apps_count`, `this_app_registered`, `note`) plus
+  a registration hint. Fail-graceful: any universe problem degrades to
+  `available:false` and never throws into session bootstrap. Three states
+  distinguished — ok / configured-but-missing / degraded — with registry
+  reconciliation notes. `rules/0-session-bootstrap.md` §0.1 documents consulting the
+  universe governance when available.
+- **Consent-gated app registration in `/rsct-setup` (T1.b).** A new Phase 4.8 acts
+  on the "this app is not registered" hint: on an explicit opt-in (`[y/N]`), it
+  renders `applications/<app>/README.md` from the universe template and appends the
+  app to `.universe.json` `registered_apps[]` by **text-splice** (never a whole-file
+  `JSON.parse`→`stringify`). It writes into the universe's **own** repo as working
+  files only and **never** runs git there (the dev reviews and commits in the
+  universe themselves); it never overwrites an existing app dir (reconciles the index
+  instead). Self-contained: identity + universe path are read from the project's
+  `.rsct.json`.
+- **Test foundation for the bash surface (T0).** The prompt/install bash — where
+  every historical CAP bug lived — had zero automated coverage. Three layers, all in
+  the cross-OS CI matrix: (1) a **static bash lint** — `bash -n` over every prompt
+  block + script, plus AP1–AP7 detectors for the CLAUDE.md anti-patterns, each with
+  known-bad/known-good self-tests; (2) a **script-level sandbox smoke** — real
+  install/uninstall into a throwaway `$HOME` (layout, idempotency, scrub); (3) a
+  **curated prompt-block smoke** — runs self-contained mutation blocks (gitignore
+  backfill, `.rsct.json` secrets merge, `.mcp.json` scrub, app registration) against
+  fixtures, extracted by anchor so they never drift from the prompt. CI sets
+  `RSCT_REQUIRE_BASH=1` so a runner without bash FAILS rather than silently skipping.
+- **Non-interactive install mode.** `install.sh` / `uninstall-framework.sh` accept
+  `RSCT_ASSUME_YES=1` / `--yes` / `-y` (answer prompts with defaults) and
+  `RSCT_SKIP_MCP=1` / `--skip-mcp` (framework files only — no global `npm install -g`
+  / `claude mcp add`). Interactive behavior is unchanged.
+- **`.github/dependabot.yml`** — security-updates only (`open-pull-requests-limit: 0`);
+  `esbuild` ignored (a build-time-only transitive dep that never ships — `dist/` is
+  prebuilt).
+
+### Fixed
+
+- Apostrophes inside `node -e '...'` blocks in `01-setup.md` (Phase 4.4) and
+  `03-uninstall.md` (Phase 4.V.a2) closed the single-quoted string and broke the
+  command at runtime — surfaced by the new bash lint's `bash -n` gate. Reworded the
+  offending comments/strings (no logic change). A new anti-pattern vector beyond the
+  documented `\b`/escape case (CAP-20): apostrophes in JS comments/strings inside a
+  single-quoted `node -e`.
+
 ## [1.0.0] - 2026-06-15
 
 **First stable release.** Consolidates the entire pre-1.0 development effort

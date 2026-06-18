@@ -563,7 +563,7 @@ function stampClassifyVerdict(projectRoot, args) {
 }
 
 // src/lib/version.ts
-var RSCT_MCP_VERSION = "1.0.0";
+var RSCT_MCP_VERSION = "1.1.0";
 var NONE_BLOCK = {
   available: false,
   name: null,

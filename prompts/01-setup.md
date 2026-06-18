@@ -1,5 +1,5 @@
 # RSCT Setup — 01-setup.md
-# Version: 1.0.0
+# Version: 1.1.0
 
 You are operating inside a software project repository.
 Your task: apply or update the RSCT governance protocol.

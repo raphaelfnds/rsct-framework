@@ -14,4 +14,4 @@
  * BOTH on every release, or `npm install -g` will silently skip the new
  * binary.
  */
-export const RSCT_MCP_VERSION = '1.0.0'
+export const RSCT_MCP_VERSION = '1.1.0'
