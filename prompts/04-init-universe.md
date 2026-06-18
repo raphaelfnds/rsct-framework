@@ -1,5 +1,5 @@
 # RSCT Init Universe — 04-init-universe.md
-# Version: 1.0.0
+# Version: 1.1.0
 
 You are operating to **bootstrap a new universe repository** for an organization.
 
