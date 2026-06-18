@@ -60,6 +60,8 @@ export interface RunBlockOpts {
   seedFiles?: Record<string, string>
   /** Run the block N times in the SAME dir (idempotency tests). Default 1. */
   runs?: number
+  /** Extra env for the bash process (merged over a hermetic default). */
+  env?: Record<string, string>
 }
 
 export interface RunBlockResult {
@@ -87,9 +89,13 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
   const body = Array.from({ length: runs }, () => one).join('\n# --- rerun ---\n')
   const runnerPath = join(dir, '.rsct_runner.sh')
   writeFileSync(runnerPath, body)
+  // Hermetic by default: HOME points at the temp dir so a block reading
+  // $HOME/.rsct/... never touches the real home (overridable via opts.env).
+  const env = { ...process.env, HOME: dir.replace(/\\/g, '/'), ...(opts.env ?? {}) }
   try {
     const out = execFileSync('bash', [runnerPath], {
       cwd: dir,
+      env,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })

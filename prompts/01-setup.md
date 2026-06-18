@@ -2222,6 +2222,99 @@ standard, like `decisions.md`). §B (consult it before writing code) and §H (th
 decisions × anti-decisions × conventions taxonomy) cover when the agent reads
 and proposes conventions.
 
+### 4.8 — Register this app in the universe (optional, consent-based)
+
+When this project belongs to an org-level **universe** (a `universe.local` was
+discovered in Phase 1.9 and persisted to `.rsct.json`), setup can register the app
+in that universe: create `applications/<app>/README.md` from the template and add
+`<app>` to `.universe.json` `registered_apps[]`. This is the action behind the
+`rsct_status` / `rsct_load_context` "this app is not registered" hint (T1.a).
+
+This step is **opt-in** and writes into the universe's **own git repository**:
+
+- If no universe resolves, or the app is already registered → the block below is a
+  safe **no-op** (run it anyway; it self-guards).
+- If the app is **not** registered → make a **single-line offer**, e.g. *"Register
+  this app in the universe at `<path>`? `[y/N]`"*. Writing into another repo must be
+  a deliberate **yes** — run the block **only on an explicit yes**; on decline or
+  silence, do nothing.
+- **RSCT never touches the universe's git** — it writes working files only and
+  **never** `git add` / `commit` / `push` there. After it writes, review and commit
+  inside the universe repo yourself (the §0 universe rule: local-first, remote-with-OK).
+- It **never overwrites** an existing `applications/<app>/` (warns instead).
+
+```bash
+echo "  CHECKPOINT: Phase 4.8 registering this app in the universe (consented)"
+# Self-contained + cross-OS via node: reads identity + universe path from the
+# .rsct.json written in Phase 4.4 (the AI runs blocks separately, so earlier-phase
+# shell vars are not assumed in scope). Appends to registered_apps[] by TEXT-SPLICE
+# — never JSON.parse->stringify the whole .universe.json (CLAUDE.md #5; .universe.json
+# is NOT a documented exception). No apostrophes anywhere in this node program (a
+# stray apostrophe would close the single-quoted node -e — CAP-20 / V2 class).
+node -e '
+  const fs = require("fs");
+  const path = require("path");
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(".rsct.json", "utf8")); }
+  catch (e) { console.error("  WARN: .rsct.json unreadable — skipping universe registration."); process.exit(0); }
+  const app = cfg.app && cfg.app.name;
+  const org = (cfg.app && cfg.app.org) || "";
+  const uniLocal = cfg.universe && cfg.universe.local;
+  if (!app || !uniLocal) { console.log("  No universe.local / app in .rsct.json — skipping registration."); process.exit(0); }
+  const uni = path.isAbsolute(uniLocal) ? uniLocal : path.resolve(process.cwd(), uniLocal);
+  if (!fs.existsSync(path.join(uni, ".universe.json"))) { console.log("  Universe not found/invalid at " + uni + " — skipping registration."); process.exit(0); }
+  const appDir = path.join(uni, "applications", app);
+
+  // Append app to registered_apps[] by text-splice (bracket-balanced walk); idempotent.
+  function appendRegistry() {
+    const target = path.join(uni, ".universe.json");
+    let txt;
+    try { txt = fs.readFileSync(target, "utf8"); } catch (e) { return; }
+    const m = txt.match(/("registered_apps"[ \t]*:[ \t]*)\[/);
+    if (!m) { console.error("  WARN: registered_apps[] not found in .universe.json — add " + JSON.stringify(app) + " to it manually."); return; }
+    const openIdx = m.index + m[0].length - 1;
+    let i = openIdx + 1, depth = 1, inStr = false, esc = false;
+    for (; i < txt.length && depth > 0; i++) {
+      const c = txt[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === "\"") inStr = !inStr;
+      else if (!inStr && c === "[") depth++;
+      else if (!inStr && c === "]") depth--;
+    }
+    const closeIdx = i - 1;
+    const inner = txt.slice(openIdx + 1, closeIdx);
+    const elems = inner.split(",").map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+    if (elems.indexOf(JSON.stringify(app)) !== -1) { console.log("  index already lists " + app); return; }
+    elems.push(JSON.stringify(app));
+    const ml = inner.indexOf("\n") !== -1;
+    const rendered = ml ? ("\n    " + elems.join(",\n    ") + "\n  ") : elems.join(", ");
+    fs.writeFileSync(target, txt.slice(0, openIdx + 1) + rendered + txt.slice(closeIdx), "utf8");
+    console.log("  indexed " + app + " in .universe.json registered_apps[]");
+  }
+
+  if (fs.existsSync(appDir)) {
+    console.log("  applications/" + app + "/ already exists in the universe — left as-is (verify it is this repo).");
+    appendRegistry();
+    process.exit(0);
+  }
+
+  const tmpl = path.join(process.env.HOME || "", ".rsct", "universe-templates", "applications", "_app.md.template");
+  fs.mkdirSync(appDir, { recursive: true });
+  let body;
+  try { body = fs.readFileSync(tmpl, "utf8").split("[APP_NAME]").join(app).split("[ORG_SLUG]").join(org); }
+  catch (e) { body = "# " + app + "\n\n(app template not found; minimal stub — fill this in)\n"; }
+  fs.writeFileSync(path.join(appDir, "README.md"), body, "utf8");
+  console.log("  CREATE  applications/" + app + "/README.md in the universe");
+  appendRegistry();
+  console.log("  NOTE: modified the universe repo at " + uni + " — RSCT never commits the universe; review and commit THERE yourself.");
+' || { echo "  ERROR: universe registration failed" >&2; exit 1; }
+```
+
+Idempotent: a second run sees `applications/<app>/` and only reconciles the index
+(never overwrites the README). The universe repo is left with **uncommitted** working
+changes on purpose — committing there is the dev's call.
+
 ### 4.V — INV-2.3 poison-pill closer (SessionStart sanitizer hook)
 
 The §C-gated tools (`rsct_request_commit/_push/_merge`) require an

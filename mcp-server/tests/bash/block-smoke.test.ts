@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { rmSync } from 'node:fs'
+import { rmSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import {
   runBlock,
@@ -214,4 +215,70 @@ describe.skipIf(!BASH || !NODE)('block: .mcp.json rsct scrub (03-uninstall 4.V.a
     expect(mcpServersOf(r).rsct).toBeUndefined()
     expect(mcpServersOf(r).other).toBeDefined()
   }, 60_000)
+})
+
+// --- Block 4 (T1.b): universe app registration (01-setup 4.8) ------------------
+const REG_ANCHOR = 'CHECKPOINT: Phase 4.8'
+const APP_TEMPLATE = readFileSync(
+  resolve(ROOT, 'universe-templates', 'applications', '_app.md.template'), 'utf8',
+)
+// Project .rsct.json: universe.local is a relative SUBDIR (resolves to native path
+// cross-OS). HOME defaults to the temp dir (hermetic), so seed the app template under
+// .rsct/universe-templates/ — exactly where the block reads it ($HOME/.rsct/...).
+const PROJECT_RSCT = JSON.stringify(
+  { rsct_version: '1.0.0', app: { name: 'demo-app', org: 'acme' }, universe: { name: 'acme-universe', local: 'acme-universe' } },
+  null, 2,
+) + '\n'
+const UNIVERSE_JSON = JSON.stringify(
+  { universe_version: '1.0.0', org: 'acme', name: 'acme-universe', registered_apps: [] }, null, 2,
+) + '\n'
+const baseSeed = (): Record<string, string> => ({
+  '.rsct.json': PROJECT_RSCT,
+  'acme-universe/.universe.json': UNIVERSE_JSON,
+  '.rsct/universe-templates/applications/_app.md.template': APP_TEMPLATE,
+})
+const appsOf = (r: RunBlockResult): string[] =>
+  JSON.parse(readIn(r, 'acme-universe/.universe.json')).registered_apps
+
+describe.skipIf(!BASH || !NODE)('block: universe app registration (01-setup 4.8 / T1.b)', () => {
+  it('registers: renders the app README and indexes it in registered_apps[]', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: baseSeed() })
+    const readme = readIn(r, 'acme-universe/applications/demo-app/README.md')
+    expect(readme).toContain('# demo-app') // [APP_NAME] substituted
+    expect(readme).toContain('acme') // [ORG_SLUG] substituted (Repository line)
+    expect(appsOf(r)).toContain('demo-app')
+  }, 60_000)
+
+  it('idempotent: re-run does not duplicate the registry entry', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: baseSeed(), runs: 2 })
+    expect(appsOf(r).filter((a) => a === 'demo-app')).toHaveLength(1)
+  }, 60_000)
+
+  it('collision: never overwrites an existing app README, only reconciles the index', () => {
+    const seed = { ...baseSeed(), 'acme-universe/applications/demo-app/README.md': '# CUSTOM dev content\n' }
+    const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: seed })
+    expect(readIn(r, 'acme-universe/applications/demo-app/README.md')).toBe('# CUSTOM dev content\n')
+    expect(r.out).toMatch(/already exists/)
+    expect(appsOf(r)).toContain('demo-app') // index reconciled
+  }, 60_000)
+
+  it('no universe configured → safe no-op', () => {
+    const noUni = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'demo-app', org: 'acme' } }, null, 2) + '\n'
+    const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: { '.rsct.json': noUni } })
+    expect(r.out).toMatch(/skipping registration/)
+    expect(hasIn(r, 'acme-universe')).toBe(false)
+  }, 60_000)
+
+  it('text-splice: other .universe.json fields are byte-preserved (no whole-file reformat)', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: baseSeed() })
+    const raw = readIn(r, 'acme-universe/.universe.json')
+    expect(raw).toContain('"org": "acme"')
+    expect(raw).toContain('"universe_version": "1.0.0"')
+  }, 60_000)
+
+  it('never runs git against the universe (hands-off — §3.5)', () => {
+    // Structural guarantee: the block issues NO git command of any kind.
+    const block = extractBlockByAnchor(ROOT, '01-setup.md', REG_ANCHOR)
+    expect(block.code).not.toMatch(/\bgit\s/)
+  })
 })
