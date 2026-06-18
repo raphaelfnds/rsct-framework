@@ -691,7 +691,7 @@ if [ -f "$MCP_JSON" ]; then
     } else {
       if (remaining === 0) delete cfg.mcpServers;
       fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n", "utf8");
-      console.log("Removed rsct from .mcp.json; preserved the dev's other entries.");
+      console.log("Removed rsct from .mcp.json; preserved the other entries.");
     }
   ' "$MCP_JSON"
 fi

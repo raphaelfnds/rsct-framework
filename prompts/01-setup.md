@@ -1288,7 +1288,7 @@ node -e '
   // CAP-42 → CAP-50 → CAP-51 (field-report C1 + audit F5 + field-report F1):
   // generate an ASSIGNMENT regex `<VAR>\s*=\s*\S+`. History — the original bare
   // `\b<VAR>\b` matched the variable NAME anywhere (even prose), tripping INV-6
-  // on the §E security note that merely LISTS the vars; CAP-42's `[=:]` still
+  // on the §E security note that merely LISTS the vars; the CAP-42 `[=:]` still
   // matched doc prose like "APP_KEY: a chave" (`:` is ambiguous — YAML
   // assignment vs a doc label); CAP-50 narrowed to `=` only (unambiguous, and
   // `.env`/`*.properties`/shell — the files SENSITIVE_VARS is discovered from —
@@ -1297,7 +1297,7 @@ node -e '
   // BS (String.fromCharCode(92)) so the shells do not eat `\s`/`\S` (#4 / CAP-20).
   //
   // CAP-51 (field-report F1): migrate legacy entries to the `=` form BY SHAPE,
-  // independent of this run's SENSITIVE_VARS. The pre-CAP-51 code migrated only
+  // independent of the SENSITIVE_VARS for this run. The pre-CAP-51 code migrated only
   // the vars rediscovered THIS run, so an entry whose var was not re-derived
   // (lives in .rsct.json but not re-scanned this run) stayed in its old
   // `[=:]`/bare shape forever and the array never converged. `legacyVarOf`
@@ -1331,7 +1331,7 @@ node -e '
     if (!seen.has(neu)) { seen.add(neu); result.push(neu); }
   }
   const added = [];
-  for (const v of vars) {                  // union this run's SENSITIVE_VARS
+  for (const v of vars) {                  // union the SENSITIVE_VARS for this run
     if (!v || /[^A-Za-z0-9_]/.test(v)) continue;  // skip names with regex-unsafe chars
     const re = v + ATTR;
     if (!seen.has(re)) { seen.add(re); result.push(re); added.push(re); }
