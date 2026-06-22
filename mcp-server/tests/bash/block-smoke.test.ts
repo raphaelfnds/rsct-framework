@@ -488,3 +488,44 @@ describe.skipIf(!BASH)('block: universe discovery probe (01-setup 1.9 — T1.d)'
     expect(r.out).not.toMatch(/FOUND:/)
   }, 60_000)
 })
+
+// --- Block 6: update-check consent ask-once (01-setup 4.9 — T4) — uses node --------
+// Writes $HOME/.rsct/update-check.json; HOME is hermetic (= temp dir). CONSENT is
+// injected via preamble (the shipped block reads it from the dev's answer).
+const CONSENT_ANCHOR = 'Phase 4.9 executing canonical update-check consent'
+const CC_FILE = '.rsct/update-check.json'
+
+describe.skipIf(!BASH || !NODE)('block: update-check consent (01-setup 4.9 — T4)', () => {
+  it('records consent "yes" on first run (opt-in)', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR, preamble: 'CONSENT=yes' })
+    expect(readIn(r, CC_FILE)).toContain('"consent": "yes"')
+  }, 60_000)
+
+  it('defaults to "no" when CONSENT is unset (privacy-first)', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR })
+    expect(readIn(r, CC_FILE)).toContain('"consent": "no"')
+  }, 60_000)
+
+  it('ask-once — does NOT change an already-recorded consent', () => {
+    const seeded = JSON.stringify({ consent: 'yes', latest_tag: 'v9.9.9' }, null, 2) + '\n'
+    const r = run({
+      promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR,
+      preamble: 'CONSENT=no', // would flip to "no" if the ask-once guard failed
+      seedFiles: { [CC_FILE]: seeded },
+    })
+    expect(readIn(r, CC_FILE)).toContain('"consent": "yes"') // unchanged
+    expect(r.out).toMatch(/already recorded/)
+  }, 60_000)
+
+  it('merge — preserves other cache fields when recording consent', () => {
+    // File exists but has NO consent field yet → ask runs, node merge keeps latest_tag.
+    const seeded = JSON.stringify({ latest_tag: 'v9.9.9' }, null, 2) + '\n'
+    const r = run({
+      promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR,
+      preamble: 'CONSENT=yes', seedFiles: { [CC_FILE]: seeded },
+    })
+    const cc = readIn(r, CC_FILE)
+    expect(cc).toContain('"consent": "yes"')
+    expect(cc).toContain('"latest_tag": "v9.9.9"') // preserved
+  }, 60_000)
+})

@@ -8903,7 +8903,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join15 } = __require("path");
+    var { join: join16 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8946,7 +8946,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join15(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join16(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9349,7 +9349,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join15, isAbsolute: isAbsolute5, sep } = __require("path");
+    var { join: join16, isAbsolute: isAbsolute5, sep } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9412,7 +9412,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join15(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join16(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9430,7 +9430,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join15(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join16(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9452,7 +9452,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join15(__dirname$1, "..", "file.js");
+          return join16(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10442,7 +10442,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join15 = ",";
+            let join16 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10456,7 +10456,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join15 = `,
+                join16 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10464,13 +10464,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join15;
+                res += join16;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join15}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join16}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10491,7 +10491,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join15 = `,
+              join16 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10505,13 +10505,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join15;
+                separator = join16;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join15;
+              separator = join16;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10552,7 +10552,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join15 = ",";
+            let join16 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10565,7 +10565,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join15 = `,
+                join16 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10573,13 +10573,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join15;
+                res += join16;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join15}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join16}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10592,7 +10592,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join15 = `,
+              join16 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10601,7 +10601,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join15;
+                separator = join16;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10659,20 +10659,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join16 = `,
+              const join17 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join16;
+                res2 += join17;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join16}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10688,16 +10688,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join15 = `,
+            const join16 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join15, maximumBreadth);
+              res += stringifyTypedArray(value, join16, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join15;
+              separator = join16;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10708,13 +10708,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join15;
+                separator = join16;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join15;
+              separator = join16;
             }
             if (separator !== "") {
               res = `
@@ -23215,6 +23215,88 @@ function getUniverse(config2, projectRoot, opts = {}) {
   return { block, hint };
 }
 
+// src/lib/update-check.ts
+init_esm_shims();
+var REPO = "raphaelfnds/rsct-framework";
+var LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+var TTL_MS = 24 * 60 * 60 * 1e3;
+function cachePath(home) {
+  return join(home, ".rsct", "update-check.json");
+}
+function readCache(home) {
+  try {
+    const p = cachePath(home);
+    if (!existsSync(p)) return null;
+    const parsed = JSON.parse(readFileSync(p, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeCacheAtomic(home, data) {
+  try {
+    mkdirSync(join(home, ".rsct"), { recursive: true });
+    const p = cachePath(home);
+    const tmp = `${p}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(data, null, 2)}
+`, "utf8");
+    renameSync(tmp, p);
+  } catch {
+  }
+}
+function parseSemver(v) {
+  const m = String(v).replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function isNewer(latestTag, current) {
+  const a = parseSemver(latestTag);
+  const b = parseSemver(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+function defaultFetcher() {
+  return fetch(LATEST_URL, {
+    headers: { Accept: "application/vnd.github+json", "User-Agent": `rsct-mcp/${RSCT_MCP_VERSION}` },
+    signal: AbortSignal.timeout(2e3)
+  });
+}
+async function backgroundRefresh(home, fetcher, nowIso, prev) {
+  try {
+    const res = await fetcher();
+    if (!res.ok) return;
+    const body = await res.json();
+    const tag = typeof body.tag_name === "string" ? body.tag_name : prev.latest_tag;
+    writeCacheAtomic(home, { consent: "yes", last_checked: nowIso, latest_tag: tag });
+  } catch {
+  }
+}
+function getUpdateNotice(opts = {}) {
+  try {
+    const home = opts.home ?? process.env.HOME ?? homedir();
+    const cache = readCache(home);
+    if (!cache || cache.consent !== "yes") return { hint: null };
+    const now = opts.now ?? Date.now();
+    const last = cache.last_checked ? Date.parse(cache.last_checked) : NaN;
+    const stale = !Number.isFinite(last) || now - last > TTL_MS;
+    if (stale) {
+      void backgroundRefresh(home, opts.fetcher ?? defaultFetcher, new Date(now).toISOString(), cache);
+    }
+    if (cache.latest_tag && isNewer(cache.latest_tag, RSCT_MCP_VERSION)) {
+      const tag = cache.latest_tag.replace(/^v/, "");
+      return {
+        hint: `A newer RSCT release (v${tag}) is available \u2014 you have ${RSCT_MCP_VERSION}. Update the framework (git pull + reinstall) then run /rsct-setup to apply it. (suggestion only)`
+      };
+    }
+    return { hint: null };
+  } catch {
+    return { hint: null };
+  }
+}
+
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
@@ -23244,6 +23326,8 @@ async function statusHandler(rawInput) {
   const hints = buildStatusHints(resolution, git);
   const universe = getUniverse(resolution.config, resolution.root);
   if (universe.hint) hints.push(universe.hint);
+  const update = getUpdateNotice();
+  if (update.hint) hints.push(update.hint);
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION },
     rsct_installed: resolution.rsct_installed,

@@ -2442,6 +2442,48 @@ Idempotent: a second run sees `applications/<app>/` and only reconciles the inde
 (never overwrites the README). The universe repo is left with **uncommitted** working
 changes on purpose — committing there is the dev's call.
 
+### 4.9 — Update-check consent (optional, ask-once)
+
+T4: `rsct_status` can surface a one-line "a newer RSCT release is available" hint at
+session start. It is **opt-in** — until consent is recorded, the MCP server makes NO
+network call. This step ASKS ONCE (it never re-asks once `~/.rsct/update-check.json`
+carries a `consent` field) and records the answer. The check is **cached (~daily),
+fail-silent, and suggest-only** — it never auto-updates anything.
+
+Ask the dev (only when consent is not yet recorded):
+> *"Allow RSCT to check GitHub for a newer release at session start? It is cached
+> (~once/day), never blocks, and only suggests — never auto-updates. `[y/N]`"*
+
+Set `CONSENT` to `yes` or `no` from the answer (default `no`), then record it:
+
+```bash
+echo "  CHECKPOINT: Phase 4.9 executing canonical update-check consent (ask-once)"
+UPDATE_CHECK_FILE="$HOME/.rsct/update-check.json"
+HAS_CONSENT="no"
+[ -f "$UPDATE_CHECK_FILE" ] && grep -q '"consent"' "$UPDATE_CHECK_FILE" 2>/dev/null && HAS_CONSENT="yes"
+if [ "$HAS_CONSENT" = "yes" ]; then
+  echo "  update-check consent already recorded — no change (ask-once)"
+else
+  # CONSENT is set from the dev's answer above; default to "no" (opt-in / privacy-first).
+  CONSENT="${CONSENT:-no}"
+  mkdir -p "$HOME/.rsct"
+  # RSCT-owned runtime file — a small Node merge is fine (preserves any cache fields).
+  # Path passed as argv (no pwd reliance); double-quoted JS only (no apostrophes — CAP-42).
+  node -e '
+    var fs = require("fs");
+    var p = process.argv[1];
+    var consent = process.argv[2] === "yes" ? "yes" : "no";
+    var o = {};
+    try { var prev = JSON.parse(fs.readFileSync(p, "utf8")); if (prev && typeof prev === "object") o = prev; } catch (e) { o = {}; }
+    o.consent = consent;
+    var tmp = p + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(o, null, 2) + "\n", "utf8");
+    fs.renameSync(tmp, p);
+    console.log("  update-check consent recorded: " + consent);
+  ' "$UPDATE_CHECK_FILE" "$CONSENT"
+fi
+```
+
 ### 4.V — INV-2.3 poison-pill closer (SessionStart sanitizer hook)
 
 The §C-gated tools (`rsct_request_commit/_push/_merge`) require an
