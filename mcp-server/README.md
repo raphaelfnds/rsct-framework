@@ -206,17 +206,53 @@ All tools degrade gracefully outside rsct projects (return
 
 ### `rsct_status`
 
-Fast bootstrap check. Returns rsct identity, protected branches, git state, hints.
+Fast bootstrap check. Returns rsct identity, protected branches, git state, the
+[`universe` block](#the-universe-block), and hints.
 
 - Input: `project_root?`
-- Output: identity, git, hints
+- Output: identity, git, `universe`, hints
 
 ### `rsct_load_context`
 
 Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, knowledge index, next-action hints.
 
 - Input: `project_root?`, `decisions_excerpt_count?` (default 3, max 20)
-- Output: structured snapshot for session priming
+- Output: structured snapshot for session priming (identity, git, active plan,
+  decisions, knowledge, `universe`, `next_action_hints`)
+
+### The `universe` block
+
+Both `rsct_status` and `rsct_load_context` surface the org-level **universe**
+(the layer linked by `/rsct-canonical-source` and bootstrapped by
+`/rsct-init-universe`). They compute it from a single shared source, so the two
+outputs never drift, and it is **fail-graceful**: any error degrades to an empty
+block and never throws into the bootstrap path. A project with no universe behaves
+exactly as before this feature existed (`available: false`, no hint).
+
+The block is **always present** with these fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `available` | boolean | `true` only when a universe was resolved AND its `.universe.json` was read. |
+| `name` | string \| null | Universe name (from `.universe.json`, else `.rsct.json universe.name`). |
+| `local_path` | string \| null | The resolved universe path that was chosen (transparency). |
+| `registered_apps_count` | number | Count of `applications/<app>/` **directories** (ground truth — not the `.universe.json` list length). |
+| `this_app_registered` | boolean | Whether this project's app is registered in the universe. |
+| `note` | string \| null | Diagnostic for the degraded / configured-missing / reconciliation states. |
+
+When the block carries an actionable message, a one-line `hint` is also pushed into
+`hints` (status) / `next_action_hints` (load_context). States:
+
+- **none** — no universe found (or project not rsct-managed): empty block, no hint.
+- **found + registered** — `available: true`, `this_app_registered: true`, no hint.
+- **found + NOT registered** — `available: true`, `this_app_registered: false`, plus a
+  hint to run `/rsct-setup` to register the app (see [Phase 4.8 registration](../README.md#universe-app-registration)).
+- **configured-missing** — `.rsct.json universe.local` points somewhere that does not
+  exist: `available: false`, `note` "configured but not found", hint to fix it.
+- **unreadable (degraded)** — the directory exists but `.universe.json` is missing or
+  corrupt: `available: false`, `note` "found but unreadable".
+- **reconciliation** — the `.universe.json registered_apps[]` index and the
+  `applications/<app>/` directories disagree: `note` explains the mismatch.
 
 ### `rsct_get_decisions`
 

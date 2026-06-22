@@ -279,6 +279,20 @@ pointing to the universe repository of your organization. If no universe
 is found locally or remotely, this command offers to invoke
 `/rsct-init-universe` first.
 
+### Universe app registration
+
+Once a project is linked to a universe (via `/rsct-canonical-source`), re-running
+`/rsct-setup` offers to **register this app in the universe** (consent-gated): it
+renders an app README into `applications/<app>/` and appends the app to the
+universe's `registered_apps[]` index. It writes only to the universe repo and never
+commits or pushes there — you review and commit those changes yourself.
+
+From then on, `rsct_status` and `rsct_load_context` surface a `universe` block
+describing the universe and whether this app is registered, and emit a one-line hint
+to register it when it is not yet linked. See
+[the `universe` block](mcp-server/README.md#the-universe-block) for the field/state
+reference.
+
 ### Uninstall RSCT from a project
 ```
 /rsct-uninstall
@@ -471,14 +485,21 @@ work safely.
   list when storage gets crowded
 - **Two-pass audit before proposing plans** — strengthen §B item 2 to enforce
   re-read of relevant context before submitting options
-- **Auto-registration of applications in the universe** — `/rsct-setup` will
-  detect a locally-cloned universe and offer to register the current project
-  in `applications/<app>/README.md` automatically
 - **Cursor support** — auto-generate `.cursorrules` pointing to `CLAUDE.md`
   so Cursor reads the same governance protocol
 - **GitHub Copilot support** — auto-generate `.github/copilot-instructions.md`
   with the same content
 - **OpenAI Codex / other tools** — as their native config conventions stabilize
+
+### Done (shipped in v1.1.0)
+
+- **Universe-aware `rsct-mcp`** — `rsct_status` and `rsct_load_context` now resolve,
+  read, and surface the org-level universe as a `universe` block (with a registration
+  hint when the app is not yet linked). See
+  [the `universe` block](mcp-server/README.md#the-universe-block).
+- **Auto-registration of applications in the universe** — `/rsct-setup` detects a
+  linked universe and offers (consent-gated) to register the current project in
+  `applications/<app>/`. See [Universe app registration](#universe-app-registration).
 
 ### Done (shipped in v1.0.0)
 
