@@ -1404,9 +1404,12 @@ Plan tracking files (`plan_<slug>.md` and `progress_<slug>.md`) are
 **branch-local** by §B item 6 — they must never reach `main`/`test`.
 `spec_<slug>.md` is treated as an **accepted alias of `plan_<slug>.md`**
 (a dev may name the artefact "spec" instead of "plan"; same gitignore
-rule, same NEVER-on-protected guarantee). Setup adds a marker-wrapped
-block to the project's `.gitignore` so `/rsct-uninstall` can excise
-it cleanly later:
+rule, same NEVER-on-protected guarantee). The block also ignores the
+RSCT runtime-state files and, root-anchored, the framework source clone
+(`/rsct-framework/`) in case it is cloned INTO the project — a
+team-safety rule so the clone never travels with the project repo.
+Setup adds a marker-wrapped block to the project's `.gitignore` so
+`/rsct-uninstall` can excise it cleanly later:
 
 ```bash
 echo "  CHECKPOINT: Phase 4.4b executing canonical .gitignore RSCT block install"
@@ -1434,6 +1437,12 @@ spec_*.md
 .rsct/approvals-seen.json
 .rsct/phase-state.json
 .rsct/phase-state.lock
+
+# RSCT framework source clone — if the framework repo is cloned INTO the
+# project (a top-level "rsct-framework" dir) to invoke its prompts, ignore it
+# so it never travels with the project repo. Root-anchored: a clone living
+# elsewhere (e.g. under your home dir) is untouched.
+/rsct-framework/
 $END_MARKER
 EOF
 )
@@ -1512,6 +1521,23 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  CAP-25 backfill: added .rsct/phase-state.lock to existing RSCT .gitignore block"
     else
       echo "  ⚠ CAP-25 backfill: .rsct/phase-state.lock insertion did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # framework-clone backfill: pre-1.1.x RSCT blocks did not list /rsct-framework/
+  # (the framework source clone, root-anchored). Deterministic team-safety rule —
+  # a clone committed into the project repo would travel to the whole team. Same
+  # backfill idiom as CAP-16/CAP-25: append after .rsct/phase-state.lock (the last
+  # runtime-state line — guaranteed present because the CAP-25 lock clause just
+  # ran) when missing, so existing installs ignore a top-level clone on re-run.
+  if ! grep -qF "/rsct-framework/" "$GITIGNORE"; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk '/^\.rsct\/phase-state\.lock$/{print; print "/rsct-framework/"; next} 1' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+
+    if grep -qF "/rsct-framework/" "$GITIGNORE"; then
+      echo "  backfill: added /rsct-framework/ (framework clone) to existing RSCT .gitignore block"
+    else
+      echo "  ⚠ backfill: /rsct-framework/ insertion did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
 elif [ "$HAS_LEGACY_BLOCK" = "yes" ]; then

@@ -36,6 +36,16 @@ afterEach(() => {
 
 const countBegin = (s: string) => (s.match(/RSCT-BEGIN/g) ?? []).length
 
+// True iff `needle` appears on its own line strictly between the RSCT-BEGIN and
+// RSCT-END markers (proves a backfilled line lands INSIDE the block, not after END).
+const inMarkerRange = (s: string, needle: string) => {
+  const lines = s.replace(/\r/g, '').split('\n')
+  const begin = lines.findIndex((l) => l.includes('RSCT-BEGIN'))
+  const end = lines.findIndex((l) => l.includes('RSCT-END'))
+  if (begin < 0 || end < 0 || end <= begin) return false
+  return lines.slice(begin + 1, end).some((l) => l.trim() === needle)
+}
+
 describe('block-harness self-test + node policy', () => {
   it('extractBlockByAnchor returns the single matching block', () => {
     const b = extractBlockByAnchor(ROOT, '01-setup.md', 'CHECKPOINT: Phase 4.4b executing')
@@ -60,7 +70,7 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const gi = readIn(r, '.gitignore')
     for (const pat of ['RSCT-BEGIN', 'plan_*.md', 'progress_*.md', 'spec_*.md',
       '.rsct/audit.log', '.rsct/approvals-seen.json', '.rsct/phase-state.json',
-      '.rsct/phase-state.lock', '# RSCT-END']) {
+      '.rsct/phase-state.lock', '/rsct-framework/', '# RSCT-END']) {
       expect(gi, `missing ${pat}`).toContain(pat)
     }
   }, 60_000)
@@ -86,6 +96,59 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect(gi).toContain('.rsct/phase-state.json')
     expect(gi).toContain('.rsct/phase-state.lock')
     expect(countBegin(gi)).toBe(1) // no duplicate block
+  }, 60_000)
+
+  it('backfill — adds /rsct-framework/ to a pre-1.1.x block, inside the marker range', () => {
+    // Old block that already has phase-state.lock (the anchor) but lacks the
+    // framework-clone line; the new clause must backfill it INSIDE the markers.
+    const old = [
+      'node_modules/',
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      'spec_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '.rsct/phase-state.lock',
+      '# RSCT-END',
+      '*.log',
+      '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    const gi = readIn(r, '.gitignore')
+    expect(gi).toContain('/rsct-framework/')
+    expect(inMarkerRange(gi, '/rsct-framework/'), 'must land INSIDE the marker range').toBe(true)
+    expect(countBegin(gi)).toBe(1) // no duplicate block
+    expect(gi).toContain('node_modules/') // user content preserved
+    expect(gi).toContain('*.log')
+  }, 60_000)
+
+  it('backfill — chains lock + /rsct-framework/ on a block missing both', () => {
+    // Block predates BOTH the CAP-25 lock line and the framework-clone line.
+    // The CAP-25 clause inserts the lock anchor first; the framework clause then
+    // anchors on it. Validates the sequential-clause ordering (V FV1 / CASE 2).
+    const old = [
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '# RSCT-END',
+      '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    const gi = readIn(r, '.gitignore')
+    expect(gi).toContain('.rsct/phase-state.lock')
+    expect(inMarkerRange(gi, '/rsct-framework/')).toBe(true)
+    expect(countBegin(gi)).toBe(1)
+  }, 60_000)
+
+  it('idempotent — /rsct-framework/ appears exactly once after a re-run', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, runs: 2 })
+    const gi = readIn(r, '.gitignore')
+    expect((gi.match(/\/rsct-framework\//g) ?? []).length).toBe(1)
   }, 60_000)
 
   it('CRLF — backfill lands on a CRLF .gitignore (tr -d \\r path)', () => {
