@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { createRequire } from 'module';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 import { resolve, isAbsolute, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+createRequire(import.meta.url);
 var POISON_PILL_PATTERNS = [
   // Bare git mutations: Bash(git commit/push/merge ...)
   /^Bash\(\s*git\s+commit\b/i,
