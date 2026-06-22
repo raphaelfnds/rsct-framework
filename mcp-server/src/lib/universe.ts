@@ -79,19 +79,23 @@ export function resolveUniverseRoot(
     return isUniverseDir(local) ? { kind: 'found', path: local } : { kind: 'configured-missing', path: local }
   }
 
-  // (b) candidate probe — needs a name (universe.name) or the org slug to build
-  // the *-universe candidates. Mirrors the canonical-source Phase 1.2 order.
+  // (b) candidate probe — build "<base>-universe" candidates from the known
+  // basenames, in the canonical-source / Phase 1.9 priority order: explicit
+  // universe.name first, then the org name INFERRED by stripping a trailing
+  // -<digits> suffix (e.g. "bluelt-23" → "bluelt"; T1.d — lets an unlinked,
+  // org-suffixed project still discover the canonically-named universe), then
+  // the raw org. The inference uses `-\d*$` to match the prompt's
+  // `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
   const name = uni?.name ?? null
   const org = config?.app?.org ?? null
+  const inferred = org ? org.replace(/-\d*$/, '') : null
+  const basenames = [...new Set([name, inferred, org].filter((x): x is string => !!x))]
   const candidates: string[] = []
-  const pushNamed = (base: string) => {
-    if (name) candidates.push(`${base}/${name}-universe`)
-    if (org && org !== name) candidates.push(`${base}/${org}-universe`)
-  }
-  candidates.push(resolve(projectRoot, '..', name ? `${name}-universe` : ''))
-  if (org && org !== name) candidates.push(resolve(projectRoot, '..', `${org}-universe`))
+  for (const b of basenames) candidates.push(resolve(projectRoot, '..', `${b}-universe`))
   candidates.push(resolve(projectRoot, '..', 'universe'))
-  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) pushNamed(join(home, sub))
+  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) {
+    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`))
+  }
 
   for (const c of candidates) {
     if (c && isUniverseDir(c)) return { kind: 'found', path: c }

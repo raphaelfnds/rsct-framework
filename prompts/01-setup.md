@@ -447,17 +447,32 @@ rather than adding it.
 
 ### 1.9 — Universe local path
 ```bash
-ORG_SLUG="[value from step 1.1]"
+echo "  CHECKPOINT: Phase 1.9 executing canonical universe local-path probe"
+: "${ORG_SLUG:=[value from step 1.1]}"   # AI substitutes from 1.1; tests pre-set it
+# Strip a trailing -<digits> org suffix (e.g. "bluelt-23" → "bluelt"), mirroring
+# 02-canonical-source.md Phase 1.1, so an org-suffixed slug still discovers the
+# canonically-named universe (this is T1.d — Phase 1.9 previously probed only
+# "${ORG_SLUG}-universe" and missed e.g. "bluelt-universe" for org "bluelt-23").
+UNIVERSE_NAME=$(printf '%s' "$ORG_SLUG" | sed 's/-[0-9]*$//')
 for candidate in \
+  "../${UNIVERSE_NAME}-universe" \
   "../${ORG_SLUG}-universe" \
   "../universe" \
-  "$HOME/projetos/${ORG_SLUG}-universe" \
-  "$HOME/projects/${ORG_SLUG}-universe" \
-  "$HOME/dev/${ORG_SLUG}-universe" \
-  "$HOME/workspace/${ORG_SLUG}-universe"; do
-  [ -d "$candidate" ] && echo "FOUND: $candidate" && break
+  "$HOME/projetos/${UNIVERSE_NAME}-universe" \
+  "$HOME/projects/${UNIVERSE_NAME}-universe" \
+  "$HOME/dev/${UNIVERSE_NAME}-universe" \
+  "$HOME/workspace/${UNIVERSE_NAME}-universe" \
+  "$HOME/projetos/${ORG_SLUG}-universe"; do
+  # Require the `.universe.json` marker (not just a dir) — mirrors the MCP
+  # `isUniverseDir`, so a same-named non-universe dir is not a false positive.
+  [ -d "$candidate" ] && [ -f "$candidate/.universe.json" ] && echo "FOUND: $candidate" && break
 done
 ```
+
+The inferred `${UNIVERSE_NAME}-universe` is probed FIRST (the canonical name wins),
+with `${ORG_SLUG}-universe` kept as a fallback for universes literally named with the
+org suffix. If a universe is FOUND here but the project is not yet linked to it (see
+Phase 1.10 / `canonical_source_added`), Phase 3 will OFFER to link it (T1.d).
 
 ### 1.10 — Existing `.rsct.json` + discrepancy detection
 
@@ -616,6 +631,22 @@ Mode: [UPDATE | CREATE]
 ❓ Could not discover — please answer:
   [numbered list — only what was NOT found above and is not already
    in DISCREPANCIES]
+
+🌌 UNIVERSE LINK (T1.d) — present ONLY when Phase 1.9 FOUND a universe AND this
+  project is NOT yet linked to it (`.rsct.json` has no `universe.local`, i.e.
+  `canonical_source_added` is false / the `universe` block is absent). Omit entirely
+  when already linked or no universe was found.
+  [Present as a Recommended (§B item 1) consent question:]
+  "Universe `[UNIVERSE_NAME]-universe` found at `[PATH]`, but this project is not linked
+   to it. Link it now? `[Y/n]`
+   ✅ Recommended: yes — runs `/rsct-canonical-source` (adds the canonical-source
+      section to CLAUDE.md + sets `universe.local` in `.rsct.json`), after which this
+      app can be registered in the universe (Phase 4.8)."
+  - On YES → after this setup applies its own mutations, invoke `/rsct-canonical-source`
+    (it OWNS `universe.local` + `canonical_source_added` + the CLAUDE.md section — setup
+    never writes them directly). Once `universe.local` is set, run Phase 4.8 to register
+    the app (it reads `universe.local` fresh from `.rsct.json` at execution time).
+  - On NO → proceed unlinked (no change); the dev can run `/rsct-canonical-source` later.
 
 ──────────────────────────────────────────────────────
 Plan:

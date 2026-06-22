@@ -439,3 +439,52 @@ describe.skipIf(!BASH)('block: display-version stamp (01-setup 4.4)', () => {
     expect(readIn(r, '.rsct.json')).toContain('"rsct_version": "1.0.0"')
   }, 60_000)
 })
+
+// --- Block 5: universe local-path probe w/ org→name inference (01-setup 1.9, T1.d) --
+// HOME is hermetic (= temp dir); the block probes $HOME/projetos/<name>-universe etc.
+// ORG_SLUG is injected via preamble (the shipped block uses `: "${ORG_SLUG:=…}"`).
+const UNI_ANCHOR = 'Phase 1.9 executing canonical universe local-path probe'
+const UNI_JSON = '{"name":"x","registered_apps":[]}\n'
+
+describe.skipIf(!BASH)('block: universe discovery probe (01-setup 1.9 — T1.d)', () => {
+  it('infers the universe name from an org slug suffix (bluelt-23 → bluelt-universe)', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: UNI_ANCHOR,
+      preamble: 'ORG_SLUG=bluelt-23',
+      seedFiles: { 'projetos/bluelt-universe/.universe.json': UNI_JSON },
+    })
+    expect(r.out).toMatch(/FOUND: .*\/projetos\/bluelt-universe$/m)
+  }, 60_000)
+
+  it('false-positive guard — a same-named dir WITHOUT .universe.json is not FOUND', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: UNI_ANCHOR,
+      preamble: 'ORG_SLUG=bluelt-23',
+      seedFiles: { 'projetos/bluelt-universe/README.md': '# not a universe\n' },
+    })
+    expect(r.out).not.toMatch(/FOUND:/)
+  }, 60_000)
+
+  it('fallback — universe literally named <org>-universe still found (foo-9-universe)', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: UNI_ANCHOR,
+      preamble: 'ORG_SLUG=foo-9',
+      seedFiles: { 'projetos/foo-9-universe/.universe.json': UNI_JSON },
+    })
+    expect(r.out).toMatch(/FOUND: .*\/projetos\/foo-9-universe$/m)
+  }, 60_000)
+
+  it('no-suffix org still works (acme → acme-universe)', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: UNI_ANCHOR,
+      preamble: 'ORG_SLUG=acme',
+      seedFiles: { 'projetos/acme-universe/.universe.json': UNI_JSON },
+    })
+    expect(r.out).toMatch(/FOUND: .*\/projetos\/acme-universe$/m)
+  }, 60_000)
+
+  it('no universe present → nothing FOUND', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: UNI_ANCHOR, preamble: 'ORG_SLUG=bluelt-23' })
+    expect(r.out).not.toMatch(/FOUND:/)
+  }, 60_000)
+})
