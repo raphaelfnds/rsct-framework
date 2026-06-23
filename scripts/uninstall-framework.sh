@@ -121,7 +121,13 @@ for cmd in "${PRESENT_COMMANDS[@]}"; do
   echo "Will remove: $CLAUDE_COMMANDS_DIR/$cmd.md"
 done
 if [ -n "$PRESENT_RSCT_MCP" ]; then
-  echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+  # Mirror the actual companion-removal gate below ([ -z "$SKIP_MCP" ]): under
+  # --skip-mcp the script never asks, so don't claim it "will ask separately".
+  if [ -z "$SKIP_MCP" ]; then
+    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+  else
+    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (left untouched; --skip-mcp set)"
+  fi
 fi
 echo ""
 echo "NOTE: This does NOT remove RSCT from any project. Projects keep their"
