@@ -79,6 +79,7 @@ const EXPECTED_SCOPE_TOKEN: Record<string, string> = {
   rsct_phase_test_complete: 'test_complete',
   rsct_phase_abandon: 'phase_abandon',
   rsct_capture_issue: 'capture_issue',
+  rsct_plan_authorize: 'plan_authorize',
 }
 
 const BURST_WINDOW_MS = 10000

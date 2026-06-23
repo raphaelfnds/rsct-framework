@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 export interface GitState {
   available: boolean
@@ -54,6 +55,60 @@ export function getUnstagedDiff(projectRoot: string): string | null {
 function isGitRepo(projectRoot: string): boolean {
   const out = safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree'])
   return out === 'true'
+}
+
+export interface WorktreeInfo {
+  in_git_repo: boolean
+  /**
+   * True when running inside a LINKED git worktree (not the main worktree).
+   * T3/FV2: decided by `git-dir !== git-common-dir` — the canonical signal.
+   * Empirically the main worktree reports both as `.git`, while a linked
+   * worktree reports an absolute `…/.git/worktrees/<name>` git-dir vs a
+   * `…/.git` common-dir.
+   */
+  is_worktree: boolean
+  /** `git rev-parse --show-toplevel` (forward-slash normalized) or null. */
+  toplevel: string | null
+  /** Linked-worktree name (basename of git-dir) or null on the main worktree. */
+  name: string | null
+}
+
+/**
+ * Read git worktree info for the project root. Pure read, never throws
+ * (mirrors {@link readGitState}). Used by T3 to surface that the
+ * plan-authorization token + phase-state + anti-reuse store are isolated to
+ * THIS worktree (each `git worktree` checkout starts with its own gitignored
+ * `.rsct/`). Git emits forward slashes even on Windows; we normalize
+ * defensively before comparing/splitting.
+ */
+export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
+  if (safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree']) !== 'true') {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null }
+  }
+  const norm = (s: string | null): string | null =>
+    s === null ? null : s.replace(/\\/g, '/')
+  const gitDirRaw = safeGit(projectRoot, ['rev-parse', '--git-dir'])
+  const commonDirRaw = safeGit(projectRoot, ['rev-parse', '--git-common-dir'])
+  const toplevel = norm(safeGit(projectRoot, ['rev-parse', '--show-toplevel']))
+
+  // git reports --git-dir / --git-common-dir relative to the cwd (projectRoot)
+  // OR absolute, and MIXES the two forms: a subdirectory of the MAIN worktree
+  // yields an ABSOLUTE --git-dir but a RELATIVE --git-common-dir (e.g.
+  // 'C:/repo/.git' vs '../../.git'). A raw string compare would treat the same
+  // .git as different → falsely report the main worktree as a linked one.
+  // Resolve BOTH against projectRoot first so identical .git dirs compare equal.
+  let isWorktree = false
+  let name: string | null = null
+  if (gitDirRaw !== null && commonDirRaw !== null) {
+    const gitDirAbs = resolve(projectRoot, gitDirRaw)
+    const commonDirAbs = resolve(projectRoot, commonDirRaw)
+    isWorktree = gitDirAbs !== commonDirAbs
+    if (isWorktree) {
+      const parts = gitDirAbs.replace(/\\/g, '/').split('/').filter((p) => p.length > 0)
+      name = parts.length > 0 ? parts[parts.length - 1]! : null
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name }
 }
 
 function safeGit(cwd: string, args: string[]): string | null {

@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { PhaseState, PlanAuthorizationBlock } from '../../src/lib/phase-scope.js'
 import {
   requestCommitHandler,
   type RequestCommitOutput,
@@ -575,5 +584,243 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
     expect(out.anti_replay_persisted).toBeNull()
     expect(out.anti_replay_error).toBeNull()
     expect(out.audit_error).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T3 — plan-token authorization path (dev_approval omitted)
+// ---------------------------------------------------------------------------
+
+function tokenBlock(over: Partial<PlanAuthorizationBlock> = {}): PlanAuthorizationBlock {
+  return {
+    plan_slug: 't3',
+    branch: 'feat/foo',
+    covers: ['commit'],
+    authorized_at: FIXED_NOW.toISOString(),
+    expires_at: new Date(FIXED_NOW.getTime() + 60 * 60_000).toISOString(),
+    max_actions: 5,
+    actions_used: 0,
+    approval_ref: { action_scope: 'plan_authorize:t3', timestamp: VALID_TS },
+    ...over,
+  }
+}
+
+function seedState(state: PhaseState): void {
+  mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+  writeFileSync(join(tmpRoot, '.rsct/phase-state.json'), JSON.stringify(state), 'utf8')
+}
+
+function readPhaseState(): PhaseState | null {
+  const p = join(tmpRoot, '.rsct/phase-state.json')
+  if (!existsSync(p)) return null
+  return JSON.parse(readFileSync(p, 'utf8')) as PhaseState
+}
+
+function writePlanFile(slug = 't3', status = 'in progress'): void {
+  writeFileSync(join(tmpRoot, `plan_${slug}.md`), `# Plan\n\n| Status | ${status} |\n`)
+}
+
+function tokenInternal(over: Partial<RequestCommitInternal> = {}): RequestCommitInternal {
+  return {
+    gitStateOverride: gitState('feat/foo'),
+    gitExecutor: gitExecutorMock(
+      { 'commit -m feat: x': COMMIT_OK },
+      { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+    ),
+    now: FIXED_NOW,
+    ...over,
+  }
+}
+
+function hasGit(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+const GIT = hasGit()
+
+describe('rsct_request_commit — plan-token path (T3)', () => {
+  it('commits with NO dev_approval when a valid token covers it; debits one action', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('plan_token')
+    expect(out.channel).toBe('plan_token')
+    expect(out.plan_token?.actions_used).toBe(1)
+    expect(out.plan_token?.max_actions).toBe(5)
+    // debit-first persisted the increment
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
+  })
+
+  it('a second token commit debits again (2/5)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.plan_token?.actions_used).toBe(2)
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(2)
+  })
+
+  it('rejects when no dev_approval and no token (absent)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects an exhausted token (actions_used >= max_actions)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 5, max_actions: 5 }) })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects an expired token', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({
+      plan_authorization: tokenBlock({
+        expires_at: new Date(FIXED_NOW.getTime() - 60_000).toISOString(),
+      }),
+    })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects on branch mismatch (token auto-revokes on branch switch)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ branch: 'feat/foo' }) })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ gitStateOverride: gitState('feat/other') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects when the token plan_/spec_ file is gone (plan_gone)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    // no plan_t3.md written
+    seedState({ plan_authorization: tokenBlock() })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('INV-5: token NEVER covers a protected branch (rejects, no override possible)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ branch: 'main' }) })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ gitStateOverride: gitState('main') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+    // token not debited on an INV-5 reject
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
+  })
+
+  it('RV4: token path IGNORES staged_diff_override (cannot fake a clean diff)', async () => {
+    // Non-git tmpRoot → real getStagedDiff is null → empty → clean. Passing a
+    // dirty override must NOT be honored on the token path, so the commit lands.
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x', staged_diff_override: dirtyDiff() },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.secrets_check.findings_count).toBe(0)
+  })
+
+  it.skipIf(!GIT)('INV-6: token path rejects a REAL staged secret (scans git diff --cached)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    // real git repo with a staged secret so getStagedDiff returns it
+    execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: tmpRoot, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: tmpRoot, stdio: 'ignore' })
+    writeFileSync(join(tmpRoot, 'app.env'), 'API_KEY=sk-AAAAAAAAAAAAAAAAAAAAAAAA\n')
+    execFileSync('git', ['add', 'app.env'], { cwd: tmpRoot, stdio: 'ignore' })
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('secrets')
+    // token not debited on an INV-6 reject
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
+  })
+
+  it('RV3: a failed commit REFUNDS the reserved token action (debit-first)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 2 }) })
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({
+        gitExecutor: gitExecutorMock(
+          { 'commit -m feat: x': { ok: false, stdout: '', stderr: 'nothing to commit', exitCode: 1 } },
+          { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+        ),
+      }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('mutation_failed')
+    // reserved action refunded → counter back to 2
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(2)
+  })
+
+  it('precedence: a dev_approval present uses the per-action path; token untouched', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
+    const out = (await requestCommitHandler(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      tokenInternal({ promptFn: alwaysYes() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('dev_approval')
+    expect(out.channel).toBe('windows')
+    // token counter NOT touched by the per-action path
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
   })
 })

@@ -147,6 +147,30 @@ export interface LastClassifyBlock {
   signals_summary?: string
 }
 
+/**
+ * T3: plan-scoped batch authorization token. When present + valid,
+ * `rsct_request_commit` authorizes a commit WITHOUT a fresh per-action
+ * dev_approval — one approval (minted by `rsct_plan_authorize` under the full
+ * §C gate) covers up to `max_actions` commits within the plan+branch+time
+ * window. Covers COMMIT only (push/merge keep per-action §C). Cleared by
+ * `rsct_plan_revoke` / `rsct_phase_abandon`, and auto-revoked on branch
+ * switch, plan completion/deletion, expiry, or exhaustion. The token never
+ * bypasses INV-5 (branch protection) or INV-6 (secrets): the token path
+ * carries no dev_approval, hence no overrides. See lib/plan-authorization.ts.
+ */
+export interface PlanAuthorizationBlock {
+  plan_slug: string
+  branch: string
+  covers: string[]
+  authorized_at: string
+  expires_at: string
+  max_actions: number
+  actions_used: number
+  approval_ref: { action_scope: string; timestamp: string }
+  /** Diagnostic only — the session that minted the token. Not used for validation. */
+  session_id?: string
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
@@ -155,6 +179,8 @@ export interface PhaseState {
   verification?: PhaseVerificationBlock
   /** CAP-30: most-recent classify_task verdict (with tier_max ratchet). */
   last_classify?: LastClassifyBlock
+  /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */
+  plan_authorization?: PlanAuthorizationBlock
   /**
    * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
    * call. Mutating tools (phase_code_start, request_*) surface a warning

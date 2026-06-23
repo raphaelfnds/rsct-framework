@@ -8,6 +8,10 @@ export interface RsctApprovalModes {
   timestamp_skew_seconds?: number
   fabrication_signal_threshold_ms?: number
   trust_allowed_for?: string[]
+  /** T3: default TTL (minutes) for a plan-authorization token. Bounds 5–480. */
+  plan_token_ttl_minutes?: number
+  /** T3: default max commits a plan-authorization token covers. Bounds 1–100. */
+  plan_token_max_actions?: number
 }
 
 export interface RsctAuditConfig {
@@ -68,6 +72,7 @@ const TRUST_ALLOWED_TOOL_NAMES = [
   'rsct_phase_test_complete',
   'rsct_phase_abandon',
   'rsct_capture_issue',
+  'rsct_plan_authorize',
 ] as const
 
 const RsctApprovalModesSchema = z
@@ -75,6 +80,11 @@ const RsctApprovalModesSchema = z
     timestamp_skew_seconds: z.number().int().min(60).max(600).optional(),
     fabrication_signal_threshold_ms: z.number().int().min(100).max(5000).optional(),
     trust_allowed_for: z.array(z.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
+    // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
+    // rejects the whole config (rsct_installed=false) rather than silently
+    // granting an over-wide batch window.
+    plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
+    plan_token_max_actions: z.number().int().min(1).max(100).optional(),
   })
   .strict()
 

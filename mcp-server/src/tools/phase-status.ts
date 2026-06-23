@@ -3,6 +3,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readPhaseState } from '../lib/phase-scope.js'
+import { readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
+import { readToken } from '../lib/plan-authorization.js'
 import {
   RSCT_PHASES,
   nextPhase,
@@ -24,6 +26,15 @@ export interface PhaseStatusVerificationSummary {
   started_at: string | null
 }
 
+export interface PhaseStatusPlanAuthSummary {
+  plan_slug: string
+  branch: string
+  covers: string[]
+  expires_at: string
+  max_actions: number
+  actions_used: number
+}
+
 export interface PhaseStatusOutput {
   rsct_installed: boolean
   phase_state_exists: boolean
@@ -32,6 +43,10 @@ export interface PhaseStatusOutput {
   started_at: string | null
   scope_globs: string[]
   verification: PhaseStatusVerificationSummary | null
+  /** T3: active plan-scoped batch token (null when none). */
+  plan_authorization: PhaseStatusPlanAuthSummary | null
+  /** T3: git worktree context (linked worktree → isolated rsct state). */
+  worktree: WorktreeInfo
   next_recommended_phase: RsctPhase | null
   rsct_phase_order: readonly RsctPhase[]
   hints: string[]
@@ -60,6 +75,7 @@ export async function phaseStatusHandler(
   const input = phaseStatusInputSchema.parse(rawInput ?? {})
   const resolution = resolveProjectRoot(input.project_root)
   const read = readPhaseState(resolution.root)
+  const worktree = readWorktreeInfo(resolution.root)
 
   const hints: string[] = []
   if (!resolution.rsct_installed) {
@@ -79,6 +95,8 @@ export async function phaseStatusHandler(
       started_at: null,
       scope_globs: [],
       verification: null,
+      plan_authorization: null,
+      worktree,
       next_recommended_phase: null,
       rsct_phase_order: RSCT_PHASES,
       hints,
@@ -125,6 +143,28 @@ export async function phaseStatusHandler(
     )
   }
 
+  // T3: surface an active plan-scoped batch token (execution mode = batch).
+  const token = readToken(state)
+  let planAuth: PhaseStatusPlanAuthSummary | null = null
+  if (token) {
+    planAuth = {
+      plan_slug: token.plan_slug,
+      branch: token.branch,
+      covers: token.covers,
+      expires_at: token.expires_at,
+      max_actions: token.max_actions,
+      actions_used: token.actions_used,
+    }
+    hints.push(
+      `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`,
+    )
+  }
+  if (worktree.is_worktree) {
+    hints.push(
+      `Linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — this phase-state + token are isolated to THIS worktree.`,
+    )
+  }
+
   return {
     rsct_installed: resolution.rsct_installed,
     phase_state_exists: true,
@@ -133,6 +173,8 @@ export async function phaseStatusHandler(
     started_at: state?.started_at ?? null,
     scope_globs: state?.scope_globs ?? [],
     verification,
+    plan_authorization: planAuth,
+    worktree,
     next_recommended_phase: recommended,
     rsct_phase_order: RSCT_PHASES,
     hints,

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
-import { findActivePlan } from '../lib/plan.js'
+import { findActivePlan, findPlanBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
   getStagedDiff,
@@ -21,6 +21,7 @@ import {
 } from '../lib/secrets.js'
 import {
   recordConsumedApproval,
+  type DevApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
 import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
@@ -36,8 +37,18 @@ import {
 } from '../lib/request-gate.js'
 import {
   evaluateBootstrapMarker,
+  readPhaseState,
+  writePhaseState,
   type BootstrapMarker,
+  type PhaseState,
+  type PlanAuthorizationBlock,
 } from '../lib/phase-scope.js'
+import {
+  readToken,
+  validateToken,
+  consumeTokenAction,
+  type TokenInvalidReason,
+} from '../lib/plan-authorization.js'
 
 export const requestCommitInputSchema = z
   .object({
@@ -51,9 +62,9 @@ export const requestCommitInputSchema = z
       .describe('Commit message to pass to `git commit -m`.'),
     dev_approval: z
       .unknown()
+      .optional()
       .describe(
-        'The dev_approval payload (timestamp, action_scope, reason). Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication). To avoid the soft `scope_mismatch` fabrication signal (logged to .rsct/audit.log, non-blocking), make `action_scope`/`reason` mirror the ACTUAL staged diff — the files and branch being committed — instead of free-text intent that the validator cannot reconcile with the diff.',
-
+        'The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action §C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) — but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff.',
       ),
     staged_diff_override: z
       .string()
@@ -72,11 +83,20 @@ export type RequestCommitRejectKind =
   | GateRejectKind
   | 'protected_branch'
   | 'secrets'
+  | 'plan_token_invalid'
+
+/** How the commit was authorized: a per-action dev_approval or a plan token. */
+export type CommitAuthVia = 'dev_approval' | 'plan_token'
+
+/** Commit authorization channel — the gate channels plus the T3 plan-token path. */
+export type CommitChannel = GateChannel | 'plan_token'
 
 export interface RequestCommitOutput {
   status: RequestCommitStatus
   branch: string | null
-  channel: GateChannel | null
+  channel: CommitChannel | null
+  /** T3: which authorization path was taken (null on reject before auth resolves). */
+  authorized_via: CommitAuthVia | null
   reject_kind: RequestCommitRejectKind | null
   reason: string | null
   fabrication_signals: FabricationSignal[]
@@ -91,6 +111,13 @@ export interface RequestCommitOutput {
     findings: SecretFinding[]
     override_used: boolean
   }
+  /** T3: plan-token budget after this commit (null when not a token commit). */
+  plan_token?: {
+    plan_slug: string
+    actions_used: number
+    max_actions: number
+    expires_at: string
+  } | null
   /** CAP-33: §0 bootstrap visibility — null when not evaluated (reject paths). */
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
@@ -102,17 +129,16 @@ export interface RequestCommitOutput {
    */
   audit_error: string | null
   /**
-   * On `committed`: `true` if `recordConsumedApproval` persisted
-   * the (action_scope, timestamp) pair to `.rsct/approvals-seen.json`;
-   * `false` if the write failed. On rejected / mutation_failed: `null`
-   * (record was never attempted — approval not consumed by design).
+   * On `committed`: post-mutation bookkeeping persisted. For the dev_approval
+   * path this is `recordConsumedApproval` writing the anti-reuse entry; for the
+   * plan-token path it is the token's `actions_used` increment being persisted.
+   * `false` if that write failed. On rejected / mutation_failed: `null`.
    */
   anti_replay_persisted: boolean | null
   /**
-   * Set when `recordConsumedApproval` failed post-commit. Non-null here
-   * means the same dev_approval may be replayable within the skew window;
-   * the caller MUST either rotate the approval or repair
-   * `.rsct/approvals-seen.json` before the next §C-gated call.
+   * Set when the post-mutation bookkeeping write failed. Non-null means either
+   * the same dev_approval may be replayable, or the token counter is stale
+   * (an action was not debited). Repair before the next §C-gated call.
    */
   anti_replay_error: string | null
   hints: string[]
@@ -144,7 +170,7 @@ export interface RequestCommitInternal {
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. Validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, runs INV-5 branch and INV-6 secrets checks, then executes `git commit -m`. On rejection the approval is NOT consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+    "§C-gated commit. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -159,7 +185,7 @@ export const requestCommitTool: Tool = {
       dev_approval: {
         type: 'object',
         description:
-          'The dev_approval payload (timestamp, action_scope, reason, optional overrides).',
+          'OPTIONAL dev_approval payload (timestamp, action_scope, reason, optional overrides). Omit to authorize via an active plan token (rsct_plan_authorize).',
       },
       staged_diff_override: {
         type: 'string',
@@ -167,9 +193,28 @@ export const requestCommitTool: Tool = {
           'For tests: substitute the staged diff with this unified-diff string.',
       },
     },
-    required: ['message', 'dev_approval'],
+    required: ['message'],
     additionalProperties: false,
   },
+}
+
+function planTokenRejectReason(reason: TokenInvalidReason): string {
+  switch (reason) {
+    case 'absent':
+      return 'no dev_approval and no active plan token — pass a dev_approval, or mint a batch token with rsct_plan_authorize'
+    case 'not_covered':
+      return 'the active plan token does not cover commit'
+    case 'expired':
+      return 'the plan token has expired — re-authorize with rsct_plan_authorize'
+    case 'branch_mismatch':
+      return 'the plan token was minted for a different branch (tokens auto-revoke on branch switch) — re-authorize on this branch or pass a per-action dev_approval'
+    case 'plan_gone':
+      return "the plan token's plan_/spec_ file no longer exists — re-authorize with rsct_plan_authorize"
+    case 'plan_complete':
+      return "the plan token's plan is marked complete — re-authorize if work continues"
+    case 'exhausted':
+      return 'the plan token reached its max_actions budget — mint a fresh token with rsct_plan_authorize'
+  }
 }
 
 export async function requestCommitHandler(
@@ -188,59 +233,129 @@ export async function requestCommitHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
-  const gate = await gateRequest({
-    toolName: 'rsct_request_commit',
-    approval: input.dev_approval,
-    dialog: {
-      title: 'RSCT §C — commit approval',
-      message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}`,
-    },
-    projectRoot,
-    ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
-    promptFn,
-    now,
-  })
+  // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
+  let channel: CommitChannel
+  let authorizedVia: CommitAuthVia
+  let approval: DevApproval | null = null
+  let fabricationSignals: FabricationSignal[] = []
+  let tokenCtx: { token: PlanAuthorizationBlock; baseState: PhaseState } | null = null
 
-  if (gate.status === 'rejected') {
-    const audit = appendAudit(
+  if (input.dev_approval !== undefined) {
+    const gate = await gateRequest({
+      toolName: 'rsct_request_commit',
+      approval: input.dev_approval,
+      dialog: {
+        title: 'RSCT §C — commit approval',
+        message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}`,
+      },
       projectRoot,
-      {
-        event: 'request_commit.rejected',
-        tool: 'rsct_request_commit',
+      ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+      promptFn,
+      now,
+    })
+
+    if (gate.status === 'rejected') {
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.rejected',
+          tool: 'rsct_request_commit',
+          reject_kind: gate.reject_kind,
+          reason: gate.reason,
+          branch: gitState.branch,
+          fabrication_signals: gate.fabrication_signals,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
         reject_kind: gate.reject_kind,
         reason: gate.reason,
-        branch: gitState.branch,
         fabrication_signals: gate.fabrication_signals,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch: gitState.branch,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      secrets_check: { findings_count: 0, findings: [], override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      }
     }
+
+    approval = gate.approval
+    channel = gate.channel
+    authorizedVia = 'dev_approval'
+    fabricationSignals = gate.fabrication_signals
+  } else {
+    // Token path: no dev_approval supplied — try an active plan-scoped token.
+    const existing = readPhaseState(projectRoot)
+    const token = readToken(existing.state)
+    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null
+    const verdict = validateToken(token, {
+      now,
+      branch: gitState.branch,
+      tokenPlan,
+      action: 'commit',
+    })
+
+    if (!verdict.valid) {
+      const reason = planTokenRejectReason(verdict.reason)
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.rejected',
+          tool: 'rsct_request_commit',
+          reject_kind: 'plan_token_invalid',
+          token_reason: verdict.reason,
+          reason,
+          branch: gitState.branch,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
+        reject_kind: 'plan_token_invalid',
+        reason,
+        fabrication_signals: [],
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [`§C rejected (plan_token_invalid): ${reason}`],
+      }
+    }
+
+    channel = 'plan_token'
+    authorizedVia = 'plan_token'
+    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} }
   }
 
-  const approval = gate.approval
-  const overrideBranch = approval.override_protected_branch
-  const overrideSecrets = approval.override_secrets_check
+  // Overrides ONLY come from a per-action dev_approval. The token path leaves
+  // both undefined (FV3) → a protected branch / any secret finding rejects.
+  const overrideBranch = approval?.override_protected_branch
+  const overrideSecrets = approval?.override_secrets_check
 
   const { list: protectedList } = effectiveProtectedList(config)
   const branchProtected = isProtectedBranch(gitState.branch, protectedList)
 
   if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to proceed`
+    const reason = `branch '${branchLabel}' is protected — ${
+      authorizedVia === 'plan_token'
+        ? 'plan tokens never cover protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }'
+        : 'pass dev_approval.override_protected_branch: { reason } to proceed'
+    }`
     const audit = appendAudit(
       projectRoot,
       {
@@ -249,21 +364,24 @@ export async function requestCommitHandler(
         reject_kind: 'protected_branch',
         reason,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
+        authorized_via: authorizedVia,
       },
       config?.audit,
     )
     return {
       status: 'rejected',
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: 'protected_branch',
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: true, override_used: false },
       secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -280,21 +398,29 @@ export async function requestCommitHandler(
         override_kind: 'protected_branch',
         override_reason: overrideBranch.reason,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
       },
       config?.audit,
     )
   }
 
+  // INV-6: scan the staged diff for secrets. `staged_diff_override` is a test
+  // seam honored ONLY on the per-action dev_approval path — the plan-token path
+  // ALWAYS scans the real `git diff --cached`, so a token commit (which carries
+  // no override) can never feed a fabricated clean diff to the scanner.
   const diff =
-    input.staged_diff_override !== undefined
+    authorizedVia !== 'plan_token' && input.staged_diff_override !== undefined
       ? input.staged_diff_override
       : getStagedDiff(projectRoot) ?? ''
   const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
   const findings = scanDiffForSecrets(diff, extras)
 
   if (findings.length > 0 && !overrideSecrets) {
-    const reason = `${findings.length} secret finding(s) in staged diff — pass dev_approval.override_secrets_check: { reason } to proceed`
+    const reason = `${findings.length} secret finding(s) in staged diff — ${
+      authorizedVia === 'plan_token'
+        ? 'plan tokens never bypass the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }'
+        : 'pass dev_approval.override_secrets_check: { reason } to proceed'
+    }`
     const audit = appendAudit(
       projectRoot,
       {
@@ -303,7 +429,8 @@ export async function requestCommitHandler(
         reject_kind: 'secrets',
         reason,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
+        authorized_via: authorizedVia,
         findings_count: findings.length,
       },
       config?.audit,
@@ -311,14 +438,16 @@ export async function requestCommitHandler(
     return {
       status: 'rejected',
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: 'secrets',
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: branchProtected, override_used: branchProtected },
       secrets_check: { findings_count: findings.length, findings, override_used: false },
+      plan_token: null,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -336,15 +465,87 @@ export async function requestCommitHandler(
         override_reason: overrideSecrets.reason,
         findings_count: findings.length,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
       },
       config?.audit,
     )
   }
 
+  // Token path (T3 / review FV): RESERVE the action by debiting the counter
+  // BEFORE the commit. If the debit can't persist, REFUSE to commit — the bound
+  // must be mechanically enforceable, so "can't record the spend" ⇒ "can't
+  // spend". (A debit-AFTER-commit ordering would let a persistent phase-state
+  // write failure authorize unbounded commits within the TTL window.) On a
+  // later commit failure we best-effort refund so a failed commit doesn't waste
+  // a slot.
+  let reservedToken: PlanAuthorizationBlock | null = null
+  if (tokenCtx) {
+    reservedToken = consumeTokenAction(tokenCtx.token)
+    const reserve = writePhaseState(projectRoot, {
+      ...tokenCtx.baseState,
+      plan_authorization: reservedToken,
+    })
+    if (!reserve.ok) {
+      const detail =
+        reserve.reason === 'locked'
+          ? `phase-state.json locked (held ${reserve.lock_age_ms}ms)`
+          : reserve.error
+      const reason = `could not reserve a plan-token action (${detail}) — retry, or commit with a per-action dev_approval`
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.rejected',
+          tool: 'rsct_request_commit',
+          reject_kind: 'plan_token_invalid',
+          token_reason: 'reserve_failed',
+          reason,
+          branch: gitState.branch,
+          channel,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: 'plan_token_invalid',
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: {
+          findings_count: findings.length,
+          findings,
+          override_used: false,
+        },
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [reason],
+      }
+    }
+  }
+
   const commit = gitCommit(projectRoot, input.message, gitExecutor)
   if (!commit.ok) {
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
+    // Token path: the action was reserved (debited) before the commit. The
+    // commit didn't land, so best-effort REFUND it — a failed commit shouldn't
+    // waste a slot. If the refund write also fails, the action stays spent
+    // (fail-safe: tightens the bound, never loosens it).
+    let refundNote = ''
+    if (tokenCtx) {
+      const refund = writePhaseState(projectRoot, {
+        ...tokenCtx.baseState,
+        plan_authorization: tokenCtx.token,
+      })
+      refundNote = refund.ok
+        ? ' The reserved token action was refunded.'
+        : ' ⚠ the reserved token action could NOT be refunded (phase-state write failed) — one action was forfeited (fail-safe).'
+    }
     const audit = appendAudit(
       projectRoot,
       {
@@ -352,17 +553,19 @@ export async function requestCommitHandler(
         tool: 'rsct_request_commit',
         reason,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
+        authorized_via: authorizedVia,
       },
       config?.audit,
     )
     return {
       status: 'mutation_failed',
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: null,
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: commit.sha_before,
       sha_after: null,
       branch_check: { protected: branchProtected, override_used: branchProtected },
@@ -371,28 +574,64 @@ export async function requestCommitHandler(
         findings,
         override_used: findings.length > 0,
       },
+      plan_token: null,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ['git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.'],
+      hints: [
+        authorizedVia === 'plan_token'
+          ? `git commit failed — fix the underlying error and retry.${refundNote}`
+          : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
+      ],
     }
   }
 
-  // Commit succeeded — now persist anti-replay state and write the
-  // outcome audit entry. Both can fail (read-only FS, permission denied,
-  // disk full); failures are surfaced as warning hints + non-null
-  // `anti_replay_error` / `audit_error` so the caller can react.
-  const record = recordApproval(approval, { projectRoot, now })
+  // Commit succeeded — persist post-mutation bookkeeping (anti-reuse for the
+  // approval path, or the token counter increment for the token path) and write
+  // the outcome audit entry. Both can fail; failures surface as warning hints
+  // + non-null `anti_replay_error` / `audit_error`.
+  let antiReplayPersisted: boolean
+  let antiReplayError: string | null = null
+  let tokenSummary: RequestCommitOutput['plan_token'] = null
+  const bookkeepingHints: string[] = []
+
+  if (approval) {
+    const record = recordApproval(approval, { projectRoot, now })
+    antiReplayPersisted = record.ok
+    if (!record.ok) {
+      antiReplayError = record.error
+      bookkeepingHints.push(
+        `⚠ commit landed but anti-replay store update failed: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window — rotate the approval or repair .rsct/approvals-seen.json before the next §C-gated call.`,
+      )
+    }
+  } else {
+    // Token path: the action was already debited (reserved) BEFORE the commit
+    // (debit-first — see the reserve block above), so nothing to persist here.
+    antiReplayPersisted = true
+    tokenSummary = {
+      plan_slug: reservedToken!.plan_slug,
+      actions_used: reservedToken!.actions_used,
+      max_actions: reservedToken!.max_actions,
+      expires_at: reservedToken!.expires_at,
+    }
+  }
+
   const audit = appendAudit(
     projectRoot,
     {
       event: 'request_commit.committed',
       tool: 'rsct_request_commit',
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       sha_before: commit.sha_before,
       sha_after: commit.sha_after,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
+      ...(tokenSummary !== null && {
+        plan_slug: tokenSummary.plan_slug,
+        plan_token_actions_used: tokenSummary.actions_used,
+        plan_token_max_actions: tokenSummary.max_actions,
+      }),
     },
     config?.audit,
   )
@@ -400,11 +639,13 @@ export async function requestCommitHandler(
   const hints: string[] = [
     `Committed ${commit.sha_after ?? '<unknown sha>'} on '${branchLabel}'.`,
   ]
-  if (!record.ok) {
+  if (tokenSummary) {
+    const remaining = tokenSummary.max_actions - tokenSummary.actions_used
     hints.push(
-      `⚠ commit landed but anti-replay store update failed: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window — rotate the approval or repair .rsct/approvals-seen.json before the next §C-gated call.`,
+      `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`,
     )
   }
+  hints.push(...bookkeepingHints)
   const afields = auditFields(audit)
   if (afields.audit_error !== null) {
     hints.push(
@@ -447,10 +688,11 @@ export async function requestCommitHandler(
   return {
     status: 'committed',
     branch: gitState.branch,
-    channel: gate.channel,
+    channel,
+    authorized_via: authorizedVia,
     reject_kind: null,
     reason: null,
-    fabrication_signals: gate.fabrication_signals,
+    fabrication_signals: fabricationSignals,
     sha_before: commit.sha_before,
     sha_after: commit.sha_after,
     branch_check: { protected: branchProtected, override_used: branchProtected },
@@ -459,10 +701,11 @@ export async function requestCommitHandler(
       findings,
       override_used: findings.length > 0,
     },
+    plan_token: tokenSummary,
     bootstrap_marker: bootstrap,
     ...afields,
-    anti_replay_persisted: record.ok,
-    anti_replay_error: record.ok ? null : record.error,
+    anti_replay_persisted: antiReplayPersisted,
+    anti_replay_error: antiReplayError,
     hints,
   }
 }

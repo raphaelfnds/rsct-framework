@@ -528,7 +528,7 @@ work safely.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` — M1 Recall + M2 Enforcement + M3 phase machine + personas + Tutor + issue capture** (shipped in `v1.0.0`). Companion MCP server at
-  [`mcp-server/`](mcp-server/README.md). **30 tools + 5 resources**
+  [`mcp-server/`](mcp-server/README.md). **32 tools + 5 resources**
   covering:
   - **Recall (M1):** 7 read-only tools (status, decisions, knowledge,
     environments with INV-6 secret masking, architecture, module
@@ -538,6 +538,13 @@ work safely.
     mutating ops (`rsct_request_commit`, `_push`, `_merge`) that
     require a single-use `dev_approval` payload AND pop a cross-platform
     OS dialog for out-of-band confirmation.
+  - **Plan execution modes (T3):** `rsct_plan_authorize` / `rsct_plan_revoke`.
+    Opt-in **batch mode** — one approval mints a plan- + branch-scoped token
+    that covers up to N **commits** (default 20) for a time window (default
+    120 min), so commits within the plan don't each stop for an OK. Commit
+    only (push/merge keep per-action §C); never bypasses branch protection or
+    the secrets scan; auto-revokes on branch switch / plan completion / expiry
+    / exhaustion. State is per-git-worktree, so parallel worktrees stay isolated.
   - **SessionStart sanitizer hook** — strips poison-pill entries
     (`Bash(git commit:*)` etc) from `.claude/settings.local.json` on
     every session start. INV-2.3 closer.

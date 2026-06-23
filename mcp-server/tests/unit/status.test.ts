@@ -69,4 +69,13 @@ describe('rsct_status', () => {
       rmSync(h, { recursive: true, force: true })
     }
   })
+
+  // T3: status always reports a worktree block; a plain fixture (or subdir of
+  // the main worktree) is NOT a linked worktree, so no linked-worktree hint.
+  it('includes a worktree block and emits no linked-worktree hint outside one', async () => {
+    const out = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+    expect(out.worktree).toBeDefined()
+    expect(out.worktree.is_worktree).toBe(false)
+    expect(out.hints.some((h) => h.includes('linked git worktree'))).toBe(false)
+  })
 })

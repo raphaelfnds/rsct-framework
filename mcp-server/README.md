@@ -50,7 +50,7 @@ fixes, skip the phase machine entirely.
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 
-**30 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
+**32 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -372,11 +372,14 @@ The `dev_approval` shape (validated by `lib/dev-approval.ts`):
 
 #### `rsct_request_commit`
 
-Stages-and-commits if `dev_approval` is valid + no INV-5 (protected
-branch) violation + no INV-6 (secrets) hits in the staged diff.
+Commits if authorization is valid + no INV-5 (protected branch) violation +
+no INV-6 (secrets) hits in the staged diff. **Authorization is EITHER** a
+per-action `dev_approval` **OR** — when `dev_approval` is omitted — an active
+**plan-scoped batch token** (see `rsct_plan_authorize`). The token path carries
+no overrides, so a protected branch or a secret finding still rejects.
 
-- Input: `project_root?`, `message`, `dev_approval`, `staged_diff_override?` (test seam)
-- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `sha_before`, `sha_after?`, `reject_kind?`, `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token), `staged_diff_override?` (test seam)
+- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`), `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 
 Approval consumption rule: never burn the approval on pre-mutation
 rejects. Only `recordConsumedApproval` AFTER a successful commit.
@@ -411,6 +414,34 @@ force-pushy patterns by default).
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
 don't accidentally pass the flag without the override.
+
+#### `rsct_plan_authorize` (T3 — plan execution mode: batch)
+
+Mints a **plan-scoped batch token**: one strong `dev_approval` (full §C gate +
+OS dialog) authorizes up to `max_actions` **commits** within the active plan +
+current branch + a time window, so `rsct_request_commit` no longer needs a fresh
+approval per commit. **Commit only** — push/merge keep per-action §C. Requires an
+active `plan_`/`spec_` at the project root and a **non-protected** branch. The
+token never bypasses INV-5/INV-6 (no overrides on the token path). The emitting
+approval is consumed (cannot re-mint). Auto-revokes on branch switch, plan
+completion/deletion, expiry, or exhaustion.
+
+- Input: `project_root?`, `dev_approval`, `ttl_minutes?` (5–480, default 120), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
+- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `protected_branch` / `no_branch`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
+
+#### `rsct_plan_revoke` (T3)
+
+Revokes the active plan token. **NOT §C-gated** — revoking only tightens
+security. After revoke, `rsct_request_commit` again requires a per-action
+`dev_approval`. No-op (`status: 'no_token'`) when none is active.
+
+- Input: `project_root?`, `reason?`
+- Output: `status: 'revoked' | 'no_token' | 'state_write_failed'`, `revoked_plan_slug`, `audit_path`, `audit_error`, `hints`.
+
+The active token + git-worktree context are also surfaced by `rsct_phase_status`
+(`plan_authorization`, `worktree`) and `rsct_status` (`worktree`). Because the
+runtime state is gitignored and per-working-tree, each `git worktree` gets its
+own isolated token and anti-reuse store.
 
 ### SessionStart sanitizer hook (INV-2.3 closer)
 

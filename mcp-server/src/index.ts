@@ -45,6 +45,14 @@ import {
   requestMergeHandler,
 } from './tools/request-merge.js'
 import {
+  planAuthorizeTool,
+  planAuthorizeHandler,
+} from './tools/plan-authorize.js'
+import {
+  planRevokeTool,
+  planRevokeHandler,
+} from './tools/plan-revoke.js'
+import {
   phaseVerificationStartTool,
   phaseVerificationStartHandler,
 } from './tools/phase-verification-start.js'
@@ -137,6 +145,8 @@ const TOOLS: Tool[] = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  planAuthorizeTool,
+  planRevokeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -170,6 +180,8 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_plan_authorize: planAuthorizeHandler,
+  rsct_plan_revoke: planRevokeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,

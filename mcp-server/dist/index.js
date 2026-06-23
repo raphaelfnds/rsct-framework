@@ -3006,7 +3006,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3033,7 +3033,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3664,7 +3664,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3922,7 +3922,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -21302,7 +21302,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21319,7 +21319,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21397,7 +21397,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -21658,12 +21658,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22524,12 +22524,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
@@ -22598,12 +22598,18 @@ var TRUST_ALLOWED_TOOL_NAMES = [
   "rsct_phase_code_complete",
   "rsct_phase_test_complete",
   "rsct_phase_abandon",
-  "rsct_capture_issue"
+  "rsct_capture_issue",
+  "rsct_plan_authorize"
 ];
 var RsctApprovalModesSchema = external_exports.object({
   timestamp_skew_seconds: external_exports.number().int().min(60).max(600).optional(),
   fabrication_signal_threshold_ms: external_exports.number().int().min(100).max(5e3).optional(),
-  trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional()
+  trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
+  // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
+  // rejects the whole config (rsct_installed=false) rather than silently
+  // granting an over-wide batch window.
+  plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
+  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional()
 }).strict();
 var RsctAuditConfigSchema = external_exports.object({
   // `false` is the documented bypass vector — schema literal blocks it.
@@ -22772,6 +22778,27 @@ function getUnstagedDiff(projectRoot) {
 function isGitRepo(projectRoot) {
   const out = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
   return out === "true";
+}
+function readWorktreeInfo(projectRoot) {
+  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
+  }
+  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
+  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
+  const commonDirRaw = safeGit(projectRoot, ["rev-parse", "--git-common-dir"]);
+  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
+  let isWorktree = false;
+  let name = null;
+  if (gitDirRaw !== null && commonDirRaw !== null) {
+    const gitDirAbs = resolve(projectRoot, gitDirRaw);
+    const commonDirAbs = resolve(projectRoot, commonDirRaw);
+    isWorktree = gitDirAbs !== commonDirAbs;
+    if (isWorktree) {
+      const parts = gitDirAbs.replace(/\\/g, "/").split("/").filter((p) => p.length > 0);
+      name = parts.length > 0 ? parts[parts.length - 1] : null;
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
 }
 function safeGit(cwd2, args) {
   const raw = safeGitRaw(cwd2, args);
@@ -23324,6 +23351,12 @@ async function statusHandler(rawInput) {
     stampBootstrapMarker(resolution.root);
   }
   const hints = buildStatusHints(resolution, git);
+  const worktree = readWorktreeInfo(resolution.root);
+  if (worktree.is_worktree) {
+    hints.push(
+      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ""} \u2014 RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated to THIS worktree (independent of the main worktree and sibling worktrees).`
+    );
+  }
   const universe = getUniverse(resolution.config, resolution.root);
   if (universe.hint) hints.push(universe.hint);
   const update = getUpdateNotice();
@@ -23340,6 +23373,7 @@ async function statusHandler(rawInput) {
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
+    worktree,
     universe: universe.block,
     hints
   };
@@ -23397,6 +23431,26 @@ function findActivePlan(projectRoot) {
   return {
     slug: winner.slug,
     plan_path: winner.path,
+    progress_path: progress_exists ? progress_path : null,
+    status: metadata.status,
+    branch: metadata.branch,
+    created: metadata.created
+  };
+}
+function findPlanBySlug(projectRoot, slug) {
+  const planName = `plan_${slug}.md`;
+  const specName = `spec_${slug}.md`;
+  let chosen = null;
+  if (safeMtime(join(projectRoot, planName)) !== null) chosen = planName;
+  else if (safeMtime(join(projectRoot, specName)) !== null) chosen = specName;
+  if (!chosen) return null;
+  const path2 = join(projectRoot, chosen);
+  const metadata = extractPlanMetadata(path2);
+  const progress_path = join(projectRoot, `progress_${slug}.md`);
+  const progress_exists = safeMtime(progress_path) !== null;
+  return {
+    slug,
+    plan_path: path2,
     progress_path: progress_exists ? progress_path : null,
     status: metadata.status,
     branch: metadata.branch,
@@ -25335,7 +25389,8 @@ var EXPECTED_SCOPE_TOKEN = {
   rsct_phase_code_complete: "code_complete",
   rsct_phase_test_complete: "test_complete",
   rsct_phase_abandon: "phase_abandon",
-  rsct_capture_issue: "capture_issue"
+  rsct_capture_issue: "capture_issue",
+  rsct_plan_authorize: "plan_authorize"
 };
 var BURST_WINDOW_MS = 1e4;
 var BURST_THRESHOLD_PRIOR = 3;
@@ -25705,12 +25760,76 @@ function inferRejectKind(reason) {
   return "schema";
 }
 
+// src/lib/plan-authorization.ts
+init_esm_shims();
+var PLAN_TOKEN_COVERS = ["commit"];
+var PLAN_TOKEN_TTL_DEFAULT_MIN = 120;
+var PLAN_TOKEN_TTL_MIN = 5;
+var PLAN_TOKEN_TTL_MAX = 480;
+var PLAN_TOKEN_MAX_ACTIONS_DEFAULT = 20;
+var PLAN_TOKEN_MAX_ACTIONS_MIN = 1;
+var PLAN_TOKEN_MAX_ACTIONS_MAX = 100;
+function emitToken(args) {
+  const expiresMs = args.now.getTime() + args.ttlMinutes * 6e4;
+  const block = {
+    plan_slug: args.planSlug,
+    branch: args.branch,
+    covers: [...PLAN_TOKEN_COVERS],
+    authorized_at: args.now.toISOString(),
+    expires_at: new Date(expiresMs).toISOString(),
+    max_actions: args.maxActions,
+    actions_used: 0,
+    approval_ref: args.approvalRef
+  };
+  if (args.sessionId !== void 0) block.session_id = args.sessionId;
+  return block;
+}
+function validateToken(token, ctx) {
+  if (!token) return { valid: false, reason: "absent" };
+  if (!Array.isArray(token.covers) || !token.covers.includes(ctx.action)) {
+    return { valid: false, reason: "not_covered" };
+  }
+  const expiresMs = new Date(token.expires_at).getTime();
+  if (Number.isNaN(expiresMs) || ctx.now.getTime() >= expiresMs) {
+    return { valid: false, reason: "expired" };
+  }
+  if (ctx.branch !== token.branch) return { valid: false, reason: "branch_mismatch" };
+  if (!ctx.tokenPlan) return { valid: false, reason: "plan_gone" };
+  if (isPlanComplete(ctx.tokenPlan.status)) return { valid: false, reason: "plan_complete" };
+  if (token.actions_used >= token.max_actions) return { valid: false, reason: "exhausted" };
+  return { valid: true, token };
+}
+function consumeTokenAction(token) {
+  return { ...token, actions_used: token.actions_used + 1 };
+}
+function readToken(state) {
+  return state?.plan_authorization ?? null;
+}
+function clearTokenFromState(state) {
+  const next = { ...state };
+  delete next.plan_authorization;
+  return next;
+}
+function resolveTtlMinutes(input, configDefault) {
+  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_DEFAULT_MIN;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_DEFAULT_MIN;
+  return Math.min(PLAN_TOKEN_TTL_MAX, Math.max(PLAN_TOKEN_TTL_MIN, v));
+}
+function resolveMaxActions(input, configDefault) {
+  const v = input ?? configDefault ?? PLAN_TOKEN_MAX_ACTIONS_DEFAULT;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_MAX_ACTIONS_DEFAULT;
+  return Math.min(
+    PLAN_TOKEN_MAX_ACTIONS_MAX,
+    Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v)
+  );
+}
+
 // src/tools/request-commit.ts
 var requestCommitInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   message: external_exports.string().min(1, "commit message required").describe("Commit message to pass to `git commit -m`."),
-  dev_approval: external_exports.unknown().describe(
-    "The dev_approval payload (timestamp, action_scope, reason). Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication). To avoid the soft `scope_mismatch` fabrication signal (logged to .rsct/audit.log, non-blocking), make `action_scope`/`reason` mirror the ACTUAL staged diff \u2014 the files and branch being committed \u2014 instead of free-text intent that the validator cannot reconcile with the diff."
+  dev_approval: external_exports.unknown().optional().describe(
+    "The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action \xA7C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) \u2014 but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff."
   ),
   staged_diff_override: external_exports.string().optional().describe(
     "Programmatic override of `git diff --cached` for testing. Bypasses the real git fetch."
@@ -25718,7 +25837,7 @@ var requestCommitInputSchema = external_exports.object({
 }).strict();
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. Validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, runs INV-5 branch and INV-6 secrets checks, then executes `git commit -m`. On rejection the approval is NOT consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+  description: "\xA7C-gated commit. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: "object",
     properties: {
@@ -25732,17 +25851,35 @@ var requestCommitTool = {
       },
       dev_approval: {
         type: "object",
-        description: "The dev_approval payload (timestamp, action_scope, reason, optional overrides)."
+        description: "OPTIONAL dev_approval payload (timestamp, action_scope, reason, optional overrides). Omit to authorize via an active plan token (rsct_plan_authorize)."
       },
       staged_diff_override: {
         type: "string",
         description: "For tests: substitute the staged diff with this unified-diff string."
       }
     },
-    required: ["message", "dev_approval"],
+    required: ["message"],
     additionalProperties: false
   }
 };
+function planTokenRejectReason(reason) {
+  switch (reason) {
+    case "absent":
+      return "no dev_approval and no active plan token \u2014 pass a dev_approval, or mint a batch token with rsct_plan_authorize";
+    case "not_covered":
+      return "the active plan token does not cover commit";
+    case "expired":
+      return "the plan token has expired \u2014 re-authorize with rsct_plan_authorize";
+    case "branch_mismatch":
+      return "the plan token was minted for a different branch (tokens auto-revoke on branch switch) \u2014 re-authorize on this branch or pass a per-action dev_approval";
+    case "plan_gone":
+      return "the plan token's plan_/spec_ file no longer exists \u2014 re-authorize with rsct_plan_authorize";
+    case "plan_complete":
+      return "the plan token's plan is marked complete \u2014 re-authorize if work continues";
+    case "exhausted":
+      return "the plan token reached its max_actions budget \u2014 mint a fresh token with rsct_plan_authorize";
+  }
+}
 async function requestCommitHandler(rawInput, internal = {}) {
   const input = requestCommitInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -25755,57 +25892,115 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const branchLabel = gitState.branch ?? "<no-branch>";
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const gate = await gateRequest({
-    toolName: "rsct_request_commit",
-    approval: input.dev_approval,
-    dialog: {
-      title: "RSCT \xA7C \u2014 commit approval",
-      message: `Approve commit on '${branchLabel}'?
+  let channel;
+  let authorizedVia;
+  let approval = null;
+  let fabricationSignals = [];
+  let tokenCtx = null;
+  if (input.dev_approval !== void 0) {
+    const gate = await gateRequest({
+      toolName: "rsct_request_commit",
+      approval: input.dev_approval,
+      dialog: {
+        title: "RSCT \xA7C \u2014 commit approval",
+        message: `Approve commit on '${branchLabel}'?
 
 message: ${input.message}`
-    },
-    projectRoot,
-    ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
-    promptFn,
-    now
-  });
-  if (gate.status === "rejected") {
-    const audit2 = appendAudit(
+      },
       projectRoot,
-      {
-        event: "request_commit.rejected",
-        tool: "rsct_request_commit",
+      ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+      promptFn,
+      now
+    });
+    if (gate.status === "rejected") {
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
+          reject_kind: gate.reject_kind,
+          reason: gate.reason,
+          branch: gitState.branch,
+          fabrication_signals: gate.fabrication_signals
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
         reject_kind: gate.reject_kind,
         reason: gate.reason,
-        branch: gitState.branch,
-        fabrication_signals: gate.fabrication_signals
-      },
-      config2?.audit
-    );
-    return {
-      status: "rejected",
+        fabrication_signals: gate.fabrication_signals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      };
+    }
+    approval = gate.approval;
+    channel = gate.channel;
+    authorizedVia = "dev_approval";
+    fabricationSignals = gate.fabrication_signals;
+  } else {
+    const existing = readPhaseState(projectRoot);
+    const token = readToken(existing.state);
+    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
+    const verdict = validateToken(token, {
+      now,
       branch: gitState.branch,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      secrets_check: { findings_count: 0, findings: [], override_used: false },
-      ...auditFields(audit2),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
-    };
+      tokenPlan,
+      action: "commit"
+    });
+    if (!verdict.valid) {
+      const reason = planTokenRejectReason(verdict.reason);
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
+          reject_kind: "plan_token_invalid",
+          token_reason: verdict.reason,
+          reason,
+          branch: gitState.branch
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
+        reject_kind: "plan_token_invalid",
+        reason,
+        fabrication_signals: [],
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [`\xA7C rejected (plan_token_invalid): ${reason}`]
+      };
+    }
+    channel = "plan_token";
+    authorizedVia = "plan_token";
+    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
   }
-  const approval = gate.approval;
-  const overrideBranch = approval.override_protected_branch;
-  const overrideSecrets = approval.override_secrets_check;
+  const overrideBranch = approval?.override_protected_branch;
+  const overrideSecrets = approval?.override_secrets_check;
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(gitState.branch, protectedList);
   if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected \u2014 pass dev_approval.override_protected_branch: { reason } to proceed`;
+    const reason = `branch '${branchLabel}' is protected \u2014 ${authorizedVia === "plan_token" ? "plan tokens never cover protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }" : "pass dev_approval.override_protected_branch: { reason } to proceed"}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -25814,21 +26009,24 @@ message: ${input.message}`
         reject_kind: "protected_branch",
         reason,
         branch: gitState.branch,
-        channel: gate.channel
+        channel,
+        authorized_via: authorizedVia
       },
       config2?.audit
     );
     return {
       status: "rejected",
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: "protected_branch",
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: true, override_used: false },
       secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -25844,16 +26042,16 @@ message: ${input.message}`
         override_kind: "protected_branch",
         override_reason: overrideBranch.reason,
         branch: gitState.branch,
-        channel: gate.channel
+        channel
       },
       config2?.audit
     );
   }
-  const diff = input.staged_diff_override !== void 0 ? input.staged_diff_override : getStagedDiff(projectRoot) ?? "";
+  const diff = authorizedVia !== "plan_token" && input.staged_diff_override !== void 0 ? input.staged_diff_override : getStagedDiff(projectRoot) ?? "";
   const extras = compileExtraPatterns(config2?.secrets_extra_patterns ?? []).compiled;
   const findings = scanDiffForSecrets(diff, extras);
   if (findings.length > 0 && !overrideSecrets) {
-    const reason = `${findings.length} secret finding(s) in staged diff \u2014 pass dev_approval.override_secrets_check: { reason } to proceed`;
+    const reason = `${findings.length} secret finding(s) in staged diff \u2014 ${authorizedVia === "plan_token" ? "plan tokens never bypass the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }" : "pass dev_approval.override_secrets_check: { reason } to proceed"}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -25862,7 +26060,8 @@ message: ${input.message}`
         reject_kind: "secrets",
         reason,
         branch: gitState.branch,
-        channel: gate.channel,
+        channel,
+        authorized_via: authorizedVia,
         findings_count: findings.length
       },
       config2?.audit
@@ -25870,14 +26069,16 @@ message: ${input.message}`
     return {
       status: "rejected",
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: "secrets",
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: branchProtected, override_used: branchProtected },
       secrets_check: { findings_count: findings.length, findings, override_used: false },
+      plan_token: null,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -25894,14 +26095,69 @@ message: ${input.message}`
         override_reason: overrideSecrets.reason,
         findings_count: findings.length,
         branch: gitState.branch,
-        channel: gate.channel
+        channel
       },
       config2?.audit
     );
   }
+  let reservedToken = null;
+  if (tokenCtx) {
+    reservedToken = consumeTokenAction(tokenCtx.token);
+    const reserve = writePhaseState(projectRoot, {
+      ...tokenCtx.baseState,
+      plan_authorization: reservedToken
+    });
+    if (!reserve.ok) {
+      const detail = reserve.reason === "locked" ? `phase-state.json locked (held ${reserve.lock_age_ms}ms)` : reserve.error;
+      const reason = `could not reserve a plan-token action (${detail}) \u2014 retry, or commit with a per-action dev_approval`;
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
+          reject_kind: "plan_token_invalid",
+          token_reason: "reserve_failed",
+          reason,
+          branch: gitState.branch,
+          channel
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: "plan_token_invalid",
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: {
+          findings_count: findings.length,
+          findings,
+          override_used: false
+        },
+        plan_token: null,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [reason]
+      };
+    }
+  }
   const commit = gitCommit(projectRoot, input.message, gitExecutor);
   if (!commit.ok) {
     const reason = commit.error ?? commit.stderr ?? "git commit failed";
+    let refundNote = "";
+    if (tokenCtx) {
+      const refund = writePhaseState(projectRoot, {
+        ...tokenCtx.baseState,
+        plan_authorization: tokenCtx.token
+      });
+      refundNote = refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
+    }
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -25909,17 +26165,19 @@ message: ${input.message}`
         tool: "rsct_request_commit",
         reason,
         branch: gitState.branch,
-        channel: gate.channel
+        channel,
+        authorized_via: authorizedVia
       },
       config2?.audit
     );
     return {
       status: "mutation_failed",
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       reject_kind: null,
       reason,
-      fabrication_signals: gate.fabrication_signals,
+      fabrication_signals: fabricationSignals,
       sha_before: commit.sha_before,
       sha_after: null,
       branch_check: { protected: branchProtected, override_used: branchProtected },
@@ -25928,34 +26186,66 @@ message: ${input.message}`
         findings,
         override_used: findings.length > 0
       },
+      plan_token: null,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ["git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."]
+      hints: [
+        authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+      ]
     };
   }
-  const record2 = recordApproval(approval, { projectRoot, now });
+  let antiReplayPersisted;
+  let antiReplayError = null;
+  let tokenSummary = null;
+  const bookkeepingHints = [];
+  if (approval) {
+    const record2 = recordApproval(approval, { projectRoot, now });
+    antiReplayPersisted = record2.ok;
+    if (!record2.ok) {
+      antiReplayError = record2.error;
+      bookkeepingHints.push(
+        `\u26A0 commit landed but anti-replay store update failed: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+      );
+    }
+  } else {
+    antiReplayPersisted = true;
+    tokenSummary = {
+      plan_slug: reservedToken.plan_slug,
+      actions_used: reservedToken.actions_used,
+      max_actions: reservedToken.max_actions,
+      expires_at: reservedToken.expires_at
+    };
+  }
   const audit = appendAudit(
     projectRoot,
     {
       event: "request_commit.committed",
       tool: "rsct_request_commit",
       branch: gitState.branch,
-      channel: gate.channel,
+      channel,
+      authorized_via: authorizedVia,
       sha_before: commit.sha_before,
       sha_after: commit.sha_after,
-      fabrication_signals: gate.fabrication_signals
+      fabrication_signals: fabricationSignals,
+      ...tokenSummary !== null && {
+        plan_slug: tokenSummary.plan_slug,
+        plan_token_actions_used: tokenSummary.actions_used,
+        plan_token_max_actions: tokenSummary.max_actions
+      }
     },
     config2?.audit
   );
   const hints = [
     `Committed ${commit.sha_after ?? "<unknown sha>"} on '${branchLabel}'.`
   ];
-  if (!record2.ok) {
+  if (tokenSummary) {
+    const remaining = tokenSummary.max_actions - tokenSummary.actions_used;
     hints.push(
-      `\u26A0 commit landed but anti-replay store update failed: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+      `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`
     );
   }
+  hints.push(...bookkeepingHints);
   const afields = auditFields(audit);
   if (afields.audit_error !== null) {
     hints.push(
@@ -25988,10 +26278,11 @@ message: ${input.message}`
   return {
     status: "committed",
     branch: gitState.branch,
-    channel: gate.channel,
+    channel,
+    authorized_via: authorizedVia,
     reject_kind: null,
     reason: null,
-    fabrication_signals: gate.fabrication_signals,
+    fabrication_signals: fabricationSignals,
     sha_before: commit.sha_before,
     sha_after: commit.sha_after,
     branch_check: { protected: branchProtected, override_used: branchProtected },
@@ -26000,10 +26291,11 @@ message: ${input.message}`
       findings,
       override_used: findings.length > 0
     },
+    plan_token: tokenSummary,
     bootstrap_marker: bootstrap,
     ...afields,
-    anti_replay_persisted: record2.ok,
-    anti_replay_error: record2.ok ? null : record2.error,
+    anti_replay_persisted: antiReplayPersisted,
+    anti_replay_error: antiReplayError,
     hints
   };
 }
@@ -26650,6 +26942,359 @@ function auditFields3(r) {
   };
 }
 
+// src/tools/plan-authorize.ts
+init_esm_shims();
+var planAuthorizeInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  dev_approval: external_exports.unknown().describe(
+    'The dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:" (INV-2.2 scope_mismatch). Validated via the full \xA7C gate (schema/skew/anti-reuse/fabrication + OS dialog). This single approval mints a batch token covering up to max_actions commits.'
+  ),
+  ttl_minutes: external_exports.number().int().min(PLAN_TOKEN_TTL_MIN).max(PLAN_TOKEN_TTL_MAX).optional().describe(
+    `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}). Precedence: this input > .rsct.json approval_modes.plan_token_ttl_minutes > 120.`
+  ),
+  max_actions: external_exports.number().int().min(PLAN_TOKEN_MAX_ACTIONS_MIN).max(PLAN_TOKEN_MAX_ACTIONS_MAX).optional().describe(
+    `Max commits the token covers (${PLAN_TOKEN_MAX_ACTIONS_MIN}\u2013${PLAN_TOKEN_MAX_ACTIONS_MAX}). Precedence: this input > approval_modes.plan_token_max_actions > 20.`
+  )
+}).strict();
+var planAuthorizeTool = {
+  name: "rsct_plan_authorize",
+  description: "T3 \xA7C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full \xA7C gate \u2014 schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY \u2014 push/merge keep per-action \xA7C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited.",
+  inputSchema: {
+    type: "object",
+    required: ["dev_approval"],
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      },
+      dev_approval: {
+        type: "object",
+        description: 'dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:".'
+      },
+      ttl_minutes: {
+        type: "number",
+        description: `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}; default 120).`
+      },
+      max_actions: {
+        type: "number",
+        description: `Max commits the token covers (${PLAN_TOKEN_MAX_ACTIONS_MIN}\u2013${PLAN_TOKEN_MAX_ACTIONS_MAX}; default 20).`
+      }
+    },
+    additionalProperties: false
+  }
+};
+function auditFields4(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return {
+    audit_path: audit.path ?? null,
+    audit_error: audit.error ?? "write_failed"
+  };
+}
+async function planAuthorizeHandler(rawInput, internal = {}) {
+  const input = planAuthorizeInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config ?? void 0;
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const gitState = internal.gitStateOverride ?? readGitState(projectRoot);
+  const branch = gitState.branch;
+  const branchLabel = branch ?? "<no-branch>";
+  const gate = await gateRequest({
+    toolName: "rsct_plan_authorize",
+    approval: input.dev_approval,
+    dialog: {
+      title: "RSCT \xA7C \u2014 authorize plan execution (batch)",
+      message: `Mint a plan-scoped batch token on '${branchLabel}'?
+
+This lets rsct_request_commit commit WITHOUT a fresh approval per commit, within this plan + branch, until it expires/is exhausted/revoked.`
+    },
+    projectRoot,
+    ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_authorize.rejected",
+        tool: "rsct_plan_authorize",
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        branch,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      channel: null,
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      plan_slug: null,
+      branch,
+      expires_at: null,
+      max_actions: null,
+      covers: [],
+      ...auditFields4(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+    };
+  }
+  const reject = (reject_kind, reason) => {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_authorize.rejected",
+        tool: "rsct_plan_authorize",
+        reject_kind,
+        reason,
+        branch,
+        channel: gate.channel
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      channel: gate.channel,
+      reject_kind,
+      reason,
+      fabrication_signals: gate.fabrication_signals,
+      plan_slug: null,
+      branch,
+      expires_at: null,
+      max_actions: null,
+      covers: [],
+      ...auditFields4(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [reason]
+    };
+  };
+  if (branch === null) {
+    return reject(
+      "no_branch",
+      "no branch resolved (detached HEAD or not in a git worktree) \u2014 a batch token must be scoped to a named branch"
+    );
+  }
+  const { list: protectedList } = effectiveProtectedList(config2);
+  if (isProtectedBranch(branch, protectedList)) {
+    return reject(
+      "protected_branch",
+      `branch '${branchLabel}' is protected \u2014 batch tokens are only granted on derived branches (create one: git checkout -b <slug>). Protected-branch commits still require a per-action dev_approval with override_protected_branch.`
+    );
+  }
+  const activePlan = findActivePlan(projectRoot);
+  if (!activePlan) {
+    return reject(
+      "no_active_plan",
+      "no active plan_<slug>.md / spec_<slug>.md at the project root \u2014 a batch token must be scoped to a plan. Create the plan/spec first."
+    );
+  }
+  const ttlMinutes = resolveTtlMinutes(
+    input.ttl_minutes,
+    config2?.approval_modes?.plan_token_ttl_minutes
+  );
+  const maxActions = resolveMaxActions(
+    input.max_actions,
+    config2?.approval_modes?.plan_token_max_actions
+  );
+  const token = emitToken({
+    planSlug: activePlan.slug,
+    branch,
+    ttlMinutes,
+    maxActions,
+    approvalRef: {
+      action_scope: gate.approval.action_scope,
+      timestamp: gate.approval.timestamp
+    },
+    now
+  });
+  const existing = readPhaseState(projectRoot);
+  const baseState = existing.state ?? {};
+  const newState = { ...baseState, plan_authorization: token };
+  const writeResult = writePhaseState(projectRoot, newState);
+  if (!writeResult.ok) {
+    const reason = writeResult.reason === "locked" ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_authorize.state_write_failed",
+        tool: "rsct_plan_authorize",
+        reason,
+        branch,
+        plan_slug: activePlan.slug,
+        channel: gate.channel
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      channel: gate.channel,
+      reject_kind: null,
+      reason,
+      fabrication_signals: gate.fabrication_signals,
+      plan_slug: activePlan.slug,
+      branch,
+      expires_at: null,
+      max_actions: maxActions,
+      covers: [...PLAN_TOKEN_COVERS],
+      ...auditFields4(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`]
+    };
+  }
+  const record2 = recordApproval(gate.approval, { projectRoot, now });
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "plan_authorize.authorized",
+      tool: "rsct_plan_authorize",
+      branch,
+      plan_slug: activePlan.slug,
+      expires_at: token.expires_at,
+      max_actions: maxActions,
+      covers: token.covers,
+      channel: gate.channel,
+      fabrication_signals: gate.fabrication_signals
+    },
+    config2?.audit
+  );
+  const afields = auditFields4(audit);
+  const hints = [
+    `Plan token minted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval within this scope. Revoke early: rsct_plan_revoke. Branch switch / plan completion / expiry auto-revokes. push/merge still need per-action \xA7C.`
+  ];
+  if (!record2.ok) {
+    hints.push(
+      `\u26A0 token minted but anti-replay store update failed: ${record2.error}. The emitting dev_approval may be replayable within the skew window \u2014 rotate it or repair .rsct/approvals-seen.json.`
+    );
+  }
+  if (afields.audit_error !== null) {
+    hints.push(`\u26A0 token minted but audit log write failed: ${afields.audit_error}.`);
+  }
+  return {
+    status: "authorized",
+    channel: gate.channel,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    plan_slug: activePlan.slug,
+    branch,
+    expires_at: token.expires_at,
+    max_actions: maxActions,
+    covers: [...token.covers],
+    ...afields,
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error ?? null,
+    hints
+  };
+}
+
+// src/tools/plan-revoke.ts
+init_esm_shims();
+var planRevokeInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  reason: external_exports.string().optional().describe("Optional human-readable reason; lands in the audit log.")
+}).strict();
+var planRevokeTool = {
+  name: "rsct_plan_revoke",
+  description: 'T3: revoke the active plan-scoped batch token (minted by rsct_plan_authorize). NOT \xA7C-gated \u2014 revoking only TIGHTENS security, so no dev_approval is needed. After revoke, rsct_request_commit again requires a per-action dev_approval. The token also auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion, and rsct_phase_abandon clears it too. No-op (status="no_token") when no token is present.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      },
+      reason: {
+        type: "string",
+        description: "Optional reason; lands in the audit log."
+      }
+    },
+    additionalProperties: false
+  }
+};
+function auditFields5(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return {
+    audit_path: audit.path ?? null,
+    audit_error: audit.error ?? "write_failed"
+  };
+}
+async function planRevokeHandler(rawInput, internal = {}) {
+  const input = planRevokeInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const existing = readPhaseState(projectRoot);
+  const token = readToken(existing.state);
+  if (!token) {
+    return {
+      status: "no_token",
+      revoked_plan_slug: null,
+      audit_path: null,
+      audit_error: null,
+      hints: [
+        "No active plan token to revoke. rsct_request_commit already requires a per-action dev_approval."
+      ]
+    };
+  }
+  const baseState = existing.state ?? {};
+  const newState = clearTokenFromState(baseState);
+  const writeResult = writePhaseState(projectRoot, newState);
+  if (!writeResult.ok) {
+    const reason = writeResult.reason === "locked" ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_revoke.state_write_failed",
+        tool: "rsct_plan_revoke",
+        reason,
+        plan_slug: token.plan_slug
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      revoked_plan_slug: token.plan_slug,
+      ...auditFields5(audit2),
+      hints: [`\u26A0 token still active \u2014 ${reason}.`]
+    };
+  }
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "plan_revoke.revoked",
+      tool: "rsct_plan_revoke",
+      plan_slug: token.plan_slug,
+      branch: token.branch,
+      actions_used: token.actions_used,
+      max_actions: token.max_actions,
+      reason: input.reason ?? null,
+      revoked_at: now.toISOString()
+    },
+    config2?.audit
+  );
+  return {
+    status: "revoked",
+    revoked_plan_slug: token.plan_slug,
+    ...auditFields5(audit),
+    hints: [
+      `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`
+    ]
+  };
+}
+
 // src/tools/phase-verification-start.ts
 init_esm_shims();
 
@@ -27147,7 +27792,7 @@ var phaseVerificationStartTool = {
     additionalProperties: false
   }
 };
-function auditFields4(audit) {
+function auditFields6(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -27190,7 +27835,7 @@ async function phaseVerificationStartHandler(rawInput) {
       },
       config2?.audit
     );
-    const fields2 = auditFields4(skipAudit);
+    const fields2 = auditFields6(skipAudit);
     return {
       status: "skipped_tier",
       rsct_installed: resolution.rsct_installed,
@@ -27263,7 +27908,7 @@ async function phaseVerificationStartHandler(rawInput) {
       config2?.audit
     );
   }
-  const fields = auditFields4(startAudit);
+  const fields = auditFields6(startAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -27368,7 +28013,7 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function auditFields5(audit) {
+function auditFields7(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -27432,7 +28077,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields5(audit);
+    const fields2 = auditFields7(audit);
     return {
       status: "rejected",
       channel: null,
@@ -27464,7 +28109,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields5(audit);
+    const fields2 = auditFields7(audit);
     return {
       status: "rejected",
       channel: null,
@@ -27513,7 +28158,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       },
       config2?.audit
     );
-    const fields2 = auditFields5(audit);
+    const fields2 = auditFields7(audit);
     return {
       status: "rejected",
       channel: null,
@@ -27578,7 +28223,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     config2?.audit
   );
   const record2 = recordApproval(gate.approval, { projectRoot, now });
-  const fields = auditFields5(completeAudit);
+  const fields = auditFields7(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -28106,7 +28751,7 @@ function nextPhase(current) {
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
   return PHASE_ORDER[idx + 1];
 }
-function auditFields6(audit) {
+function auditFields8(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -28132,7 +28777,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(audit2);
+    const fields2 = auditFields8(audit2);
     return {
       status: "phase_already_active",
       phase: input.phase,
@@ -28172,7 +28817,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields6(audit);
+  const fields = auditFields8(audit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -28240,7 +28885,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -28272,7 +28917,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -28319,7 +28964,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -28362,7 +29007,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields6(completeAudit);
+  const fields = auditFields8(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     if (recommended) {
@@ -28431,6 +29076,7 @@ async function phaseStatusHandler(rawInput) {
   const input = phaseStatusInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
   const read = readPhaseState(resolution.root);
+  const worktree = readWorktreeInfo(resolution.root);
   const hints = [];
   if (!resolution.rsct_installed) {
     hints.push(
@@ -28449,6 +29095,8 @@ async function phaseStatusHandler(rawInput) {
       started_at: null,
       scope_globs: [],
       verification: null,
+      plan_authorization: null,
+      worktree,
       next_recommended_phase: null,
       rsct_phase_order: RSCT_PHASES,
       hints
@@ -28486,6 +29134,26 @@ async function phaseStatusHandler(rawInput) {
       "phase-state.json present but no active phase field. Start a phase with rsct_phase_<phase>_start."
     );
   }
+  const token = readToken(state);
+  let planAuth = null;
+  if (token) {
+    planAuth = {
+      plan_slug: token.plan_slug,
+      branch: token.branch,
+      covers: token.covers,
+      expires_at: token.expires_at,
+      max_actions: token.max_actions,
+      actions_used: token.actions_used
+    };
+    hints.push(
+      `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`
+    );
+  }
+  if (worktree.is_worktree) {
+    hints.push(
+      `Linked git worktree${worktree.name ? ` ('${worktree.name}')` : ""} \u2014 this phase-state + token are isolated to THIS worktree.`
+    );
+  }
   return {
     rsct_installed: resolution.rsct_installed,
     phase_state_exists: true,
@@ -28494,6 +29162,8 @@ async function phaseStatusHandler(rawInput) {
     started_at: state?.started_at ?? null,
     scope_globs: state?.scope_globs ?? [],
     verification,
+    plan_authorization: planAuth,
+    worktree,
     next_recommended_phase: recommended,
     rsct_phase_order: RSCT_PHASES,
     hints
@@ -28715,7 +29385,7 @@ var phaseCodeStartTool = {
     additionalProperties: false
   }
 };
-function auditFields7(audit) {
+function auditFields9(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -28842,7 +29512,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields7(audit);
+    const fields = auditFields9(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -28900,7 +29570,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields7(audit);
+    const fields = auditFields9(audit);
     return {
       status: "verification_gate_rejected",
       reject_kind: rejectKind,
@@ -29108,7 +29778,7 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields8(audit) {
+function auditFields10(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29182,7 +29852,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29218,7 +29888,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields8(abandonedAudit);
+  const fields = auditFields10(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29361,7 +30031,7 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields9(audit) {
+function auditFields11(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29435,7 +30105,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields11(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -29488,7 +30158,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields11(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -29540,7 +30210,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields11(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -29581,7 +30251,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields11(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -29618,7 +30288,7 @@ GH CLI will run in '${projectRoot}'.`
     },
     config2?.audit
   );
-  const fields = auditFields9(createdAudit);
+  const fields = auditFields11(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
@@ -30460,7 +31130,7 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields10(audit) {
+function auditFields12(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30521,7 +31191,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields10(audit);
+  const fields = auditFields12(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,
@@ -30661,6 +31331,8 @@ var TOOLS = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  planAuthorizeTool,
+  planRevokeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -30693,6 +31365,8 @@ var HANDLERS = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_plan_authorize: planAuthorizeHandler,
+  rsct_plan_revoke: planRevokeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,

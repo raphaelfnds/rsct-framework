@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
-import { readGitState } from '../lib/git.js'
+import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
 import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
@@ -30,6 +30,8 @@ export interface StatusOutput {
     test_framework: string | null
   }
   git: ReturnType<typeof readGitState>
+  /** T3: git worktree context (is this a linked worktree? — isolated rsct state). */
+  worktree: WorktreeInfo
   universe: UniverseBlock
   hints: string[]
 }
@@ -67,6 +69,17 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
 
   const hints = buildStatusHints(resolution, git)
 
+  // T3: worktree context. When running inside a LINKED worktree, the rsct
+  // runtime state (.rsct/phase-state.json incl. any plan-authorization token,
+  // .rsct/approvals-seen.json) is isolated to THIS worktree — surfacing this
+  // helps an agent reason about parallel/isolated execution. Never throws.
+  const worktree = readWorktreeInfo(resolution.root)
+  if (worktree.is_worktree) {
+    hints.push(
+      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated to THIS worktree (independent of the main worktree and sibling worktrees).`,
+    )
+  }
+
   // T1.a: surface the org-level universe (single source — load_context calls the
   // same getUniverse). Fail-graceful: never throws; absent universe → behaves as
   // before (available:false, no hint).
@@ -91,6 +104,7 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
       test_framework: resolution.config?.test_framework ?? null,
     },
     git,
+    worktree,
     universe: universe.block,
     hints,
   }
