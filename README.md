@@ -528,7 +528,7 @@ work safely.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` — M1 Recall + M2 Enforcement + M3 phase machine + personas + Tutor + issue capture** (shipped in `v1.0.0`). Companion MCP server at
-  [`mcp-server/`](mcp-server/README.md). **32 tools + 5 resources**
+  [`mcp-server/`](mcp-server/README.md). **33 tools + 5 resources**
   covering:
   - **Recall (M1):** 7 read-only tools (status, decisions, knowledge,
     environments with INV-6 secret masking, architecture, module

@@ -22,6 +22,7 @@ import {
   getArchitectureTool,
   getArchitectureHandler,
 } from './tools/get-architecture.js'
+import { getUniverseTool, getUniverseHandler } from './tools/get-universe.js'
 import {
   checkPremiseTool,
   checkPremiseHandler,
@@ -138,6 +139,7 @@ const TOOLS: Tool[] = [
   getKnowledgeTool,
   getEnvironmentsTool,
   getArchitectureTool,
+  getUniverseTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -173,6 +175,7 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_get_knowledge: getKnowledgeHandler,
   rsct_get_environments: getEnvironmentsHandler,
   rsct_get_architecture: getArchitectureHandler,
+  rsct_get_universe: getUniverseHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,

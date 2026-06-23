@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join16 } = __require("path");
+    var { join: join17 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join16(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join17(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join16, isAbsolute: isAbsolute5, sep } = __require("path");
+    var { join: join17, isAbsolute: isAbsolute6, sep } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join16(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join17(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join16(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join17(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9457,11 +9457,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute5(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute6(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join16(__dirname$1, "..", "file.js");
+          return join17(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join16 = ",";
+            let join17 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join16 = `,
+                join17 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join16;
+                res += join17;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join16}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join16 = `,
+              join17 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join16;
+                separator = join17;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join16;
+              separator = join17;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join16 = ",";
+            let join17 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join16 = `,
+                join17 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join16;
+                res += join17;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join16}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join16 = `,
+              join17 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join16;
+                separator = join17;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join17 = `,
+              const join18 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join17;
+                res2 += join18;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join18}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join16 = `,
+            const join17 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join16, maximumBreadth);
+              res += stringifyTypedArray(value, join17, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join16;
+              separator = join17;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join16;
+                separator = join17;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join16;
+              separator = join17;
             }
             if (separator !== "") {
               res = `
@@ -23151,13 +23151,112 @@ var RSCT_MCP_VERSION = "1.1.0";
 
 // src/lib/universe.ts
 init_esm_shims();
+
+// src/lib/universe-content.ts
+init_esm_shims();
+
+// src/lib/markdown.ts
+init_esm_shims();
+function parseSections(body) {
+  const lines = body.split("\n");
+  const out = [];
+  let current = null;
+  const flush = () => {
+    if (!current) return;
+    const sectionBody = current.bodyLines.join("\n").trim();
+    out.push({
+      level: current.level,
+      heading: current.heading,
+      body: sectionBody,
+      excerpt: makeExcerpt(sectionBody)
+    });
+  };
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{2,3})\s+(.+?)\s*$/);
+    if (headingMatch?.[1] && headingMatch[2]) {
+      flush();
+      current = {
+        level: headingMatch[1].length,
+        heading: headingMatch[2].trim(),
+        bodyLines: []
+      };
+    } else if (current) {
+      current.bodyLines.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+function makeExcerpt(body) {
+  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("<!--"));
+  const first = lines.slice(0, 3).join(" ");
+  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
+}
+
+// src/lib/universe-content.ts
+var KNOWN_GOVERNANCE_DOCS = [
+  "document-control",
+  "canonical-sources-map",
+  "dns-governance-survey",
+  "lgpd-system-matrix",
+  "naming-standards"
+];
+var EMPTY_GOVERNANCE_INDEX = {
+  available: false,
+  governance_dir: null,
+  docs: [],
+  has_index: false
+};
+function fwd(p) {
+  return p.split("\\").join("/");
+}
+function isSafeDocSlug(slug) {
+  if (typeof slug !== "string" || slug.length === 0) return false;
+  if (slug.includes("/") || slug.includes("\\")) return false;
+  if (slug.includes("..")) return false;
+  if (isAbsolute(slug)) return false;
+  return true;
+}
+function readUniverseGovernanceIndex(universeRoot) {
+  try {
+    const dir = join(universeRoot, "docs", "governance");
+    if (!statSync(dir).isDirectory()) return EMPTY_GOVERNANCE_INDEX;
+    const has_index = existsSync(join(universeRoot, "docs", "INDEX.md"));
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return { available: true, governance_dir: fwd(dir), docs: [], has_index };
+    }
+    const docs = entries.filter((e) => e.isFile() && /\.md$/i.test(e.name) && !/^README\.md$/i.test(e.name)).map((e) => e.name.replace(/\.md$/i, "")).sort((a, b) => a.localeCompare(b));
+    return { available: true, governance_dir: fwd(dir), docs, has_index };
+  } catch {
+    return EMPTY_GOVERNANCE_INDEX;
+  }
+}
+function readUniverseDoc(universeRoot, slug) {
+  const miss = { slug, exists: false, path: null, sections: [] };
+  if (!isSafeDocSlug(slug)) return miss;
+  const rel = slug === "INDEX" ? join("docs", "INDEX.md") : join("docs", "governance", `${slug}.md`);
+  const full = join(universeRoot, rel);
+  try {
+    if (!existsSync(full)) return miss;
+    const body = readFileSync(full, "utf8");
+    return { slug, exists: true, path: fwd(rel), sections: parseSections(body) };
+  } catch {
+    return miss;
+  }
+}
+
+// src/lib/universe.ts
 var NONE_BLOCK = {
   available: false,
   name: null,
   local_path: null,
   registered_apps_count: 0,
   this_app_registered: false,
-  note: null
+  note: null,
+  governance: EMPTY_GOVERNANCE_INDEX
 };
 var MAX_UNIVERSE_JSON_BYTES = 1e6;
 function isUniverseDir(dir) {
@@ -23245,7 +23344,9 @@ function getUniverse(config2, projectRoot, opts = {}) {
     local_path: resolution.path,
     registered_apps_count: data.registeredFromDirs.length,
     this_app_registered: thisAppRegistered,
-    note
+    note,
+    // V FV2: only the found+readable path computes the governance index.
+    governance: readUniverseGovernanceIndex(resolution.path)
   };
   const hint = !thisAppRegistered && appName !== null ? `Universe found at ${resolution.path}; this app ("${appName}") is not registered there. Run /rsct-setup to register it.` : null;
   return { block, hint };
@@ -23611,46 +23712,6 @@ function extractExcerpt(section) {
 
 // src/lib/knowledge.ts
 init_esm_shims();
-
-// src/lib/markdown.ts
-init_esm_shims();
-function parseSections(body) {
-  const lines = body.split("\n");
-  const out = [];
-  let current = null;
-  const flush = () => {
-    if (!current) return;
-    const sectionBody = current.bodyLines.join("\n").trim();
-    out.push({
-      level: current.level,
-      heading: current.heading,
-      body: sectionBody,
-      excerpt: makeExcerpt(sectionBody)
-    });
-  };
-  for (const line of lines) {
-    const headingMatch = line.match(/^(#{2,3})\s+(.+?)\s*$/);
-    if (headingMatch?.[1] && headingMatch[2]) {
-      flush();
-      current = {
-        level: headingMatch[1].length,
-        heading: headingMatch[2].trim(),
-        bodyLines: []
-      };
-    } else if (current) {
-      current.bodyLines.push(line);
-    }
-  }
-  flush();
-  return out;
-}
-function makeExcerpt(body) {
-  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("<!--"));
-  const first = lines.slice(0, 3).join(" ");
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
-}
-
-// src/lib/knowledge.ts
 var KNOWN_CATEGORIES = [
   "business-glossary",
   "business-rules",
@@ -24700,6 +24761,128 @@ function surfaceFilterHints(hints, label, set, moduleName) {
       `${subdirLabel}/ exists but contains zero .md files (besides README). Likely still on TODO scaffolding.`
     );
   }
+}
+
+// src/tools/get-universe.ts
+init_esm_shims();
+var SCOPES3 = ["governance", "index", "all"];
+var getUniverseInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  scope: external_exports.enum(SCOPES3).default("governance").describe(
+    "governance: read docs/governance/*.md. index: read docs/INDEX.md. all: both."
+  ),
+  doc: external_exports.string().min(1).optional().describe(
+    "Optional governance doc slug to narrow scope=governance to one file (docs/governance/<doc>.md). Canonical docs: " + KNOWN_GOVERNANCE_DOCS.join(", ") + ". Ignored for scope=index."
+  ),
+  query: external_exports.string().min(1).optional().describe(
+    "Optional case-insensitive substring filter; matches sections whose heading or body contain the query."
+  )
+}).strict();
+var getUniverseTool = {
+  name: "rsct_get_universe",
+  description: "Reads the linked org-level universe's governance content. scope=governance reads docs/governance/*.md (all unless doc narrows it); scope=index reads docs/INDEX.md; scope=all reads both. Optional query is a case-insensitive substring filter over section heading + body. Use this when rsct_status reports a universe available, to consult org naming standards / canonical-sources map / governance before proposing new structure (the \xA70 rule treats org standards as authoritative over local guesses). Returns empty docs (not an error) when no universe is linked or governance is unscaffolded.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      },
+      scope: {
+        type: "string",
+        enum: [...SCOPES3],
+        default: "governance",
+        description: "governance: docs/governance/*.md. index: docs/INDEX.md. all: both."
+      },
+      doc: {
+        type: "string",
+        description: "Optional governance doc slug; narrows scope=governance to one file (docs/governance/<doc>.md). Canonical: " + KNOWN_GOVERNANCE_DOCS.join(", ") + ". Ignored for scope=index."
+      },
+      query: {
+        type: "string",
+        description: "Optional case-insensitive substring; only sections whose heading or body matches are returned."
+      }
+    },
+    additionalProperties: false
+  }
+};
+function resolveRequestedSlugs(scope, doc, index) {
+  if (scope === "index") return ["INDEX"];
+  const governance = doc ? index.docs.includes(doc) ? [doc] : [] : index.docs;
+  if (scope === "all") return ["INDEX", ...governance];
+  return governance;
+}
+function filterSections2(sections, query) {
+  if (!query) return sections;
+  const needle = query.toLowerCase();
+  return sections.filter(
+    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
+  );
+}
+async function getUniverseHandler(rawInput) {
+  const input = getUniverseInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const { block } = getUniverse(resolution.config, resolution.root);
+  const hints = [];
+  if (!block.available || !block.local_path) {
+    if (block.note) {
+      hints.push(`${block.note}.`);
+    } else {
+      hints.push(
+        "No universe is linked to this project. Run /rsct-canonical-source to link the org universe, then this tool can read its governance docs."
+      );
+    }
+    return {
+      rsct_installed: resolution.rsct_installed,
+      universe_available: false,
+      universe_path: block.local_path,
+      universe_note: block.note,
+      scope: input.scope,
+      doc: input.doc ?? null,
+      query: input.query ?? null,
+      governance: block.governance,
+      docs: [],
+      hints
+    };
+  }
+  const index = block.governance;
+  const slugs = resolveRequestedSlugs(input.scope, input.doc, index);
+  const docs = slugs.map((slug) => {
+    const file = readUniverseDoc(block.local_path, slug);
+    return { ...file, sections: filterSections2(file.sections, input.query) };
+  });
+  if (input.scope !== "index" && index.docs.length === 0) {
+    hints.push(
+      `Universe at ${block.local_path} has no governance docs (docs/governance/ ${index.available ? "is empty" : "is missing"}). Run /rsct-init-universe to scaffold them.`
+    );
+  }
+  if (input.doc && input.scope !== "index" && !index.docs.includes(input.doc)) {
+    hints.push(
+      `No docs/governance/${input.doc}.md in the universe. Available: ${index.docs.length > 0 ? index.docs.join(", ") : "(none)"}.`
+    );
+  }
+  if (input.scope === "index" && docs[0] && !docs[0].exists) {
+    hints.push(
+      `Universe at ${block.local_path} has no docs/INDEX.md. Run /rsct-init-universe to scaffold it.`
+    );
+  }
+  if (input.query && docs.length > 0 && docs.every((d) => d.sections.length === 0)) {
+    hints.push(
+      `Query '${input.query}' matched no section in the requested doc(s). Try a broader term or omit query.`
+    );
+  }
+  return {
+    rsct_installed: resolution.rsct_installed,
+    universe_available: true,
+    universe_path: block.local_path,
+    universe_note: block.note,
+    scope: input.scope,
+    doc: input.doc ?? null,
+    query: input.query ?? null,
+    governance: index,
+    docs,
+    hints
+  };
 }
 
 // src/tools/check-premise.ts
@@ -31328,6 +31511,7 @@ var TOOLS = [
   getKnowledgeTool,
   getEnvironmentsTool,
   getArchitectureTool,
+  getUniverseTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -31362,6 +31546,7 @@ var HANDLERS = {
   rsct_get_knowledge: getKnowledgeHandler,
   rsct_get_environments: getEnvironmentsHandler,
   rsct_get_architecture: getArchitectureHandler,
+  rsct_get_universe: getUniverseHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,

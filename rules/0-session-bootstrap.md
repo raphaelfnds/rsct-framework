@@ -35,7 +35,11 @@ suggest the dev run `/rsct-setup` to enable the enforcement layer.
 **universe** repository: consult its governance / naming standards
 before proposing new structure (modules, services, naming, ownership),
 and treat those org-level standards as **authoritative over local
-guesses**. If the block carries a `note` (e.g. "configured but not
+guesses**. The block's `governance` field indexes the available org docs
+(e.g. `naming-standards`, `canonical-sources-map`); call
+**`mcp__rsct__rsct_get_universe`** (`scope: 'governance'`, optionally a
+`doc` slug or `query`) to read their content before proposing structure.
+If the block carries a `note` (e.g. "configured but not
 found", "found but unreadable", or a registry mismatch) or a hint that
 this app is not registered, surface it to the dev — do not silently
 ignore it. When `available` is `false` and there is no note, there is no

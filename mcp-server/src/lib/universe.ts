@@ -2,6 +2,11 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { RsctConfig } from './project-root.js'
+import {
+  readUniverseGovernanceIndex,
+  EMPTY_GOVERNANCE_INDEX,
+  type UniverseGovernanceIndex,
+} from './universe-content.js'
 
 // T1.a — make the org-level "universe" usable at runtime. The universe layer
 // already exists (universe repo, .universe.json, applications/ registry) and
@@ -21,6 +26,13 @@ export interface UniverseBlock {
   this_app_registered: boolean
   /** Diagnostic for the degraded / configured-but-missing / reconciliation states. */
   note: string | null
+  /**
+   * T1.c — lightweight index of the universe's org-level governance docs
+   * (slugs only; no content). Always present (FV1); empty when no universe or no
+   * docs/governance/. Computed ONLY on the found+readable path (FV2). Content is
+   * read on demand via the rsct_get_universe tool.
+   */
+  governance: UniverseGovernanceIndex
 }
 
 export interface UniverseResult {
@@ -41,6 +53,7 @@ const NONE_BLOCK: UniverseBlock = {
   registered_apps_count: 0,
   this_app_registered: false,
   note: null,
+  governance: EMPTY_GOVERNANCE_INDEX,
 }
 
 // Defensive cap: never read a multi-MB file into memory for a tiny index.
@@ -199,6 +212,8 @@ export function getUniverse(
     registered_apps_count: data.registeredFromDirs.length,
     this_app_registered: thisAppRegistered,
     note,
+    // V FV2: only the found+readable path computes the governance index.
+    governance: readUniverseGovernanceIndex(resolution.path),
   }
 
   const hint =

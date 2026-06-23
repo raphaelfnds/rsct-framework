@@ -50,7 +50,7 @@ fixes, skip the phase machine entirely.
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 
-**32 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
+**33 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -239,6 +239,7 @@ The block is **always present** with these fields:
 | `registered_apps_count` | number | Count of `applications/<app>/` **directories** (ground truth — not the `.universe.json` list length). |
 | `this_app_registered` | boolean | Whether this project's app is registered in the universe. |
 | `note` | string \| null | Diagnostic for the degraded / configured-missing / reconciliation states. |
+| `governance` | object | Index of the universe's org-level governance docs (slugs only): `{ available, governance_dir, docs[], has_index }`. Read their content with [`rsct_get_universe`](#rsct_get_universe). Empty when no universe or no `docs/governance/`. |
 
 When the block carries an actionable message, a one-line `hint` is also pushed into
 `hints` (status) / `next_action_hints` (load_context). States:
@@ -288,6 +289,22 @@ Reads `documentation/architecture.md` and the `modules/` / `impact/` directories
 
 - Input: `project_root?`, `scope?: 'overview'|'module'|'impact'|'all'` (default `overview`), `module_name?` (narrows scope=module/impact)
 - Output: overview file, modules set, impacts set + hints
+
+### `rsct_get_universe`
+
+Reads the linked **org-level universe's** governance content — `docs/governance/*.md`
+and `docs/INDEX.md` — so Claude can consult org naming standards / the canonical-sources
+map before proposing structure (the §0 rule treats org standards as authoritative over
+local guesses). The universe layout is **not** the project layout: a universe has no
+`documentation/{decisions,knowledge,architecture}`; its authority lives under
+`docs/governance/`. Resolution reuses the same single source as the [`universe` block](#the-universe-block).
+
+- Input: `project_root?`, `scope?: 'governance'|'index'|'all'` (default `governance`), `doc?` (governance slug, narrows scope=governance; ignored for scope=index), `query?` (case-insensitive substring across heading + body)
+- Output: `universe_available`, `universe_path`, `governance` index, `docs[]` (each `{ slug, exists, path, sections[] }`) + hints
+
+Fail-graceful: no universe linked, or governance unscaffolded → `universe_available: false`
+/ empty `docs` with a hint (never an error). A `doc` slug containing a path separator,
+`..`, or an absolute path is rejected (returns `exists: false`).
 
 ### `rsct_check_premise`
 
