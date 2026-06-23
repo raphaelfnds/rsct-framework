@@ -103,7 +103,11 @@ async function backgroundRefresh(
     if (!res.ok) return
     const body = (await res.json()) as { tag_name?: unknown }
     const tag = typeof body.tag_name === 'string' ? body.tag_name : prev.latest_tag
-    writeCacheAtomic(home, { consent: 'yes', last_checked: nowIso, latest_tag: tag })
+    // exactOptionalPropertyTypes: include latest_tag ONLY when known — never write a
+    // present-undefined. (JSON.stringify omits undefined, so the on-disk file is identical.)
+    const next: UpdateCheckFile = { consent: 'yes', last_checked: nowIso }
+    if (tag !== undefined) next.latest_tag = tag
+    writeCacheAtomic(home, next)
   } catch {
     /* fail-silent — leave the cache as-is, retry next session */
   }

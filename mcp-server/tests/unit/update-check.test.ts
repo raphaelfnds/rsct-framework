@@ -110,6 +110,27 @@ describe('lib/update-check — getUpdateNotice (opt-in, cached, fail-silent)', (
     }
   })
 
+  it('A1: refresh with a non-string tag_name and no prior tag writes a cache WITHOUT latest_tag', async () => {
+    const h = home()
+    // tag_name is not a string → tag falls back to prev.latest_tag (absent) → omit the key.
+    const fetcher = vi.fn(
+      async (): Promise<FetchLike> => ({ ok: true, json: async () => ({ tag_name: 123 }) }),
+    )
+    try {
+      seedCache(h, { consent: 'yes', last_checked: '2000-01-01T00:00:00Z' }) // stale, no latest_tag
+      expect(() =>
+        getUpdateNotice({ home: h, fetcher, now: Date.parse('2026-06-22T00:00:00Z') }),
+      ).not.toThrow()
+      await flush()
+      const c = readCache(h)
+      expect('latest_tag' in c).toBe(false) // omitted, never written as present-undefined
+      expect(c.consent).toBe('yes')
+      expect(typeof c.last_checked).toBe('string')
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
   it('fail-silent: a throwing fetcher never throws and leaves the cache intact', async () => {
     const h = home()
     const fetcher = vi.fn(async () => {

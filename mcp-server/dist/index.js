@@ -23297,7 +23297,9 @@ async function backgroundRefresh(home, fetcher, nowIso, prev) {
     if (!res.ok) return;
     const body = await res.json();
     const tag = typeof body.tag_name === "string" ? body.tag_name : prev.latest_tag;
-    writeCacheAtomic(home, { consent: "yes", last_checked: nowIso, latest_tag: tag });
+    const next = { consent: "yes", last_checked: nowIso };
+    if (tag !== void 0) next.latest_tag = tag;
+    writeCacheAtomic(home, next);
   } catch {
   }
 }
