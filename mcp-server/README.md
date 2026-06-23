@@ -50,7 +50,7 @@ fixes, skip the phase machine entirely.
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 
-**33 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
+**34 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -255,6 +255,27 @@ When the block carries an actionable message, a one-line `hint` is also pushed i
 - **reconciliation** — the `.universe.json registered_apps[]` index and the
   `applications/<app>/` directories disagree: `note` explains the mismatch.
 
+### The `topology` block
+
+Both `rsct_status` and `rsct_load_context` also surface a **topology** block (T2),
+computed from the same single source, fail-graceful (absent config / universe → `mono`,
+no hint). It reports the repo's place in a multi-repo org and is what the
+contract-surface gate ([`rsct_request_commit`](#rsct_request_commit)) diverges on:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `confirmed_mode` | `'mono'\|'monorepo'\|'multi-repo'` \| null | The dev-confirmed mode from `.rsct.json topology.mode` (authoritative — what the gate uses). `null` until `/rsct-setup` confirms it. |
+| `inferred_mode` | `'mono'\|'monorepo'\|'multi-repo'` | Silent inference from on-disk signals — only **pre-selects** the explicit ask; never gates. |
+| `confidence` | `'high'\|'medium'\|'low'` | Confidence of the inference (monorepo is always `low`). |
+| `effective_mode` | mode | `confirmed_mode ?? inferred_mode` (what to display when unconfirmed). |
+| `signals` | object | `{ universe_available, registered_apps_count, this_app_registered, nested_app_markers, universe_external }`. |
+
+The gate is enforced **only** when `confirmed_mode === 'multi-repo'` AND a `contracts.json`
+exists at the universe root AND a produced surface is touched. When `confirmed_mode` is
+`multi-repo` but the gate can't fire (no universe linked / no `contracts.json`), a HIGH
+**inactive-gate** hint is pushed so the off gate is never silent. Read the contract graph
+with [`rsct_get_topology`](#rsct_get_topology).
+
 ### `rsct_get_decisions`
 
 Returns firm premises and ADRs from `documentation/decisions.md`, optionally filtered.
@@ -305,6 +326,25 @@ local guesses). The universe layout is **not** the project layout: a universe ha
 Fail-graceful: no universe linked, or governance unscaffolded → `universe_available: false`
 / empty `docs` with a hint (never an error). A `doc` slug containing a path separator,
 `..`, or an absolute path is rejected (returns `exists: false`).
+
+### `rsct_get_topology`
+
+Reports the repo **topology** ([`topology` block](#the-topology-block)) plus the org-level
+**contract graph** read from `contracts.json` at the universe root: the contracts this app
+**produces** (its surfaces) and **consumes** (its dependencies). A contract is a *surface* —
+path globs in the producer repo (`openapi/*.yaml`, `src/api/**`, `proto/**`) that consumer
+apps depend on.
+
+- Input: `project_root?`
+- Output: `topology` block, `contracts` graph (`{ available, contracts[], note }`), `produced[]`,
+  `consumed[]`, `app_name`, `universe_path` + hints
+
+In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks** a commit that
+touches a produced surface (listing the affected consumers) unless
+`dev_approval.override_contract_surface: { reason }` is given. Surface globs support `*` `**`
+`?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
+sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
+hint (never an error).
 
 ### `rsct_check_premise`
 

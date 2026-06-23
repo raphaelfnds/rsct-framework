@@ -25,6 +25,13 @@ export const DevApprovalSchema = z
       .object({ reason: z.string().min(1, 'override reason required') })
       .strict()
       .optional(),
+    // T2/INV-7: waive the contract-surface block (multi-repo mode). Parallel to
+    // the other overrides — the token path carries none, so under a plan token a
+    // surface-touching commit is a hard block until a per-action dev_approval.
+    override_contract_surface: z
+      .object({ reason: z.string().min(1, 'override reason required') })
+      .strict()
+      .optional(),
   })
   .strict()
 

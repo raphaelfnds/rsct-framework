@@ -211,6 +211,7 @@ Mapping (template source → target path):
 | `CLAUDE.md.template` | `CLAUDE.md` |
 | `README.md.template` | `README.md` |
 | `universe.json.template` | `.universe.json` |
+| `contracts.json.template` | `contracts.json` |
 | `docs/INDEX.md.template` | `docs/INDEX.md` |
 | `docs/governance/document-control.md.template` | `docs/governance/document-control.md` |
 | `docs/governance/canonical-sources-map.md.template` | `docs/governance/canonical-sources-map.md` |

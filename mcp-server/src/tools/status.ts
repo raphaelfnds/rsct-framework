@@ -5,6 +5,7 @@ import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js
 import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
+import { detectTopology, type TopologyBlock } from '../lib/topology.js'
 import { getUpdateNotice } from '../lib/update-check.js'
 
 export const statusInputSchema = z
@@ -33,6 +34,8 @@ export interface StatusOutput {
   /** T3: git worktree context (is this a linked worktree? — isolated rsct state). */
   worktree: WorktreeInfo
   universe: UniverseBlock
+  /** T2: repo topology (mono/monorepo/multi-repo) — what the contract gate diverges on. */
+  topology: TopologyBlock
   hints: string[]
 }
 
@@ -86,6 +89,12 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
   const universe = getUniverse(resolution.config, resolution.root)
   if (universe.hint) hints.push(universe.hint)
 
+  // T2: repo topology (single source — load_context calls the same detectTopology).
+  // Fail-graceful: absent config / universe → mono, no hint. The FV1 hint fires only
+  // when topology is confirmed multi-repo but the contract gate can't enforce.
+  const topology = detectTopology(resolution.config, resolution.root, {}, universe)
+  if (topology.hint) hints.push(topology.hint)
+
   // T4: opt-in, cached, fail-silent "a newer RSCT release is available" hint.
   // Reads only the ~/.rsct cache (zero network latency); a stale cache fires a
   // non-blocking background refresh. No-op unless consent was granted at /rsct-setup.
@@ -106,6 +115,7 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
     git,
     worktree,
     universe: universe.block,
+    topology: topology.block,
     hints,
   }
 }

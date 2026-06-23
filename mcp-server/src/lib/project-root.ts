@@ -27,6 +27,16 @@ export interface RsctConfig {
     local?: string
     remote?: string
   }
+  /**
+   * T2 — the repo topology, confirmed by the dev at /rsct-setup. The
+   * contract-surface gate (INV-7) diverges ONLY on `mode === 'multi-repo'`.
+   * Additive (Zod top-level `.strip()` keeps older servers tolerant).
+   */
+  topology?: {
+    mode: 'mono' | 'monorepo' | 'multi-repo'
+    confirmed_at?: string
+    detected_signals?: string[]
+  }
   protected_branches?: string[]
   test_framework?: string
   install?: {
@@ -110,6 +120,19 @@ const RsctConfigSchema = z
         local: z.string().min(1).optional(),
         remote: z.string().min(1).optional(),
       })
+      .optional(),
+    // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
+    // rejects the whole config (rsct_installed=false → the contract gate can't
+    // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
+    // (a silently dropped `mode` would turn enforcement OFF with no signal —
+    // worse); the rejection surfaces via the forced `bounds_violation` audit.
+    topology: z
+      .object({
+        mode: z.enum(['mono', 'monorepo', 'multi-repo']),
+        confirmed_at: z.string().optional(),
+        detected_signals: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
       .optional(),
     // `.min(1)`: empty array disables the default protection wholesale and
     // is the HIGH-4 vector. If a project genuinely wants zero protected

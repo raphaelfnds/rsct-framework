@@ -2484,6 +2484,84 @@ else
 fi
 ```
 
+### 4.10 — Topology confirmation (mono / monorepo / multi-repo)
+
+T2: record the repo's **topology** so the contract-surface gate knows whether to
+enforce. The MCP **infers** it from on-disk signals; this step lets the dev
+**confirm** it and persists the answer to `.rsct.json` (`topology.mode`). The gate
+(`rsct_request_commit`) enforces contracts **only** when the confirmed mode is
+**`multi-repo`**; `mono` / `monorepo` are recorded but never gated.
+
+Steps:
+1. Call **`mcp__rsct__rsct_get_topology`** and read `topology.confirmed_mode`,
+   `topology.inferred_mode`, `topology.signals` (universe presence, registered-app
+   count, nested app markers), and `hints`.
+2. Decide whether to ASK — **ask-once**: do NOT re-prompt a topology the dev already
+   settled unless the signals changed:
+   - **`confirmed_mode` is null** (first run / a pre-T2 project being upgraded): ASK.
+   - **`confirmed_mode` is set and no hint warns of a contradiction** (the signals still
+     agree): do NOT re-ask — re-confirm SILENTLY with the existing `confirmed_mode`.
+   - **`confirmed_mode` is set but a hint says the signals now suggest a DIFFERENT mode**
+     (e.g. a `mono` repo that grew into `multi-repo` — the RV2 downgrade hint): surface
+     the change and ASK whether to update.
+   When asking:
+   > *"Detected topology: **<inferred_mode>** (signals: <…>). Confirm the repo
+   > topology — `mono` (one repo, one app), `monorepo` (many apps in this repo), or
+   > `multi-repo` (many repos under the universe, contract-gated)? [default:
+   > <confirmed_mode if set, else inferred_mode>]"*
+3. Set `TOPOLOGY_MODE` to the resulting mode (`mono` / `monorepo` / `multi-repo`) — the
+   dev's answer when asked, or the existing `confirmed_mode` when re-confirming silently
+   (the splice is idempotent — re-writing the same value is a safe no-op). For a
+   non-interactive run, `RSCT_TOPOLOGY_MODE` pre-seeds it.
+
+Idempotent (re-running updates the value in place; no duplicate key) and it **never
+reformats** the rest of `.rsct.json` (text-splice — `.rsct.json` is NOT a documented
+JSON-merge exception; CLAUDE.md #5).
+
+```bash
+echo "  CHECKPOINT: Phase 4.10 executing canonical topology persistence (text-splice)"
+RSCT_JSON=".rsct.json"
+CONFIRMED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)
+# TOPOLOGY_MODE comes from the dev's confirmation above (mono|monorepo|multi-repo).
+# RSCT_TOPOLOGY_MODE pre-seeds it for non-interactive / CI runs.
+TOPOLOGY_MODE="${TOPOLOGY_MODE:-${RSCT_TOPOLOGY_MODE:-}}"
+case "$TOPOLOGY_MODE" in
+  mono|monorepo|multi-repo) ;;
+  *) echo "  No valid topology confirmed (got '${TOPOLOGY_MODE}') — leaving .rsct.json topology unset (gate stays OFF)."; TOPOLOGY_MODE="" ;;
+esac
+if [ -n "$TOPOLOGY_MODE" ] && [ -f "$RSCT_JSON" ]; then
+  # Persist topology.mode by TEXT-SPLICE — never JSON.parse->stringify the managed
+  # .rsct.json (CLAUDE.md #5; .rsct.json is NOT a documented exception). Path via
+  # argv (no pwd reliance); double-quoted JS only (no apostrophes — CAP-42). The
+  # regex is anchored on "topology" so a sibling "install"."mode" is never touched;
+  # the char class [ \t\r\n] is CRLF-tolerant.
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], mode = process.argv[2], at = process.argv[3];
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — topology not persisted."); process.exit(0); }
+    var eol = /\r\n/.test(s) ? "\r\n" : "\n";
+    var hasTopo = /"topology"[ \t\r\n]*:[ \t\r\n]*\{/.test(s);
+    if (hasTopo) {
+      s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"mode"[ \t\r\n]*:[ \t\r\n]*")[^"]*(")/, "$1" + mode + "$2");
+      if (/"topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"confirmed_at"[ \t\r\n]*:[ \t\r\n]*"/.test(s)) {
+        s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"confirmed_at"[ \t\r\n]*:[ \t\r\n]*")[^"]*(")/, "$1" + at + "$2");
+      } else {
+        s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"mode"[ \t\r\n]*:[ \t\r\n]*"[^"]*")/, "$1, \"confirmed_at\": \"" + at + "\"");
+      }
+    } else {
+      var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
+      if (!m) { console.error("  WARN: .rsct.json root object not found — topology not persisted."); process.exit(0); }
+      var block = "\"topology\": { \"mode\": \"" + mode + "\", \"confirmed_at\": \"" + at + "\" }," + eol + "  ";
+      s = s.slice(0, m[0].length) + block + s.slice(m[0].length);
+    }
+    fs.writeFileSync(f, s, "utf8");
+    console.log("  topology.mode persisted: " + mode);
+  ' "$RSCT_JSON" "$TOPOLOGY_MODE" "$CONFIRMED_AT"
+  if grep -q '"topology"' "$RSCT_JSON" 2>/dev/null; then echo "  OK: topology recorded"; else echo "  ERROR: topology persistence failed" >&2; exit 1; fi
+fi
+```
+
 ### 4.V — INV-2.3 poison-pill closer (SessionStart sanitizer hook)
 
 The §C-gated tools (`rsct_request_commit/_push/_merge`) require an

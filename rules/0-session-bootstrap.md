@@ -45,6 +45,21 @@ this app is not registered, surface it to the dev — do not silently
 ignore it. When `available` is `false` and there is no note, there is no
 universe in play; proceed normally.
 
+**Topology (multi-repo).** Both calls also return a `topology` block
+(`mono` / `monorepo` / `multi-repo`, with `confirmed_mode` and a silent
+`inferred_mode`). When `topology.confirmed_mode` is `multi-repo`, this
+app is one repo of a multi-repo org: before changing a shared **surface**
+(an API/schema/event interface other apps consume), call
+**`mcp__rsct__rsct_get_topology`** to read the contract graph — which
+contracts this app **produces** (its surfaces) and **consumes** (its
+dependencies). In multi-repo mode `rsct_request_commit` **blocks** a
+commit that touches a produced contract surface and lists the affected
+consumers; if that block is intended, the dev approves with
+`override_contract_surface: { reason }`. If a `topology` hint says the
+gate is INACTIVE (multi-repo confirmed but no universe / no
+`contracts.json`), surface it. For `mono` / `monorepo`, or when the mode
+is unconfirmed, there is no contract gate — proceed normally.
+
 ### 2. Task classification (any non-trivial request)
 
 Before §B (presenting a plan):

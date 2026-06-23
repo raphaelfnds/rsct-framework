@@ -843,3 +843,146 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T2 — INV-7 contract-surface gate (multi-repo only)
+// ---------------------------------------------------------------------------
+
+const UNIVERSE_FX = join(__dirname, '..', 'fixtures', 'sample-universe')
+
+function multiRepoCfg(over: Record<string, unknown> = {}) {
+  return {
+    rsct_version: '1.0.0',
+    app: { name: 'registered-app', org: 'acme' },
+    topology: { mode: 'multi-repo' },
+    universe: { local: UNIVERSE_FX },
+    ...over,
+  }
+}
+
+// INV-7 gate internal: a clean staged diff (passes INV-6) + an injected staged
+// path list (the gate's real input is git diff --cached --name-only; the override
+// is a test-only seam, same posture as stagedDiffOverride).
+function gateInternal(
+  stagedPaths: string[],
+  over: Partial<RequestCommitInternal> = {},
+): RequestCommitInternal {
+  return {
+    gitStateOverride: gitState('feat/api'),
+    stagedPathsOverride: stagedPaths,
+    stagedDiffOverride: cleanDiff(),
+    gitExecutor: gitExecutorMock(
+      { 'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 } },
+      COMMIT_OK,
+    ),
+    promptFn: alwaysYes(),
+    now: FIXED_NOW,
+    ...over,
+  }
+}
+
+describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
+  it('multi-repo + produced surface touched + no override → BLOCK with consumers', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: api', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+    expect(out.contract_check?.touched).toEqual(['orders-api'])
+    expect(out.contract_check?.consumers).toEqual(['reporting', 'web-frontend'])
+  })
+
+  it('mono + surface touched → NO-OP (commits); contract_check.mode = mono', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ topology: { mode: 'mono' } }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBe('mono')
+    expect(out.contract_check?.touched).toEqual([])
+  })
+
+  it('multi-repo + non-surface path → NO-OP (commits)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['README.md']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBe('multi-repo')
+    expect(out.contract_check?.touched).toEqual([])
+  })
+
+  it('unconfirmed topology + surface touched → NO-OP (gate off until confirmed)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ topology: undefined }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBeNull()
+  })
+
+  it('override_contract_surface → commits + records override_used', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval({ override_contract_surface: { reason: 'coordinated cross-repo bump' } }),
+      },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.override_used).toBe(true)
+    expect(out.contract_check?.touched).toEqual(['orders-api'])
+  })
+
+  it('INV-6 secrets still enforced under multi-repo (rejects before INV-7)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts'], { stagedDiffOverride: dirtyDiff() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('secrets')
+  })
+
+  it('token path + surface touched → HARD BLOCK (token carries no override)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ stagedPathsOverride: ['src/api/orders.ts'], stagedDiffOverride: cleanDiff() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+  })
+
+  it('RV3: multi-repo + no contracts.json → NO-OP commit + inactive-gate hint', async () => {
+    const uni = mkdtempSync(join(tmpdir(), 'rsct-uni-nc-'))
+    mkdirSync(join(uni, 'applications', 'registered-app'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"x","registered_apps":["registered-app"]}')
+    writeConfig(tmpRoot, multiRepoCfg({ universe: { local: uni } }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.hints.join(' ')).toMatch(/did NOT enforce/)
+  })
+
+  it('INV-5 protected branch takes precedence over INV-7 (rejects protected_branch first)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ protected_branches: ['main'] }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts'], { gitStateOverride: gitState('main') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch') // INV-5 runs before the INV-7 gate
+  })
+})

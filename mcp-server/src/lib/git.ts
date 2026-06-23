@@ -44,6 +44,26 @@ export function getStagedDiff(projectRoot: string): string | null {
 }
 
 /**
+ * Return the staged file paths (`git diff --cached --name-only -z`) as a
+ * forward-slash-normalized string[]. `-z` is NUL-separated and unquoted, so
+ * paths with spaces/unicode survive intact and `core.quotepath` can't mangle
+ * them. `null` outside a git repo / on git failure; `[]` when nothing is staged.
+ *
+ * Used by the T2 contract-surface gate (INV-7). Deliberately the REAL staged
+ * set — there is NO MCP-substitutable override (the A2/INV-6 lesson: a public
+ * diff override is an enforcement bypass).
+ */
+export function getStagedPaths(projectRoot: string): string[] | null {
+  if (!isGitRepo(projectRoot)) return null
+  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
+  if (raw === null) return null
+  return raw
+    .split('\0')
+    .map((p) => p.replace(/\\/g, '/'))
+    .filter((p) => p.length > 0)
+}
+
+/**
  * Return the unstaged diff (`git diff`) as a unified-diff string.
  * Same semantics as {@link getStagedDiff}.
  */

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import path, { join, resolve, dirname, isAbsolute, relative, basename } from 'path';
+import path, { join, resolve, dirname, isAbsolute, sep, relative, basename } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync } from 'fs';
@@ -3015,7 +3015,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve5.call(this, root, ref);
+      let _sch = resolve6.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3042,7 +3042,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve5(root, ref) {
+    function resolve6(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3673,7 +3673,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve5(baseURI, relativeURI, options) {
+    function resolve6(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3931,7 +3931,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve5,
+      resolve: resolve6,
       resolveComponent,
       equal,
       serialize,
@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join17 } = __require("path");
+    var { join: join19 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join17(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join19(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join17, isAbsolute: isAbsolute6, sep } = __require("path");
+    var { join: join19, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join17(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join19(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join17(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join19(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,12 +9461,12 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join17(__dirname$1, "..", "file.js");
+          return join19(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
           try {
-            const context = filePath === "node:repl" ? process.cwd() + sep : filePath;
+            const context = filePath === "node:repl" ? process.cwd() + sep2 : filePath;
             fixTarget2 = createRequire(context).resolve(origin);
             break;
           } catch (err) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join17 = ",";
+            let join19 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join17 = `,
+                join19 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join17;
+                res += join19;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join19}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join17 = `,
+              join19 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join17;
+                separator = join19;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join17;
+              separator = join19;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join17 = ",";
+            let join19 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join17 = `,
+                join19 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join17;
+                res += join19;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join17}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join19}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join17 = `,
+              join19 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join17;
+                separator = join19;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join18 = `,
+              const join20 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join18;
+                res2 += join20;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join18}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join17 = `,
+            const join19 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join17, maximumBreadth);
+              res += stringifyTypedArray(value, join19, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join17;
+              separator = join19;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join17;
+                separator = join19;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join17;
+              separator = join19;
             }
             if (separator !== "") {
               res = `
@@ -21311,7 +21311,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
+        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21328,7 +21328,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21406,7 +21406,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve5(parseResult.data);
+            resolve6(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -21667,12 +21667,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve5, interval);
+      const timeoutId = setTimeout(resolve6, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22533,12 +22533,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve5) => {
+    return new Promise((resolve6) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve5();
+        resolve6();
       } else {
-        this._stdout.once("drain", resolve5);
+        this._stdout.once("drain", resolve6);
       }
     });
   }
@@ -22637,6 +22637,16 @@ var RsctConfigSchema = external_exports.object({
     local: external_exports.string().min(1).optional(),
     remote: external_exports.string().min(1).optional()
   }).optional(),
+  // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
+  // rejects the whole config (rsct_installed=false → the contract gate can't
+  // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
+  // (a silently dropped `mode` would turn enforcement OFF with no signal —
+  // worse); the rejection surfaces via the forced `bounds_violation` audit.
+  topology: external_exports.object({
+    mode: external_exports.enum(["mono", "monorepo", "multi-repo"]),
+    confirmed_at: external_exports.string().optional(),
+    detected_signals: external_exports.array(external_exports.string().min(1)).optional()
+  }).strict().optional(),
   // `.min(1)`: empty array disables the default protection wholesale and
   // is the HIGH-4 vector. If a project genuinely wants zero protected
   // branches, it should uninstall `.rsct.json`.
@@ -22779,6 +22789,12 @@ function readGitState(projectRoot) {
 function getStagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
   return safeGitRaw(projectRoot, ["diff", "--cached", "--no-color", "-U0"]);
+}
+function getStagedPaths(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--name-only", "-z"]);
+  if (raw === null) return null;
+  return raw.split("\0").map((p) => p.replace(/\\/g, "/")).filter((p) => p.length > 0);
 }
 function getUnstagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
@@ -23352,6 +23368,117 @@ function getUniverse(config2, projectRoot, opts = {}) {
   return { block, hint };
 }
 
+// src/lib/topology.ts
+init_esm_shims();
+var NONE_BLOCK2 = {
+  confirmed_mode: null,
+  inferred_mode: "mono",
+  confidence: "high",
+  effective_mode: "mono",
+  signals: {
+    universe_available: false,
+    registered_apps_count: 0,
+    this_app_registered: false,
+    nested_app_markers: 0,
+    universe_external: false
+  }
+};
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  ".rsct",
+  "coverage",
+  "build",
+  "out",
+  "target"
+]);
+var APP_MARKERS = ["package.json", ".rsct.json", "CLAUDE.md"];
+function safeReaddir(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+function countNestedAppMarkers(projectRoot) {
+  const hasMarker = (dir) => APP_MARKERS.some((m) => existsSync(join(dir, m)));
+  let count = 0;
+  for (const e of safeReaddir(projectRoot)) {
+    if (!e.isDirectory() || SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
+    const lvl1 = join(projectRoot, e.name);
+    for (const se of safeReaddir(lvl1)) {
+      if (!se.isDirectory() || SKIP_DIRS.has(se.name)) continue;
+      if (hasMarker(join(lvl1, se.name))) count++;
+    }
+  }
+  return count;
+}
+function infer(s) {
+  if (!s.universe_available) {
+    if (s.nested_app_markers >= 2) return { inferred: "monorepo", confidence: "low" };
+    return { inferred: "mono", confidence: "high" };
+  }
+  if (s.registered_apps_count >= 2 && s.universe_external) {
+    return { inferred: "multi-repo", confidence: "high" };
+  }
+  if (s.nested_app_markers >= 2) return { inferred: "monorepo", confidence: "low" };
+  return { inferred: "mono", confidence: "medium" };
+}
+function buildTopologyHint(block, universeRoot) {
+  if (block.confirmed_mode !== "multi-repo") return null;
+  if (!universeRoot) {
+    return "Topology is confirmed multi-repo but no universe is linked \u2014 the contract-surface gate is INACTIVE. Run /rsct-canonical-source to link the org universe so rsct_request_commit can enforce contracts.";
+  }
+  if (!existsSync(join(universeRoot, "contracts.json"))) {
+    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing \u2014 the contract-surface gate is INACTIVE. Add a contracts.json (scaffold via /rsct-init-universe) to enforce contracts.`;
+  }
+  return null;
+}
+function detectTopology(config2, projectRoot, opts = {}, precomputedUniverse) {
+  if (!config2) return { block: NONE_BLOCK2, universe_root: null, hint: null };
+  let universeRoot = null;
+  let universeAvailable = false;
+  let registeredAppsCount = 0;
+  let thisAppRegistered = false;
+  try {
+    const { block: uni } = precomputedUniverse ?? getUniverse(config2, projectRoot, opts);
+    universeAvailable = uni.available;
+    universeRoot = uni.available ? uni.local_path : null;
+    registeredAppsCount = uni.registered_apps_count;
+    thisAppRegistered = uni.this_app_registered;
+  } catch {
+  }
+  const signals = {
+    universe_available: universeAvailable,
+    registered_apps_count: registeredAppsCount,
+    this_app_registered: thisAppRegistered,
+    nested_app_markers: countNestedAppMarkers(projectRoot),
+    // V FV2 — append path.sep to the prefix, else a sibling `<repo>-universe`
+    // (which shares the `<repo>` prefix) is misread as INTERNAL. RV2: a universe
+    // root EQUAL to the project root is internal (not external), so guard equality
+    // first (startsWith(p + sep) is false for p itself → would wrongly say external).
+    universe_external: universeRoot ? resolve(universeRoot) !== resolve(projectRoot) && !resolve(universeRoot).startsWith(resolve(projectRoot) + sep) : false
+  };
+  const { inferred, confidence } = infer(signals);
+  const confirmed = readConfirmedMode(config2);
+  const block = {
+    confirmed_mode: confirmed,
+    inferred_mode: inferred,
+    confidence,
+    effective_mode: confirmed ?? inferred,
+    signals
+  };
+  return { block, universe_root: universeRoot, hint: buildTopologyHint(block, universeRoot) };
+}
+function confirmedTopologyMode(config2) {
+  return readConfirmedMode(config2);
+}
+function readConfirmedMode(config2) {
+  const mode = config2?.topology?.mode;
+  return mode === "mono" || mode === "monorepo" || mode === "multi-repo" ? mode : null;
+}
+
 // src/lib/update-check.ts
 init_esm_shims();
 var REPO = "raphaelfnds/rsct-framework";
@@ -23471,6 +23598,8 @@ async function statusHandler(rawInput) {
   }
   const universe = getUniverse(resolution.config, resolution.root);
   if (universe.hint) hints.push(universe.hint);
+  const topology = detectTopology(resolution.config, resolution.root, {}, universe);
+  if (topology.hint) hints.push(topology.hint);
   const update = getUpdateNotice();
   if (update.hint) hints.push(update.hint);
   return {
@@ -23487,6 +23616,7 @@ async function statusHandler(rawInput) {
     git,
     worktree,
     universe: universe.block,
+    topology: topology.block,
     hints
   };
 }
@@ -23838,8 +23968,10 @@ async function loadContextHandler(rawInput) {
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse();
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse();
   const universe = getUniverse(resolution.config, resolution.root);
+  const topology = detectTopology(resolution.config, resolution.root, {}, universe);
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
   if (universe.hint) next_action_hints.push(universe.hint);
+  if (topology.hint) next_action_hints.push(topology.hint);
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION2 },
     rsct_installed: resolution.rsct_installed,
@@ -23863,6 +23995,7 @@ async function loadContextHandler(rawInput) {
     },
     knowledge,
     universe: universe.block,
+    topology: topology.block,
     next_action_hints
   };
 }
@@ -24885,6 +25018,146 @@ async function getUniverseHandler(rawInput) {
   };
 }
 
+// src/tools/get-topology.ts
+init_esm_shims();
+
+// src/lib/contracts.ts
+init_esm_shims();
+var EMPTY_CONTRACT_GRAPH = {
+  available: false,
+  contracts: [],
+  note: null
+};
+var MAX_CONTRACTS_JSON_BYTES = 1e6;
+function readContracts(universeRoot) {
+  if (!universeRoot) return EMPTY_CONTRACT_GRAPH;
+  try {
+    const p = join(universeRoot, "contracts.json");
+    if (!existsSync(p)) return EMPTY_CONTRACT_GRAPH;
+    if (statSync(p).size > MAX_CONTRACTS_JSON_BYTES) {
+      return { available: false, contracts: [], note: `contracts.json exceeds ${MAX_CONTRACTS_JSON_BYTES} bytes` };
+    }
+    const parsed = JSON.parse(readFileSync(p, "utf8"));
+    const raw = Array.isArray(parsed.contracts) ? parsed.contracts : [];
+    const contracts = [];
+    let dropped = 0;
+    for (const c of raw) {
+      if (isValidContract(c)) contracts.push(normalizeContract(c));
+      else dropped++;
+    }
+    const emptySurface = contracts.filter((c) => c.surface.length === 0).length;
+    const notes = [];
+    if (dropped > 0) {
+      notes.push(`${dropped} malformed contract ${dropped === 1 ? "entry" : "entries"} skipped`);
+    }
+    if (emptySurface > 0) {
+      notes.push(`${emptySurface} contract(s) have an empty surface and can never gate`);
+    }
+    return { available: true, contracts, note: notes.length > 0 ? notes.join("; ") : null };
+  } catch (e) {
+    return {
+      available: false,
+      contracts: [],
+      note: `contracts.json unreadable/malformed: ${e instanceof Error ? e.message : String(e)}`
+    };
+  }
+}
+function isValidContract(c) {
+  if (!c || typeof c !== "object") return false;
+  const o = c;
+  return typeof o.id === "string" && o.id.length > 0 && typeof o.producer === "string" && o.producer.length > 0 && Array.isArray(o.surface) && o.surface.every((s) => typeof s === "string") && Array.isArray(o.consumers) && o.consumers.every((s) => typeof s === "string");
+}
+function normalizeContract(c) {
+  const out = {
+    id: c.id,
+    producer: c.producer,
+    surface: c.surface.filter((s) => s.length > 0),
+    consumers: c.consumers.filter((s) => s.length > 0)
+  };
+  if (typeof c.description === "string" && c.description.length > 0) out.description = c.description;
+  return out;
+}
+function contractsTouchingPaths(graph, app, paths) {
+  if (!app) return [];
+  return graph.contracts.filter(
+    (c) => c.producer === app && paths.some((p) => matchesAnyGlob(p, c.surface).matched)
+  );
+}
+function contractsProducedBy(graph, app) {
+  if (!app) return [];
+  return graph.contracts.filter((c) => c.producer === app);
+}
+function contractsConsumedBy(graph, app) {
+  if (!app) return [];
+  return graph.contracts.filter((c) => c.consumers.includes(app));
+}
+function affectedConsumers(contracts) {
+  return [...new Set(contracts.flatMap((c) => c.consumers))].sort((a, b) => a.localeCompare(b));
+}
+
+// src/tools/get-topology.ts
+var getTopologyInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+}).strict();
+var getTopologyTool = {
+  name: "rsct_get_topology",
+  description: "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo \u2014 inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      }
+    },
+    additionalProperties: false
+  }
+};
+async function getTopologyHandler(rawInput) {
+  const input = getTopologyInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const appName = resolution.config?.app?.name ?? null;
+  const { block, universe_root, hint } = detectTopology(resolution.config, resolution.root);
+  const contracts = readContracts(universe_root);
+  const produced = contractsProducedBy(contracts, appName);
+  const consumed = contractsConsumedBy(contracts, appName);
+  const hints = [];
+  if (!resolution.rsct_installed) {
+    hints.push(
+      "No .rsct.json in this project \u2014 run /rsct-setup. Topology detection + contract enforcement need an rsct-managed project."
+    );
+  }
+  if (hint) hints.push(hint);
+  if (resolution.rsct_installed && block.confirmed_mode === null) {
+    hints.push(
+      `Topology not yet confirmed (inferred '${block.inferred_mode}', confidence ${block.confidence}). Run /rsct-setup to confirm + persist it \u2014 the contract gate stays OFF until a 'multi-repo' mode is confirmed.`
+    );
+  }
+  if (block.confirmed_mode !== null && block.confirmed_mode !== "multi-repo" && block.inferred_mode === "multi-repo" && block.confidence === "high") {
+    hints.push(
+      `Topology is confirmed '${block.confirmed_mode}' but the signals strongly suggest 'multi-repo' (${block.signals.registered_apps_count} registered apps in an external universe) \u2014 the contract gate is OFF. If this repo is multi-repo, re-run /rsct-setup to confirm it.`
+    );
+  }
+  if (block.confirmed_mode === "multi-repo" && contracts.available && produced.length > 0) {
+    const consumers = affectedConsumers(produced);
+    hints.push(
+      `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(", ") || "none listed"}). rsct_request_commit will BLOCK commits touching those surfaces unless dev_approval.override_contract_surface is given.`
+    );
+  }
+  if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`);
+  return {
+    rsct_installed: resolution.rsct_installed,
+    app_name: appName,
+    universe_available: block.signals.universe_available,
+    universe_path: universe_root,
+    topology: block,
+    contracts,
+    produced,
+    consumed,
+    hints
+  };
+}
+
 // src/tools/check-premise.ts
 init_esm_shims();
 
@@ -25571,7 +25844,11 @@ var DevApprovalSchema = external_exports.object({
   action_scope: external_exports.string().min(1, "action_scope required"),
   reason: external_exports.string().min(1, "reason required"),
   override_protected_branch: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
-  override_secrets_check: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional()
+  override_secrets_check: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
+  // T2/INV-7: waive the contract-surface block (multi-repo mode). Parallel to
+  // the other overrides — the token path carries none, so under a plan token a
+  // surface-touching commit is a hard block until a per-action dev_approval.
+  override_contract_surface: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional()
 }).strict();
 var EXPECTED_SCOPE_TOKEN = {
   rsct_request_commit: "commit",
@@ -26287,6 +26564,89 @@ message: ${input.message}`
       config2?.audit
     );
   }
+  const overrideContract = approval?.override_contract_surface;
+  const topoMode = confirmedTopologyMode(config2 ?? null);
+  let contractResult = {
+    mode: topoMode,
+    touched: [],
+    consumers: [],
+    override_used: false
+  };
+  let contractGateInactive = false;
+  if (topoMode === "multi-repo") {
+    const appName = config2?.app?.name ?? null;
+    let universeRoot = null;
+    try {
+      const r = resolveUniverseRoot(config2 ?? null, projectRoot);
+      universeRoot = r.kind === "found" ? r.path : null;
+    } catch {
+      universeRoot = null;
+    }
+    const graph = readContracts(universeRoot);
+    contractGateInactive = !graph.available;
+    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? [];
+    const hits2 = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : [];
+    if (hits2.length > 0) {
+      const ids = hits2.map((h) => h.id);
+      const consumers = affectedConsumers(hits2);
+      contractResult = { mode: "multi-repo", touched: ids, consumers, override_used: !!overrideContract };
+      if (!overrideContract) {
+        const reason = `commit touches contract surface(s) [${ids.join(", ")}] that other repos consume [${consumers.join(", ") || "none listed"}] \u2014 ${authorizedVia === "plan_token" ? "plan tokens never bypass the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }" : "pass dev_approval.override_contract_surface: { reason } to proceed (acknowledging the cross-repo blast radius)"}`;
+        const audit2 = appendAudit(
+          projectRoot,
+          {
+            event: "request_commit.rejected",
+            tool: "rsct_request_commit",
+            reject_kind: "contract_surface",
+            reason,
+            branch: gitState.branch,
+            channel,
+            authorized_via: authorizedVia,
+            contracts: ids,
+            consumers
+          },
+          config2?.audit
+        );
+        return {
+          status: "rejected",
+          branch: gitState.branch,
+          channel,
+          authorized_via: authorizedVia,
+          reject_kind: "contract_surface",
+          reason,
+          fabrication_signals: fabricationSignals,
+          sha_before: gitState.head_sha,
+          sha_after: null,
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: {
+            findings_count: findings.length,
+            findings,
+            override_used: findings.length > 0
+          },
+          contract_check: contractResult,
+          plan_token: null,
+          ...auditFields(audit2),
+          anti_replay_persisted: null,
+          anti_replay_error: null,
+          hints: [reason]
+        };
+      }
+      appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.override_invoked",
+          tool: "rsct_request_commit",
+          override_kind: "contract_surface",
+          override_reason: overrideContract.reason,
+          contracts: ids,
+          consumers,
+          branch: gitState.branch,
+          channel
+        },
+        config2?.audit
+      );
+    }
+  }
   let reservedToken = null;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
@@ -26327,6 +26687,7 @@ message: ${input.message}`
           override_used: false
         },
         plan_token: null,
+        contract_check: contractResult,
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
@@ -26374,6 +26735,7 @@ message: ${input.message}`
         override_used: findings.length > 0
       },
       plan_token: null,
+      contract_check: contractResult,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -26426,6 +26788,11 @@ message: ${input.message}`
   const hints = [
     `Committed ${commit.sha_after ?? "<unknown sha>"} on '${branchLabel}'.`
   ];
+  if (contractGateInactive) {
+    hints.push(
+      "\u26A0 topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) \u2014 the contract-surface gate did NOT enforce. Link the universe / add contracts.json to enable it."
+    );
+  }
   if (tokenSummary) {
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used;
     hints.push(
@@ -26479,6 +26846,7 @@ message: ${input.message}`
       override_used: findings.length > 0
     },
     plan_token: tokenSummary,
+    contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
@@ -31512,6 +31880,7 @@ var TOOLS = [
   getEnvironmentsTool,
   getArchitectureTool,
   getUniverseTool,
+  getTopologyTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -31547,6 +31916,7 @@ var HANDLERS = {
   rsct_get_environments: getEnvironmentsHandler,
   rsct_get_architecture: getArchitectureHandler,
   rsct_get_universe: getUniverseHandler,
+  rsct_get_topology: getTopologyHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,

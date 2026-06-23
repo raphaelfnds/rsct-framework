@@ -529,3 +529,88 @@ describe.skipIf(!BASH || !NODE)('block: update-check consent (01-setup 4.9 — T
     expect(cc).toContain('"latest_tag": "v9.9.9"') // preserved
   }, 60_000)
 })
+
+// --- Block 7: topology persistence (01-setup 4.10 — T2) ----------------------
+const TOPO_ANCHOR = 'Phase 4.10 executing canonical topology persistence'
+const TOPO_RSCT_JSON =
+  JSON.stringify(
+    { rsct_version: '1.0.0', app: { name: 'billing', org: 'acme' }, install: { mode: 'CREATE' } },
+    null,
+    2,
+  ) + '\n'
+
+describe.skipIf(!BASH)('block: topology persistence (01-setup 4.10 — T2)', () => {
+  it('inserts topology.mode into a .rsct.json without one (sibling install.mode untouched)', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': TOPO_RSCT_JSON },
+      env: { TOPOLOGY_MODE: 'multi-repo' },
+    })
+    const o = JSON.parse(readIn(r, '.rsct.json'))
+    expect(o.topology.mode).toBe('multi-repo')
+    expect(o.install.mode).toBe('CREATE') // sibling "mode" key NOT clobbered
+    expect(o.rsct_version).toBe('1.0.0')
+  }, 60_000)
+
+  it('updates an existing topology.mode in place (one key)', () => {
+    const withTopo =
+      JSON.stringify({ rsct_version: '1.0.0', topology: { mode: 'mono' }, app: { name: 'b', org: 'a' } }, null, 2) +
+      '\n'
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': withTopo },
+      env: { TOPOLOGY_MODE: 'multi-repo' },
+    })
+    const json = readIn(r, '.rsct.json')
+    expect(JSON.parse(json).topology.mode).toBe('multi-repo')
+    expect((json.match(/"topology"/g) ?? []).length).toBe(1)
+  }, 60_000)
+
+  it('idempotent — re-run yields exactly one topology key', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': TOPO_RSCT_JSON },
+      env: { TOPOLOGY_MODE: 'monorepo' },
+      runs: 2,
+    })
+    const json = readIn(r, '.rsct.json')
+    expect((json.match(/"topology"/g) ?? []).length).toBe(1)
+    expect(JSON.parse(json).topology.mode).toBe('monorepo')
+  }, 60_000)
+
+  it('CRLF .rsct.json — persists, install.mode untouched', () => {
+    const crlf = TOPO_RSCT_JSON.replace(/\n/g, '\r\n')
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': crlf },
+      env: { TOPOLOGY_MODE: 'multi-repo' },
+    })
+    const o = JSON.parse(readIn(r, '.rsct.json'))
+    expect(o.topology.mode).toBe('multi-repo')
+    expect(o.install.mode).toBe('CREATE')
+  }, 60_000)
+
+  it('invalid TOPOLOGY_MODE → not written (gate stays off)', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': TOPO_RSCT_JSON },
+      env: { TOPOLOGY_MODE: 'bogus' },
+    })
+    expect(readIn(r, '.rsct.json')).not.toContain('"topology"')
+    expect(r.out).toMatch(/No valid topology/)
+  }, 60_000)
+
+  it('no TOPOLOGY_MODE → no-op', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: TOPO_ANCHOR,
+      seedFiles: { '.rsct.json': TOPO_RSCT_JSON },
+    })
+    expect(readIn(r, '.rsct.json')).not.toContain('"topology"')
+  }, 60_000)
+})

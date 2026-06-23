@@ -5,6 +5,7 @@ import { findActivePlan, findPlanBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
   getStagedDiff,
+  getStagedPaths,
   gitCommit,
   readGitState,
   type GitExecutor,
@@ -49,6 +50,13 @@ import {
   consumeTokenAction,
   type TokenInvalidReason,
 } from '../lib/plan-authorization.js'
+import { confirmedTopologyMode } from '../lib/topology.js'
+import { resolveUniverseRoot } from '../lib/universe.js'
+import {
+  readContracts,
+  contractsTouchingPaths,
+  affectedConsumers,
+} from '../lib/contracts.js'
 
 export const requestCommitInputSchema = z
   .object({
@@ -77,6 +85,7 @@ export type RequestCommitRejectKind =
   | GateRejectKind
   | 'protected_branch'
   | 'secrets'
+  | 'contract_surface'
   | 'plan_token_invalid'
 
 /** How the commit was authorized: a per-action dev_approval or a plan token. */
@@ -84,6 +93,17 @@ export type CommitAuthVia = 'dev_approval' | 'plan_token'
 
 /** Commit authorization channel — the gate channels plus the T3 plan-token path. */
 export type CommitChannel = GateChannel | 'plan_token'
+
+/** T2/INV-7: the contract-surface gate result (multi-repo only). */
+export interface ContractCheckResult {
+  /** The CONFIRMED topology mode the gate saw (null when unconfirmed). */
+  mode: 'mono' | 'monorepo' | 'multi-repo' | null
+  /** Contract ids whose produced surface the staged diff touched. */
+  touched: string[]
+  /** Affected consumer apps (sorted union across touched contracts). */
+  consumers: string[]
+  override_used: boolean
+}
 
 export interface RequestCommitOutput {
   status: RequestCommitStatus
@@ -105,6 +125,8 @@ export interface RequestCommitOutput {
     findings: SecretFinding[]
     override_used: boolean
   }
+  /** T2/INV-7: contract-surface gate result (omitted on rejects before INV-7 runs). */
+  contract_check?: ContractCheckResult | null
   /** T3: plan-token budget after this commit (null when not a token commit). */
   plan_token?: {
     plan_slug: string
@@ -155,6 +177,12 @@ export interface RequestCommitInternal {
    * fabricated-diff hole; A2).
    */
   stagedDiffOverride?: string
+  /**
+   * Test-only seam: substitute the staged file list (`git diff --cached
+   * --name-only`) so the INV-7 contract-surface gate can be exercised without a
+   * real git repo. NOT an MCP input (same posture as stagedDiffOverride).
+   */
+  stagedPathsOverride?: string[]
   /**
    * Test-only seam: replace `appendAuditEntry`. Production uses the
    * default lib helper; tests inject simulated I/O failures to verify
@@ -465,6 +493,107 @@ export async function requestCommitHandler(
     )
   }
 
+  // INV-7 (T2): contract-surface gate. Diverges ONLY on a CONFIRMED multi-repo
+  // topology (the dev confirmed it at /rsct-setup — an unconfirmed/inferred mode
+  // never gates). In multi-repo mode, a commit touching a contract surface THIS
+  // app PRODUCES is blocked so the cross-repo blast radius is acknowledged, unless
+  // a per-action dev_approval carries override_contract_surface. mono/monorepo, no
+  // universe/manifest, or no produced surface touched → no-op (degrade-to-today).
+  // The token path carries no overrides → a surface-touching commit under a token
+  // is a hard block. Scans the REAL staged set (the override is a test-only seam).
+  const overrideContract = approval?.override_contract_surface
+  const topoMode = confirmedTopologyMode(config ?? null)
+  let contractResult: ContractCheckResult = {
+    mode: topoMode,
+    touched: [],
+    consumers: [],
+    override_used: false,
+  }
+  // RV3: surface a multi-repo commit where the gate could NOT enforce (no universe
+  // linked / no readable contracts.json) so the inactive gate isn't silent at commit.
+  let contractGateInactive = false
+  if (topoMode === 'multi-repo') {
+    const appName = config?.app?.name ?? null
+    let universeRoot: string | null = null
+    try {
+      const r = resolveUniverseRoot(config ?? null, projectRoot)
+      universeRoot = r.kind === 'found' ? r.path : null
+    } catch {
+      universeRoot = null
+    }
+    const graph = readContracts(universeRoot)
+    contractGateInactive = !graph.available
+    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
+    const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
+    if (hits.length > 0) {
+      const ids = hits.map((h) => h.id)
+      const consumers = affectedConsumers(hits)
+      contractResult = { mode: 'multi-repo', touched: ids, consumers, override_used: !!overrideContract }
+      if (!overrideContract) {
+        const reason = `commit touches contract surface(s) [${ids.join(', ')}] that other repos consume [${
+          consumers.join(', ') || 'none listed'
+        }] — ${
+          authorizedVia === 'plan_token'
+            ? 'plan tokens never bypass the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }'
+            : 'pass dev_approval.override_contract_surface: { reason } to proceed (acknowledging the cross-repo blast radius)'
+        }`
+        const audit = appendAudit(
+          projectRoot,
+          {
+            event: 'request_commit.rejected',
+            tool: 'rsct_request_commit',
+            reject_kind: 'contract_surface',
+            reason,
+            branch: gitState.branch,
+            channel,
+            authorized_via: authorizedVia,
+            contracts: ids,
+            consumers,
+          },
+          config?.audit,
+        )
+        return {
+          status: 'rejected',
+          branch: gitState.branch,
+          channel,
+          authorized_via: authorizedVia,
+          reject_kind: 'contract_surface',
+          reason,
+          fabrication_signals: fabricationSignals,
+          sha_before: gitState.head_sha,
+          sha_after: null,
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: {
+            findings_count: findings.length,
+            findings,
+            override_used: findings.length > 0,
+          },
+          contract_check: contractResult,
+          plan_token: null,
+          ...auditFields(audit),
+          anti_replay_persisted: null,
+          anti_replay_error: null,
+          hints: [reason],
+        }
+      }
+      // Override invoked — audit the waiver (parallel to the secrets override).
+      appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.override_invoked',
+          tool: 'rsct_request_commit',
+          override_kind: 'contract_surface',
+          override_reason: overrideContract.reason,
+          contracts: ids,
+          consumers,
+          branch: gitState.branch,
+          channel,
+        },
+        config?.audit,
+      )
+    }
+  }
+
   // Token path (T3 / review FV): RESERVE the action by debiting the counter
   // BEFORE the commit. If the debit can't persist, REFUSE to commit — the bound
   // must be mechanically enforceable, so "can't record the spend" ⇒ "can't
@@ -515,6 +644,7 @@ export async function requestCommitHandler(
           override_used: false,
         },
         plan_token: null,
+        contract_check: contractResult,
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
@@ -569,6 +699,7 @@ export async function requestCommitHandler(
         override_used: findings.length > 0,
       },
       plan_token: null,
+      contract_check: contractResult,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -633,6 +764,14 @@ export async function requestCommitHandler(
   const hints: string[] = [
     `Committed ${commit.sha_after ?? '<unknown sha>'} on '${branchLabel}'.`,
   ]
+  // RV3: a confirmed multi-repo commit where the gate could not enforce (no
+  // universe linked / no readable contracts.json) — say so at commit time, not
+  // only in the read tools (the FV1 philosophy: the inactive gate is never silent).
+  if (contractGateInactive) {
+    hints.push(
+      '⚠ topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) — the contract-surface gate did NOT enforce. Link the universe / add contracts.json to enable it.',
+    )
+  }
   if (tokenSummary) {
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used
     hints.push(
@@ -696,6 +835,7 @@ export async function requestCommitHandler(
       override_used: findings.length > 0,
     },
     plan_token: tokenSummary,
+    contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
