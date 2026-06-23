@@ -378,7 +378,7 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 **plan-scoped batch token** (see `rsct_plan_authorize`). The token path carries
 no overrides, so a protected branch or a secret finding still rejects.
 
-- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token), `staged_diff_override?` (test seam)
+- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`), `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 
 Approval consumption rule: never burn the approval on pre-mutation

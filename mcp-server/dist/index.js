@@ -25832,9 +25832,6 @@ var requestCommitInputSchema = external_exports.object({
   message: external_exports.string().min(1, "commit message required").describe("Commit message to pass to `git commit -m`."),
   dev_approval: external_exports.unknown().optional().describe(
     "The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action \xA7C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) \u2014 but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff."
-  ),
-  staged_diff_override: external_exports.string().optional().describe(
-    "Programmatic override of `git diff --cached` for testing. Bypasses the real git fetch."
   )
 }).strict();
 var requestCommitTool = {
@@ -25854,10 +25851,6 @@ var requestCommitTool = {
       dev_approval: {
         type: "object",
         description: "OPTIONAL dev_approval payload (timestamp, action_scope, reason, optional overrides). Omit to authorize via an active plan token (rsct_plan_authorize)."
-      },
-      staged_diff_override: {
-        type: "string",
-        description: "For tests: substitute the staged diff with this unified-diff string."
       }
     },
     required: ["message"],
@@ -26049,7 +26042,7 @@ message: ${input.message}`
       config2?.audit
     );
   }
-  const diff = authorizedVia !== "plan_token" && input.staged_diff_override !== void 0 ? input.staged_diff_override : getStagedDiff(projectRoot) ?? "";
+  const diff = internal.stagedDiffOverride ?? getStagedDiff(projectRoot) ?? "";
   const extras = compileExtraPatterns(config2?.secrets_extra_patterns ?? []).compiled;
   const findings = scanDiffForSecrets(diff, extras);
   if (findings.length > 0 && !overrideSecrets) {

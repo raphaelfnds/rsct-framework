@@ -109,6 +109,23 @@ function cleanDiff(): string {
 
 const COMMIT_OK: GitExecResult = { ok: true, stdout: '', stderr: '', exitCode: 0 }
 
+// A2 (INV-6 hardening): `staged_diff_override` is no longer a PUBLIC MCP input —
+// the staged-diff test seam now lives on `internal.stagedDiffOverride`. This
+// adapter keeps the existing call-sites readable by lifting a `staged_diff_override`
+// key from the input object into the internal seam. Tests that assert the PUBLIC
+// input is now rejected call `requestCommitHandler` DIRECTLY (see the A2 test below).
+function callCommit(
+  input: Record<string, unknown>,
+  internal: RequestCommitInternal = {},
+): Promise<RequestCommitOutput> {
+  const { staged_diff_override, ...rest } = input
+  const merged: RequestCommitInternal =
+    typeof staged_diff_override === 'string'
+      ? { ...internal, stagedDiffOverride: staged_diff_override }
+      : internal
+  return requestCommitHandler(rest, merged)
+}
+
 describe('rsct_request_commit — happy path', () => {
   it('commits on a non-protected branch with no findings and writes audit', async () => {
     writeConfig(tmpRoot, rsctConfig())
@@ -121,7 +138,7 @@ describe('rsct_request_commit — happy path', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -140,7 +157,7 @@ describe('rsct_request_commit — happy path', () => {
     expect(existsSync(join(tmpRoot, '.rsct', 'audit.log'))).toBe(true)
 
     // Approval consumed: a second call with the same approval must reject as 'reused'.
-    const out2 = (await requestCommitHandler(
+    const out2 = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -174,7 +191,7 @@ describe('rsct_request_commit — CAP-53 plan-tracking reminder', () => {
       join(tmpRoot, 'plan_foo.md'),
       '# Plan\n\n| Field | Value |\n|---|---|\n| Status | in progress |\n',
     )
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x', dev_approval: approval(), staged_diff_override: cleanDiff() },
       COMMIT_INTERNAL('feat/foo'),
     )) as RequestCommitOutput
@@ -184,7 +201,7 @@ describe('rsct_request_commit — CAP-53 plan-tracking reminder', () => {
 
   it('does NOT hint when no plan/spec file exists', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x', dev_approval: approval(), staged_diff_override: cleanDiff() },
       COMMIT_INTERNAL('feat/bar'),
     )) as RequestCommitOutput
@@ -205,7 +222,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -253,7 +270,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -272,7 +289,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
 describe('rsct_request_commit — branch protection (INV-5)', () => {
   it('rejects with protected_branch when on main without override', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -294,7 +311,7 @@ describe('rsct_request_commit — branch protection (INV-5)', () => {
 
   it('commits on a protected branch when override_protected_branch is provided', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'hotfix: x',
@@ -323,7 +340,7 @@ describe('rsct_request_commit — branch protection (INV-5)', () => {
 describe('rsct_request_commit — secrets scan (INV-6)', () => {
   it('rejects with secrets when staged diff contains a credential and no override', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -345,7 +362,7 @@ describe('rsct_request_commit — secrets scan (INV-6)', () => {
 
   it('commits when override_secrets_check is provided', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -372,7 +389,7 @@ describe('rsct_request_commit — secrets scan (INV-6)', () => {
 describe('rsct_request_commit — dialog refusal', () => {
   it('rejects with dialog_no when the dev says No', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -409,7 +426,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -424,7 +441,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
 
     // Retry with the SAME approval should NOT be 'reused' — mutation_failed
     // does not burn the approval. (We swap the executor to a success path.)
-    const out2 = (await requestCommitHandler(
+    const out2 = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -443,7 +460,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
 describe('rsct_request_commit — schema validation', () => {
   it('rejects unknown input keys (zod strict)', async () => {
     await expect(
-      requestCommitHandler({
+      callCommit({
         project_root: tmpRoot,
         message: 'm',
         dev_approval: approval(),
@@ -454,7 +471,7 @@ describe('rsct_request_commit — schema validation', () => {
 
   it('rejects when message is missing', async () => {
     await expect(
-      requestCommitHandler({
+      callCommit({
         project_root: tmpRoot,
         dev_approval: approval(),
       }),
@@ -470,7 +487,7 @@ describe('rsct_request_commit — reused detection via external pre-seed', () =>
       projectRoot: tmpRoot,
       now: new Date(FIXED_NOW.getTime() - 10_000),
     })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -504,7 +521,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
         error: 'simulated disk full',
       }),
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -539,7 +556,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
         error: 'simulated atomic rename failed',
       }),
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -570,7 +587,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
       promptFn: dialog({ response: 'no', channel: 'windows' }),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -648,7 +665,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writePlanFile()
     seedState({ plan_authorization: tokenBlock() })
 
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -666,7 +683,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -677,7 +694,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
 
   it('rejects when no dev_approval and no token (absent)', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -689,7 +706,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ actions_used: 5, max_actions: 5 }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -705,7 +722,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
         expires_at: new Date(FIXED_NOW.getTime() - 60_000).toISOString(),
       }),
     })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -717,7 +734,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ branch: 'feat/foo' }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal({ gitStateOverride: gitState('feat/other') }),
     )) as RequestCommitOutput
@@ -729,7 +746,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     // no plan_t3.md written
     seedState({ plan_authorization: tokenBlock() })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -741,7 +758,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ branch: 'main' }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal({ gitStateOverride: gitState('main') }),
     )) as RequestCommitOutput
@@ -751,18 +768,20 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
   })
 
-  it('RV4: token path IGNORES staged_diff_override (cannot fake a clean diff)', async () => {
-    // Non-git tmpRoot → real getStagedDiff is null → empty → clean. Passing a
-    // dirty override must NOT be honored on the token path, so the commit lands.
+  it('A2: staged_diff_override is no longer a PUBLIC input (zod strict rejects it)', async () => {
+    // The fabricated-diff INV-6 bypass is closed: the diff seam moved to the
+    // test-only internal arg, so passing staged_diff_override as MCP input is now
+    // an unknown key. Call the handler DIRECTLY (bypass the callCommit adapter,
+    // which would strip the key) to prove the raw input is rejected.
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock() })
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'feat: x', staged_diff_override: dirtyDiff() },
-      tokenInternal(),
-    )) as RequestCommitOutput
-    expect(out.status).toBe('committed')
-    expect(out.secrets_check.findings_count).toBe(0)
+    await expect(
+      requestCommitHandler(
+        { project_root: tmpRoot, message: 'feat: x', staged_diff_override: dirtyDiff() },
+        tokenInternal(),
+      ),
+    ).rejects.toThrow()
   })
 
   it.skipIf(!GIT)('INV-6: token path rejects a REAL staged secret (scans git diff --cached)', async () => {
@@ -776,7 +795,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeFileSync(join(tmpRoot, 'app.env'), 'API_KEY=sk-AAAAAAAAAAAAAAAAAAAAAAAA\n')
     execFileSync('git', ['add', 'app.env'], { cwd: tmpRoot, stdio: 'ignore' })
 
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal(),
     )) as RequestCommitOutput
@@ -790,7 +809,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ actions_used: 2 }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
       tokenInternal({
         gitExecutor: gitExecutorMock(
@@ -808,7 +827,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',

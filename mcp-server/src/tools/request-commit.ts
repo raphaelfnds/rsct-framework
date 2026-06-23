@@ -66,12 +66,6 @@ export const requestCommitInputSchema = z
       .describe(
         'The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action §C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) — but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff.',
       ),
-    staged_diff_override: z
-      .string()
-      .optional()
-      .describe(
-        'Programmatic override of `git diff --cached` for testing. Bypasses the real git fetch.',
-      ),
   })
   .strict()
 
@@ -154,6 +148,14 @@ export interface RequestCommitInternal {
    */
   gitStateOverride?: GitState
   /**
+   * Test-only seam: substitute the staged diff (`git diff --cached`) so the
+   * INV-6 secrets scan can be exercised without a real git repo. NOT an MCP
+   * input — the dispatch calls the handler with no `internal`, so a real caller
+   * can never use it to bypass the real scan (closes the pre-existing INV-6
+   * fabricated-diff hole; A2).
+   */
+  stagedDiffOverride?: string
+  /**
    * Test-only seam: replace `appendAuditEntry`. Production uses the
    * default lib helper; tests inject simulated I/O failures to verify
    * the post-mutation surface (`audit_error` + warning hint).
@@ -186,11 +188,6 @@ export const requestCommitTool: Tool = {
         type: 'object',
         description:
           'OPTIONAL dev_approval payload (timestamp, action_scope, reason, optional overrides). Omit to authorize via an active plan token (rsct_plan_authorize).',
-      },
-      staged_diff_override: {
-        type: 'string',
-        description:
-          'For tests: substitute the staged diff with this unified-diff string.',
       },
     },
     required: ['message'],
@@ -404,14 +401,11 @@ export async function requestCommitHandler(
     )
   }
 
-  // INV-6: scan the staged diff for secrets. `staged_diff_override` is a test
-  // seam honored ONLY on the per-action dev_approval path — the plan-token path
-  // ALWAYS scans the real `git diff --cached`, so a token commit (which carries
-  // no override) can never feed a fabricated clean diff to the scanner.
-  const diff =
-    authorizedVia !== 'plan_token' && input.staged_diff_override !== undefined
-      ? input.staged_diff_override
-      : getStagedDiff(projectRoot) ?? ''
+  // INV-6: scan the staged diff for secrets. `internal.stagedDiffOverride` is a
+  // TEST-ONLY seam (not an MCP input — the dispatch passes no `internal`), so a
+  // real caller can never substitute a fabricated diff; production ALWAYS scans
+  // the real `git diff --cached` on both the dev_approval and plan-token paths.
+  const diff = internal.stagedDiffOverride ?? getStagedDiff(projectRoot) ?? ''
   const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
   const findings = scanDiffForSecrets(diff, extras)
 
