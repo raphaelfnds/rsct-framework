@@ -189,7 +189,7 @@ export function startPhaseGeneric(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? 'unknown'}). Wait and retry.`,
+      `⚠ another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}). Wait and retry.`,
     )
   } else {
     hints.push(`⚠ phase-state.json write failed: ${writeResult.error}.`)
@@ -359,7 +359,7 @@ export async function gatePhaseComplete(
     toolName: `rsct_phase_${input.phase}_complete`,
     approval: input.devApproval,
     dialog: {
-      title: `RSCT §C — ${input.phase} complete`,
+      title: `RSCT — ${input.phase} complete`,
       message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`,
     },
     projectRoot: input.projectRoot,
@@ -445,7 +445,7 @@ export async function gatePhaseComplete(
     }
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ ${input.phase} complete approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms). State may be inconsistent.`,
+      `⚠ ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`,
     )
   } else {
     hints.push(

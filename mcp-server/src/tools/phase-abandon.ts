@@ -153,7 +153,7 @@ export async function phaseAbandonHandler(
     toolName: 'rsct_phase_abandon',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — abandon phase',
+      title: 'RSCT — abandon phase',
       message: `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ''}?\n\nReason: ${input.reason}\n\nThis discards the phase without advancing the RSCT cycle.`,
     },
     projectRoot,
@@ -226,7 +226,7 @@ export async function phaseAbandonHandler(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ Abandon approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms). Retry; state may be inconsistent until then.`,
+      `⚠ Abandon approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). Retry; state may be inconsistent until then.`,
     )
   } else {
     hints.push(

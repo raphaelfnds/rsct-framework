@@ -324,7 +324,7 @@ export async function captureIssueHandler(
     toolName: 'rsct_capture_issue',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — create GitHub issue',
+      title: 'RSCT — create GitHub issue',
       message: `Create issue '${input.title}' (severity=${input.severity})?\n\nLabels: ${labels.join(', ')}\nGH CLI will run in '${projectRoot}'.`,
     },
     projectRoot,

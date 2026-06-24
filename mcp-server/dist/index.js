@@ -23114,7 +23114,7 @@ function evaluateBootstrapMarker(args) {
       status: "missing",
       bootstrap_at: null,
       age_ms: null,
-      hint: `\u26A0 bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). CLAUDE.md \xA70 mandates \xA70 bootstrap at session start \u2014 run rsct_status and rsct_load_context first.`
+      hint: `\u26A0 bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). Run rsct_status and rsct_load_context first \u2014 they establish the session baseline RSCT needs.`
     };
   }
   const stampedMs = new Date(stamped).getTime();
@@ -23637,7 +23637,7 @@ function buildStatusHints(resolution, git) {
   const protected_branches = resolution.config?.protected_branches ?? [];
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
-      `Current branch '${git.branch}' is in protected_branches. \xA7D requires a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with dev before proposing changes.`
+      `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with the dev before proposing changes.`
     );
   }
   if (git.available && git.is_clean === false) {
@@ -23647,7 +23647,7 @@ function buildStatusHints(resolution, git) {
   }
   if (!resolution.config?.test_framework) {
     hints.push(
-      "No test_framework recorded in .rsct.json \u2014 \xA7G testing strategy will need explicit dev input until detected."
+      "No test_framework recorded in .rsct.json \u2014 the testing strategy needs explicit dev input until detected."
     );
   }
   return hints;
@@ -24009,14 +24009,14 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
   const hints = [];
   if (!resolution.rsct_installed) {
     hints.push(
-      "Project is not rsct-managed yet \u2014 recommend `/rsct-setup` before applying \xA7B-\xA7H workflow."
+      "Project is not rsct-managed yet \u2014 recommend `/rsct-setup` before applying the RSCT workflow."
     );
     return hints;
   }
   const protected_branches = resolution.config?.protected_branches ?? [];
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
-      `On protected branch '${git.branch}' \u2014 \xA7D blocks mutating git ops without a per-action OK. Suggest deriving a branch before code phase.`
+      `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
     );
   }
   if (active_phase) {
@@ -24037,11 +24037,11 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
     );
     if (active_plan.branch && git.available && git.branch && active_plan.branch !== git.branch) {
       hints.push(
-        `Plan branch '${active_plan.branch}' differs from current branch '${git.branch}'. \xA7D recommends asking dev which branch to continue in.`
+        `Plan branch '${active_plan.branch}' differs from the current branch '${git.branch}' \u2014 ask the dev which branch to continue in.`
       );
     }
   } else {
-    hints.push("No active plan file detected \u2014 \xA7B requires a plan before code editing for tasks above trivial tier.");
+    hints.push("No active plan file detected \u2014 a plan is required before code editing for tasks above the trivial tier.");
   }
   if (!knowledge.directory_exists) {
     hints.push(
@@ -26464,7 +26464,7 @@ async function gateRequest(opts) {
     if (dialog.response === "no") {
       return {
         status: "rejected",
-        reason: "dev declined the \xA7C dialog (forced by fabrication signals)",
+        reason: "dev declined the approval dialog (it was forced because the approval looked auto-generated)",
         reject_kind: "dialog_no",
         fabrication_signals: validation.fabrication_signals
       };
@@ -26487,7 +26487,7 @@ async function gateRequest(opts) {
   if (dialog.response === "no") {
     return {
       status: "rejected",
-      reason: "dev declined the \xA7C dialog",
+      reason: "dev declined the approval dialog",
       reject_kind: "dialog_no",
       fabrication_signals: validation.fabrication_signals
     };
@@ -26649,7 +26649,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
       toolName: "rsct_request_commit",
       approval: input.dev_approval,
       dialog: {
-        title: "RSCT \xA7C \u2014 commit approval",
+        title: "RSCT \u2014 commit approval",
         message: `Approve commit on '${branchLabel}'?
 
 message: ${input.message}`
@@ -26938,7 +26938,7 @@ message: ${input.message}`
       plan_authorization: reservedToken
     });
     if (!reserve.ok) {
-      const detail = reserve.reason === "locked" ? `phase-state.json locked (held ${reserve.lock_age_ms}ms)` : reserve.error;
+      const detail = reserve.reason === "locked" ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)` : reserve.error;
       const reason = `could not reserve a plan-token action (${detail}) \u2014 retry, or commit with a per-action dev_approval`;
       const audit2 = appendAudit(
         projectRoot,
@@ -27195,7 +27195,7 @@ async function requestPushHandler(rawInput, internal = {}) {
     toolName: "rsct_request_push",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 push approval",
+      title: "RSCT \u2014 push approval",
       message: `Approve push of '${branchLabel}' to '${remote}'?`
     },
     projectRoot,
@@ -27475,7 +27475,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
     toolName: "rsct_request_merge",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 merge approval",
+      title: "RSCT \u2014 merge approval",
       message: `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`
     },
     projectRoot,
@@ -27959,7 +27959,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
   const newState = { ...baseState, plan_authorization: token };
   const writeResult = writePhaseState(projectRoot, newState);
   if (!writeResult.ok) {
-    const reason = writeResult.reason === "locked" ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
+    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -28091,7 +28091,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
   const newState = clearTokenFromState(baseState);
   const writeResult = writePhaseState(projectRoot, newState);
   if (!writeResult.ok) {
-    const reason = writeResult.reason === "locked" ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
+    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -28754,7 +28754,7 @@ async function phaseVerificationStartHandler(rawInput) {
     );
   } else if (writeResult.reason === "locked") {
     hints.push(
-      `\u26A0 phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? "unknown"}). Another writer is active \u2014 wait and retry. Verification ran but state was not persisted.`
+      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry. Verification ran but state was not persisted.`
     );
   } else {
     hints.push(
@@ -28971,7 +28971,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     toolName: "rsct_phase_verification_complete",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 verification complete",
+      title: "RSCT \u2014 verification complete",
       message: `Complete V phase for spec '${input.spec_ref}'?
 
 ${input.findings_actions.length} action(s): ${summary["address-now"]} address-now, ${summary["capture-as-issue"]} capture, ${summary.defer} defer, ${summary.accept} accept`
@@ -29069,7 +29069,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     );
   } else if (writeResult.reason === "locked") {
     hints.push(
-      `\u26A0 V phase approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? "unknown"}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`
+      `\u26A0 V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`
     );
   } else {
     hints.push(
@@ -29663,7 +29663,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     );
   } else if (writeResult.reason === "locked") {
     hints.push(
-      `\u26A0 phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
+      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
     );
   } else {
     hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
@@ -29779,7 +29779,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     toolName: `rsct_phase_${input.phase}_complete`,
     approval: input.devApproval,
     dialog: {
-      title: `RSCT \xA7C \u2014 ${input.phase} complete`,
+      title: `RSCT \u2014 ${input.phase} complete`,
       message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
     },
     projectRoot: input.projectRoot,
@@ -29859,7 +29859,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     }
   } else if (writeResult.reason === "locked") {
     hints.push(
-      `\u26A0 ${input.phase} complete approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms). State may be inconsistent.`
+      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
     );
   } else {
     hints.push(
@@ -30661,7 +30661,7 @@ async function phaseAbandonHandler(rawInput, internal = {}) {
     toolName: "rsct_phase_abandon",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 abandon phase",
+      title: "RSCT \u2014 abandon phase",
       message: `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ""}?
 
 Reason: ${input.reason}
@@ -30734,7 +30734,7 @@ This discards the phase without advancing the RSCT cycle.`
     );
   } else if (writeResult.reason === "locked") {
     hints.push(
-      `\u26A0 Abandon approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms). Retry; state may be inconsistent until then.`
+      `\u26A0 Abandon approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). Retry; state may be inconsistent until then.`
     );
   } else {
     hints.push(
@@ -31021,7 +31021,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
     toolName: "rsct_capture_issue",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 create GitHub issue",
+      title: "RSCT \u2014 create GitHub issue",
       message: `Create issue '${input.title}' (severity=${input.severity})?
 
 Labels: ${labels.join(", ")}

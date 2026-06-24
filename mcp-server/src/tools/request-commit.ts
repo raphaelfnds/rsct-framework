@@ -270,7 +270,7 @@ export async function requestCommitHandler(
       toolName: 'rsct_request_commit',
       approval: input.dev_approval,
       dialog: {
-        title: 'RSCT §C — commit approval',
+        title: 'RSCT — commit approval',
         message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}`,
       },
       projectRoot,
@@ -611,7 +611,7 @@ export async function requestCommitHandler(
     if (!reserve.ok) {
       const detail =
         reserve.reason === 'locked'
-          ? `phase-state.json locked (held ${reserve.lock_age_ms}ms)`
+          ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)`
           : reserve.error
       const reason = `could not reserve a plan-token action (${detail}) — retry, or commit with a per-action dev_approval`
       const audit = appendAudit(

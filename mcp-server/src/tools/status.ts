@@ -136,7 +136,7 @@ function buildStatusHints(
   const protected_branches = resolution.config?.protected_branches ?? []
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
-      `Current branch '${git.branch}' is in protected_branches. §D requires a derived branch (feat/, fix/, chore/, docs/) for any mutating work — confirm with dev before proposing changes.`,
+      `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work — confirm with the dev before proposing changes.`,
     )
   }
 
@@ -148,7 +148,7 @@ function buildStatusHints(
 
   if (!resolution.config?.test_framework) {
     hints.push(
-      'No test_framework recorded in .rsct.json — §G testing strategy will need explicit dev input until detected.',
+      'No test_framework recorded in .rsct.json — the testing strategy needs explicit dev input until detected.',
     )
   }
 

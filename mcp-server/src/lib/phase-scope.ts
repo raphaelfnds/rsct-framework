@@ -433,7 +433,7 @@ export function evaluateBootstrapMarker(args: {
       status: 'missing',
       bootstrap_at: null,
       age_ms: null,
-      hint: `⚠ bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). CLAUDE.md §0 mandates §0 bootstrap at session start — run rsct_status and rsct_load_context first.`,
+      hint: `⚠ bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). Run rsct_status and rsct_load_context first — they establish the session baseline RSCT needs.`,
     }
   }
   const stampedMs = new Date(stamped).getTime()

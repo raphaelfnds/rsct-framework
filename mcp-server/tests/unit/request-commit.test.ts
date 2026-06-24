@@ -236,6 +236,8 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
     expect(out.bootstrap_marker).toBeDefined()
     expect(out.bootstrap_marker?.status).toBe('missing')
     expect(out.hints.some((h) => h.includes('bootstrap not detected'))).toBe(true)
+    // DX-2b regression fence: no user-facing hint leaks a bare section symbol (§).
+    expect(out.hints.join(' ')).not.toContain('§')
 
     const auditLines = require('node:fs')
       .readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')

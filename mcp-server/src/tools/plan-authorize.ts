@@ -298,7 +298,7 @@ export async function planAuthorizeHandler(
     // Persist failed → do NOT consume the approval (FV4) so the dev can retry.
     const reason =
       writeResult.reason === 'locked'
-        ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms by ${writeResult.held_by_session ?? 'unknown'}) — wait and retry`
+        ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? 'unknown'}) — wait and retry`
         : `phase-state.json write failed: ${writeResult.error}`
     const audit = appendAudit(
       projectRoot,

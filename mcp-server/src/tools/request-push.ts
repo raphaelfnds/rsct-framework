@@ -141,7 +141,7 @@ export async function requestPushHandler(
     toolName: 'rsct_request_push',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — push approval',
+      title: 'RSCT — push approval',
       message: `Approve push of '${branchLabel}' to '${remote}'?`,
     },
     projectRoot,

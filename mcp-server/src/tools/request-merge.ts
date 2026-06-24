@@ -166,7 +166,7 @@ export async function requestMergeHandler(
     toolName: 'rsct_request_merge',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — merge approval',
+      title: 'RSCT — merge approval',
       message: `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
     },
     projectRoot,

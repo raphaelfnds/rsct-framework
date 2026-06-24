@@ -290,7 +290,7 @@ export async function phaseVerificationCompleteHandler(
     toolName: 'rsct_phase_verification_complete',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — verification complete',
+      title: 'RSCT — verification complete',
       message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept`,
     },
     projectRoot,
@@ -400,7 +400,7 @@ export async function phaseVerificationCompleteHandler(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ V phase approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? 'unknown'}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`,
+      `⚠ V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`,
     )
   } else {
     hints.push(

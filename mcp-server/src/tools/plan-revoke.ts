@@ -106,7 +106,7 @@ export async function planRevokeHandler(
   if (!writeResult.ok) {
     const reason =
       writeResult.reason === 'locked'
-        ? `phase-state.json is locked (held ${writeResult.lock_age_ms}ms) — wait and retry`
+        ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago) — wait and retry`
         : `phase-state.json write failed: ${writeResult.error}`
     const audit = appendAudit(
       projectRoot,
