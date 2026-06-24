@@ -23431,10 +23431,10 @@ function infer(s) {
 function buildTopologyHint(block, universeRoot) {
   if (block.confirmed_mode !== "multi-repo") return null;
   if (!universeRoot) {
-    return "Topology is confirmed multi-repo but no universe is linked \u2014 the contract-surface gate is INACTIVE. Run /rsct-canonical-source to link the org universe so rsct_request_commit can enforce contracts.";
+    return "Topology is confirmed multi-repo but no universe is linked \u2014 the contract gate is not active yet. Run /rsct-canonical-source to link the org universe so commits can be checked against contracts.";
   }
   if (!existsSync(join(universeRoot, "contracts.json"))) {
-    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing \u2014 the contract-surface gate is INACTIVE. Add a contracts.json (scaffold via /rsct-init-universe) to enforce contracts.`;
+    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing \u2014 the contract gate is not active yet. Add a contracts.json (scaffold via /rsct-init-universe) to turn it on.`;
   }
   return null;
 }
@@ -25144,7 +25144,12 @@ async function getTopologyHandler(rawInput) {
   if (block.confirmed_mode === "multi-repo" && contracts.available && produced.length > 0) {
     const consumers = affectedConsumers(produced);
     hints.push(
-      `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(", ") || "none listed"}). rsct_request_commit will BLOCK commits touching those surfaces unless dev_approval.override_contract_surface is given.`
+      `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(", ") || "none listed"}). This repo is the PRODUCER, so rsct_request_commit blocks commits HERE that touch those surfaces unless dev_approval.override_contract_surface is given.`
+    );
+  }
+  if (block.confirmed_mode === "multi-repo" && contracts.available && produced.length === 0 && consumed.length > 0) {
+    hints.push(
+      `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface \u2014 the producer \u2014 not the consumer, so it never blocks commits here. That's expected; nothing to configure.`
     );
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`);
@@ -26680,7 +26685,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
       };
     }
     approval = gate.approval;
@@ -26727,7 +26732,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`\xA7C rejected (plan_token_invalid): ${reason}`]
+        hints: [`Approval rejected (plan_token_invalid): ${reason}`]
       };
     }
     channel = "plan_token";
@@ -26739,7 +26744,7 @@ message: ${input.message}`
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(gitState.branch, protectedList);
   if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected \u2014 ${authorizedVia === "plan_token" ? "plan tokens never cover protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }" : "pass dev_approval.override_protected_branch: { reason } to proceed"}`;
+    const reason = `branch '${branchLabel}' is protected \u2014 ${authorizedVia === "plan_token" ? "a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }" : "pass dev_approval.override_protected_branch: { reason } to proceed"}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -26790,7 +26795,7 @@ message: ${input.message}`
   const extras = compileExtraPatterns(config2?.secrets_extra_patterns ?? []).compiled;
   const findings = scanDiffForSecrets(diff, extras);
   if (findings.length > 0 && !overrideSecrets) {
-    const reason = `${findings.length} secret finding(s) in staged diff \u2014 ${authorizedVia === "plan_token" ? "plan tokens never bypass the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }" : "pass dev_approval.override_secrets_check: { reason } to proceed"}`;
+    const reason = `${findings.length} secret finding(s) in staged diff \u2014 ${authorizedVia === "plan_token" ? "a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }" : "pass dev_approval.override_secrets_check: { reason } to proceed"}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -26866,7 +26871,7 @@ message: ${input.message}`
       const consumers = affectedConsumers(hits2);
       contractResult = { mode: "multi-repo", touched: ids, consumers, override_used: !!overrideContract };
       if (!overrideContract) {
-        const reason = `commit touches contract surface(s) [${ids.join(", ")}] that other repos consume [${consumers.join(", ") || "none listed"}] \u2014 ${authorizedVia === "plan_token" ? "plan tokens never bypass the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }" : "pass dev_approval.override_contract_surface: { reason } to proceed (acknowledging the cross-repo blast radius)"}`;
+        const reason = `this commit changes contract surface(s) [${ids.join(", ")}] that other repos depend on [${consumers.join(", ") || "none listed"}]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${authorizedVia === "plan_token" ? "A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }." : "To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above)."}`;
         const audit2 = appendAudit(
           projectRoot,
           {
@@ -27029,7 +27034,7 @@ message: ${input.message}`
     if (!record2.ok) {
       antiReplayError = record2.error;
       bookkeepingHints.push(
-        `\u26A0 commit landed but anti-replay store update failed: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+        `\u26A0 commit landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
       );
     }
   } else {
@@ -27065,7 +27070,7 @@ message: ${input.message}`
   ];
   if (contractGateInactive) {
     hints.push(
-      "\u26A0 topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) \u2014 the contract-surface gate did NOT enforce. Link the universe / add contracts.json to enable it."
+      "\u26A0 topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) \u2014 the contract gate did not run. Link the universe / add contracts.json to enable it."
     );
   }
   if (tokenSummary) {
@@ -27221,7 +27226,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields2(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const approval = gate.approval;
@@ -27347,7 +27352,7 @@ async function requestPushHandler(rawInput, internal = {}) {
   const hints = [`Pushed '${branch}' to '${remote}'.`];
   if (!record2.ok) {
     hints.push(
-      `\u26A0 push landed but anti-replay store update failed: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+      `\u26A0 push landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
     );
   }
   const afields = auditFields2(audit);
@@ -27503,7 +27508,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields3(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const approval = gate.approval;
@@ -27712,7 +27717,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
   ];
   if (!record2.ok) {
     hints.push(
-      `\u26A0 merge landed but anti-replay store update failed: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+      `\u26A0 merge landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
     );
   }
   const afields = auditFields3(audit);
@@ -27837,10 +27842,10 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
     toolName: "rsct_plan_authorize",
     approval: input.dev_approval,
     dialog: {
-      title: "RSCT \xA7C \u2014 authorize plan execution (batch)",
-      message: `Mint a plan-scoped batch token on '${branchLabel}'?
+      title: "RSCT \u2014 authorize batch plan execution",
+      message: `Authorize batch commits for this plan on '${branchLabel}'?
 
-This lets rsct_request_commit commit WITHOUT a fresh approval per commit, within this plan + branch, until it expires/is exhausted/revoked.`
+This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 limited to this plan and branch, until it expires, runs out, or is revoked.`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -27874,7 +27879,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval per commit, within
       ...auditFields4(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const reject = (reject_kind, reason) => {
@@ -27999,11 +28004,11 @@ This lets rsct_request_commit commit WITHOUT a fresh approval per commit, within
   );
   const afields = auditFields4(audit);
   const hints = [
-    `Plan token minted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval within this scope. Revoke early: rsct_plan_revoke. Branch switch / plan completion / expiry auto-revokes. push/merge still need per-action \xA7C.`
+    `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`
   ];
   if (!record2.ok) {
     hints.push(
-      `\u26A0 token minted but anti-replay store update failed: ${record2.error}. The emitting dev_approval may be replayable within the skew window \u2014 rotate it or repair .rsct/approvals-seen.json.`
+      `\u26A0 authorization granted, but I could not record the approval as used: ${record2.error}. The dev_approval that granted it could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
     );
   }
   if (afields.audit_error !== null) {
@@ -29003,7 +29008,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   for (const fa of input.findings_actions) {
@@ -29070,7 +29075,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   }
   if (!record2.ok) {
     hints.push(
-      `\u26A0 Anti-replay store update failed: ${record2.error}. The same dev_approval may be replayable within the skew window \u2014 rotate the approval or repair .rsct/approvals-seen.json before the next \xA7C-gated call.`
+      `\u26A0 I could not record this approval as used: ${record2.error}. The same dev_approval could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
     );
   }
   if (fields.audit_error !== null) {
@@ -29527,7 +29532,7 @@ async function classifyTaskHandler(rawInput) {
   const hints = [];
   if (tier === "trivial") {
     hints.push(
-      "Trivial tier \u2014 recommend skipping the phase machine. Edit directly under \xA7B exception (trivial doc-only fixes)."
+      "Trivial tier \u2014 you can skip the phase machine and edit directly (trivial doc-only fixes)."
     );
   } else if (tier === "small") {
     hints.push(
@@ -29535,11 +29540,11 @@ async function classifyTaskHandler(rawInput) {
     );
   } else if (tier === "standard") {
     hints.push(
-      "Standard tier \u2014 recommend rsct_phase_research_start to begin. CAP-28: rsct_phase_code_start REJECTS with reject_kind=verification_required unless V phase completed (or override_verification_skip=true passed). Run rsct_phase_verification_start before code."
+      "Standard tier \u2014 start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true)."
     );
   } else {
     hints.push(
-      "Complex tier \u2014 full R\u2192S\u2192V\u2192C\u2192T cycle. CAP-28: rsct_phase_code_start REJECTS unless V phase completed. Verification phase is MANDATORY before code-phase."
+      "Complex tier \u2014 run the full cycle (research \u2192 spec \u2192 verification \u2192 code \u2192 test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true)."
     );
   }
   if (activePlan) {
@@ -29809,7 +29814,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const newState = { ...state };
@@ -29860,7 +29865,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
   }
   if (!record2.ok) {
     hints.push(
-      `\u26A0 Anti-replay store update failed: ${record2.error}. dev_approval may be replayable; rotate or repair .rsct/approvals-seen.json.`
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
     );
   }
   if (fields.audit_error !== null) {
@@ -30696,7 +30701,7 @@ This discards the phase without advancing the RSCT cycle.`
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const newState = {};
@@ -30735,7 +30740,7 @@ This discards the phase without advancing the RSCT cycle.`
   }
   if (!record2.ok) {
     hints.push(
-      `\u26A0 Anti-replay store update failed: ${record2.error}. dev_approval may be replayable.`
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time.`
     );
   }
   if (fields.audit_error !== null) {
@@ -31056,7 +31061,7 @@ GH CLI will run in '${projectRoot}'.`
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\xA7C rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const ghResult = ghCreate({
@@ -31122,7 +31127,7 @@ GH CLI will run in '${projectRoot}'.`
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
-      `\u26A0 Anti-replay store update failed: ${record2.error}. dev_approval may be replayable; rotate or repair .rsct/approvals-seen.json.`
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
     );
   }
   if (fields.audit_error !== null) {

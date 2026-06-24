@@ -538,7 +538,7 @@ export async function classifyTaskHandler(
   const hints: string[] = []
   if (tier === 'trivial') {
     hints.push(
-      'Trivial tier — recommend skipping the phase machine. Edit directly under §B exception (trivial doc-only fixes).',
+      'Trivial tier — you can skip the phase machine and edit directly (trivial doc-only fixes).',
     )
   } else if (tier === 'small') {
     hints.push(
@@ -546,11 +546,11 @@ export async function classifyTaskHandler(
     )
   } else if (tier === 'standard') {
     hints.push(
-      'Standard tier — recommend rsct_phase_research_start to begin. CAP-28: rsct_phase_code_start REJECTS with reject_kind=verification_required unless V phase completed (or override_verification_skip=true passed). Run rsct_phase_verification_start before code.',
+      'Standard tier — start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true).',
     )
   } else {
     hints.push(
-      'Complex tier — full R→S→V→C→T cycle. CAP-28: rsct_phase_code_start REJECTS unless V phase completed. Verification phase is MANDATORY before code-phase.',
+      'Complex tier — run the full cycle (research → spec → verification → code → test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true).',
     )
   }
   if (activePlan) {

@@ -95,7 +95,7 @@ describe('lib/topology — detectTopology inference', () => {
 
   it('FV1: confirmed multi-repo but no universe → inactive-gate hint', () => {
     const r = detectTopology(cfg({ topology: { mode: 'multi-repo' } }), tmp(), { home: tmp() })
-    expect(r.hint).toMatch(/INACTIVE/)
+    expect(r.hint).toMatch(/not active yet/)
   })
 
   it('FV1: confirmed multi-repo + universe but no contracts.json → inactive hint', () => {
@@ -105,7 +105,7 @@ describe('lib/topology — detectTopology inference', () => {
       proj,
       { home: tmp() },
     )
-    expect(r.hint).toMatch(/contracts\.json is missing|INACTIVE/)
+    expect(r.hint).toMatch(/contracts\.json is missing|not active yet/)
   })
 
   it('no FV1 hint when multi-repo + universe + contracts.json present', () => {

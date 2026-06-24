@@ -308,7 +308,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
       }
     }
 
@@ -358,7 +358,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`§C rejected (plan_token_invalid): ${reason}`],
+        hints: [`Approval rejected (plan_token_invalid): ${reason}`],
       }
     }
 
@@ -378,7 +378,7 @@ export async function requestCommitHandler(
   if (branchProtected && !overrideBranch) {
     const reason = `branch '${branchLabel}' is protected — ${
       authorizedVia === 'plan_token'
-        ? 'plan tokens never cover protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }'
+        ? 'a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }'
         : 'pass dev_approval.override_protected_branch: { reason } to proceed'
     }`
     const audit = appendAudit(
@@ -440,7 +440,7 @@ export async function requestCommitHandler(
   if (findings.length > 0 && !overrideSecrets) {
     const reason = `${findings.length} secret finding(s) in staged diff — ${
       authorizedVia === 'plan_token'
-        ? 'plan tokens never bypass the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }'
+        ? 'a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }'
         : 'pass dev_approval.override_secrets_check: { reason } to proceed'
     }`
     const audit = appendAudit(
@@ -530,12 +530,12 @@ export async function requestCommitHandler(
       const consumers = affectedConsumers(hits)
       contractResult = { mode: 'multi-repo', touched: ids, consumers, override_used: !!overrideContract }
       if (!overrideContract) {
-        const reason = `commit touches contract surface(s) [${ids.join(', ')}] that other repos consume [${
+        const reason = `this commit changes contract surface(s) [${ids.join(', ')}] that other repos depend on [${
           consumers.join(', ') || 'none listed'
-        }] — ${
+        }]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${
           authorizedVia === 'plan_token'
-            ? 'plan tokens never bypass the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }'
-            : 'pass dev_approval.override_contract_surface: { reason } to proceed (acknowledging the cross-repo blast radius)'
+            ? 'A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }.'
+            : 'To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above).'
         }`
         const audit = appendAudit(
           projectRoot,
@@ -726,7 +726,7 @@ export async function requestCommitHandler(
     if (!record.ok) {
       antiReplayError = record.error
       bookkeepingHints.push(
-        `⚠ commit landed but anti-replay store update failed: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window — rotate the approval or repair .rsct/approvals-seen.json before the next §C-gated call.`,
+        `⚠ commit landed, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,
       )
     }
   } else {
@@ -769,7 +769,7 @@ export async function requestCommitHandler(
   // only in the read tools (the FV1 philosophy: the inactive gate is never silent).
   if (contractGateInactive) {
     hints.push(
-      '⚠ topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) — the contract-surface gate did NOT enforce. Link the universe / add contracts.json to enable it.',
+      '⚠ topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) — the contract gate did not run. Link the universe / add contracts.json to enable it.',
     )
   }
   if (tokenSummary) {

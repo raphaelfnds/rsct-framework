@@ -398,7 +398,7 @@ export async function gatePhaseComplete(
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -454,7 +454,7 @@ export async function gatePhaseComplete(
   }
   if (!record.ok) {
     hints.push(
-      `⚠ Anti-replay store update failed: ${record.error}. dev_approval may be replayable; rotate or repair .rsct/approvals-seen.json.`,
+      `⚠ I could not record this approval as used: ${record.error}. The dev_approval could be accepted again by mistake for a short time — use a fresh one next time, or repair .rsct/approvals-seen.json.`,
     )
   }
   if (fields.audit_error !== null) {

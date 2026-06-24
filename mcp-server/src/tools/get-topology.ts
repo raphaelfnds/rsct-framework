@@ -93,7 +93,20 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
   if (block.confirmed_mode === 'multi-repo' && contracts.available && produced.length > 0) {
     const consumers = affectedConsumers(produced)
     hints.push(
-      `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(', ') || 'none listed'}). rsct_request_commit will BLOCK commits touching those surfaces unless dev_approval.override_contract_surface is given.`,
+      `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(', ') || 'none listed'}). This repo is the PRODUCER, so rsct_request_commit blocks commits HERE that touch those surfaces unless dev_approval.override_contract_surface is given.`,
+    )
+  }
+  // The consumer's-eye view: a repo that only CONSUMES contracts often expects the
+  // gate to protect IT — but the gate is producer-side. Say so, so a consumer-side
+  // installer isn't left wondering why the gate never fires (field-report friction).
+  if (
+    block.confirmed_mode === 'multi-repo' &&
+    contracts.available &&
+    produced.length === 0 &&
+    consumed.length > 0
+  ) {
+    hints.push(
+      `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface — the producer — not the consumer, so it never blocks commits here. That's expected; nothing to configure.`,
     )
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`)

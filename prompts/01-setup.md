@@ -91,10 +91,10 @@ echo "  CHECKPOINT: Phase 0 executing canonical universe-vs-app guard"
 GUARD_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -f "$GUARD_ROOT/.universe.json" ]; then
   echo "RSCT-UNIVERSE-REPO-DETECTED"
-  echo "Este repositório é um UNIVERSE (repo de governança), não uma aplicação."
-  echo "O /rsct-setup configura APPS. Aqui você edita os arquivos do universe"
-  echo "(.universe.json, contracts.json, docs/governance/) e commita você mesmo."
-  echo "Para reforçar só os marcadores/esqueleto do universe, use /rsct-init-universe (modo update)."
+  echo "This repository is a UNIVERSE (governance repo), not an application."
+  echo "/rsct-setup configures APPS. Here you edit the universe files"
+  echo "(.universe.json, contracts.json, docs/governance/) and commit them yourself."
+  echo "To refresh just the universe markers/skeleton, use /rsct-init-universe (update mode)."
 fi
 ```
 
@@ -702,7 +702,10 @@ Mode: [UPDATE | CREATE]
    to it. Link it now? `[Y/n]`
    ✅ Recommended: yes — runs `/rsct-canonical-source` (adds the canonical-source
       section to CLAUDE.md + sets `universe.local` in `.rsct.json`), after which this
-      app can be registered in the universe (Phase 4.8)."
+      app can be registered in the universe (Phase 4.8).
+   Note: the universe is a SEPARATE repository. Here in the app I only edit `CLAUDE.md`
+   and `.rsct.json`; any change to the universe stays in the universe repo and YOU review
+   and commit it there yourself — RSCT never commits the universe."
   - On YES → after this setup applies its own mutations, invoke `/rsct-canonical-source`
     (it OWNS `universe.local` + `canonical_source_added` + the CLAUDE.md section — setup
     never writes them directly). Once `universe.local` is set, run Phase 4.8 to register
@@ -713,17 +716,17 @@ Mode: [UPDATE | CREATE]
   `recommended_route: "offer-create-universe"` (≥1 same-org sibling app found at `../`
   and NO universe). Omit when the MCP isn't installed or no confirmed sibling was found.
   [Present as ONE plain-language ORIENTATION prompt, Recommended (§B item 1):]
-  "🌌 Você tem outros apps da mesma org (`[list the siblings.dir from the detector]`) sem
-   um *universe* central. Um universe guarda a governança e os *contratos* entre esses apps
-   — e é o que permite o RSCT bloquear um commit que quebra um contrato de outro repositório.
-   Quer configurar isso agora? `[s/N]`
-   ✅ Recomendado: sim. Vou, com seu OK em CADA passo:
-     1) criar o universe (`/rsct-init-universe`),
-     2) linkar ESTE app (`/rsct-canonical-source`),
-     3) registrar este app no universe (Phase 4.8).
-   Você edita o conteúdo dos contratos e commita o repositório do universe você mesmo —
-   o RSCT nunca mexe no git do universe. O gate de contratos só ativa quando um SEGUNDO
-   app for registrado neste universe."
+  "🌌 You have other apps from the same org (`[list the siblings.dir from the detector]`)
+   with no central *universe*. A universe holds the governance and the *contracts* between
+   those apps — it's what lets RSCT block a commit that breaks a contract another repo
+   depends on. Set this up now? `[y/N]`
+   ✅ Recommended: yes. With your OK at EACH step, I will:
+     1) create the universe (`/rsct-init-universe`),
+     2) link THIS app (`/rsct-canonical-source`),
+     3) register this app in the universe (Phase 4.8).
+   You edit the contract content and commit the universe repository yourself — RSCT never
+   touches the universe's git. The contract gate only activates once a SECOND app is
+   registered in this universe."
   - On NO → proceed unlinked (mono path). (Ask-once PERSISTENCE of this decline is deferred
     to DX-1b — a durable flag needs a new `.rsct.json` schema field; stashing it under the
     existing `universe` block would be silently stripped on read. For now the offer may
@@ -735,22 +738,22 @@ Mode: [UPDATE | CREATE]
        `/rsct-init-universe` reports as `Universe created at:` (its final report) as
        `<universe-path>`: `[ -f "<universe-path>/.universe.json" ]`. If absent (init-universe aborted — e.g.
        missing templates — or its own OK was declined): **STOP here** and tell the dev
-       "criação do universe cancelada/falhou — rode `/rsct-setup` quando quiser; nada foi linkado."
+       "universe creation was cancelled or failed — run `/rsct-setup` whenever you want; nothing was linked."
     b) Invoke `/rsct-canonical-source` (it OWNS `universe.local` + `canonical_source_added`
        + the CLAUDE.md section — setup never writes them directly). Then VERIFY linking:
        `.rsct.json` now has a non-empty `universe.local`. If not: **STOP** and report the app
        is not linked (the state is re-runnable; nothing else was promised).
     c) Run Phase 4.8 to register this app (it reads `universe.local` fresh from `.rsct.json`).
-    Report FILESYSTEM-verified results ("criei `applications/<app>/` e setei `universe.local`;
-    o MCP só reflete isso após reiniciar o IDE") — do NOT claim what the MCP can't confirm
-    this session (the restart is inevitable).
+    Report FILESYSTEM-verified results ("created `applications/<app>/` and set `universe.local`;
+    the MCP only reflects this after you restart the IDE") — do NOT claim what the MCP can't
+    confirm this session (the restart is inevitable).
 
 🔧 UNIVERSE LINK BROKEN (DX-1) — present ONLY when Phase 1.9b returned
   `recommended_route: "fix-universe-link"` (`.rsct.json` `universe.local` is set but the
   universe does not resolve there).
-  "⚠️ Seu `.rsct.json` aponta para um universe em `[universe.local_path]`, mas ele não existe
-   lá. Corrija o caminho (`universe.local`) ou rode `/rsct-canonical-source` de novo. NÃO vou
-   registrar este app num universe inexistente."
+  "⚠️ Your `.rsct.json` points to a universe at `[universe.local_path]`, but it isn't there.
+   Fix the path (`universe.local`) or run `/rsct-canonical-source` again. I will NOT register
+   this app into a universe that doesn't exist."
   - Skip Phase 4.8 registration for this state (registering into a missing universe is a no-op
     that misleads the dev). No mutation; the dev fixes the path or re-links.
 
@@ -2613,7 +2616,8 @@ Steps:
    When asking:
    > *"Detected topology: **<inferred_mode>** (signals: <…>). Confirm the repo
    > topology — `mono` (one repo, one app), `monorepo` (many apps in this repo), or
-   > `multi-repo` (many repos under the universe, contract-gated)? [default:
+   > `multi-repo` (many repos under the universe; the contract gate applies — it
+   > protects the repo that PRODUCES a shared surface, not the consumers)? [default:
    > <confirmed_mode if set, else inferred_mode>]"*
 3. Set `TOPOLOGY_MODE` to the resulting mode (`mono` / `monorepo` / `multi-repo`) — the
    dev's answer when asked, or the existing `confirmed_mode` when re-confirming silently
@@ -3095,9 +3099,9 @@ session boot.
 7. If on protected branch: require explicit reconfirmed OK.
 8. **Fresh-install pointer (DX-1):** if `rsct-mcp` was NOT installed/loaded during THIS run
    (so Phase 1.9b was skipped — typically the first `/rsct-setup`, before the IDE restart
-   that loads the MCP), print: "RSCT instalado. Reinicie o IDE e rode `/rsct-setup` de novo —
-   aí eu detecto os outros repositórios da sua org e ofereço configurar governança
-   compartilhada (universe + contratos)." This is the honest second-run capability (the
+   that loads the MCP), print: "RSCT installed. Restart the IDE and run `/rsct-setup` again —
+   then I can detect the other repositories in your org and offer to set up shared governance
+   (universe + contracts)." This is the honest second-run capability (the
    detector loads only after the restart). Skip this line when the MCP was already available
    this run (the orchestration already happened in Phase 3).
 

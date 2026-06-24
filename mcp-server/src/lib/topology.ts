@@ -131,10 +131,10 @@ function infer(s: TopologySignals): { inferred: TopologyMode; confidence: Topolo
 function buildTopologyHint(block: TopologyBlock, universeRoot: string | null): string | null {
   if (block.confirmed_mode !== 'multi-repo') return null
   if (!universeRoot) {
-    return 'Topology is confirmed multi-repo but no universe is linked — the contract-surface gate is INACTIVE. Run /rsct-canonical-source to link the org universe so rsct_request_commit can enforce contracts.'
+    return 'Topology is confirmed multi-repo but no universe is linked — the contract gate is not active yet. Run /rsct-canonical-source to link the org universe so commits can be checked against contracts.'
   }
   if (!existsSync(join(universeRoot, 'contracts.json'))) {
-    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing — the contract-surface gate is INACTIVE. Add a contracts.json (scaffold via /rsct-init-universe) to enforce contracts.`
+    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing — the contract gate is not active yet. Add a contracts.json (scaffold via /rsct-init-universe) to turn it on.`
   }
   return null
 }

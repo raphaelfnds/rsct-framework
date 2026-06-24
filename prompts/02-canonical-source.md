@@ -160,9 +160,9 @@ Wait for explicit OK.
 
 **If universe not found locally**, offer 3 options to the developer:
 
-> "Universe `[UNIVERSE_NAME]-universe` not found locally.
->
-> Choose one:
+> "Universe `[UNIVERSE_NAME]-universe` not found locally. A universe is the shared
+> source of governance + cross-repo contracts for your org — do you want one wired
+> to this project? Choose how:
 >
 > **1. Create it now (recommended for a new organization).**
 >    I will invoke `/rsct-init-universe` to bootstrap a skeleton

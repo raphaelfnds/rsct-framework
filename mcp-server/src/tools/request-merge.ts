@@ -203,7 +203,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -423,7 +423,7 @@ export async function requestMergeHandler(
   ]
   if (!record.ok) {
     hints.push(
-      `⚠ merge landed but anti-replay store update failed: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') may be replayable within the skew window — rotate the approval or repair .rsct/approvals-seen.json before the next §C-gated call.`,
+      `⚠ merge landed, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,
     )
   }
   const afields = auditFields(audit)

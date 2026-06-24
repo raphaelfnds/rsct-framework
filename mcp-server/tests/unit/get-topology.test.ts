@@ -52,6 +52,19 @@ describe('rsct_get_topology', () => {
     expect(out.consumed.map((c) => c.id).sort()).toEqual(['events-stream', 'orders-api'])
   })
 
+  it('consumer-only repo (multi-repo) → producer-vs-consumer hint (gate is producer-side)', async () => {
+    const r = writeCfg(tmp(), {
+      rsct_version: '1.0.0',
+      app: { name: 'reporting', org: 'acme' },
+      topology: { mode: 'multi-repo' },
+      universe: { local: UNIVERSE },
+    })
+    const out = await getTopologyHandler({ project_root: r })
+    expect(out.produced).toEqual([])
+    expect(out.consumed.length).toBeGreaterThan(0)
+    expect(out.hints.join(' ')).toMatch(/only CONSUMES/)
+  })
+
   it('RV2: confirmed mono contradicting high-confidence multi-repo → downgrade hint', async () => {
     const parent = tmp()
     const proj = join(parent, 'app-a')
@@ -90,6 +103,6 @@ describe('rsct_get_topology', () => {
       }),
     )
     const out = await getTopologyHandler({ project_root: proj })
-    expect(out.hints.join(' ')).toMatch(/INACTIVE/)
+    expect(out.hints.join(' ')).toMatch(/not active yet/)
   })
 })

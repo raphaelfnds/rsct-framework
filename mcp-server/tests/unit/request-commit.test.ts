@@ -572,7 +572,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
     expect(
       out.hints.some(
         (h) =>
-          h.includes('anti-replay store update failed') &&
+          h.includes('could not record this approval as used') &&
           h.includes('simulated atomic rename failed') &&
           h.includes('commit:feat/foo:abc1234'),
       ),
@@ -941,6 +941,19 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
     expect(out.contract_check?.touched).toEqual(['orders-api'])
   })
 
+  it('multi-repo + surface touched + no override → rejects; reason still names override_contract_surface', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+    // DX-2: the reason is reworded plain-language, but the actionable override field
+    // name is an API contract the agent must emit — it must survive the reword.
+    expect(out.reason).toMatch(/override_contract_surface/)
+  })
+
   it('INV-6 secrets still enforced under multi-repo (rejects before INV-7)', async () => {
     writeConfig(tmpRoot, multiRepoCfg())
     const out = (await callCommit(
@@ -973,7 +986,7 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
       gateInternal(['src/api/orders.ts']),
     )) as RequestCommitOutput
     expect(out.status).toBe('committed')
-    expect(out.hints.join(' ')).toMatch(/did NOT enforce/)
+    expect(out.hints.join(' ')).toMatch(/did not run/)
   })
 
   it('INV-5 protected branch takes precedence over INV-7 (rejects protected_branch first)', async () => {

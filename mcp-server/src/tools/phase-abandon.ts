@@ -193,7 +193,7 @@ export async function phaseAbandonHandler(
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -235,7 +235,7 @@ export async function phaseAbandonHandler(
   }
   if (!record.ok) {
     hints.push(
-      `⚠ Anti-replay store update failed: ${record.error}. dev_approval may be replayable.`,
+      `⚠ I could not record this approval as used: ${record.error}. The dev_approval could be accepted again by mistake for a short time.`,
     )
   }
   if (fields.audit_error !== null) {

@@ -293,7 +293,7 @@ describe('rsct_request_push — post-mutation write failures (HIGH-2 / HIGH-3)',
     expect(out.anti_replay_persisted).toBe(false)
     expect(out.anti_replay_error).toBe('simulated atomic rename failed')
     expect(
-      out.hints.some((h) => h.includes('anti-replay store update failed')),
+      out.hints.some((h) => h.includes('could not record this approval as used')),
     ).toBe(true)
   })
 

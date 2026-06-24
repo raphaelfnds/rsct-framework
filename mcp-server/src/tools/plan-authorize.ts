@@ -169,8 +169,8 @@ export async function planAuthorizeHandler(
     toolName: 'rsct_plan_authorize',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — authorize plan execution (batch)',
-      message: `Mint a plan-scoped batch token on '${branchLabel}'?\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval per commit, within this plan + branch, until it expires/is exhausted/revoked.`,
+      title: 'RSCT — authorize batch plan execution',
+      message: `Authorize batch commits for this plan on '${branchLabel}'?\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -205,7 +205,7 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -350,11 +350,11 @@ export async function planAuthorizeHandler(
   const afields = auditFields(audit)
 
   const hints: string[] = [
-    `Plan token minted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval within this scope. Revoke early: rsct_plan_revoke. Branch switch / plan completion / expiry auto-revokes. push/merge still need per-action §C.`,
+    `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`,
   ]
   if (!record.ok) {
     hints.push(
-      `⚠ token minted but anti-replay store update failed: ${record.error}. The emitting dev_approval may be replayable within the skew window — rotate it or repair .rsct/approvals-seen.json.`,
+      `⚠ authorization granted, but I could not record the approval as used: ${record.error}. The dev_approval that granted it could be accepted again by mistake for a short time — use a fresh one next time, or repair .rsct/approvals-seen.json.`,
     )
   }
   if (afields.audit_error !== null) {
