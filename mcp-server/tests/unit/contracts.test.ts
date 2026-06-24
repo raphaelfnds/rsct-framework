@@ -8,6 +8,7 @@ import {
   contractsProducedBy,
   contractsConsumedBy,
   affectedConsumers,
+  unregisteredProducers,
   EMPTY_CONTRACT_GRAPH,
 } from '../../src/lib/contracts.js'
 
@@ -106,5 +107,55 @@ describe('lib/contracts — surface matching (producer-side, V FV8)', () => {
   })
   it('affectedConsumers sorts + dedups', () => {
     expect(affectedConsumers(g.contracts)).toEqual(['reporting', 'web-frontend'])
+  })
+})
+
+describe('lib/contracts — unregisteredProducers (DX-5)', () => {
+  it('all producers registered → []', () => {
+    expect(unregisteredProducers(['api', 'web'], ['api', 'web', 'extra'])).toEqual([])
+  })
+  it('an unregistered producer → kind unregistered (no suggestion)', () => {
+    expect(unregisteredProducers(['ghost'], ['api', 'web'])).toEqual([
+      { producer: 'ghost', kind: 'unregistered' },
+    ])
+  })
+  it('case-only diff → kind case_mismatch + correctly-cased suggestion', () => {
+    expect(unregisteredProducers(['Web-Frontend'], ['web-frontend'])).toEqual([
+      { producer: 'Web-Frontend', kind: 'case_mismatch', suggestion: 'web-frontend' },
+    ])
+  })
+  it('exact match wins over a case-variant in the registered set', () => {
+    // `web` is registered exactly → no issue, even though `WEB` is also present.
+    expect(unregisteredProducers(['web'], ['WEB', 'web'])).toEqual([])
+  })
+  it('dedupes repeated producers, preserving input order', () => {
+    expect(unregisteredProducers(['ghost', 'ghost', 'api'], ['api'])).toEqual([
+      { producer: 'ghost', kind: 'unregistered' },
+    ])
+  })
+  it('mixed set → one issue per distinct mismatch, in input order', () => {
+    expect(unregisteredProducers(['api', 'Web', 'ghost'], ['api', 'web'])).toEqual([
+      { producer: 'Web', kind: 'case_mismatch', suggestion: 'web' },
+      { producer: 'ghost', kind: 'unregistered' },
+    ])
+  })
+  it('§9.B multi case-match → first registered name in input order wins', () => {
+    expect(unregisteredProducers(['app'], ['App', 'APP'])).toEqual([
+      { producer: 'app', kind: 'case_mismatch', suggestion: 'App' },
+    ])
+  })
+  it('§9.C does NOT trim — stray whitespace producer is genuinely unregistered', () => {
+    expect(unregisteredProducers(['web '], ['web'])).toEqual([
+      { producer: 'web ', kind: 'unregistered' },
+    ])
+  })
+  it('§9.D empty registered set → every producer unregistered (intentional)', () => {
+    expect(unregisteredProducers(['api', 'web'], [])).toEqual([
+      { producer: 'api', kind: 'unregistered' },
+      { producer: 'web', kind: 'unregistered' },
+    ])
+  })
+  it('no producers → []', () => {
+    expect(unregisteredProducers([], ['api'])).toEqual([])
   })
 })

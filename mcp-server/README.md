@@ -209,7 +209,7 @@ file content on disk.
 - [ ] `rsct-mcp` registers and runs on the primary maintainer platform (e.g., Windows + Git Bash).
 - [ ] All 7 tools and 5 resources respond as expected (tables above).
 - [ ] Claude reads `decisions.md` via tool in a real conversation (Tool check #3 or #7 is the canonical proof).
-- [ ] Dev signs off in [progress_rsct-mcp-v1.md](../progress_rsct-mcp-v1.md) to start M2.
+- [ ] Dev signs off in progress_rsct-mcp-v1.md to start M2.
 
 If any row fails, capture the failure (tool name, prompt, actual vs expected
 response) in the progress file before opening a fix.
@@ -822,7 +822,7 @@ target platform" in the M2 sign-off — does NOT block the gate.
 - [ ] Anti-decisions cross-check fires `conflict` for a claim shared with
       an AD-NNN entry (verifiable via tool check #7 from M1 with a claim
       like "use DynamoDB for orders").
-- [ ] Dev signs off in [progress_rsct-mcp-v2.md](../progress_rsct-mcp-v2.md)
+- [ ] Dev signs off in progress_rsct-mcp-v2.md
       to start M3 (or to merge v1 + v2 → main as the planned M2 close).
 
 If any row fails, capture the failure (tool/hook, prompt or step, actual

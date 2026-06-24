@@ -166,7 +166,7 @@ Wait for explicit OK.
 >
 > **1. Create it now (recommended for a new organization).**
 >    I will invoke `/rsct-init-universe` to bootstrap a skeleton
->    universe at `~/projetos/[UNIVERSE_NAME]-universe/`. It creates governance
+>    universe at `~/projects/[UNIVERSE_NAME]-universe/`. It creates governance
 >    document templates with TODOs, placeholder folders for applications
 >    and hosts, and a CLAUDE.md operational protocol. You fill the content
 >    over time.

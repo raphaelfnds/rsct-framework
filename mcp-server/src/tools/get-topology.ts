@@ -7,9 +7,11 @@ import {
   contractsProducedBy,
   contractsConsumedBy,
   affectedConsumers,
+  unregisteredProducers,
   type Contract,
   type ContractGraph,
 } from '../lib/contracts.js'
+import { readUniverse } from '../lib/universe.js'
 
 export const getTopologyInputSchema = z
   .object({
@@ -108,6 +110,32 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
     hints.push(
       `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface — the producer — not the consumer, so it never blocks commits here. That's expected; nothing to configure.`,
     )
+  }
+  // Producer-name-mismatch warning (DX-5) — fire whenever computable (any topology
+  // mode): a contract whose `producer` matches no registered app, the way the gate
+  // compares (`===`, case-SENSITIVE), can never gate. A case-only typo is the worst
+  // case — it looks right but the gate silently treats it as unregistered. Re-read
+  // the universe here: the registered NAME arrays don't escape universe.ts —
+  // getUniverse/TopologyBlock expose only the count (§9.A). readUniverse may still
+  // return null on a degraded-but-resolvable universe → that null is the real guard.
+  if (contracts.available && universe_root) {
+    const universe = readUniverse(universe_root)
+    if (universe) {
+      // Union dirs∪json mirrors `this_app_registered = inDirs || inJson` (universe.ts).
+      const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson]
+      const producers = contracts.contracts.map((c) => c.producer)
+      for (const issue of unregisteredProducers(producers, registered)) {
+        if (issue.kind === 'case_mismatch') {
+          hints.push(
+            `Contract producer '${issue.producer}' looks like the registered app '${issue.suggestion}' but the case differs — the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue.suggestion}'.`,
+          )
+        } else {
+          hints.push(
+            `Contract producer '${issue.producer}' matches no registered app in the universe — that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`,
+          )
+        }
+      }
+    }
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`)
 

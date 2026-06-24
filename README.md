@@ -282,7 +282,7 @@ Same command — detects what exists and only adds what is missing.
 ```
 /rsct-init-universe
 ```
-Creates a skeleton universe repository at `~/projetos/<org>-universe/` with:
+Creates a skeleton universe repository at `~/projects/<org>-universe/` with:
 - `CLAUDE.md` (operational protocol §0)
 - `docs/governance/` (LGPD matrix, DNS survey, naming standards, retention)
 - `docs/diagrams/` (placeholders for C4, deployment, DFD .drawio files)

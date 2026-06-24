@@ -25114,6 +25114,25 @@ function contractsConsumedBy(graph, app) {
 function affectedConsumers(contracts) {
   return [...new Set(contracts.flatMap((c) => c.consumers))].sort((a, b) => a.localeCompare(b));
 }
+function unregisteredProducers(producers, registered) {
+  const exact = new Set(registered);
+  const byLower = /* @__PURE__ */ new Map();
+  for (const r of registered) {
+    const k = r.toLowerCase();
+    if (!byLower.has(k)) byLower.set(k, r);
+  }
+  const issues = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const p of producers) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    if (exact.has(p)) continue;
+    const suggestion = byLower.get(p.toLowerCase());
+    if (suggestion !== void 0) issues.push({ producer: p, kind: "case_mismatch", suggestion });
+    else issues.push({ producer: p, kind: "unregistered" });
+  }
+  return issues;
+}
 
 // src/tools/get-topology.ts
 var getTopologyInputSchema = external_exports.object({
@@ -25168,6 +25187,24 @@ async function getTopologyHandler(rawInput) {
     hints.push(
       `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface \u2014 the producer \u2014 not the consumer, so it never blocks commits here. That's expected; nothing to configure.`
     );
+  }
+  if (contracts.available && universe_root) {
+    const universe = readUniverse(universe_root);
+    if (universe) {
+      const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson];
+      const producers = contracts.contracts.map((c) => c.producer);
+      for (const issue2 of unregisteredProducers(producers, registered)) {
+        if (issue2.kind === "case_mismatch") {
+          hints.push(
+            `Contract producer '${issue2.producer}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue2.suggestion}'.`
+          );
+        } else {
+          hints.push(
+            `Contract producer '${issue2.producer}' matches no registered app in the universe \u2014 that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`
+          );
+        }
+      }
+    }
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`);
   return {
