@@ -41,6 +41,23 @@ running a four-category checklist (gap / breakage / redundancy /
 forgotten) against the project's institutional context. Tier table:
 trivial+small skip V; standard+complex run V.
 
+## Documentation
+
+The end-user guides live in [`docs/`](docs/):
+
+- **[Getting started](docs/getting-started.md)** — prerequisites, install,
+  restart, `/rsct-setup`, and a 5-minute first-project walkthrough (the
+  single-repo happy path).
+- **[Command reference](docs/commands.md)** — a per-command manual for all four
+  slash commands.
+- **[Multi-repo & contracts](docs/multi-repo.md)** — the T2 layer: topology
+  modes, the org universe, contracts & surfaces, producer-vs-consumer, and a
+  step-by-step multi-repo walkthrough.
+- **[Troubleshooting](docs/troubleshooting.md)** — common failures and fixes.
+
+The companion server's tool-by-tool reference is in
+[`mcp-server/README.md`](mcp-server/README.md).
+
 ## Installation
 
 One-time, per machine. Installs runtime files to `~/.rsct/` and registers
@@ -242,7 +259,9 @@ touch a file the dev owns) — add it yourself if the warnings bother you.
 
 ## How to use
 
-After installation, from inside any project on the machine:
+After installation, from inside any project on the machine. The stubs below are
+quickstarts — the full per-command manual (preconditions, outputs, consent
+gates, recovery) is in **[`docs/commands.md`](docs/commands.md)**.
 
 ### New project (no existing CLAUDE.md)
 ```
@@ -292,6 +311,10 @@ describing the universe and whether this app is registered, and emit a one-line 
 to register it when it is not yet linked. See
 [the `universe` block](mcp-server/README.md#the-universe-block) for the field/state
 reference.
+
+> **Multi-repo org?** Topology modes, contracts & surfaces, the producer-vs-consumer
+> gate, and which session edits which repo are covered in
+> **[`docs/multi-repo.md`](docs/multi-repo.md)**.
 
 ### Uninstall RSCT from a project
 ```
@@ -528,7 +551,7 @@ work safely.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` — M1 Recall + M2 Enforcement + M3 phase machine + personas + Tutor + issue capture** (shipped in `v1.0.0`). Companion MCP server at
-  [`mcp-server/`](mcp-server/README.md). **34 tools + 5 resources**
+  [`mcp-server/`](mcp-server/README.md). **35 tools + 5 resources**
   covering:
   - **Recall (M1):** 7 read-only tools (status, decisions, knowledge,
     environments with INV-6 secret masking, architecture, module

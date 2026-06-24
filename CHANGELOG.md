@@ -10,6 +10,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Repo topology detection (T2).** `lib/topology.ts` classifies a project as
+  `mono` / `monorepo` / `multi-repo` — inferred from signals (nested app markers;
+  registered-app count in an external universe) and **confirmed** by the dev at
+  `/rsct-setup` (persisted to `.rsct.json` `topology.mode`). `rsct_get_topology`
+  exposes the mode plus the org-level **contract graph**.
+- **Contract-surface gate (T2 / INV-7).** In a confirmed **multi-repo** setup,
+  `rsct_request_commit` blocks a commit in the **producer** repo that touches a
+  declared surface (path globs in `contracts.json` at the universe root), listing
+  the affected consumers, unless a per-action `override_contract_surface: { reason }`
+  is given. Producer matching is exact and case-sensitive; consumer repos are never
+  blocked by the gate; a plan-authorization token never bypasses it (hard block).
+- **New MCP tools** for the universe/topology/onboarding surface:
+  `rsct_get_universe`, `rsct_get_topology`, and `rsct_detect_onboarding` (the
+  `/rsct-setup` onboarding orchestrator).
+- **End-user documentation** under [`docs/`](docs/): a per-command manual, a
+  getting-started/onboarding guide, a multi-repo & contracts guide, and a
+  troubleshooting guide.
+
 ## [1.1.0] - 2026-06-18
 
 Universe-aware runtime + a cross-OS **test foundation** for the prompt/install

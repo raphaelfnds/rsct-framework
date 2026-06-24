@@ -50,7 +50,7 @@ fixes, skip the phase machine entirely.
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 
-**34 tools · 5 resources · tsc strict · ESM ~250 KB
+**35 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -84,18 +84,21 @@ Expect on stderr (single JSON line, then clean exit 0):
 {"level":30,"time":"...","name":"rsct-mcp","version":"0.6.3",
  "tools":["rsct_status","rsct_load_context","rsct_get_decisions",
           "rsct_get_knowledge","rsct_get_environments",
-          "rsct_get_architecture","rsct_check_premise",
-          "rsct_check_branch","rsct_check_secrets",
-          "rsct_check_edit_scope","rsct_request_commit",
-          "rsct_request_push","rsct_request_merge",
-          "rsct_classify_task","rsct_phase_status",
-          "rsct_phase_research_start","rsct_phase_research_complete",
-          "rsct_phase_spec_start","rsct_phase_spec_complete",
-          "rsct_phase_verification_start","rsct_phase_verification_complete",
-          "rsct_phase_code_start","rsct_phase_code_complete",
-          "rsct_phase_test_start","rsct_phase_test_complete",
-          "rsct_phase_abandon","rsct_capture_issue",
-          "rsct_persona_review","rsct_auto_persona","rsct_tutor_step"],
+          "rsct_get_architecture","rsct_get_universe",
+          "rsct_get_topology","rsct_detect_onboarding",
+          "rsct_check_premise","rsct_check_branch",
+          "rsct_check_secrets","rsct_check_edit_scope",
+          "rsct_request_commit","rsct_request_push",
+          "rsct_request_merge","rsct_plan_authorize",
+          "rsct_plan_revoke","rsct_classify_task",
+          "rsct_phase_status","rsct_phase_research_start",
+          "rsct_phase_research_complete","rsct_phase_spec_start",
+          "rsct_phase_spec_complete","rsct_phase_verification_start",
+          "rsct_phase_verification_complete","rsct_phase_code_start",
+          "rsct_phase_code_complete","rsct_phase_test_start",
+          "rsct_phase_test_complete","rsct_phase_abandon",
+          "rsct_capture_issue","rsct_persona_review",
+          "rsct_auto_persona","rsct_tutor_step"],
  "resources":["rsct://decisions","rsct://architecture",
               "rsct://plan","rsct://progress"],
  "resource_templates":["rsct://knowledge/{category}"],
@@ -105,6 +108,9 @@ Expect on stderr (single JSON line, then clean exit 0):
 The immediate exit is correct: the server reads MCP protocol from stdin;
 piping `/dev/null` (or `NUL` on Windows) gives it nothing, so it closes
 after the ready log.
+
+> The JSON above is an illustrative example — the `version` and exact tool list
+> reflect whatever build you have installed, not a pinned snapshot.
 
 ---
 
@@ -345,6 +351,19 @@ touches a produced surface (listing the affected consumers) unless
 `?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
 sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
 hint (never an error).
+
+### `rsct_detect_onboarding`
+
+The onboarding orchestrator brain for `/rsct-setup`. Classifies the project's onboarding
+**situation** — `is-universe` (a `.universe.json` is present → this is a universe repo, not an
+app), `has-universe-linked`, `has-universe-unlinked`, `universe-configured-missing`,
+`offer-register`, `siblings-no-universe` (same-org sibling repos detected, no universe yet →
+offer to create one), or `solo` — and returns the recommended **route** for the setup prompt to
+follow. The same-org sibling scan reads `../` one level (origin-pinned, CRLF-safe, case-folded
+self-skip); it never writes.
+
+- Input: `project_root?`
+- Output: `rsct_installed`, `situation`, `route`, the resolved universe/sibling signals + hints
 
 ### `rsct_check_premise`
 
