@@ -29,6 +29,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **End-user documentation** under [`docs/`](docs/): a per-command manual, a
   getting-started/onboarding guide, a multi-repo & contracts guide, and a
   troubleshooting guide.
+- **Mechanical REVIEW phase (DX-4).** A code review of the diff is now a
+  first-class phase between Code and Test — the recommended cycle is
+  **R→S→V→C→REVIEW→T**. It is opt-in and asked ONCE: pass `include_review` to
+  `rsct_phase_spec_complete` to record the decision (keyed by `spec_ref`). For
+  `spec_tier ∈ {standard, complex}`, `rsct_phase_test_start` enforces it —
+  `decision=no` proceeds (review skipped), `decision=yes` requires a completed
+  `rsct_phase_review_{start,complete}`, and no decision rejects; pass
+  `override_review_skip=true` to bypass (audit-logged). trivial/small bypass the
+  gate. Mirrors how the V audit sits between Spec and Code. New tools:
+  `rsct_phase_review_start`, `rsct_phase_review_complete`.
 
 ## [1.1.0] - 2026-06-18
 

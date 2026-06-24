@@ -40,6 +40,7 @@ export const RSCT_PHASES = [
   'spec',
   'verification',
   'code',
+  'review',
   'test',
 ] as const
 
@@ -50,13 +51,18 @@ export type RsctPhase = (typeof RSCT_PHASES)[number]
  * `_start` call after a `_complete`. Verification is OPTIONAL between
  * spec and code: when `spec_complete` lands, the next recommended phase
  * is verification; when `verification_complete` lands, it's code; when
- * spec is skipped straight to code, that is the dev's call.
+ * spec is skipped straight to code, that is the dev's call. REVIEW (code
+ * review of the diff) sits between code and test: when `code_complete`
+ * lands the next recommended phase is review; it is opt-in (asked once at
+ * spec_complete via include_review) and the test-start gate honors that
+ * decision. The recommended cycle is R→S→V→C→REVIEW→T.
  */
 const PHASE_ORDER: readonly RsctPhase[] = [
   'research',
   'spec',
   'verification',
   'code',
+  'review',
   'test',
 ]
 

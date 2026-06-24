@@ -99,6 +99,22 @@ code:
 - Review findings, set per-finding actions, then
   `mcp__rsct__rsct_phase_verification_complete`.
 
+For `standard` and `complex`, ALSO decide the REVIEW step at
+spec_complete — a code review of the diff between Code and Test (cycle:
+R→S→V→C→REVIEW→T):
+- Ask the dev ONCE, at plan/spec approval, whether to include a code
+  review before tests (strongly recommend it), then pass the answer:
+  `mcp__rsct__rsct_phase_spec_complete({ spec_ref, dev_approval,
+  include_review: true | false })`. The decision is recorded keyed by
+  `spec_ref` and asked only once.
+- `include_review: true` → after code_complete, run
+  `rsct_phase_review_start` → do the review (hunt correctness / security /
+  regression / cross-OS bugs in the diff — the qa + senior-dev personas
+  or a review skill help) → `rsct_phase_review_complete`.
+- `include_review: false` → the review is skipped and never run.
+- The test phase enforces this (see §5 below). NOTE: this REVIEW *phase*
+  is distinct from `rsct_persona_review` (a stateless advisory lens).
+
 ### 4. Code phase + scope-gated edits
 
 Before any `Edit` / `Write` to executable behavior files
@@ -123,12 +139,20 @@ Before any `Edit` / `Write` to executable behavior files
   and ask the dev to expand `scope_globs` (requires re-opening spec)
   or to defer the change.
 - After all edits land → `mcp__rsct__rsct_phase_code_complete`
-  (§C gate).
+  (§C gate). Next: the REVIEW phase when `include_review:true` was set at
+  spec_complete (see above), otherwise the test phase.
 
 ### 5. Test phase
 
-After code phase closes:
-- `mcp__rsct__rsct_phase_test_start({ spec_ref })`.
+After code phase closes (and the REVIEW phase, when included):
+- `mcp__rsct__rsct_phase_test_start({ spec_ref, spec_tier })` — **pass
+  `spec_tier`**. For `tier='standard'|'complex'` this enforces the REVIEW
+  decision recorded at spec_complete: `include_review:false` proceeds
+  (review skipped); `include_review:true` **rejects unless
+  `rsct_phase_review_complete` ran for the same `spec_ref`**; no recorded
+  decision rejects (record one first). `tier='trivial'|'small'` bypasses
+  the gate. To bypass intentionally (rare), pass `override_review_skip:
+  true` — the override is audit-logged.
 - Run / add tests; check results.
 - `mcp__rsct__rsct_phase_test_complete` — the §C gate that closes
   the task.

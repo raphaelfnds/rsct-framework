@@ -96,6 +96,14 @@ import {
   phaseCodeCompleteHandler,
 } from './tools/phase-code-complete.js'
 import {
+  phaseReviewStartTool,
+  phaseReviewStartHandler,
+} from './tools/phase-review-start.js'
+import {
+  phaseReviewCompleteTool,
+  phaseReviewCompleteHandler,
+} from './tools/phase-review-complete.js'
+import {
   phaseTestStartTool,
   phaseTestStartHandler,
 } from './tools/phase-test-start.js'
@@ -166,6 +174,8 @@ const TOOLS: Tool[] = [
   phaseVerificationCompleteTool,
   phaseCodeStartTool,
   phaseCodeCompleteTool,
+  phaseReviewStartTool,
+  phaseReviewCompleteTool,
   phaseTestStartTool,
   phaseTestCompleteTool,
   phaseAbandonTool,
@@ -204,6 +214,8 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_phase_verification_complete: phaseVerificationCompleteHandler,
   rsct_phase_code_start: phaseCodeStartHandler,
   rsct_phase_code_complete: phaseCodeCompleteHandler,
+  rsct_phase_review_start: phaseReviewStartHandler,
+  rsct_phase_review_complete: phaseReviewCompleteHandler,
   rsct_phase_test_start: phaseTestStartHandler,
   rsct_phase_test_complete: phaseTestCompleteHandler,
   rsct_phase_abandon: phaseAbandonHandler,

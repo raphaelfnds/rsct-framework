@@ -83,6 +83,7 @@ const EXPECTED_SCOPE_TOKEN: Record<string, string> = {
   rsct_phase_research_complete: 'research_complete',
   rsct_phase_spec_complete: 'spec_complete',
   rsct_phase_code_complete: 'code_complete',
+  rsct_phase_review_complete: 'review_complete',
   rsct_phase_test_complete: 'test_complete',
   rsct_phase_abandon: 'phase_abandon',
   rsct_capture_issue: 'capture_issue',

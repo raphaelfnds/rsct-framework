@@ -17,9 +17,9 @@ Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, and the
   `rsct_classify_task` (heuristic tier classifier),
   `rsct_phase_status`, the V phase
   (`rsct_phase_verification_{start,complete}`) with reverse-dep walk
-  + 4-category checklist, the four R/S/C/T phase pairs
-  (`rsct_phase_{research,spec,code,test}_{start,complete}`) backed by
-  the shared `lib/phase-machine.ts`, `rsct_phase_abandon` (§C-gated
+  + 4-category checklist, the five R/S/C/REVIEW/T phase pairs
+  (`rsct_phase_{research,spec,code,review,test}_{start,complete}`) backed
+  by the shared `lib/phase-machine.ts`, `rsct_phase_abandon` (§C-gated
   phase discard), `rsct_capture_issue` (draft + create modes via gh
   CLI), 5 personas (Architect, Senior Dev, QA, DevOps, Security) +
   `rsct_persona_review` + `rsct_auto_persona`, and Tutor as the 6th
@@ -31,6 +31,17 @@ task description. It returns a tier (trivial / small / standard / complex)
 and the recommended phase sequence. Tier is advisory — the phase tools
 accept any phase regardless of classify_task output. For trivial / docs-only
 fixes, skip the phase machine entirely.
+
+**REVIEW phase (DX-4)** — a code review of the diff sits between Code and Test
+(the recommended cycle is **R→S→V→C→REVIEW→T**), mirroring how the V audit sits
+between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
+`rsct_phase_spec_complete` (recorded keyed by `spec_ref`). For `spec_tier ∈
+{standard, complex}`, `rsct_phase_test_start` then enforces the decision —
+`decision=no` proceeds (review skipped), `decision=yes` requires a completed
+`rsct_phase_review_{start,complete}` for that `spec_ref`, and no decision rejects
+(asking you to record one); `override_review_skip=true` bypasses (audit-logged).
+`trivial`/`small` bypass the gate. NOTE: the REVIEW *phase* is distinct from
+`rsct_persona_review` (a stateless advisory lens).
 
 ## Status
 
@@ -50,7 +61,7 @@ fixes, skip the phase machine entirely.
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 
-**35 tools · 5 resources · tsc strict · ESM ~250 KB
+**37 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -95,7 +106,8 @@ Expect on stderr (single JSON line, then clean exit 0):
           "rsct_phase_research_complete","rsct_phase_spec_start",
           "rsct_phase_spec_complete","rsct_phase_verification_start",
           "rsct_phase_verification_complete","rsct_phase_code_start",
-          "rsct_phase_code_complete","rsct_phase_test_start",
+          "rsct_phase_code_complete","rsct_phase_review_start",
+          "rsct_phase_review_complete","rsct_phase_test_start",
           "rsct_phase_test_complete","rsct_phase_abandon",
           "rsct_capture_issue","rsct_persona_review",
           "rsct_auto_persona","rsct_tutor_step"],

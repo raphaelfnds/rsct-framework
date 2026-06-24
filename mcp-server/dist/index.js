@@ -23163,6 +23163,20 @@ function stampClassifyVerdict(projectRoot, args) {
   };
   return writePhaseState(projectRoot, newState);
 }
+function stampReviewDecision(projectRoot, patch) {
+  const existing = readPhaseState(projectRoot);
+  const baseState = existing.state ?? {};
+  const prev = baseState.review;
+  const carry = prev && prev.spec_ref === patch.spec_ref ? prev : void 0;
+  const merged = {
+    ...carry,
+    spec_ref: patch.spec_ref,
+    decision: patch.decision ?? carry?.decision ?? "no"
+  };
+  if (patch.decided_at !== void 0) merged.decided_at = patch.decided_at;
+  if (patch.completed_at !== void 0) merged.completed_at = patch.completed_at;
+  return writePhaseState(projectRoot, { ...baseState, review: merged });
+}
 
 // src/lib/version.ts
 init_esm_shims();
@@ -26141,6 +26155,7 @@ var EXPECTED_SCOPE_TOKEN = {
   rsct_phase_research_complete: "research_complete",
   rsct_phase_spec_complete: "spec_complete",
   rsct_phase_code_complete: "code_complete",
+  rsct_phase_review_complete: "review_complete",
   rsct_phase_test_complete: "test_complete",
   rsct_phase_abandon: "phase_abandon",
   rsct_capture_issue: "capture_issue",
@@ -29459,7 +29474,7 @@ function classify(description) {
     return {
       tier: "complex",
       signals,
-      reasoning: `Architecture / security keywords detected (${archHits.join(", ")}). Treat as complex \u2014 likely cross-cutting, deserves full R\u2192S\u2192V\u2192C\u2192T cycle.`
+      reasoning: `Architecture / security keywords detected (${archHits.join(", ")}). Treat as complex \u2014 likely cross-cutting, deserves full R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T cycle.`
     };
   }
   if (multiHits.length > 0) {
@@ -29480,7 +29495,7 @@ function classify(description) {
     return {
       tier: "complex",
       signals,
-      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex \u2014 multi-step orchestration warrants R\u2192S\u2192V\u2192C\u2192T.`
+      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex \u2014 multi-step orchestration warrants R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T.`
     };
   }
   if (concerns.size >= 3) {
@@ -29507,14 +29522,19 @@ function classify(description) {
   return {
     tier: "standard",
     signals,
-    reasoning: `Defaulting to standard \u2014 no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R\u2192S\u2192C\u2192T cycle recommended; consider verification phase if the change touches code with many importers.`
+    reasoning: `Defaulting to standard \u2014 no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R\u2192S\u2192C\u2192REVIEW\u2192T cycle recommended; consider verification phase if the change touches code with many importers.`
   };
 }
 var RECOMMENDED_PHASES = {
   trivial: [],
   small: ["spec", "code", "test"],
-  standard: ["research", "spec", "code", "test"],
-  complex: ["research", "spec", "verification", "code", "test"]
+  // NOTE: 'verification' is deliberately omitted from the standard array
+  // (a pre-existing choice — V is still ENFORCED for standard at
+  // rsct_phase_code_start regardless of this hint). DX-4 adds 'review'
+  // (the code review of the diff) for standard + complex; the recommended
+  // cycle is R→S→V→C→REVIEW→T.
+  standard: ["research", "spec", "code", "review", "test"],
+  complex: ["research", "spec", "verification", "code", "review", "test"]
 };
 async function classifyTaskHandler(rawInput) {
   const input = classifyTaskInputSchema.parse(rawInput ?? {});
@@ -29543,11 +29563,11 @@ async function classifyTaskHandler(rawInput) {
     );
   } else if (tier === "standard") {
     hints.push(
-      "Standard tier \u2014 start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true)."
+      "Standard tier \u2014 start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it)."
     );
   } else {
     hints.push(
-      "Complex tier \u2014 run the full cycle (research \u2192 spec \u2192 verification \u2192 code \u2192 test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true)."
+      "Complex tier \u2014 run the full cycle (research \u2192 spec \u2192 verification \u2192 code \u2192 review \u2192 test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it)."
     );
   }
   if (activePlan) {
@@ -29575,6 +29595,7 @@ var RSCT_PHASES = [
   "spec",
   "verification",
   "code",
+  "review",
   "test"
 ];
 var PHASE_ORDER = [
@@ -29582,6 +29603,7 @@ var PHASE_ORDER = [
   "spec",
   "verification",
   "code",
+  "review",
   "test"
 ];
 function nextPhase(current) {
@@ -29898,7 +29920,7 @@ var phaseStatusInputSchema = external_exports.object({
 }).strict();
 var phaseStatusTool = {
   name: "rsct_phase_status",
-  description: "Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, and the next recommended phase per the canonical R\u2192S\u2192V\u2192C\u2192T order. Use to check where the task is mid-session before starting a new phase.",
+  description: "Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the recorded review decision when present, and the next recommended phase per the canonical R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T order. Use to check where the task is mid-session before starting a new phase.",
   inputSchema: {
     type: "object",
     properties: {
@@ -29933,6 +29955,7 @@ async function phaseStatusHandler(rawInput) {
       started_at: null,
       scope_globs: [],
       verification: null,
+      review: null,
       plan_authorization: null,
       worktree,
       next_recommended_phase: null,
@@ -29951,6 +29974,16 @@ async function phaseStatusHandler(rawInput) {
       spec_tier: state.verification.spec_tier ?? null,
       findings_count: Array.isArray(findings) ? findings.length : 0,
       started_at: state.verification.started_at ?? null
+    };
+  }
+  let review = null;
+  if (state?.review) {
+    review = {
+      spec_ref: state.review.spec_ref,
+      decision: state.review.decision,
+      completed: state.review.completed_at != null,
+      decided_at: state.review.decided_at ?? null,
+      completed_at: state.review.completed_at ?? null
     };
   }
   const recommended = active ? nextPhase(active) : null;
@@ -30000,6 +30033,7 @@ async function phaseStatusHandler(rawInput) {
     started_at: state?.started_at ?? null,
     scope_globs: state?.scope_globs ?? [],
     verification,
+    review,
     plan_authorization: planAuth,
     worktree,
     next_recommended_phase: recommended,
@@ -30140,18 +30174,25 @@ init_esm_shims();
 var phaseSpecCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
-  dev_approval: external_exports.unknown()
+  dev_approval: external_exports.unknown(),
+  include_review: external_exports.boolean().optional().describe(
+    "DX-4: the ask-once REVIEW decision. true = include a code review of the diff before tests (strongly recommended for standard+complex); false = skip it. Recorded into the review block keyed by spec_ref; rsct_phase_test_start enforces it. Omit only if the decision is deferred \u2014 the test-start gate then asks for it."
+  )
 }).strict();
 var phaseSpecCompleteTool = {
   name: "rsct_phase_spec_complete",
-  description: '\xA7C-gated S phase closure. Reads .rsct/phase-state.json (must hold phase="spec" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "spec_complete:spec_ref=<X>". Next recommended phase: verification (optional \u2014 call rsct_phase_verification_start to run the audit-level sweep) or code (skip V phase).',
+  description: '\xA7C-gated S phase closure. Reads .rsct/phase-state.json (must hold phase="spec" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "spec_complete:spec_ref=<X>". Next recommended phase: verification (optional \u2014 call rsct_phase_verification_start to run the audit-level sweep) or code (skip V phase). **DX-4: pass `include_review` here** to record the ask-once REVIEW decision (a code review of the diff before tests \u2014 strongly recommended for standard+complex); the recommended cycle is R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
     properties: {
       project_root: { type: "string" },
       spec_ref: { type: "string" },
-      dev_approval: { type: "object" }
+      dev_approval: { type: "object" },
+      include_review: {
+        type: "boolean",
+        description: "DX-4 ask-once REVIEW decision: true = include a code review before tests (recommended for standard+complex); false = skip. Recorded keyed by spec_ref; enforced by rsct_phase_test_start."
+      }
     },
     additionalProperties: false
   }
@@ -30159,7 +30200,7 @@ var phaseSpecCompleteTool = {
 async function phaseSpecCompleteHandler(rawInput, internal = {}) {
   const input = phaseSpecCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  return gatePhaseComplete(
+  const result = await gatePhaseComplete(
     {
       projectRoot: resolution.root,
       phase: "spec",
@@ -30169,6 +30210,24 @@ async function phaseSpecCompleteHandler(rawInput, internal = {}) {
     resolution.config,
     internal
   );
+  if (input.include_review !== void 0 && result.status === "completed") {
+    const decidedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+    const stamp = stampReviewDecision(resolution.root, {
+      spec_ref: input.spec_ref,
+      decision: input.include_review ? "yes" : "no",
+      decided_at: decidedAt
+    });
+    if (stamp.ok) {
+      result.hints.push(
+        input.include_review ? `Review decision recorded: a code review of the diff is included before tests (run rsct_phase_review_start after code, then rsct_phase_review_complete).` : `Review decision recorded: the code review is skipped for this spec_ref.`
+      );
+    } else {
+      result.hints.push(
+        `\u26A0 spec complete succeeded but I could not record the review decision (${stamp.reason}). rsct_phase_test_start will ask for it \u2014 retry by re-running rsct_phase_spec_complete with include_review, or set it then.`
+      );
+    }
+  }
+  return result;
 }
 
 // src/tools/phase-code-start.ts
@@ -30482,7 +30541,7 @@ var phaseCodeCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseCodeCompleteTool = {
   name: "rsct_phase_code_complete",
-  description: '\xA7C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: test.',
+  description: '\xA7C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: review (the code review of the diff, when include_review was set at spec_complete) \u2014 then test.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -30509,18 +30568,18 @@ async function phaseCodeCompleteHandler(rawInput, internal = {}) {
   );
 }
 
-// src/tools/phase-test-start.ts
+// src/tools/phase-review-start.ts
 init_esm_shims();
-var phaseTestStartInputSchema = external_exports.object({
+var phaseReviewStartInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
   spec_slug: external_exports.string().optional(),
   scope_globs: external_exports.array(external_exports.string()).optional(),
   persona: external_exports.string().optional()
 }).strict();
-var phaseTestStartTool = {
-  name: "rsct_phase_test_start",
-  description: 'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after code phase is complete to add unit/integration tests + run the test suite end-to-end before sign-off.',
+var phaseReviewStartTool = {
+  name: "rsct_phase_review_start",
+  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -30534,9 +30593,263 @@ var phaseTestStartTool = {
     additionalProperties: false
   }
 };
+async function phaseReviewStartHandler(rawInput) {
+  const input = phaseReviewStartInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const args = {
+    projectRoot: resolution.root,
+    phase: "review",
+    specRef: input.spec_ref
+  };
+  if (input.spec_slug !== void 0) args.specSlug = input.spec_slug;
+  if (input.scope_globs !== void 0) args.scopeGlobs = input.scope_globs;
+  if (input.persona !== void 0) args.persona = input.persona;
+  return startPhaseGeneric(args, resolution.config);
+}
+
+// src/tools/phase-review-complete.ts
+init_esm_shims();
+var phaseReviewCompleteInputSchema = external_exports.object({
+  project_root: external_exports.string().optional(),
+  spec_ref: external_exports.string().min(1),
+  dev_approval: external_exports.unknown()
+}).strict();
+var phaseReviewCompleteTool = {
+  name: "rsct_phase_review_complete",
+  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+  inputSchema: {
+    type: "object",
+    required: ["spec_ref", "dev_approval"],
+    properties: {
+      project_root: { type: "string" },
+      spec_ref: { type: "string" },
+      dev_approval: { type: "object" }
+    },
+    additionalProperties: false
+  }
+};
+async function phaseReviewCompleteHandler(rawInput, internal = {}) {
+  const input = phaseReviewCompleteInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const result = await gatePhaseComplete(
+    {
+      projectRoot: resolution.root,
+      phase: "review",
+      specRef: input.spec_ref,
+      devApproval: input.dev_approval
+    },
+    resolution.config,
+    internal
+  );
+  if (result.status === "completed") {
+    const completedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+    const stamp = stampReviewDecision(resolution.root, {
+      spec_ref: input.spec_ref,
+      completed_at: completedAt
+    });
+    if (!stamp.ok) {
+      result.hints.push(
+        `\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start may still report the review as incomplete \u2014 retry by re-running rsct_phase_review_complete, or check .rsct/phase-state.json.`
+      );
+    }
+  }
+  return result;
+}
+
+// src/tools/phase-test-start.ts
+init_esm_shims();
+var TIER_VALUES3 = ["trivial", "small", "standard", "complex"];
+var TIERS_BYPASSING_REVIEW_GATE = /* @__PURE__ */ new Set([
+  "trivial",
+  "small"
+]);
+var phaseTestStartInputSchema = external_exports.object({
+  project_root: external_exports.string().optional(),
+  spec_ref: external_exports.string().min(1),
+  spec_slug: external_exports.string().optional(),
+  scope_globs: external_exports.array(external_exports.string()).optional(),
+  persona: external_exports.string().optional(),
+  spec_tier: external_exports.enum(TIER_VALUES3).default("standard").describe(
+    "Tier per rsct_classify_task. trivial+small bypass the review gate; standard+complex require a recorded review decision (from rsct_phase_spec_complete include_review). Missing \u2192 standard \u2192 gated."
+  ),
+  override_review_skip: external_exports.boolean().default(false).describe(
+    "When true, allows the test phase to start without honoring the review decision for tier \u2208 {standard, complex}. The override is logged to audit; use sparingly when the dev has explicitly chosen to bypass the review gate."
+  )
+}).strict();
+var phaseTestStartTool = {
+  name: "rsct_phase_test_start",
+  description: 'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after the code (and review) phase is complete to add unit/integration tests + run the suite end-to-end before sign-off. **DX-4: review gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads the review decision recorded at rsct_phase_spec_complete (include_review) and rejects unless it is honored: decision=no proceeds (review skipped); decision=yes requires a completed rsct_phase_review_complete for this spec_ref; no decision \u2192 rejects asking you to record one. Pass override_review_skip=true to bypass (audit-logged). For spec_tier \u2208 {trivial, small} the gate is automatically bypassed.',
+  inputSchema: {
+    type: "object",
+    required: ["spec_ref"],
+    properties: {
+      project_root: { type: "string" },
+      spec_ref: { type: "string" },
+      spec_slug: { type: "string" },
+      scope_globs: { type: "array", items: { type: "string" } },
+      persona: { type: "string" },
+      spec_tier: {
+        type: "string",
+        enum: [...TIER_VALUES3],
+        default: "standard",
+        description: "trivial+small bypass the review gate; standard+complex require a recorded review decision (or override)."
+      },
+      override_review_skip: {
+        type: "boolean",
+        default: false,
+        description: "When true, bypass the review gate for standard+complex (audit-logged)."
+      }
+    },
+    additionalProperties: false
+  }
+};
+function auditFields10(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return {
+    audit_path: audit.path ?? null,
+    audit_error: audit.error ?? "write_failed"
+  };
+}
+function evaluateReviewGate(args) {
+  const { specRef, specTier, overrideReviewSkip } = args;
+  if (TIERS_BYPASSING_REVIEW_GATE.has(specTier)) {
+    return {
+      status: "bypassed_tier",
+      spec_tier: specTier,
+      review_block_found: false,
+      review_spec_ref: null,
+      review_decision: null,
+      review_completed_at: null,
+      hint: `tier=${specTier} bypasses the review gate per canonical tier table.`
+    };
+  }
+  const stateRead = readPhaseState(args.projectRoot);
+  const review = stateRead.state?.review;
+  const reviewSpecRef = review?.spec_ref ?? null;
+  const matchesSpec = reviewSpecRef !== null && reviewSpecRef === specRef;
+  const decision = matchesSpec ? review?.decision ?? null : null;
+  const completedAt = matchesSpec ? review?.completed_at ?? null : null;
+  if (decision === "no") {
+    return {
+      status: "bypassed_declined",
+      spec_tier: specTier,
+      review_block_found: true,
+      review_spec_ref: reviewSpecRef,
+      review_decision: "no",
+      review_completed_at: completedAt,
+      hint: `Review was declined for this spec_ref (include_review=false at spec_complete). Test phase may proceed; the review is intentionally skipped.`
+    };
+  }
+  if (decision === "yes" && completedAt !== null) {
+    return {
+      status: "passed",
+      spec_tier: specTier,
+      review_block_found: true,
+      review_spec_ref: reviewSpecRef,
+      review_decision: "yes",
+      review_completed_at: completedAt,
+      hint: `Review phase completed at ${completedAt} for this spec_ref. Test phase may proceed.`
+    };
+  }
+  if (overrideReviewSkip) {
+    return {
+      status: "overridden",
+      spec_tier: specTier,
+      review_block_found: review !== void 0,
+      review_spec_ref: reviewSpecRef,
+      review_decision: decision,
+      review_completed_at: completedAt,
+      hint: `override_review_skip=true acknowledged. Override logged to audit (.rsct/audit.log).`
+    };
+  }
+  if (decision === "yes" && completedAt === null) {
+    return {
+      status: "rejected_incomplete",
+      spec_tier: specTier,
+      review_block_found: true,
+      review_spec_ref: reviewSpecRef,
+      review_decision: "yes",
+      review_completed_at: null,
+      hint: `A code review was requested (include_review=true) for spec_ref='${specRef}' but not completed. Run rsct_phase_review_start \u2192 (do the review) \u2192 rsct_phase_review_complete first, OR pass override_review_skip=true to bypass.`
+    };
+  }
+  return {
+    status: "rejected_undecided",
+    spec_tier: specTier,
+    review_block_found: review !== void 0,
+    review_spec_ref: reviewSpecRef,
+    review_decision: null,
+    review_completed_at: null,
+    hint: `tier='${specTier}' needs a recorded review decision for spec_ref='${specRef}' before tests. Re-run rsct_phase_spec_complete with include_review=true (do a code review \u2014 strongly recommended) or include_review=false (skip it), OR pass override_review_skip=true (logged to audit).`
+  };
+}
 async function phaseTestStartHandler(rawInput) {
   const input = phaseTestStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
+  const gate = evaluateReviewGate({
+    projectRoot: resolution.root,
+    specRef: input.spec_ref,
+    specTier: input.spec_tier,
+    overrideReviewSkip: input.override_review_skip
+  });
+  if (gate.status === "rejected_undecided" || gate.status === "rejected_incomplete") {
+    const rejectKind = gate.status === "rejected_undecided" ? "review_undecided" : "review_incomplete";
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "test.start.rejected",
+        tool: "rsct_phase_test_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: rejectKind,
+        review_block_found: gate.review_block_found,
+        review_spec_ref: gate.review_spec_ref,
+        review_decision: gate.review_decision,
+        review_completed_at: gate.review_completed_at
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields10(audit);
+    return {
+      status: "review_gate_rejected",
+      reject_kind: rejectKind,
+      reason: gate.hint,
+      spec_ref: input.spec_ref,
+      review_gate: gate,
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [gate.hint]
+    };
+  }
+  if (gate.status === "overridden") {
+    appendAuditEntry(
+      resolution.root,
+      {
+        event: "test.start.review_override",
+        tool: "rsct_phase_test_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        review_block_found: gate.review_block_found,
+        review_spec_ref: gate.review_spec_ref,
+        review_decision: gate.review_decision
+      },
+      resolution.config?.audit
+    );
+  } else if (gate.status === "bypassed_declined") {
+    appendAuditEntry(
+      resolution.root,
+      {
+        event: "test.start.review_skipped_declined",
+        tool: "rsct_phase_test_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier
+      },
+      resolution.config?.audit
+    );
+  }
   const args = {
     projectRoot: resolution.root,
     phase: "test",
@@ -30545,7 +30858,8 @@ async function phaseTestStartHandler(rawInput) {
   if (input.spec_slug !== void 0) args.specSlug = input.spec_slug;
   if (input.scope_globs !== void 0) args.scopeGlobs = input.scope_globs;
   if (input.persona !== void 0) args.persona = input.persona;
-  return startPhaseGeneric(args, resolution.config);
+  const result = startPhaseGeneric(args, resolution.config);
+  return { ...result, review_gate: gate };
 }
 
 // src/tools/phase-test-complete.ts
@@ -30616,7 +30930,7 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields10(audit) {
+function auditFields11(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30690,7 +31004,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields10(audit);
+    const fields2 = auditFields11(audit);
     return {
       status: "rejected",
       channel: null,
@@ -30726,7 +31040,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields10(abandonedAudit);
+  const fields = auditFields11(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30869,7 +31183,7 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields11(audit) {
+function auditFields12(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30943,7 +31257,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields12(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -30996,7 +31310,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields12(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -31048,7 +31362,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields12(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -31089,7 +31403,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields12(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -31126,7 +31440,7 @@ GH CLI will run in '${projectRoot}'.`
     },
     config2?.audit
   );
-  const fields = auditFields11(createdAudit);
+  const fields = auditFields12(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
@@ -31968,7 +32282,7 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields12(audit) {
+function auditFields13(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -32029,7 +32343,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields12(audit);
+  const fields = auditFields13(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,
@@ -32184,6 +32498,8 @@ var TOOLS = [
   phaseVerificationCompleteTool,
   phaseCodeStartTool,
   phaseCodeCompleteTool,
+  phaseReviewStartTool,
+  phaseReviewCompleteTool,
   phaseTestStartTool,
   phaseTestCompleteTool,
   phaseAbandonTool,
@@ -32221,6 +32537,8 @@ var HANDLERS = {
   rsct_phase_verification_complete: phaseVerificationCompleteHandler,
   rsct_phase_code_start: phaseCodeStartHandler,
   rsct_phase_code_complete: phaseCodeCompleteHandler,
+  rsct_phase_review_start: phaseReviewStartHandler,
+  rsct_phase_review_complete: phaseReviewCompleteHandler,
   rsct_phase_test_start: phaseTestStartHandler,
   rsct_phase_test_complete: phaseTestCompleteHandler,
   rsct_phase_abandon: phaseAbandonHandler,

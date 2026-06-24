@@ -108,7 +108,7 @@ describe('phase-code start + complete', () => {
     expect(state.scope_globs).toEqual(['src/lib/**/*.ts'])
   })
 
-  it('complete advances to test (next phase per RSCT)', async () => {
+  it('complete advances to review (next phase per RSCT)', async () => {
     setActivePhase('code', 'feat-code-smoke')
     const r = (await phaseCodeCompleteHandler(
       {
@@ -117,24 +117,34 @@ describe('phase-code start + complete', () => {
         dev_approval: {
           timestamp: VALID_TS,
           action_scope: 'code_complete:spec_ref=feat-code-smoke',
-          reason: 'code phase complete; ready to add and run tests',
+          reason: 'code phase complete; ready for review then tests',
         },
       },
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as CompletePhaseResult
     expect(r.status).toBe('completed')
-    expect(r.next_recommended_phase).toBe('test')
+    expect(r.next_recommended_phase).toBe('review')
   })
 })
 
 describe('phase-test start + complete (terminal)', () => {
-  it('start writes phase=test', async () => {
+  it('start writes phase=test (tier=trivial bypasses review gate)', async () => {
+    // DX-4: default tier=standard requires an honored review decision;
+    // this smoke uses tier=trivial to bypass the gate since the focus is
+    // the phase-state write, not review-gate semantics (the gate has
+    // dedicated coverage in phase-review.test.ts).
     const r = await phaseTestStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-test-smoke',
+      spec_tier: 'trivial',
     })
+    if (r.status !== 'started') {
+      throw new Error(
+        `expected status=started, got ${r.status} (${JSON.stringify(r)})`,
+      )
+    }
     expect(r.phase).toBe('test')
-    expect(r.status).toBe('started')
+    expect(r.review_gate.status).toBe('bypassed_tier')
   })
 
   it('complete returns null next_recommended_phase (cycle done)', async () => {

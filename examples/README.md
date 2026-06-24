@@ -15,8 +15,8 @@ For a tour of the companion MCP server, see
 [`../mcp-server/README.md`](../mcp-server/README.md) — the M1
 (Recall), M2 (Enforcement), and M3 (V phase + L4 phase machine +
 L3 personas + Tutor + issue capture) surfaces all live there. The
-server currently ships 35 tools and 5
+server currently ships 37 tools and 5
 resources, including the §C-gated commit/push/merge ops, the
-SessionStart sanitizer hook, the full R→S→V→C→T phase cycle, the
+SessionStart sanitizer hook, the full R→S→V→C→REVIEW→T phase cycle, the
 6 personas, and bilingual (EN + pt-BR) keyword heuristics for
 `rsct_classify_task` and `rsct_auto_persona`.

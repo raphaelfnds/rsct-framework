@@ -6,8 +6,8 @@ Operational implementation of the [RSCT Workflow Framework](https://medium.com/@
 > your project's memory at the start of every session and is *mechanically*
 > prevented — via a companion MCP server — from skipping the plan, committing
 > without your OK, or drifting from your conventions. The cycle is
-> **Research → Specification → Verification → Code → Test**, with guardrails at
-> every phase.
+> **Research → Specification → Verification → Code → Review → Test**, with
+> guardrails at every phase.
 
 **Why it exists.** LLM coding agents are capable but undisciplined: they skip
 plans, lose context between sessions, reuse stale authorizations, and quietly
@@ -30,7 +30,7 @@ start. Other AI tools (Cursor, Copilot, Codex) do not currently load
 `.cursorrules` and `.github/copilot-instructions.md` is planned for v1.1.
 
 ```
-Research → Specification → Verification → Code → Test
+Research → Specification → Verification → Code → Review → Test
 ```
 
 Each phase has guardrails that prevent common AI failure modes:
@@ -39,7 +39,10 @@ The **Verification** phase (V) shipped in M3 (`v0.3.0`) — it runs
 between spec-approval and code-edit, walking reverse dependencies +
 running a four-category checklist (gap / breakage / redundancy /
 forgotten) against the project's institutional context. Tier table:
-trivial+small skip V; standard+complex run V.
+trivial+small skip V; standard+complex run V. The **Review** phase
+(a code review of the diff, between Code and Test) is opt-in and asked
+once at spec-approval; when included, the test phase will not start until
+the review has run (standard+complex; trivial+small skip it).
 
 ## Documentation
 
@@ -551,7 +554,7 @@ work safely.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` — M1 Recall + M2 Enforcement + M3 phase machine + personas + Tutor + issue capture** (shipped in `v1.0.0`). Companion MCP server at
-  [`mcp-server/`](mcp-server/README.md). **35 tools + 5 resources**
+  [`mcp-server/`](mcp-server/README.md). **37 tools + 5 resources**
   covering:
   - **Recall (M1):** 7 read-only tools (status, decisions, knowledge,
     environments with INV-6 secret masking, architecture, module
