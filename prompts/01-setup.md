@@ -568,6 +568,9 @@ RSCT_JSON_UNIVERSE_REMOTE=$(extract_json_string "remote")
 RSCT_JSON_PROTECTED_BRANCHES=$(extract_json_array "protected_branches")
 RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 RSCT_JSON_CANONICAL_SOURCE_ADDED=$(extract_json_string "canonical_source_added")
+# DX-1b ask-once: PRESENCE (not value) of install.create_universe_declined_at —
+# robust to nesting + CRLF (literal-key match). Set => suppress the 🌱 create offer.
+RSCT_CREATE_DECLINED=$(grep -q '"create_universe_declined_at"' .rsct.json 2>/dev/null && echo 1 || echo "")
 ```
 
 **Build a DISCREPANCIES list** by comparing each extracted value to the
@@ -714,7 +717,9 @@ Mode: [UPDATE | CREATE]
 
 🌱 CREATE A UNIVERSE (DX-1) — present ONLY when Phase 1.9b returned
   `recommended_route: "offer-create-universe"` (≥1 same-org sibling app found at `../`
-  and NO universe). Omit when the MCP isn't installed or no confirmed sibling was found.
+  and NO universe) AND `RSCT_CREATE_DECLINED` is empty. Omit when the MCP isn't installed,
+  no confirmed sibling was found, or the dev already declined (DX-1b ask-once — Phase 1.10
+  reads `install.create_universe_declined_at`; once declined, this offer stays quiet).
   [Present as ONE plain-language ORIENTATION prompt, Recommended (§B item 1):]
   "🌌 You have other apps from the same org (`[list the siblings.dir from the detector]`)
    with no central *universe*. A universe holds the governance and the *contracts* between
@@ -727,11 +732,41 @@ Mode: [UPDATE | CREATE]
    You edit the contract content and commit the universe repository yourself — RSCT never
    touches the universe's git. The contract gate only activates once a SECOND app is
    registered in this universe."
-  - On NO → proceed unlinked (mono path). (Ask-once PERSISTENCE of this decline is deferred
-    to DX-1b — a durable flag needs a new `.rsct.json` schema field; stashing it under the
-    existing `universe` block would be silently stripped on read. For now the offer may
-    reappear on an explicit re-run of `/rsct-setup`, and it never fires without same-org
-    siblings AND no universe, so it stays quiet for solo/mono projects.)
+  - On NO → proceed unlinked (mono path), and RECORD the decline so the offer stays quiet on
+    future runs (ask-once) — text-splice `install.create_universe_declined_at` into `.rsct.json`
+    via the block below. **To set up a universe LATER**, delete that field from `.rsct.json`, or
+    run `/rsct-init-universe` directly. (The offer never fires without same-org siblings AND no
+    universe, so it stays quiet for solo/mono projects regardless.)
+
+```bash
+echo "  CHECKPOINT: Phase 3 recording create-universe decline (ask-once, text-splice)"
+RSCT_JSON=".rsct.json"
+DECLINED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)
+# Record the decline in install.create_universe_declined_at by TEXT-SPLICE — never
+# JSON.parse->stringify the managed .rsct.json (CLAUDE.md #5). Path via argv; double-quoted
+# JS only (no apostrophe can appear inside a single-quoted node -e); CRLF-tolerant char
+# classes. The install block always exists in a managed .rsct.json; inject the key right
+# after its "{", empty-object-guarded so we never emit a trailing comma before "}".
+if [ -f "$RSCT_JSON" ] && ! grep -q '"create_universe_declined_at"' "$RSCT_JSON" 2>/dev/null; then
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], at = process.argv[2];
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — decline not recorded."); process.exit(0); }
+    if (/"create_universe_declined_at"/.test(s)) { process.exit(0); }
+    var m = s.match(/("install"[ \t\r\n]*:[ \t\r\n]*\{)([ \t\r\n]*)/);
+    if (!m) { console.error("  WARN: install block not found — decline not recorded."); process.exit(0); }
+    var at_pos = m.index + m[0].length;
+    var sep = (s.charAt(at_pos) === "}") ? "" : ", ";
+    var inject = "\"create_universe_declined_at\": \"" + at + "\"" + sep;
+    s = s.slice(0, at_pos) + inject + s.slice(at_pos);
+    fs.writeFileSync(f, s, "utf8");
+    console.log("  recorded create-universe decline at " + at);
+  ' "$RSCT_JSON" "$DECLINED_AT"
+  if grep -q '"create_universe_declined_at"' "$RSCT_JSON" 2>/dev/null; then echo "  OK: decline recorded (ask-once)"; else echo "  ERROR: decline persistence failed" >&2; exit 1; fi
+fi
+```
+
   - On YES → run the GUIDED, STATEFUL chain. Each step is consent-gated AND re-probed
     before the next; a failure or a decline STOPS the chain cleanly (no half-built promise):
     a) Invoke `/rsct-init-universe`. Then VERIFY the universe exists, using the path
@@ -2671,6 +2706,110 @@ if [ -n "$TOPOLOGY_MODE" ] && [ -f "$RSCT_JSON" ]; then
   if grep -q '"topology"' "$RSCT_JSON" 2>/dev/null; then echo "  OK: topology recorded"; else echo "  ERROR: topology persistence failed" >&2; exit 1; fi
 fi
 ```
+
+### 4.11 — Declare cross-repo contracts (DX-1b, guided) — multi-repo + ≥2 apps only
+
+Offer guided contract authoring **ONLY** when ALL hold (else skip silently — near-zero-config):
+- `TOPOLOGY_MODE == 'multi-repo'` (confirmed this run or already in `.rsct.json`), AND
+- the LINKED universe resolves (`.rsct.json` `universe.local`), AND
+- `rsct_get_topology` `topology.signals.registered_apps_count >= 2` — i.e. the universe has ≥2
+  `applications/<dir>/` directories (the gate's ground truth; NOT the `registered_apps[]` JSON array).
+  A contract needs a producer AND a consumer, so it's meaningless with fewer than 2 apps.
+If `rsct-mcp` is not installed (no count available), SKIP — this is a second-run capability, like the
+create-offer. Reuse the `rsct_get_topology` call from Phase 4.10; don't re-implement the count.
+
+[Offer — consent-gated, ONE line:]
+> "This universe has N apps (`<list registered apps>`). Want to declare a *contract* — a surface one
+>  app PUBLISHES that others consume (the gate then blocks a producer commit that breaks it)? I'll ask
+>  the details and add it to `contracts.json`; you review + commit the universe yourself. `[y/N]`"
+
+On **NO** → skip (no mutation). On **YES** → the guided Q&A below, then the splice. The framework GUIDES
+the questions but **NEVER invents** the relationships (the contract content is the dev's domain):
+1. **producer** — default = THIS app's name; confirm, or pick another registered app. (The producer is
+   the repo whose surface is gated.)
+2. **id** — a unique slug; suggest `<producer>-api`; the dev confirms/edits.
+3. **surface** — ask the dev for path globs in the producer repo. Glob rules (restate from the template
+   `_help`): `*` `**` `?` only (no brace/char-class sets); a `dir/**` glob needs the trailing slash and
+   does NOT match a sibling `dir.ext`. Need ≥1 glob — WARN if empty (an empty surface can never gate).
+4. **consumers** — present the OTHER registered apps (EXCLUDE the chosen producer — an app can't consume
+   its own surface); the dev picks which depend on the surface.
+5. **description** — optional one-liner.
+PREVIEW the assembled entry as JSON and require an **explicit approval** before writing.
+
+**Safe value handoff (BINDING — injection safety).** The answers are dev free text. To keep them out of
+the shell AND the `node -e` source, WRITE each answer **verbatim** to a scratch file using your
+file-write tool (NOT a shell heredoc/echo — zero shell quoting) under a fresh dir `$CONTRACT_SCRATCH`:
+- `$CONTRACT_SCRATCH/id`, `/producer`, `/description` (one scalar file each; omit `description` if empty),
+- `$CONTRACT_SCRATCH/surface/1`, `/2`, … (one file per glob),
+- `$CONTRACT_SCRATCH/consumers/1`, `/2`, … (one file per app).
+Then set `CONTRACTS_JSON` to the LINKED universe's `contracts.json` path and run the block. `node` reads
+each file and `JSON.stringify`s it, so a `"` / `\` / `$` / newline in any answer is neutralised. The
+write is **additive + idempotent by `id`** (an existing `id` is left untouched) and **RSCT never commits
+the universe** — after it writes, review + commit `contracts.json` in the universe repo yourself.
+
+```bash
+echo "  CHECKPOINT: Phase 4.11 executing contract additive-splice (text-splice)"
+# CONTRACT_SCRATCH: dir of verbatim answer files (see above). CONTRACTS_JSON: the linked
+# universe's contracts.json. Dev free-text reaches node ONLY as opaque file content — never
+# the node -e source nor a shell assignment — so JSON.stringify makes it injection-safe.
+CONTRACT_SCRATCH="${CONTRACT_SCRATCH:-}"
+CONTRACTS_JSON="${CONTRACTS_JSON:-}"
+if [ -z "$CONTRACT_SCRATCH" ] || [ ! -d "$CONTRACT_SCRATCH" ] || [ -z "$CONTRACTS_JSON" ] || [ ! -f "$CONTRACTS_JSON" ]; then
+  echo "  SKIP: contract scratch dir or contracts.json missing — nothing spliced."
+else
+  # Additive bracket-balanced splice into the "contracts": [ ... ] array (mirrors Phase 4.8
+  # appendRegistry). Never JSON.parse->stringify the whole file (CLAUDE.md #5); the only parses
+  # are READ-ONLY (idempotency on the array region + a post-mutation validity check). Double-quoted
+  # JS only (no apostrophe inside the single-quoted node -e); CRLF-tolerant; paths via argv.
+  node -e '
+    var fs = require("fs"), path = require("path");
+    var dir = process.argv[1], target = process.argv[2];
+    function rd(p) { try { return fs.readFileSync(p, "utf8").replace(/\r/g, "").replace(/\n+$/, "").trim(); } catch (e) { return ""; } }
+    function rdArr(sub) { var d = path.join(dir, sub), out = []; try { fs.readdirSync(d).sort().forEach(function (n) { var v = rd(path.join(d, n)); if (v) out.push(v); }); } catch (e) {} return out; }
+    var entry = { id: rd(path.join(dir, "id")), producer: rd(path.join(dir, "producer")), surface: rdArr("surface"), consumers: rdArr("consumers") };
+    var desc = rd(path.join(dir, "description"));
+    if (desc) entry.description = desc;
+    if (!entry.id || !entry.producer) { console.error("  WARN: contract id/producer missing — nothing spliced."); process.exit(0); }
+    var s;
+    try { s = fs.readFileSync(target, "utf8"); } catch (e) { console.error("  WARN: contracts.json unreadable — nothing spliced."); process.exit(0); }
+    var m = s.match(/("contracts"[ \t\r\n]*:[ \t\r\n]*)\[/);
+    if (!m) { console.error("  WARN: contracts array not found — add the entry by hand."); process.exit(0); }
+    var openIdx = m.index + m[0].length - 1;
+    var i = openIdx + 1, depth = 1, inStr = false, esc = false;
+    for (; i < s.length && depth > 0; i++) {
+      var c = s[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === "\"") inStr = !inStr;
+      else if (!inStr && c === "[") depth++;
+      else if (!inStr && c === "]") depth--;
+    }
+    var closeIdx = i - 1;
+    var inner = s.slice(openIdx + 1, closeIdx);
+    var arr;
+    try { arr = JSON.parse("[" + inner + "]"); } catch (e) { console.error("  WARN: existing contracts array is not valid JSON — fix it by hand first."); process.exit(0); }
+    if (arr.some(function (e) { return e && e.id === entry.id; })) { console.log("  contracts.json already has id=" + entry.id + " — left as-is (no overwrite)."); process.exit(0); }
+    var obj = JSON.stringify(entry);
+    var ml = inner.indexOf("\n") !== -1;
+    var rendered;
+    if (inner.trim().length === 0) {
+      rendered = ml ? ("\n    " + obj + "\n  ") : obj;
+    } else {
+      var tail = inner.replace(/[ \t\r\n]+$/, "");
+      rendered = ml ? (tail + ",\n    " + obj + "\n  ") : (tail + ", " + obj);
+    }
+    var out = s.slice(0, openIdx + 1) + rendered + s.slice(closeIdx);
+    try { JSON.parse(out); } catch (e) { console.error("  ERROR: splice would produce invalid JSON — aborted, contracts.json untouched."); process.exit(1); }
+    fs.writeFileSync(target, out, "utf8");
+    console.log("  added contract id=" + entry.id + " to contracts.json — review + commit the universe yourself.");
+  ' "$CONTRACT_SCRATCH" "$CONTRACTS_JSON"
+fi
+```
+
+After a successful splice, offer **"Declare another contract? `[y/N]`"** — each iteration RE-ENTERS the
+Q&A and requires its OWN preview + explicit approval before its write (no blanket up-front yes). When
+done, remind the dev once: the universe repo has **uncommitted** working changes — review + commit
+`contracts.json` there yourself (RSCT never commits the universe).
 
 ### 4.V — INV-2.3 poison-pill closer (SessionStart sanitizer hook)
 

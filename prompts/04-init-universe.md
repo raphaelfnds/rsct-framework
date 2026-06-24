@@ -163,7 +163,7 @@ Mode: [FRESH | UPDATE]
 Plan:
   Target           → [PATH]
   Will create:
-    CLAUDE.md, README.md, .universe.json
+    CLAUDE.md, README.md, .universe.json, contracts.json
     docs/INDEX.md
     docs/governance/ (5 templates + retention-technical-annexes/)
     docs/diagrams/README.md (placeholders for .drawio files)
@@ -301,5 +301,10 @@ Next steps for the developer:
        cp applications/_app.md.template applications/<app-name>.md
      and fill in the placeholders. (Auto-registration via /rsct-setup is
      planned for RSCT v1.1.)
+  5. Declare cross-repo contracts in contracts.json (created empty above).
+     A contract is a SURFACE one app PUBLISHES that others consume — in
+     multi-repo mode the gate then blocks a producer commit that breaks it.
+     Edit it by hand (see its _help) or, once ≥2 apps are registered,
+     re-run /rsct-setup from an app: it offers a guided flow to declare them.
 ═══════════════════════════════════════════════════════
 ```

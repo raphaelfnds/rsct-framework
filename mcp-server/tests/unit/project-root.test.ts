@@ -101,6 +101,23 @@ describe('lib/project-root — readRsctConfig happy path', () => {
     expect(r.config?.protected_branches).toEqual(['main', 'release'])
   })
 
+  it('round-trips install.create_universe_declined_at (DX-1b ask-once flag)', () => {
+    writeConfig({
+      ...VALID_MIN,
+      install: {
+        applied_at: '2026-01-01T00:00:00Z',
+        mode: 'CREATE',
+        canonical_source_added: false,
+        create_universe_declined_at: '2026-06-24T10:00:00Z',
+      },
+    })
+    const r = resolveProjectRoot()
+    expect(r.rsct_installed).toBe(true)
+    expect(r.config?.install?.create_universe_declined_at).toBe('2026-06-24T10:00:00Z')
+    // No tamper event — it's a known optional field, not an unknown-key strip.
+    expect(readAuditEntries()).toHaveLength(0)
+  })
+
   it('strips unknown top-level fields silently (forward-compat)', () => {
     writeConfig({ ...VALID_MIN, future_field: { whatever: true } })
     const r = resolveProjectRoot()

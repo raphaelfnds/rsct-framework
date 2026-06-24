@@ -614,3 +614,278 @@ describe.skipIf(!BASH)('block: topology persistence (01-setup 4.10 — T2)', () 
     expect(readIn(r, '.rsct.json')).not.toContain('"topology"')
   }, 60_000)
 })
+
+// --- Block: create-universe decline ask-once (01-setup Phase 3 — DX-1b) ---------
+const DECLINE_ANCHOR = 'CHECKPOINT: Phase 3 recording create-universe decline'
+const RSCT_WITH_INSTALL =
+  JSON.stringify(
+    {
+      rsct_version: '1.0.0',
+      app: { name: 'sample', org: 'acme' },
+      install: { applied_at: '2026-01-01T00:00:00Z', mode: 'CREATE', canonical_source_added: false },
+    },
+    null,
+    2,
+  ) + '\n'
+
+describe.skipIf(!BASH || !NODE)('block: create-universe decline ask-once (01-setup Phase 3)', () => {
+  it('injects install.create_universe_declined_at; file stays valid JSON; siblings preserved', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: DECLINE_ANCHOR, seedFiles: { '.rsct.json': RSCT_WITH_INSTALL } })
+    const o = JSON.parse(readIn(r, '.rsct.json'))
+    expect(typeof o.install.create_universe_declined_at).toBe('string')
+    expect(o.install.create_universe_declined_at.length).toBeGreaterThan(0)
+    expect(o.install.applied_at).toBe('2026-01-01T00:00:00Z')
+    expect(o.app.name).toBe('sample')
+  }, 60_000)
+
+  it('idempotent — re-run does not add a second flag', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: DECLINE_ANCHOR, seedFiles: { '.rsct.json': RSCT_WITH_INSTALL }, runs: 2 })
+    const txt = readIn(r, '.rsct.json')
+    expect((txt.match(/create_universe_declined_at/g) ?? []).length).toBe(1)
+    expect(() => JSON.parse(txt)).not.toThrow()
+  }, 60_000)
+
+  it('empty install {} → no trailing comma, valid JSON', () => {
+    const empty = JSON.stringify({ rsct_version: '1.0.0', app: { name: 's', org: 'o' }, install: {} }) + '\n'
+    const r = run({ promptBasename: '01-setup.md', anchor: DECLINE_ANCHOR, seedFiles: { '.rsct.json': empty } })
+    const o = JSON.parse(readIn(r, '.rsct.json'))
+    expect(typeof o.install.create_universe_declined_at).toBe('string')
+  }, 60_000)
+
+  it('CRLF .rsct.json → flag added, still valid JSON', () => {
+    const crlf = RSCT_WITH_INSTALL.replace(/\n/g, '\r\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: DECLINE_ANCHOR, seedFiles: { '.rsct.json': crlf } })
+    expect(() => JSON.parse(readIn(r, '.rsct.json'))).not.toThrow()
+    expect(readIn(r, '.rsct.json')).toContain('create_universe_declined_at')
+  }, 60_000)
+})
+
+// --- Block: contract additive-splice (01-setup Phase 4.11 — DX-1b) --------------
+const CONTRACT_ANCHOR = 'CHECKPOINT: Phase 4.11 executing contract additive-splice'
+const CONTRACTS_EMPTY =
+  JSON.stringify(
+    {
+      contract_version: '1.0.0',
+      _help: 'declare cross-repo contracts here BY HAND',
+      _example: { id: 'billing-api', producer: 'billing', surface: ['openapi/billing.yaml'], consumers: ['web'] },
+      contracts: [],
+    },
+    null,
+    2,
+  ) + '\n'
+const CONTRACTS_ONE =
+  JSON.stringify(
+    {
+      contract_version: '1.0.0',
+      contracts: [{ id: 'orders-api', producer: 'orders', surface: ['openapi/orders.yaml'], consumers: ['web'] }],
+    },
+    null,
+    2,
+  ) + '\n'
+const contractEnv = { CONTRACT_SCRATCH: 'scratch', CONTRACTS_JSON: 'contracts.json' }
+
+describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase 4.11)', () => {
+  it('empty array → first entry added; valid JSON; decorative keys preserved', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': CONTRACTS_EMPTY,
+        'scratch/id': 'payments-api',
+        'scratch/producer': 'payments',
+        'scratch/surface/1': 'openapi/payments.yaml',
+        'scratch/surface/2': 'src/api/**',
+        'scratch/consumers/1': 'web',
+        'scratch/consumers/2': 'reporting',
+        'scratch/description': 'Payments REST API',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.map((c: { id: string }) => c.id)).toEqual(['payments-api'])
+    expect(o.contracts[0].surface).toEqual(['openapi/payments.yaml', 'src/api/**'])
+    expect(o.contracts[0].consumers).toEqual(['web', 'reporting'])
+    expect(o.contracts[0].description).toBe('Payments REST API')
+    expect(o._example.id).toBe('billing-api') // decorative keys preserved
+  }, 60_000)
+
+  it('populated array → entry appended; both present; valid JSON', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': CONTRACTS_ONE,
+        'scratch/id': 'events-stream',
+        'scratch/producer': 'events',
+        'scratch/surface/1': 'proto/**',
+        'scratch/consumers/1': 'analytics',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['events-stream', 'orders-api'])
+  }, 60_000)
+
+  it('idempotent — existing id left untouched (no duplicate, original preserved)', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': CONTRACTS_ONE,
+        'scratch/id': 'orders-api',
+        'scratch/producer': 'orders',
+        'scratch/surface/1': 'openapi/orders-v2.yaml',
+        'scratch/consumers/1': 'mobile',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.length).toBe(1)
+    expect(o.contracts[0].surface).toEqual(['openapi/orders.yaml']) // untouched
+    expect(r.out).toMatch(/already has id=orders-api/)
+  }, 60_000)
+
+  it('adversarial free-text (quotes / backslash / $ / newline) → valid JSON, round-trips', () => {
+    const hostile = 'has "quotes", \\ backslash, $VAR, `backtick`, \'apostrophe\', and\na newline'
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': CONTRACTS_EMPTY,
+        'scratch/id': 'weird-api',
+        'scratch/producer': 'weird',
+        'scratch/surface/1': 'src/**',
+        'scratch/consumers/1': 'web',
+        'scratch/description': hostile,
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts[0].description).toBe(hostile)
+  }, 60_000)
+
+  it('CRLF contracts.json → entry added, valid JSON', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': CONTRACTS_EMPTY.replace(/\n/g, '\r\n'),
+        'scratch/id': 'x-api',
+        'scratch/producer': 'x',
+        'scratch/surface/1': 'a/**',
+        'scratch/consumers/1': 'y',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts[0].id).toBe('x-api')
+  }, 60_000)
+
+  it('idempotency is structural — tab-around-colon id is matched (no dup)', () => {
+    const tabbed =
+      '{\n  "contract_version": "1.0.0",\n  "contracts": [{ "id"\t:\t"orders-api", "producer": "orders", "surface": ["a/**"], "consumers": ["web"] }]\n}\n'
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': tabbed,
+        'scratch/id': 'orders-api',
+        'scratch/producer': 'orders',
+        'scratch/surface/1': 'b/**',
+        'scratch/consumers/1': 'mobile',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.length).toBe(1) // matched despite tab-around-colon → no dup
+  }, 60_000)
+
+  it('id check is field-scoped — a new id equal to an existing entry producer is still added', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json':
+          JSON.stringify({ contract_version: '1.0.0', contracts: [{ id: 'web-api', producer: 'web', surface: ['a/**'], consumers: ['x'] }] }, null, 2) + '\n',
+        'scratch/id': 'web',
+        'scratch/producer': 'web',
+        'scratch/surface/1': 'b/**',
+        'scratch/consumers/1': 'y',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['web', 'web-api']) // producer value never false-matched as id
+  }, 60_000)
+
+  it('id check is value-scoped — a new id matching text inside a description is still added', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json':
+          JSON.stringify({ contract_version: '1.0.0', contracts: [{ id: 'a-api', producer: 'a', surface: ['a/**'], consumers: ['x'], description: 'mentions "id": "ghost" inside prose' }] }, null, 2) + '\n',
+        'scratch/id': 'ghost',
+        'scratch/producer': 'g',
+        'scratch/surface/1': 'g/**',
+        'scratch/consumers/1': 'y',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['a-api', 'ghost']) // no false-match inside description
+  }, 60_000)
+
+  it('inline (single-line) empty array → entry added inline, valid JSON', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': '{"contract_version":"1.0.0","contracts":[]}\n',
+        'scratch/id': 'i-api',
+        'scratch/producer': 'i',
+        'scratch/surface/1': 'a/**',
+        'scratch/consumers/1': 'y',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts[0].id).toBe('i-api')
+  }, 60_000)
+
+  it('inline (single-line) populated array → entry appended inline, valid JSON', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': '{"contract_version":"1.0.0","contracts":[{"id":"one","producer":"o","surface":["a"],"consumers":["b"]}]}\n',
+        'scratch/id': 'two',
+        'scratch/producer': 't',
+        'scratch/surface/1': 'b/**',
+        'scratch/consumers/1': 'c',
+      },
+    })
+    const o = JSON.parse(readIn(r, 'contracts.json'))
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['one', 'two'])
+  }, 60_000)
+
+  it('malformed existing contracts array → warns, file untouched (no corruption)', () => {
+    const broken = '{ "contract_version": "1.0.0", "contracts": [ {bad json} ] }\n'
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: CONTRACT_ANCHOR,
+      env: contractEnv,
+      seedFiles: {
+        'contracts.json': broken,
+        'scratch/id': 'z-api',
+        'scratch/producer': 'z',
+        'scratch/surface/1': 'a/**',
+        'scratch/consumers/1': 'y',
+      },
+    })
+    // The WARN goes to stderr (success exit 0); the load-bearing guarantee is that the
+    // malformed file is left byte-for-byte untouched (no corruption / partial splice).
+    expect(readIn(r, 'contracts.json')).toBe(broken)
+  }, 60_000)
+})

@@ -22656,7 +22656,10 @@ var RsctConfigSchema = external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
     setup_commit_sha_before: external_exports.string().optional(),
-    canonical_source_added: external_exports.boolean().optional()
+    canonical_source_added: external_exports.boolean().optional(),
+    // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
+    // create-universe offer, so /rsct-setup doesn't re-ask every run.
+    create_universe_declined_at: external_exports.string().min(1).optional()
   }).optional(),
   mcp: external_exports.object({
     server: external_exports.string().optional(),

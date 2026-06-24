@@ -44,6 +44,8 @@ export interface RsctConfig {
     mode?: string
     setup_commit_sha_before?: string
     canonical_source_added?: boolean
+    /** DX-1b: ISO timestamp set when the dev declines the create-universe offer (ask-once). */
+    create_universe_declined_at?: string
   }
   mcp?: {
     server?: string
@@ -145,6 +147,9 @@ const RsctConfigSchema = z
         mode: z.string().optional(),
         setup_commit_sha_before: z.string().optional(),
         canonical_source_added: z.boolean().optional(),
+        // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
+        // create-universe offer, so /rsct-setup doesn't re-ask every run.
+        create_universe_declined_at: z.string().min(1).optional(),
       })
       .optional(),
     mcp: z
