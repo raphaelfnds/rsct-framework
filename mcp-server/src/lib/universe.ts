@@ -65,12 +65,25 @@ type Resolution =
   | { kind: 'none' }
 
 /** Does a directory hold a `.universe.json` (the universe marker)? */
-function isUniverseDir(dir: string): boolean {
+export function isUniverseDir(dir: string): boolean {
   try {
     return statSync(dir).isDirectory() && existsSync(join(dir, '.universe.json'))
   } catch {
     return false
   }
+}
+
+/**
+ * Infer the org slug by stripping a trailing `-<digits>` suffix
+ * (e.g. "bluelt-23" → "bluelt"). The `-\d*$` (not `-\d+$`) mirrors the prompt's
+ * `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
+ * Single source so the universe resolver and the onboarding detector can never
+ * drift on what counts as the "same org". Behavior-preserving: no trim/lowercase
+ * here — callers that need a case-insensitive MATCH key apply that themselves
+ * (the resolver builds directory names from this and must keep the exact case).
+ */
+export function normalizeOrg(org: string | null | undefined): string | null {
+  return org ? org.replace(/-\d*$/, '') : null
 }
 
 /**
@@ -101,7 +114,7 @@ export function resolveUniverseRoot(
   // `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
   const name = uni?.name ?? null
   const org = config?.app?.org ?? null
-  const inferred = org ? org.replace(/-\d*$/, '') : null
+  const inferred = normalizeOrg(org)
   const basenames = [...new Set([name, inferred, org].filter((x): x is string => !!x))]
   const candidates: string[] = []
   for (const b of basenames) candidates.push(resolve(projectRoot, '..', `${b}-universe`))

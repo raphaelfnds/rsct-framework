@@ -76,6 +76,40 @@ not patched per-run.
 
 ---
 
+## Phase 0 — universe≠app guard (must run FIRST, before any discovery)
+
+`/rsct-setup` configures **applications**. If THIS repository is a **universe**
+(a governance repo — it carries a `.universe.json` at its root), setup must **not**
+run here. Run this block before anything else:
+
+```bash
+echo "  CHECKPOINT: Phase 0 executing canonical universe-vs-app guard"
+# Anchor to the REPO ROOT, never $PWD: on WSL-from-Windows the shell cwd can be
+# C:\Windows, so a bare relative `.universe.json` test could false-NEGATIVE (the
+# dangerous direction — it would let setup run inside a universe). `git rev-parse`
+# is the robust anchor; `pwd` is the fallback for a not-yet-git-init'd universe.
+GUARD_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [ -f "$GUARD_ROOT/.universe.json" ]; then
+  echo "RSCT-UNIVERSE-REPO-DETECTED"
+  echo "Este repositório é um UNIVERSE (repo de governança), não uma aplicação."
+  echo "O /rsct-setup configura APPS. Aqui você edita os arquivos do universe"
+  echo "(.universe.json, contracts.json, docs/governance/) e commita você mesmo."
+  echo "Para reforçar só os marcadores/esqueleto do universe, use /rsct-init-universe (modo update)."
+fi
+```
+
+**STOP rule (mechanical, read carefully).** If the block above printed
+`RSCT-UNIVERSE-REPO-DETECTED`, **STOP the entire `/rsct-setup` run right now** —
+do **not** read or execute any further Phase, and do **not** mutate anything.
+Report the redirect message to the user and end. A bash `exit` would only end
+*that one block* (every code block here runs in its own context — see the
+Execution mandate), so the halt is **this instruction to you**, not a shell exit.
+Belt-and-suspenders: Phase 1.9b independently re-checks via
+`rsct_detect_onboarding` (`recommended_route: "guard-universe-repo"`) and applies
+the same STOP, so the guard holds even if this file's `.universe.json` were edited.
+
+---
+
 ## Phase 1 — Silent discovery (no output yet, no mutations)
 
 Run all steps silently. Collect all findings before presenting anything.
@@ -474,6 +508,33 @@ with `${ORG_SLUG}-universe` kept as a fallback for universes literally named wit
 org suffix. If a universe is FOUND here but the project is not yet linked to it (see
 Phase 1.10 / `canonical_source_added`), Phase 3 will OFFER to link it (T1.d).
 
+### 1.9b — Onboarding situation (orchestrator brain, DX-1)
+
+When `rsct-mcp` is installed, call `mcp__rsct__rsct_detect_onboarding` (pass
+`project_root` **explicitly** — same Windows/WSL caveat as Phase 5 step 3). It is the
+single deterministic classifier; store its `situation`, `recommended_route`,
+`siblings`, and `hints`. It drives Phase 3 routing (the prompt narrates in plain
+language; the tool's English `hints` are guidance for you, not user copy):
+
+| `recommended_route` | Phase 3 action |
+|---|---|
+| `guard-universe-repo` | **STOP now** — same as Phase 0 (this is the MCP belt-and-suspenders). |
+| `offer-create-universe` | Render the NEW 🌱 CREATE A UNIVERSE guided offer (siblings found, no universe). |
+| `offer-link-existing` | Render the existing 🌌 UNIVERSE LINK offer. |
+| `fix-universe-link` | Render the 🔧 UNIVERSE LINK BROKEN notice (do NOT register). |
+| `none` (situation `offer-register`) | Nothing extra — Phase 4.8 self-guards registration. |
+| `none` (situation `has-universe-linked` / `solo`) | Nothing extra (near-zero-config). |
+
+When the detector ran, its `recommended_route` is the AUTHORITY for which universe
+offer (if any) Phase 3 shows — it supersedes the Phase 1.9 bash probe for routing.
+
+If `rsct-mcp` is **NOT** installed (typically the very first `/rsct-setup`, before the
+IDE restart that loads the MCP), **SKIP this step**. The create-universe suggestion is
+then honestly a **second-run** capability; Phase 5 step 8 prints an explicit pointer so
+the dev knows to re-run after restarting. Do **NOT** hand-roll a bash sibling scan as a
+fallback (it would reintroduce the cross-OS risk the detector exists to avoid). The
+existing Phase 1.9 bash probe still feeds the 🌌 UNIVERSE LINK offer in this MCP-absent case.
+
 ### 1.10 — Existing `.rsct.json` + discrepancy detection
 
 ```bash
@@ -647,6 +708,51 @@ Mode: [UPDATE | CREATE]
     never writes them directly). Once `universe.local` is set, run Phase 4.8 to register
     the app (it reads `universe.local` fresh from `.rsct.json` at execution time).
   - On NO → proceed unlinked (no change); the dev can run `/rsct-canonical-source` later.
+
+🌱 CREATE A UNIVERSE (DX-1) — present ONLY when Phase 1.9b returned
+  `recommended_route: "offer-create-universe"` (≥1 same-org sibling app found at `../`
+  and NO universe). Omit when the MCP isn't installed or no confirmed sibling was found.
+  [Present as ONE plain-language ORIENTATION prompt, Recommended (§B item 1):]
+  "🌌 Você tem outros apps da mesma org (`[list the siblings.dir from the detector]`) sem
+   um *universe* central. Um universe guarda a governança e os *contratos* entre esses apps
+   — e é o que permite o RSCT bloquear um commit que quebra um contrato de outro repositório.
+   Quer configurar isso agora? `[s/N]`
+   ✅ Recomendado: sim. Vou, com seu OK em CADA passo:
+     1) criar o universe (`/rsct-init-universe`),
+     2) linkar ESTE app (`/rsct-canonical-source`),
+     3) registrar este app no universe (Phase 4.8).
+   Você edita o conteúdo dos contratos e commita o repositório do universe você mesmo —
+   o RSCT nunca mexe no git do universe. O gate de contratos só ativa quando um SEGUNDO
+   app for registrado neste universe."
+  - On NO → proceed unlinked (mono path). (Ask-once PERSISTENCE of this decline is deferred
+    to DX-1b — a durable flag needs a new `.rsct.json` schema field; stashing it under the
+    existing `universe` block would be silently stripped on read. For now the offer may
+    reappear on an explicit re-run of `/rsct-setup`, and it never fires without same-org
+    siblings AND no universe, so it stays quiet for solo/mono projects.)
+  - On YES → run the GUIDED, STATEFUL chain. Each step is consent-gated AND re-probed
+    before the next; a failure or a decline STOPS the chain cleanly (no half-built promise):
+    a) Invoke `/rsct-init-universe`. Then VERIFY the universe exists, using the path
+       `/rsct-init-universe` reports as `Universe created at:` (its final report) as
+       `<universe-path>`: `[ -f "<universe-path>/.universe.json" ]`. If absent (init-universe aborted — e.g.
+       missing templates — or its own OK was declined): **STOP here** and tell the dev
+       "criação do universe cancelada/falhou — rode `/rsct-setup` quando quiser; nada foi linkado."
+    b) Invoke `/rsct-canonical-source` (it OWNS `universe.local` + `canonical_source_added`
+       + the CLAUDE.md section — setup never writes them directly). Then VERIFY linking:
+       `.rsct.json` now has a non-empty `universe.local`. If not: **STOP** and report the app
+       is not linked (the state is re-runnable; nothing else was promised).
+    c) Run Phase 4.8 to register this app (it reads `universe.local` fresh from `.rsct.json`).
+    Report FILESYSTEM-verified results ("criei `applications/<app>/` e setei `universe.local`;
+    o MCP só reflete isso após reiniciar o IDE") — do NOT claim what the MCP can't confirm
+    this session (the restart is inevitable).
+
+🔧 UNIVERSE LINK BROKEN (DX-1) — present ONLY when Phase 1.9b returned
+  `recommended_route: "fix-universe-link"` (`.rsct.json` `universe.local` is set but the
+  universe does not resolve there).
+  "⚠️ Seu `.rsct.json` aponta para um universe em `[universe.local_path]`, mas ele não existe
+   lá. Corrija o caminho (`universe.local`) ou rode `/rsct-canonical-source` de novo. NÃO vou
+   registrar este app num universe inexistente."
+  - Skip Phase 4.8 registration for this state (registering into a missing universe is a no-op
+    that misleads the dev). No mutation; the dev fixes the path or re-links.
 
 ──────────────────────────────────────────────────────
 Plan:
@@ -2987,6 +3093,13 @@ session boot.
    ```
 6. **Wait for updated OK** before `git add` / `commit` / `push`.
 7. If on protected branch: require explicit reconfirmed OK.
+8. **Fresh-install pointer (DX-1):** if `rsct-mcp` was NOT installed/loaded during THIS run
+   (so Phase 1.9b was skipped — typically the first `/rsct-setup`, before the IDE restart
+   that loads the MCP), print: "RSCT instalado. Reinicie o IDE e rode `/rsct-setup` de novo —
+   aí eu detecto os outros repositórios da sua org e ofereço configurar governança
+   compartilhada (universe + contratos)." This is the honest second-run capability (the
+   detector loads only after the restart). Skip this line when the MCP was already available
+   this run (the orchestration already happened in Phase 3).
 
 ---
 

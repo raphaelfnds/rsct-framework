@@ -25,6 +25,10 @@ import {
 import { getUniverseTool, getUniverseHandler } from './tools/get-universe.js'
 import { getTopologyTool, getTopologyHandler } from './tools/get-topology.js'
 import {
+  detectOnboardingTool,
+  detectOnboardingHandler,
+} from './tools/detect-onboarding.js'
+import {
   checkPremiseTool,
   checkPremiseHandler,
 } from './tools/check-premise.js'
@@ -142,6 +146,7 @@ const TOOLS: Tool[] = [
   getArchitectureTool,
   getUniverseTool,
   getTopologyTool,
+  detectOnboardingTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -179,6 +184,7 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_get_architecture: getArchitectureHandler,
   rsct_get_universe: getUniverseHandler,
   rsct_get_topology: getTopologyHandler,
+  rsct_detect_onboarding: detectOnboardingHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,

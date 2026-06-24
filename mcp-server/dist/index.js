@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync, lstatSync, realpathSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
@@ -3015,7 +3015,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3042,7 +3042,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3673,7 +3673,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve6(baseURI, relativeURI, options) {
+    function resolve7(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3931,7 +3931,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve6,
+      resolve: resolve7,
       resolveComponent,
       equal,
       serialize,
@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join19 } = __require("path");
+    var { join: join20 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join19(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join20(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join19, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join20, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join19(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join19(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,7 +9461,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join19(__dirname$1, "..", "file.js");
+          return join20(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join19 = ",";
+            let join20 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join19 = `,
+                join20 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join19;
+                res += join20;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join19}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join19 = `,
+              join20 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join19;
+                separator = join20;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join19;
+              separator = join20;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join19 = ",";
+            let join20 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join19 = `,
+                join20 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join19;
+                res += join20;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join19}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join19 = `,
+              join20 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join19;
+                separator = join20;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join20 = `,
+              const join21 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join20;
+                res2 += join21;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join19 = `,
+            const join20 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join19, maximumBreadth);
+              res += stringifyTypedArray(value, join20, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join19;
+              separator = join20;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join19;
+                separator = join20;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join19;
+              separator = join20;
             }
             if (separator !== "") {
               res = `
@@ -21311,7 +21311,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21328,7 +21328,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21406,7 +21406,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve6(parseResult.data);
+            resolve7(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -21667,12 +21667,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve6, interval);
+      const timeoutId = setTimeout(resolve7, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22533,12 +22533,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve6) => {
+    return new Promise((resolve7) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve6();
+        resolve7();
       } else {
-        this._stdout.once("drain", resolve6);
+        this._stdout.once("drain", resolve7);
       }
     });
   }
@@ -23282,6 +23282,9 @@ function isUniverseDir(dir) {
     return false;
   }
 }
+function normalizeOrg(org) {
+  return org ? org.replace(/-\d*$/, "") : null;
+}
 function resolveUniverseRoot(config2, projectRoot, opts = {}) {
   const uni = config2?.universe;
   const home = opts.home ?? process.env.HOME ?? homedir();
@@ -23291,7 +23294,7 @@ function resolveUniverseRoot(config2, projectRoot, opts = {}) {
   }
   const name = uni?.name ?? null;
   const org = config2?.app?.org ?? null;
-  const inferred = org ? org.replace(/-\d*$/, "") : null;
+  const inferred = normalizeOrg(org);
   const basenames = [...new Set([name, inferred, org].filter((x) => !!x))];
   const candidates = [];
   for (const b of basenames) candidates.push(resolve(projectRoot, "..", `${b}-universe`));
@@ -25158,6 +25161,278 @@ async function getTopologyHandler(rawInput) {
   };
 }
 
+// src/tools/detect-onboarding.ts
+init_esm_shims();
+
+// src/lib/onboarding-detect.ts
+init_esm_shims();
+var MAX_ENTRIES = 400;
+var MAX_SIBLINGS = 50;
+var MAX_GIT_CONFIG_BYTES = 1e6;
+var CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
+function caseFold(p) {
+  return CASE_INSENSITIVE_FS ? p.toLowerCase() : p;
+}
+function matchKey(raw) {
+  if (!raw) return null;
+  const n = normalizeOrg(raw.trim());
+  return n ? n.toLowerCase() : null;
+}
+function parseGitRemoteOrg(url) {
+  const s = url.trim();
+  if (s.length === 0) return null;
+  let path2 = null;
+  const schemeMatch = s.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/(.+)$/);
+  if (schemeMatch) {
+    const scheme = (schemeMatch[1] ?? "").toLowerCase();
+    if (scheme === "file") return null;
+    let rest = schemeMatch[2] ?? "";
+    const at = rest.indexOf("@");
+    const firstSlash = rest.indexOf("/");
+    if (at >= 0 && (firstSlash === -1 || at < firstSlash)) rest = rest.slice(at + 1);
+    const slash = rest.indexOf("/");
+    if (slash === -1) return null;
+    path2 = rest.slice(slash + 1);
+  } else {
+    const colon = s.indexOf(":");
+    if (colon === -1) return null;
+    const before = s.slice(0, colon);
+    if (!before.includes("@") && !before.includes(".")) return null;
+    path2 = s.slice(colon + 1);
+  }
+  path2 = path2.replace(/^\/+/, "");
+  const segs = path2.split("/").filter((seg) => seg.length > 0);
+  if (segs.length < 2) return null;
+  const org = segs[0];
+  return org && org.length > 0 ? org : null;
+}
+function readGitRemoteOrg(dir) {
+  const cfgPath = join(dir, ".git", "config");
+  let text;
+  try {
+    if (statSync(cfgPath).size > MAX_GIT_CONFIG_BYTES) return null;
+    text = readFileSync(cfgPath, "utf8").replace(/\r/g, "");
+  } catch {
+    return null;
+  }
+  const url = extractOriginUrl(text);
+  return url ? parseGitRemoteOrg(url) : null;
+}
+function extractOriginUrl(text) {
+  let currentRemote = null;
+  let originUrl = null;
+  let firstUrl = null;
+  for (const line of text.split("\n")) {
+    const remoteHeader = line.match(/^\s*\[\s*remote\s+"([^"]+)"\s*\]/i);
+    if (remoteHeader) {
+      currentRemote = remoteHeader[1] ?? null;
+      continue;
+    }
+    if (/^\s*\[/.test(line)) {
+      currentRemote = null;
+      continue;
+    }
+    if (currentRemote) {
+      const u = line.match(/^\s*url\s*=\s*(.+?)\s*$/i);
+      if (u) {
+        const val = (u[1] ?? "").trim();
+        if (firstUrl === null) firstUrl = val;
+        if (currentRemote === "origin" && originUrl === null) originUrl = val;
+      }
+    }
+  }
+  return originUrl ?? firstUrl;
+}
+function readRsctAppIdentity(rsctPath) {
+  try {
+    if (statSync(rsctPath).size > MAX_GIT_CONFIG_BYTES) return null;
+    const parsed = JSON.parse(readFileSync(rsctPath, "utf8"));
+    const name = typeof parsed.app?.name === "string" ? parsed.app.name : null;
+    const org = typeof parsed.app?.org === "string" ? parsed.app.org : null;
+    return { name, org };
+  } catch {
+    return null;
+  }
+}
+function matchSibling(full, selfKey) {
+  const rsctPath = join(full, ".rsct.json");
+  if (existsSync(rsctPath)) {
+    const id = readRsctAppIdentity(rsctPath);
+    if (id && id.org) {
+      return matchKey(id.org) === selfKey ? { name: id.name, org: normalizeOrg(id.org.trim()), matched_by: "rsct_json" } : null;
+    }
+  }
+  const gitOrg = readGitRemoteOrg(full);
+  if (gitOrg && matchKey(gitOrg) === selfKey) {
+    return { name: null, org: normalizeOrg(gitOrg.trim()), matched_by: "git_remote" };
+  }
+  return null;
+}
+function scanSiblings(root, selfKey) {
+  if (!selfKey) return [];
+  const parent = dirname(root);
+  if (caseFold(resolve(parent)) === caseFold(resolve(root))) return [];
+  let entries;
+  try {
+    entries = readdirSync(parent, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  let scanned = 0;
+  for (const e of entries) {
+    if (scanned >= MAX_ENTRIES) break;
+    scanned++;
+    if (e.name.startsWith(".")) continue;
+    const full = join(parent, e.name);
+    if (caseFold(resolve(full)) === caseFold(resolve(root))) continue;
+    let st;
+    try {
+      st = lstatSync(full);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink() || !st.isDirectory()) continue;
+    try {
+      if (caseFold(dirname(realpathSync(full))) !== caseFold(resolve(parent))) continue;
+    } catch {
+      continue;
+    }
+    if (isUniverseDir(full)) continue;
+    const m = matchSibling(full, selfKey);
+    if (m) {
+      out.push({ dir: e.name, ...m });
+      if (out.length >= MAX_SIBLINGS) break;
+    }
+  }
+  out.sort((a, b) => a.dir.localeCompare(b.dir));
+  return out;
+}
+function buildHints4(d) {
+  const hints = [];
+  switch (d.recommended_route) {
+    case "guard-universe-repo":
+      hints.push(
+        "This repo is a UNIVERSE (governance) repo, not an application \u2014 /rsct-setup is for apps. STOP setup; edit the universe files (.universe.json, contracts.json, docs/governance/) and commit them yourself."
+      );
+      break;
+    case "fix-universe-link":
+      hints.push(
+        `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve \u2014 fix universe.local or re-run /rsct-canonical-source. Do NOT register this app into it.`
+      );
+      break;
+    case "offer-link-existing":
+      hints.push(
+        `A universe was found at ${d.universe.local_path} but this app is not linked to it \u2014 offer to link it (/rsct-canonical-source), then register it.`
+      );
+      break;
+    case "offer-create-universe": {
+      const confirmed = d.siblings.filter((s) => s.matched_by === "rsct_json").map((s) => s.dir);
+      hints.push(
+        `Found ${confirmed.length} same-org sibling app(s) (${confirmed.join(", ")}) and no universe \u2014 offer the guided flow: create a universe (/rsct-init-universe), link this app (/rsct-canonical-source), then register it. Each step is consent-gated; the dev edits contract content and commits the universe repo themselves.`
+      );
+      break;
+    }
+    case "none":
+      if (d.situation === "offer-register") {
+        hints.push(
+          "This app is linked to the universe but not registered there \u2014 Phase 4.8 of /rsct-setup will offer to register it."
+        );
+      }
+      break;
+  }
+  const advisory = d.siblings.filter((s) => s.matched_by === "git_remote").map((s) => s.dir);
+  if (advisory.length > 0) {
+    hints.push(
+      `Possible same-org repos without RSCT (advisory, not counted toward the universe suggestion): ${advisory.join(", ")}.`
+    );
+  }
+  return hints;
+}
+function detectOnboarding(config2, projectRoot, opts = {}) {
+  const root = resolve(projectRoot);
+  const appName = config2?.app?.name ?? null;
+  const rawSelfOrg = config2?.app?.org ?? readGitRemoteOrg(root);
+  const selfOrg = normalizeOrg(rawSelfOrg ? rawSelfOrg.trim() : null) || null;
+  const selfKey = matchKey(rawSelfOrg);
+  const isUniverseRepo = existsSync(join(root, ".universe.json"));
+  const { block: uni } = getUniverse(config2, root, opts);
+  const hasLocal = !!(config2?.universe?.local && config2.universe.local.trim().length > 0);
+  const configuredMissing = hasLocal && !uni.available;
+  const linked = uni.available && hasLocal;
+  let siblings = [];
+  let situation;
+  let route;
+  if (isUniverseRepo) {
+    situation = "is-universe";
+    route = "guard-universe-repo";
+  } else if (uni.available) {
+    if (!linked) {
+      situation = "has-universe-unlinked";
+      route = "offer-link-existing";
+    } else if (!uni.this_app_registered) {
+      situation = "offer-register";
+      route = "none";
+    } else {
+      situation = "has-universe-linked";
+      route = "none";
+    }
+  } else if (configuredMissing) {
+    situation = "universe-configured-missing";
+    route = "fix-universe-link";
+  } else {
+    siblings = scanSiblings(root, selfKey);
+    const confirmed = siblings.filter((s) => s.matched_by === "rsct_json");
+    if (confirmed.length >= 1) {
+      situation = "siblings-no-universe";
+      route = "offer-create-universe";
+    } else {
+      situation = "solo";
+      route = "none";
+    }
+  }
+  const core = {
+    is_universe_repo: isUniverseRepo,
+    app: { name: appName, org: selfOrg },
+    universe: {
+      available: uni.available,
+      this_app_registered: uni.this_app_registered,
+      local_path: uni.local_path,
+      linked,
+      configured_missing: configuredMissing
+    },
+    siblings,
+    situation,
+    recommended_route: route
+  };
+  return { ...core, hints: buildHints4(core) };
+}
+
+// src/tools/detect-onboarding.ts
+var detectOnboardingInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+}).strict();
+var detectOnboardingTool = {
+  name: "rsct_detect_onboarding",
+  description: "Onboarding orchestrator brain for /rsct-setup: classifies the SITUATION (is-universe / has-universe-linked / has-universe-unlinked / universe-configured-missing / offer-register / siblings-no-universe / solo) and the recommended ROUTE (guard-universe-repo / offer-link-existing / offer-create-universe / fix-universe-link / none). Reports is_universe_repo (the deterministic universe\u2260app guard \u2014 if true, STOP setup: this is a governance repo, not an app) and same-org SIBLING apps found one level up (read-only `../` scan; rsct_json matches drive the 'create a universe?' suggestion, git_remote matches are advisory). /rsct-setup calls this once at discovery, then narrates + consent-gates the guided flow. Always succeeds; degrades to 'solo' when nothing applies.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      }
+    },
+    additionalProperties: false
+  }
+};
+async function detectOnboardingHandler(rawInput) {
+  const input = detectOnboardingInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const detection = detectOnboarding(resolution.config, resolution.root);
+  return { rsct_installed: resolution.rsct_installed, ...detection };
+}
+
 // src/tools/check-premise.ts
 init_esm_shims();
 
@@ -25448,7 +25723,7 @@ async function checkPremiseHandler(rawInput) {
     anti_decision_matches: result.anti_decision_matches,
     scanned_decisions: result.scanned,
     scanned_anti_decisions: result.scanned_anti_decisions,
-    hints: buildHints4(
+    hints: buildHints5(
       resolution.rsct_installed,
       snapshot.exists,
       antiSnapshot.exists,
@@ -25462,7 +25737,7 @@ function selectSubset(premises, adrs, against) {
   if (against === "adrs") return adrs;
   return [...premises, ...adrs];
 }
-function buildHints4(installed, decisionsExist, antiDecisionsExist, recommendation, antiMatchCount) {
+function buildHints5(installed, decisionsExist, antiDecisionsExist, recommendation, antiMatchCount) {
   const hints = [];
   if (!installed) {
     hints.push(
@@ -25569,7 +25844,7 @@ async function checkBranchHandler(rawInput) {
     is_protected,
     protected_list: list,
     source,
-    hints: buildHints5({
+    hints: buildHints6({
       rsct_installed: resolution.rsct_installed,
       in_git_repo,
       branch,
@@ -25578,7 +25853,7 @@ async function checkBranchHandler(rawInput) {
     })
   };
 }
-function buildHints5(input) {
+function buildHints6(input) {
   const hints = [];
   if (!input.rsct_installed) {
     hints.push(
@@ -25665,7 +25940,7 @@ ${unstaged}`;
     findings,
     scanned_extra_patterns: extras.compiled.length,
     invalid_extra_patterns: extras.invalid,
-    hints: buildHints6({
+    hints: buildHints7({
       rsct_installed: resolution.rsct_installed,
       in_git_repo: git.available,
       diff_present: diff !== null,
@@ -25674,7 +25949,7 @@ ${unstaged}`;
     })
   };
 }
-function buildHints6(input) {
+function buildHints7(input) {
   const hints = [];
   if (!input.rsct_installed) {
     hints.push(
@@ -25786,7 +26061,7 @@ async function checkEditScopeHandler(rawInput) {
     status,
     matched_glob,
     scope_globs,
-    hints: buildHints7({
+    hints: buildHints8({
       rsct_installed: resolution.rsct_installed,
       phase_state_exists,
       state,
@@ -25799,7 +26074,7 @@ async function checkEditScopeHandler(rawInput) {
   if (parse_error !== void 0) output.phase_state_parse_error = parse_error;
   return output;
 }
-function buildHints7(input) {
+function buildHints8(input) {
   const hints = [];
   if (!input.rsct_installed) {
     hints.push("No .rsct.json \u2014 running scope check with no project context.");
@@ -31881,6 +32156,7 @@ var TOOLS = [
   getArchitectureTool,
   getUniverseTool,
   getTopologyTool,
+  detectOnboardingTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -31917,6 +32193,7 @@ var HANDLERS = {
   rsct_get_architecture: getArchitectureHandler,
   rsct_get_universe: getUniverseHandler,
   rsct_get_topology: getTopologyHandler,
+  rsct_detect_onboarding: detectOnboardingHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,
