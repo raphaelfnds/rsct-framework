@@ -90,14 +90,16 @@ else
 fi
 
 # --- Detect existing install (protocol + code versions) ---
-# Two version axes:
-#   PROTOCOL version (e.g., "1.0.0") — the rules contract, stable across
-#     the entire pre-release train. Lives in ~/.rsct/VERSION.
-#   CODE version (e.g., "0.7.0") — the rsct-mcp companion + prompt
-#     mechanics. Bumped per release. Lives in ~/.rsct/VERSION-CODE.
-# Reporting both lets the dev see e.g. "code 0.6.7 → 0.7.0" even when
-# protocol stays at 1.0.0 — the case that hid the CAP-9 → CAP-14 fixes
-# from `npm install -g` "up to date" reporting.
+# Two RELEASE version axes are reported (aligned from v1.0.0 on):
+#   PROTOCOL version (e.g., "1.1.0") — the prompts/rules release, read
+#     from the `# Version:` header of 01-setup.md. Lives in ~/.rsct/VERSION.
+#   CODE version (e.g., "1.1.0") — the rsct-mcp companion + prompt
+#     mechanics, from version.ts. Lives in ~/.rsct/VERSION-CODE.
+# Reporting both lets the dev see drift (e.g. "code 0.6.7 → 0.7.0") even
+# when the other axis is unchanged — the case that hid the CAP-9 → CAP-14
+# fixes from `npm install -g` "up to date" reporting. Neither is the
+# `v=1.0.0` marker SCHEMA ID — that's a separate, frozen idempotency key
+# carried inside markers, never stored in these files.
 EXISTING_VERSION=""
 if [ -f "$RSCT_HOME/VERSION" ]; then
   EXISTING_VERSION=$(cat "$RSCT_HOME/VERSION" 2>/dev/null | head -1)

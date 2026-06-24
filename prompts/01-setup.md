@@ -2248,16 +2248,15 @@ done
 echo "  Phase 4.6 feedback summary: CREATE=$MEM_CREATE UPDATE=$MEM_UPDATE SKIP=$MEM_SKIP PRESERVE=$MEM_PRESERVE"
 ```
 
-**Why content-SHA (not version-string) comparison:** the framework
-protocol version (`v=1.0.0`) is intentionally stable across the entire
-`v0.x` pre-release train and will only bump on the first stable release.
-A version-string compare would silently SKIP every UPDATE during the
-dev cycle (case observed in v0.6.4: body edits to
-`feedback_architect-code-changes.md` and `feedback_branch-protection.md`
-were skipped by re-runs on existing projects because `v=1.0.0` matched).
-Comparing the user file's body SHA against the resolved template SHA
-captures **every** content change without requiring a protocol-version
-bump.
+**Why content-SHA (not version-string) comparison:** the marker schema
+id (`v=1.0.0`) is intentionally stable — it changes only when the marker
+*format* changes, never per release. A version-string compare would
+silently SKIP every UPDATE during the dev cycle (case observed in v0.6.4:
+body edits to `feedback_architect-code-changes.md` and
+`feedback_branch-protection.md` were skipped by re-runs on existing
+projects because `v=1.0.0` matched). Comparing the user file's body SHA
+against the resolved template SHA captures **every** content change
+without requiring a schema-id bump.
 
 **Backward compat:** the marker shape
 (`<!-- RSCT-GENERATED v=X created=Y sha256-body=Z -->`) is unchanged.

@@ -86,10 +86,10 @@ if [ -z "$PRESENT_RSCT_HOME" ] && [ ${#PRESENT_COMMANDS[@]} -eq 0 ] && [ -z "$PR
 fi
 
 # --- Show plan ---
-# Symmetric with install.sh: report both protocol and code versions so the
-# dev sees exactly what is being removed (the code version is the one that
-# moves between releases; protocol stays at 1.0.0 across the pre-release
-# train and would otherwise look unchanged across re-installs).
+# Symmetric with install.sh: report both the protocol (prompts/rules
+# release, from ~/.rsct/VERSION) and code (~/.rsct/VERSION-CODE) versions so
+# the dev sees exactly what is being removed. Both are RELEASE versions
+# (aligned from v1.0.0 on); neither is the `v=1.0.0` marker schema id.
 EXISTING_VERSION=""
 if [ -f "$RSCT_HOME/VERSION" ]; then
   EXISTING_VERSION=$(cat "$RSCT_HOME/VERSION" 2>/dev/null | head -1)
