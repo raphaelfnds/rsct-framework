@@ -10,7 +10,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.0.0] - 2026-06-25
+
+Multi-repo governance + a guided onboarding orchestrator + the mechanical REVIEW
+phase. The product (release) version moves to **2.0.0**; the embedded marker
+**schema id stays at `v=1.0.0`** (its format is unchanged, so existing installs
+keep marker idempotency). The tool catalog grows **30 → 37**.
 
 ### Added
 
