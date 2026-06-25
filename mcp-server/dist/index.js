@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync, lstatSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
@@ -22775,6 +22775,13 @@ function emitConfigViolation(projectRoot, reason, extras) {
 
 // src/lib/git.ts
 init_esm_shims();
+function realpathOrSelf(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
 function readGitState(projectRoot) {
   if (!isGitRepo(projectRoot)) {
     return { available: false, branch: null, head_sha: null, is_clean: null };
@@ -22820,7 +22827,7 @@ function readWorktreeInfo(projectRoot) {
   if (gitDirRaw !== null && commonDirRaw !== null) {
     const gitDirAbs = resolve(projectRoot, gitDirRaw);
     const commonDirAbs = resolve(projectRoot, commonDirRaw);
-    isWorktree = gitDirAbs !== commonDirAbs;
+    isWorktree = realpathOrSelf(gitDirAbs) !== realpathOrSelf(commonDirAbs);
     if (isWorktree) {
       const parts = gitDirAbs.replace(/\\/g, "/").split("/").filter((p) => p.length > 0);
       name = parts.length > 0 ? parts[parts.length - 1] : null;
@@ -25337,6 +25344,12 @@ function scanSiblings(root, selfKey) {
   } catch {
     return [];
   }
+  let realParent;
+  try {
+    realParent = realpathSync(parent);
+  } catch {
+    realParent = resolve(parent);
+  }
   const out = [];
   let scanned = 0;
   for (const e of entries) {
@@ -25353,7 +25366,7 @@ function scanSiblings(root, selfKey) {
     }
     if (st.isSymbolicLink() || !st.isDirectory()) continue;
     try {
-      if (caseFold(dirname(realpathSync(full))) !== caseFold(resolve(parent))) continue;
+      if (caseFold(dirname(realpathSync(full))) !== caseFold(realParent)) continue;
     } catch {
       continue;
     }

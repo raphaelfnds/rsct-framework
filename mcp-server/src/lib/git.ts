@@ -1,5 +1,15 @@
 import { execFileSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+/** realpath if it resolves (collapses macOS /var→/private/var, Win 8.3/casing); else the input. */
+function realpathOrSelf(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
 
 export interface GitState {
   available: boolean
@@ -117,12 +127,16 @@ export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
   // 'C:/repo/.git' vs '../../.git'). A raw string compare would treat the same
   // .git as different → falsely report the main worktree as a linked one.
   // Resolve BOTH against projectRoot first so identical .git dirs compare equal.
+  // Then realpath BOTH: git emits its absolute paths symlink-resolved while
+  // `resolve()` does not, so on macOS (`tmpdir()` = /var→/private/var) / Windows
+  // (8.3 short-names, drive casing) the abs --git-dir and the resolved relative
+  // --git-common-dir would differ for the SAME .git → false linked-worktree.
   let isWorktree = false
   let name: string | null = null
   if (gitDirRaw !== null && commonDirRaw !== null) {
     const gitDirAbs = resolve(projectRoot, gitDirRaw)
     const commonDirAbs = resolve(projectRoot, commonDirRaw)
-    isWorktree = gitDirAbs !== commonDirAbs
+    isWorktree = realpathOrSelf(gitDirAbs) !== realpathOrSelf(commonDirAbs)
     if (isWorktree) {
       const parts = gitDirAbs.replace(/\\/g, '/').split('/').filter((p) => p.length > 0)
       name = parts.length > 0 ? parts[parts.length - 1]! : null

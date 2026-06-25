@@ -231,6 +231,19 @@ function scanSiblings(root: string, selfKey: string | null): SiblingApp[] {
     return []
   }
 
+  // The junction-escape guard below compares `dirname(realpathSync(full))` against
+  // the parent. `realpathSync` resolves symlinks; `resolve()` does NOT — so on a
+  // filesystem where the parent itself sits under a symlink (macOS `tmpdir()` is
+  // `/var`→`/private/var`; Windows 8.3 short-names / drive casing) the two would
+  // never match and EVERY sibling would be wrongly skipped. realpath the parent
+  // ONCE so both sides of the compare are symlink-resolved like-for-like.
+  let realParent: string
+  try {
+    realParent = realpathSync(parent)
+  } catch {
+    realParent = resolve(parent)
+  }
+
   const out: SiblingApp[] = []
   // MAX_ENTRIES bounds the entries EXAMINED (a DoS bound on a pathological parent),
   // not siblings found — skipped entries (dotdirs, self, non-dirs) count toward it.
@@ -252,7 +265,7 @@ function scanSiblings(root: string, selfKey: string | null): SiblingApp[] {
     // R7: Windows junctions are NOT reported as symlinks by lstat — verify the
     // real path is still a direct child of the parent (rejects junction escapes).
     try {
-      if (caseFold(dirname(realpathSync(full))) !== caseFold(resolve(parent))) continue
+      if (caseFold(dirname(realpathSync(full))) !== caseFold(realParent)) continue
     } catch {
       continue
     }
