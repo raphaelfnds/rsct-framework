@@ -3,8 +3,9 @@
 MCP server for the [RSCT framework](../) — institutional consciousness layer
 for Claude Code.
 
-Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, and the
-**M3 phase machine** (V phase + R/S/C/T pairs + classify_task):
+Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, the
+**M3 phase machine** (V phase + R/S/C/T pairs + classify_task), and the
+**post-M3 multi-repo / onboarding / REVIEW** additions (T1c/T2/T3 + the DX track):
 - **M1 — Recall (`plan_rsct-mcp-v1.md`):** 7 tools + 5 resources that let
   Claude reach into a project's structured documentation (decisions, knowledge
   graph, environment profiles, architecture, infrastructure) before proposing
@@ -17,14 +18,22 @@ Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, and the
   `rsct_classify_task` (heuristic tier classifier),
   `rsct_phase_status`, the V phase
   (`rsct_phase_verification_{start,complete}`) with reverse-dep walk
-  + 4-category checklist, the four R/S/C/T phase pairs
-  (`rsct_phase_{research,spec,code,test}_{start,complete}`) backed by
-  the shared `lib/phase-machine.ts`, `rsct_phase_abandon` (§C-gated
+  + 4-category checklist, the five R/S/C/REVIEW/T phase pairs
+  (`rsct_phase_{research,spec,code,review,test}_{start,complete}`) backed
+  by the shared `lib/phase-machine.ts`, `rsct_phase_abandon` (§C-gated
   phase discard), `rsct_capture_issue` (draft + create modes via gh
   CLI), 5 personas (Architect, Senior Dev, QA, DevOps, Security) +
   `rsct_persona_review` + `rsct_auto_persona`, and Tutor as the 6th
   persona (opt-in only) with `rsct_tutor_step`. Bilingual EN+pt-BR
   vocabulary across the heuristic keyword sets.
+- **Post-M3 — multi-repo, onboarding & the REVIEW phase:** the 30 M1+M2+M3
+  tools are joined by 7 more, bringing the catalog to **37**: org-universe
+  governance reads (`rsct_get_universe`, T1c), multi-repo topology + the
+  contract-surface gate (`rsct_get_topology`, T2), the guided-onboarding detector
+  (`rsct_detect_onboarding`, DX-1), plan-authorization batch tokens
+  (`rsct_plan_authorize` / `rsct_plan_revoke`, T3), and the mechanical REVIEW
+  phase (`rsct_phase_review_start` / `rsct_phase_review_complete`, DX-4 — the
+  cycle becomes R→S→V→C→REVIEW→T).
 
 **Entry point for non-trivial tasks:** call `rsct_classify_task` with the
 task description. It returns a tier (trivial / small / standard / complex)
@@ -32,11 +41,22 @@ and the recommended phase sequence. Tier is advisory — the phase tools
 accept any phase regardless of classify_task output. For trivial / docs-only
 fixes, skip the phase machine entirely.
 
+**REVIEW phase (DX-4)** — a code review of the diff sits between Code and Test
+(the recommended cycle is **R→S→V→C→REVIEW→T**), mirroring how the V audit sits
+between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
+`rsct_phase_spec_complete` (recorded keyed by `spec_ref`). For `spec_tier ∈
+{standard, complex}`, `rsct_phase_test_start` then enforces the decision —
+`decision=no` proceeds (review skipped), `decision=yes` requires a completed
+`rsct_phase_review_{start,complete}` for that `spec_ref`, and no decision rejects
+(asking you to record one); `override_review_skip=true` bypasses (audit-logged).
+`trivial`/`small` bypass the gate. NOTE: the REVIEW *phase* is distinct from
+`rsct_persona_review` (a stateless advisory lens).
+
 ## Status
 
 | Milestone | State |
 |---|---|
-| M1 — Recall MVP (F0 + F1 + F2) | ✅ gate passed 2026-06-03; merged to `main` (tag `v0.2.0-m2`) |
+| M1 — Recall MVP (F0 + F1 + F2) | ✅ gate passed 2026-06-03; merged to `main` (tag `v0.2.0-m1`) |
 | M2 — Enforcement MVP (F2.5.0..F2.5.8b) | ✅ gate passed 2026-06-06; merged to `main` (tag `v0.2.0-m2`) |
 | Post-M2 Track 1 (safety hardening) | ✅ closed 2026-06-06; merged to `main` (tag `v0.2.1-track1-safety`) |
 | Post-M2 Track 2 (install + docs + adoption) | ✅ closed 2026-06-06; merged to `main` (tag `v0.2.2-track2-complete`) |
@@ -49,8 +69,9 @@ fixes, skip the phase machine entirely.
 | M3 F3 personas (5 personas + persona_review + auto_persona) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.0-m3-personas`) |
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
+| Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 
-**30 tools · 5 resources · 473/473 unit tests · tsc strict · ESM ~250 KB
+**37 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -81,21 +102,25 @@ node dist/index.js < /dev/null
 Expect on stderr (single JSON line, then clean exit 0):
 
 ```json
-{"level":30,"time":"...","name":"rsct-mcp","version":"0.6.3",
+{"level":30,"time":"...","name":"rsct-mcp","version":"2.0.0",
  "tools":["rsct_status","rsct_load_context","rsct_get_decisions",
           "rsct_get_knowledge","rsct_get_environments",
-          "rsct_get_architecture","rsct_check_premise",
-          "rsct_check_branch","rsct_check_secrets",
-          "rsct_check_edit_scope","rsct_request_commit",
-          "rsct_request_push","rsct_request_merge",
-          "rsct_classify_task","rsct_phase_status",
-          "rsct_phase_research_start","rsct_phase_research_complete",
-          "rsct_phase_spec_start","rsct_phase_spec_complete",
-          "rsct_phase_verification_start","rsct_phase_verification_complete",
-          "rsct_phase_code_start","rsct_phase_code_complete",
-          "rsct_phase_test_start","rsct_phase_test_complete",
-          "rsct_phase_abandon","rsct_capture_issue",
-          "rsct_persona_review","rsct_auto_persona","rsct_tutor_step"],
+          "rsct_get_architecture","rsct_get_universe",
+          "rsct_get_topology","rsct_detect_onboarding",
+          "rsct_check_premise","rsct_check_branch",
+          "rsct_check_secrets","rsct_check_edit_scope",
+          "rsct_request_commit","rsct_request_push",
+          "rsct_request_merge","rsct_plan_authorize",
+          "rsct_plan_revoke","rsct_classify_task",
+          "rsct_phase_status","rsct_phase_research_start",
+          "rsct_phase_research_complete","rsct_phase_spec_start",
+          "rsct_phase_spec_complete","rsct_phase_verification_start",
+          "rsct_phase_verification_complete","rsct_phase_code_start",
+          "rsct_phase_code_complete","rsct_phase_review_start",
+          "rsct_phase_review_complete","rsct_phase_test_start",
+          "rsct_phase_test_complete","rsct_phase_abandon",
+          "rsct_capture_issue","rsct_persona_review",
+          "rsct_auto_persona","rsct_tutor_step"],
  "resources":["rsct://decisions","rsct://architecture",
               "rsct://plan","rsct://progress"],
  "resource_templates":["rsct://knowledge/{category}"],
@@ -105,6 +130,9 @@ Expect on stderr (single JSON line, then clean exit 0):
 The immediate exit is correct: the server reads MCP protocol from stdin;
 piping `/dev/null` (or `NUL` on Windows) gives it nothing, so it closes
 after the ready log.
+
+> The JSON above is an illustrative example — the `version` and exact tool list
+> reflect whatever build you have installed, not a pinned snapshot.
 
 ---
 
@@ -191,7 +219,7 @@ file content on disk.
 - [ ] `rsct-mcp` registers and runs on the primary maintainer platform (e.g., Windows + Git Bash).
 - [ ] All 7 tools and 5 resources respond as expected (tables above).
 - [ ] Claude reads `decisions.md` via tool in a real conversation (Tool check #3 or #7 is the canonical proof).
-- [ ] Dev signs off in [progress_rsct-mcp-v1.md](../progress_rsct-mcp-v1.md) to start M2.
+- [ ] Dev signs off in progress_rsct-mcp-v1.md to start M2.
 
 If any row fails, capture the failure (tool name, prompt, actual vs expected
 response) in the progress file before opening a fix.
@@ -206,17 +234,75 @@ All tools degrade gracefully outside rsct projects (return
 
 ### `rsct_status`
 
-Fast bootstrap check. Returns rsct identity, protected branches, git state, hints.
+Fast bootstrap check. Returns rsct identity, protected branches, git state, the
+[`universe` block](#the-universe-block), and hints.
 
 - Input: `project_root?`
-- Output: identity, git, hints
+- Output: identity, git, `universe`, hints
 
 ### `rsct_load_context`
 
 Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, knowledge index, next-action hints.
 
 - Input: `project_root?`, `decisions_excerpt_count?` (default 3, max 20)
-- Output: structured snapshot for session priming
+- Output: structured snapshot for session priming (identity, git, active plan,
+  decisions, knowledge, `universe`, `next_action_hints`)
+
+### The `universe` block
+
+Both `rsct_status` and `rsct_load_context` surface the org-level **universe**
+(the layer linked by `/rsct-canonical-source` and bootstrapped by
+`/rsct-init-universe`). They compute it from a single shared source, so the two
+outputs never drift, and it is **fail-graceful**: any error degrades to an empty
+block and never throws into the bootstrap path. A project with no universe behaves
+exactly as before this feature existed (`available: false`, no hint).
+
+The block is **always present** with these fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `available` | boolean | `true` only when a universe was resolved AND its `.universe.json` was read. |
+| `name` | string \| null | Universe name (from `.universe.json`, else `.rsct.json universe.name`). |
+| `local_path` | string \| null | The resolved universe path that was chosen (transparency). |
+| `registered_apps_count` | number | Count of `applications/<app>/` **directories** (ground truth — not the `.universe.json` list length). |
+| `this_app_registered` | boolean | Whether this project's app is registered in the universe. |
+| `note` | string \| null | Diagnostic for the degraded / configured-missing / reconciliation states. |
+| `governance` | object | Index of the universe's org-level governance docs (slugs only): `{ available, governance_dir, docs[], has_index }`. Read their content with [`rsct_get_universe`](#rsct_get_universe). Empty when no universe or no `docs/governance/`. |
+
+When the block carries an actionable message, a one-line `hint` is also pushed into
+`hints` (status) / `next_action_hints` (load_context). States:
+
+- **none** — no universe found (or project not rsct-managed): empty block, no hint.
+- **found + registered** — `available: true`, `this_app_registered: true`, no hint.
+- **found + NOT registered** — `available: true`, `this_app_registered: false`, plus a
+  hint to run `/rsct-setup` to register the app (see [Phase 4.8 registration](../README.md#universe-app-registration)).
+- **configured-missing** — `.rsct.json universe.local` points somewhere that does not
+  exist: `available: false`, `note` "configured but not found", hint to fix it.
+- **unreadable (degraded)** — the directory exists but `.universe.json` is missing or
+  corrupt: `available: false`, `note` "found but unreadable".
+- **reconciliation** — the `.universe.json registered_apps[]` index and the
+  `applications/<app>/` directories disagree: `note` explains the mismatch.
+
+### The `topology` block
+
+Both `rsct_status` and `rsct_load_context` also surface a **topology** block (T2),
+computed from the same single source, fail-graceful (absent config / universe → `mono`,
+no hint). It reports the repo's place in a multi-repo org and is what the
+contract-surface gate ([`rsct_request_commit`](#rsct_request_commit)) diverges on:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `confirmed_mode` | `'mono'\|'monorepo'\|'multi-repo'` \| null | The dev-confirmed mode from `.rsct.json topology.mode` (authoritative — what the gate uses). `null` until `/rsct-setup` confirms it. |
+| `inferred_mode` | `'mono'\|'monorepo'\|'multi-repo'` | Silent inference from on-disk signals — only **pre-selects** the explicit ask; never gates. |
+| `confidence` | `'high'\|'medium'\|'low'` | Confidence of the inference (monorepo is always `low`). |
+| `effective_mode` | mode | `confirmed_mode ?? inferred_mode` (what to display when unconfirmed). |
+| `signals` | object | `{ universe_available, registered_apps_count, this_app_registered, nested_app_markers, universe_external }`. |
+
+The gate is enforced **only** when `confirmed_mode === 'multi-repo'` AND a `contracts.json`
+exists at the universe root AND a produced surface is touched. When `confirmed_mode` is
+`multi-repo` but the gate can't fire (no universe linked / no `contracts.json`), a HIGH
+**inactive-gate** hint is pushed so the off gate is never silent. Read the contract graph
+with [`rsct_get_topology`](#rsct_get_topology).
 
 ### `rsct_get_decisions`
 
@@ -252,6 +338,61 @@ Reads `documentation/architecture.md` and the `modules/` / `impact/` directories
 
 - Input: `project_root?`, `scope?: 'overview'|'module'|'impact'|'all'` (default `overview`), `module_name?` (narrows scope=module/impact)
 - Output: overview file, modules set, impacts set + hints
+
+### `rsct_get_universe`
+
+Reads the linked **org-level universe's** governance content — `docs/governance/*.md`
+and `docs/INDEX.md` — so Claude can consult org naming standards / the canonical-sources
+map before proposing structure (the §0 rule treats org standards as authoritative over
+local guesses). The universe layout is **not** the project layout: a universe has no
+`documentation/{decisions,knowledge,architecture}`; its authority lives under
+`docs/governance/`. Resolution reuses the same single source as the [`universe` block](#the-universe-block).
+
+- Input: `project_root?`, `scope?: 'governance'|'index'|'all'` (default `governance`), `doc?` (governance slug, narrows scope=governance; ignored for scope=index), `query?` (case-insensitive substring across heading + body)
+- Output: `universe_available`, `universe_path`, `governance` index, `docs[]` (each `{ slug, exists, path, sections[] }`) + hints
+
+Fail-graceful: no universe linked, or governance unscaffolded → `universe_available: false`
+/ empty `docs` with a hint (never an error). A `doc` slug containing a path separator,
+`..`, or an absolute path is rejected (returns `exists: false`).
+
+### `rsct_get_topology`
+
+Reports the repo **topology** ([`topology` block](#the-topology-block)) plus the org-level
+**contract graph** read from `contracts.json` at the universe root: the contracts this app
+**produces** (its surfaces) and **consumes** (its dependencies). A contract is a *surface* —
+path globs in the producer repo (`openapi/*.yaml`, `src/api/**`, `proto/**`) that consumer
+apps depend on.
+
+- Input: `project_root?`
+- Output: `topology` block, `contracts` graph (`{ available, contracts[], note }`), `produced[]`,
+  `consumed[]`, `app_name`, `universe_path` + hints
+
+In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks** a commit that
+touches a produced surface (listing the affected consumers) unless
+`dev_approval.override_contract_surface: { reason }` is given. Surface globs support `*` `**`
+`?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
+sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
+hint (never an error).
+
+**Producer-mismatch warning.** Whenever the contract graph and the universe are both
+readable, `rsct_get_topology` adds a hint for each contract `producer` that matches **no
+registered app** — the gate compares names exactly and case-sensitively (`===`), so an
+unregistered or mis-cased producer silently never gates. A case-only difference is flagged as
+a likely typo with the correctly-cased name to use. Lists the offending producer name(s), not
+just a count.
+
+### `rsct_detect_onboarding`
+
+The onboarding orchestrator brain for `/rsct-setup`. Classifies the project's onboarding
+**situation** — `is-universe` (a `.universe.json` is present → this is a universe repo, not an
+app), `has-universe-linked`, `has-universe-unlinked`, `universe-configured-missing`,
+`offer-register`, `siblings-no-universe` (same-org sibling repos detected, no universe yet →
+offer to create one), or `solo` — and returns the recommended **route** for the setup prompt to
+follow. The same-org sibling scan reads `../` one level (origin-pinned, CRLF-safe, case-folded
+self-skip); it never writes.
+
+- Input: `project_root?`
+- Output: `rsct_installed`, `situation`, `route`, the resolved universe/sibling signals + hints
 
 ### `rsct_check_premise`
 
@@ -336,11 +477,14 @@ The `dev_approval` shape (validated by `lib/dev-approval.ts`):
 
 #### `rsct_request_commit`
 
-Stages-and-commits if `dev_approval` is valid + no INV-5 (protected
-branch) violation + no INV-6 (secrets) hits in the staged diff.
+Commits if authorization is valid + no INV-5 (protected branch) violation +
+no INV-6 (secrets) hits in the staged diff. **Authorization is EITHER** a
+per-action `dev_approval` **OR** — when `dev_approval` is omitted — an active
+**plan-scoped batch token** (see `rsct_plan_authorize`). The token path carries
+no overrides, so a protected branch or a secret finding still rejects.
 
-- Input: `project_root?`, `message`, `dev_approval`, `staged_diff_override?` (test seam)
-- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `sha_before`, `sha_after?`, `reject_kind?`, `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
+- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`), `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 
 Approval consumption rule: never burn the approval on pre-mutation
 rejects. Only `recordConsumedApproval` AFTER a successful commit.
@@ -375,6 +519,34 @@ force-pushy patterns by default).
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
 don't accidentally pass the flag without the override.
+
+#### `rsct_plan_authorize` (T3 — plan execution mode: batch)
+
+Mints a **plan-scoped batch token**: one strong `dev_approval` (full §C gate +
+OS dialog) authorizes up to `max_actions` **commits** within the active plan +
+current branch + a time window, so `rsct_request_commit` no longer needs a fresh
+approval per commit. **Commit only** — push/merge keep per-action §C. Requires an
+active `plan_`/`spec_` at the project root and a **non-protected** branch. The
+token never bypasses INV-5/INV-6 (no overrides on the token path). The emitting
+approval is consumed (cannot re-mint). Auto-revokes on branch switch, plan
+completion/deletion, expiry, or exhaustion.
+
+- Input: `project_root?`, `dev_approval`, `ttl_minutes?` (5–480, default 120), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
+- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `protected_branch` / `no_branch`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
+
+#### `rsct_plan_revoke` (T3)
+
+Revokes the active plan token. **NOT §C-gated** — revoking only tightens
+security. After revoke, `rsct_request_commit` again requires a per-action
+`dev_approval`. No-op (`status: 'no_token'`) when none is active.
+
+- Input: `project_root?`, `reason?`
+- Output: `status: 'revoked' | 'no_token' | 'state_write_failed'`, `revoked_plan_slug`, `audit_path`, `audit_error`, `hints`.
+
+The active token + git-worktree context are also surfaced by `rsct_phase_status`
+(`plan_authorization`, `worktree`) and `rsct_status` (`worktree`). Because the
+runtime state is gitignored and per-working-tree, each `git worktree` gets its
+own isolated token and anti-reuse store.
 
 ### SessionStart sanitizer hook (INV-2.3 closer)
 
@@ -603,7 +775,7 @@ companion install (`npm run build && npm install -g .`) and after
 
 - [ ] M1 validation gate signed off (per progress_rsct-mcp-v1.md).
 - [ ] `rsct-mcp` on PATH and `node dist/index.js < /dev/null` prints the
-      ready log including all 13 tool names.
+      ready log including all 13 M1+M2 tool names (the full catalog is 37 now).
 - [ ] `/rsct-setup` re-run in the test project; Phase 4.V reports either
       "Installed RSCT SessionStart sanitizer hook" (fresh) or "already
       present — no change" (idempotent).
@@ -667,7 +839,7 @@ target platform" in the M2 sign-off — does NOT block the gate.
 - [ ] Anti-decisions cross-check fires `conflict` for a claim shared with
       an AD-NNN entry (verifiable via tool check #7 from M1 with a claim
       like "use DynamoDB for orders").
-- [ ] Dev signs off in [progress_rsct-mcp-v2.md](../progress_rsct-mcp-v2.md)
+- [ ] Dev signs off in progress_rsct-mcp-v2.md
       to start M3 (or to merge v1 + v2 → main as the planned M2 close).
 
 If any row fails, capture the failure (tool/hook, prompt or step, actual

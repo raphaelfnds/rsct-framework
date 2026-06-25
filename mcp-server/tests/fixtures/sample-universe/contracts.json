@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "contracts": [
+    {
+      "id": "orders-api",
+      "producer": "registered-app",
+      "surface": ["openapi/orders.yaml", "src/api/**"],
+      "consumers": ["web-frontend", "reporting"],
+      "description": "Orders REST API produced by registered-app"
+    },
+    {
+      "id": "events-stream",
+      "producer": "web-frontend",
+      "surface": ["src/events/**"],
+      "consumers": ["reporting"]
+    }
+  ]
+}

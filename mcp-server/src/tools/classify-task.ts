@@ -273,7 +273,7 @@ const CONCERN_LEXICONS: Record<string, readonly string[]> = {
 
 /**
  * CAP-29: step-count detector. Multi-step plans (4+ numbered steps)
- * indicate orchestration that warrants the full R→S→V→C→T cycle.
+ * indicate orchestration that warrants the full R→S→V→C→REVIEW→T cycle.
  *
  * Matches sequences like "1. foo\n2. bar\n3. baz\n4. qux" (numbered
  * list with dots) OR "passo 1", "step 1" form with at least 4
@@ -440,7 +440,7 @@ function classify(description: string): {
     return {
       tier: 'complex',
       signals,
-      reasoning: `Architecture / security keywords detected (${archHits.join(', ')}). Treat as complex — likely cross-cutting, deserves full R→S→V→C→T cycle.`,
+      reasoning: `Architecture / security keywords detected (${archHits.join(', ')}). Treat as complex — likely cross-cutting, deserves full R→S→V→C→REVIEW→T cycle.`,
     }
   }
   if (multiHits.length > 0) {
@@ -469,7 +469,7 @@ function classify(description: string): {
     return {
       tier: 'complex',
       signals,
-      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex — multi-step orchestration warrants R→S→V→C→T.`,
+      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex — multi-step orchestration warrants R→S→V→C→REVIEW→T.`,
     }
   }
   if (concerns.size >= 3) {
@@ -496,15 +496,20 @@ function classify(description: string): {
   return {
     tier: 'standard',
     signals,
-    reasoning: `Defaulting to standard — no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R→S→C→T cycle recommended; consider verification phase if the change touches code with many importers.`,
+    reasoning: `Defaulting to standard — no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R→S→C→REVIEW→T cycle recommended; consider verification phase if the change touches code with many importers.`,
   }
 }
 
 const RECOMMENDED_PHASES: Record<Tier, RsctPhase[]> = {
   trivial: [],
   small: ['spec', 'code', 'test'],
-  standard: ['research', 'spec', 'code', 'test'],
-  complex: ['research', 'spec', 'verification', 'code', 'test'],
+  // NOTE: 'verification' is deliberately omitted from the standard array
+  // (a pre-existing choice — V is still ENFORCED for standard at
+  // rsct_phase_code_start regardless of this hint). DX-4 adds 'review'
+  // (the code review of the diff) for standard + complex; the recommended
+  // cycle is R→S→V→C→REVIEW→T.
+  standard: ['research', 'spec', 'code', 'review', 'test'],
+  complex: ['research', 'spec', 'verification', 'code', 'review', 'test'],
 }
 
 export async function classifyTaskHandler(
@@ -538,7 +543,7 @@ export async function classifyTaskHandler(
   const hints: string[] = []
   if (tier === 'trivial') {
     hints.push(
-      'Trivial tier — recommend skipping the phase machine. Edit directly under §B exception (trivial doc-only fixes).',
+      'Trivial tier — you can skip the phase machine and edit directly (trivial doc-only fixes).',
     )
   } else if (tier === 'small') {
     hints.push(
@@ -546,11 +551,11 @@ export async function classifyTaskHandler(
     )
   } else if (tier === 'standard') {
     hints.push(
-      'Standard tier — recommend rsct_phase_research_start to begin. CAP-28: rsct_phase_code_start REJECTS with reject_kind=verification_required unless V phase completed (or override_verification_skip=true passed). Run rsct_phase_verification_start before code.',
+      'Standard tier — start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it).',
     )
   } else {
     hints.push(
-      'Complex tier — full R→S→V→C→T cycle. CAP-28: rsct_phase_code_start REJECTS unless V phase completed. Verification phase is MANDATORY before code-phase.',
+      'Complex tier — run the full cycle (research → spec → verification → code → review → test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it).',
     )
   }
   if (activePlan) {

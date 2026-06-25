@@ -290,7 +290,7 @@ export async function phaseVerificationCompleteHandler(
     toolName: 'rsct_phase_verification_complete',
     approval: input.dev_approval,
     dialog: {
-      title: 'RSCT §C — verification complete',
+      title: 'RSCT — verification complete',
       message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept`,
     },
     projectRoot,
@@ -329,7 +329,7 @@ export async function phaseVerificationCompleteHandler(
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -400,7 +400,7 @@ export async function phaseVerificationCompleteHandler(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ V phase approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? 'unknown'}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`,
+      `⚠ V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`,
     )
   } else {
     hints.push(
@@ -409,7 +409,7 @@ export async function phaseVerificationCompleteHandler(
   }
   if (!record.ok) {
     hints.push(
-      `⚠ Anti-replay store update failed: ${record.error}. The same dev_approval may be replayable within the skew window — rotate the approval or repair .rsct/approvals-seen.json before the next §C-gated call.`,
+      `⚠ I could not record this approval as used: ${record.error}. The same dev_approval could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,
     )
   }
   if (fields.audit_error !== null) {

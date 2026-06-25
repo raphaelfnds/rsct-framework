@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { findActivePlan, isPlanComplete } from '../../src/lib/plan.js'
+import { findActivePlan, findPlanBySlug, isPlanComplete } from '../../src/lib/plan.js'
 
 let tmp: string
 
@@ -41,6 +41,45 @@ describe('lib/plan — findActivePlan', () => {
     writeFileSync(join(tmp, 'progress_foo.md'), 'log\n')
     const p = findActivePlan(tmp)
     expect(p?.progress_path).toContain('progress_foo.md')
+  })
+})
+
+describe('lib/plan — findPlanBySlug (T3/FV1: stable against mtime drift)', () => {
+  it('returns null when neither plan_<slug>.md nor spec_<slug>.md exists', () => {
+    expect(findPlanBySlug(tmp, 't3')).toBeNull()
+  })
+
+  it('resolves plan_<slug>.md and reads its Status', () => {
+    writeFileSync(join(tmp, 'plan_t3.md'), planBody('in progress'))
+    const p = findPlanBySlug(tmp, 't3')
+    expect(p?.slug).toBe('t3')
+    expect(p?.status).toBe('in progress')
+  })
+
+  it('falls back to spec_<slug>.md when no plan_<slug>.md', () => {
+    writeFileSync(join(tmp, 'spec_t3.md'), planBody('completed'))
+    const p = findPlanBySlug(tmp, 't3')
+    expect(p?.slug).toBe('t3')
+    expect(p?.status).toBe('completed')
+  })
+
+  it('resolves the token plan by slug even when an UNRELATED spec is newer (no mtime drift)', () => {
+    // The whole point of FV1: token validation must not flip to a different plan
+    // just because another spec_/plan_ was touched more recently.
+    writeFileSync(join(tmp, 'plan_t3.md'), planBody('in progress'))
+    writeFileSync(join(tmp, 'spec_unrelated.md'), '# other\n')
+    // Make the unrelated spec deterministically NEWER (mtime drift) so
+    // findActivePlan flips to it while findPlanBySlug stays pinned to 't3'.
+    utimesSync(join(tmp, 'plan_t3.md'), new Date(1_000_000), new Date(1_000_000))
+    utimesSync(join(tmp, 'spec_unrelated.md'), new Date(5_000_000), new Date(5_000_000))
+    expect(findPlanBySlug(tmp, 't3')?.slug).toBe('t3')
+    expect(findActivePlan(tmp)?.slug).toBe('unrelated')
+  })
+
+  it('links progress_<slug>.md when present', () => {
+    writeFileSync(join(tmp, 'plan_t3.md'), planBody('x'))
+    writeFileSync(join(tmp, 'progress_t3.md'), 'log\n')
+    expect(findPlanBySlug(tmp, 't3')?.progress_path).toContain('progress_t3.md')
   })
 })
 

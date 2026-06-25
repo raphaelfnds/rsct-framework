@@ -2,6 +2,11 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { RsctConfig } from './project-root.js'
+import {
+  readUniverseGovernanceIndex,
+  EMPTY_GOVERNANCE_INDEX,
+  type UniverseGovernanceIndex,
+} from './universe-content.js'
 
 // T1.a — make the org-level "universe" usable at runtime. The universe layer
 // already exists (universe repo, .universe.json, applications/ registry) and
@@ -21,6 +26,13 @@ export interface UniverseBlock {
   this_app_registered: boolean
   /** Diagnostic for the degraded / configured-but-missing / reconciliation states. */
   note: string | null
+  /**
+   * T1.c — lightweight index of the universe's org-level governance docs
+   * (slugs only; no content). Always present (FV1); empty when no universe or no
+   * docs/governance/. Computed ONLY on the found+readable path (FV2). Content is
+   * read on demand via the rsct_get_universe tool.
+   */
+  governance: UniverseGovernanceIndex
 }
 
 export interface UniverseResult {
@@ -41,6 +53,7 @@ const NONE_BLOCK: UniverseBlock = {
   registered_apps_count: 0,
   this_app_registered: false,
   note: null,
+  governance: EMPTY_GOVERNANCE_INDEX,
 }
 
 // Defensive cap: never read a multi-MB file into memory for a tiny index.
@@ -52,12 +65,25 @@ type Resolution =
   | { kind: 'none' }
 
 /** Does a directory hold a `.universe.json` (the universe marker)? */
-function isUniverseDir(dir: string): boolean {
+export function isUniverseDir(dir: string): boolean {
   try {
     return statSync(dir).isDirectory() && existsSync(join(dir, '.universe.json'))
   } catch {
     return false
   }
+}
+
+/**
+ * Infer the org slug by stripping a trailing `-<digits>` suffix
+ * (e.g. "bluelt-23" → "bluelt"). The `-\d*$` (not `-\d+$`) mirrors the prompt's
+ * `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
+ * Single source so the universe resolver and the onboarding detector can never
+ * drift on what counts as the "same org". Behavior-preserving: no trim/lowercase
+ * here — callers that need a case-insensitive MATCH key apply that themselves
+ * (the resolver builds directory names from this and must keep the exact case).
+ */
+export function normalizeOrg(org: string | null | undefined): string | null {
+  return org ? org.replace(/-\d*$/, '') : null
 }
 
 /**
@@ -79,19 +105,23 @@ export function resolveUniverseRoot(
     return isUniverseDir(local) ? { kind: 'found', path: local } : { kind: 'configured-missing', path: local }
   }
 
-  // (b) candidate probe — needs a name (universe.name) or the org slug to build
-  // the *-universe candidates. Mirrors the canonical-source Phase 1.2 order.
+  // (b) candidate probe — build "<base>-universe" candidates from the known
+  // basenames, in the canonical-source / Phase 1.9 priority order: explicit
+  // universe.name first, then the org name INFERRED by stripping a trailing
+  // -<digits> suffix (e.g. "bluelt-23" → "bluelt"; T1.d — lets an unlinked,
+  // org-suffixed project still discover the canonically-named universe), then
+  // the raw org. The inference uses `-\d*$` to match the prompt's
+  // `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
   const name = uni?.name ?? null
   const org = config?.app?.org ?? null
+  const inferred = normalizeOrg(org)
+  const basenames = [...new Set([name, inferred, org].filter((x): x is string => !!x))]
   const candidates: string[] = []
-  const pushNamed = (base: string) => {
-    if (name) candidates.push(`${base}/${name}-universe`)
-    if (org && org !== name) candidates.push(`${base}/${org}-universe`)
-  }
-  candidates.push(resolve(projectRoot, '..', name ? `${name}-universe` : ''))
-  if (org && org !== name) candidates.push(resolve(projectRoot, '..', `${org}-universe`))
+  for (const b of basenames) candidates.push(resolve(projectRoot, '..', `${b}-universe`))
   candidates.push(resolve(projectRoot, '..', 'universe'))
-  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) pushNamed(join(home, sub))
+  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) {
+    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`))
+  }
 
   for (const c of candidates) {
     if (c && isUniverseDir(c)) return { kind: 'found', path: c }
@@ -195,6 +225,8 @@ export function getUniverse(
     registered_apps_count: data.registeredFromDirs.length,
     this_app_registered: thisAppRegistered,
     note,
+    // V FV2: only the found+readable path computes the governance index.
+    governance: readUniverseGovernanceIndex(resolution.path),
   }
 
   const hint =

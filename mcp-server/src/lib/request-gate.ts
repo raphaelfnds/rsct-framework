@@ -107,7 +107,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
     if (dialog.response === 'no') {
       return {
         status: 'rejected',
-        reason: 'dev declined the §C dialog (forced by fabrication signals)',
+        reason: 'dev declined the approval dialog (it was forced because the approval looked auto-generated)',
         reject_kind: 'dialog_no',
         fabrication_signals: validation.fabrication_signals,
       }
@@ -131,7 +131,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   if (dialog.response === 'no') {
     return {
       status: 'rejected',
-      reason: 'dev declined the §C dialog',
+      reason: 'dev declined the approval dialog',
       reject_kind: 'dialog_no',
       fabrication_signals: validation.fabrication_signals,
     }

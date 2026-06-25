@@ -48,6 +48,25 @@ describe('lib/universe — resolveUniverseRoot', () => {
     const r = resolveUniverseRoot(cfg(), tmp(), { home: tmp() })
     expect(r).toEqual({ kind: 'none' })
   })
+
+  it('T1.d: infers the universe name from an org slug suffix (bluelt-23 → bluelt)', () => {
+    const parent = tmp()
+    const proj = join(parent, 'apibluelt'); mkdirSync(proj)
+    const sib = join(parent, 'bluelt-universe'); mkdirSync(join(sib, 'applications'), { recursive: true })
+    writeFileSync(join(sib, '.universe.json'), '{"name":"bluelt-universe","registered_apps":[]}')
+    // org "bluelt-23", NO universe.name (unlinked project) — resolves via inference.
+    const r = resolveUniverseRoot(cfg({ app: { name: 'apibluelt', org: 'bluelt-23' } }), proj, { home: tmp() })
+    expect(r).toEqual({ kind: 'found', path: sib })
+  })
+
+  it('T1.d: inference also works via the $HOME/projetos candidate', () => {
+    const home = tmp()
+    const uni = join(home, 'projetos', 'bluelt-universe')
+    mkdirSync(uni, { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"bluelt-universe","registered_apps":[]}')
+    const r = resolveUniverseRoot(cfg({ app: { name: 'apibluelt', org: 'bluelt-23' } }), tmp(), { home })
+    expect(r).toEqual({ kind: 'found', path: uni })
+  })
 })
 
 describe('lib/universe — readUniverse', () => {
@@ -79,6 +98,10 @@ describe('lib/universe — getUniverse (single source)', () => {
     expect(r.block.this_app_registered).toBe(true)
     expect(r.block.note).toBeNull()
     expect(r.hint).toBeNull()
+    // T1.c — governance index folded into the single source (FV2: only here).
+    expect(r.block.governance.available).toBe(true)
+    expect(r.block.governance.docs).toEqual(['canonical-sources-map', 'document-control', 'naming-standards'])
+    expect(r.block.governance.has_index).toBe(true)
   })
 
   it('available + this app NOT registered → registration hint', () => {
@@ -117,6 +140,7 @@ describe('lib/universe — getUniverse (single source)', () => {
     expect(r.block).toEqual({
       available: false, name: null, local_path: null,
       registered_apps_count: 0, this_app_registered: false, note: null,
+      governance: { available: false, governance_dir: null, docs: [], has_index: false },
     })
     expect(r.hint).toBeNull()
   })
@@ -136,6 +160,10 @@ describe('status / load_context — universe block parity (FV4 anti-drift)', () 
     expect(s.universe.available).toBe(true)
     expect(s.universe.name).toBe('acme-universe')
     expect(s.universe.this_app_registered).toBe(true) // app = registered-app
+    // FV8 — governance index is part of the single source → present + equal in both.
+    expect(s.universe.governance).toEqual(l.universe.governance)
+    expect(s.universe.governance.available).toBe(true)
+    expect(s.universe.governance.docs).toContain('naming-standards')
   })
 
   it('clean up the phase-state stamp written into the fixture', () => {

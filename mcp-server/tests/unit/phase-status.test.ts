@@ -111,4 +111,34 @@ describe('rsct_phase_status', () => {
     expect(r.active_phase).toBeNull()
     expect(r.hints.some((h) => h.includes("unrecognized phase"))).toBe(true)
   })
+
+  it('surfaces an active plan-scoped batch token (T3)', async () => {
+    writePhaseState({
+      plan_authorization: {
+        plan_slug: 't3',
+        branch: 'feat/t3',
+        covers: ['commit'],
+        authorized_at: '2026-06-22T12:00:00.000Z',
+        expires_at: '2026-06-22T14:00:00.000Z',
+        max_actions: 5,
+        actions_used: 2,
+        approval_ref: {
+          action_scope: 'plan_authorize:t3',
+          timestamp: '2026-06-22T11:59:00.000Z',
+        },
+      },
+    })
+    const r = (await phaseStatusHandler({ project_root: tmpRoot })) as PhaseStatusOutput
+    expect(r.plan_authorization?.plan_slug).toBe('t3')
+    expect(r.plan_authorization?.actions_used).toBe(2)
+    expect(r.plan_authorization?.max_actions).toBe(5)
+    expect(r.hints.some((h) => h.includes('batch token ACTIVE'))).toBe(true)
+  })
+
+  it('plan_authorization is null + worktree present when no phase-state (T3)', async () => {
+    const r = (await phaseStatusHandler({ project_root: tmpRoot })) as PhaseStatusOutput
+    expect(r.plan_authorization).toBeNull()
+    expect(r.worktree).toBeDefined()
+    expect(typeof r.worktree.is_worktree).toBe('boolean')
+  })
 })

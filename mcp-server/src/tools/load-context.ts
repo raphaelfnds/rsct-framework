@@ -8,6 +8,7 @@ import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import { readPhaseState, stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
+import { detectTopology, type TopologyBlock } from '../lib/topology.js'
 
 export const loadContextInputSchema = z
   .object({
@@ -62,6 +63,8 @@ export interface LoadContextOutput {
   }
   knowledge: KnowledgeIndex
   universe: UniverseBlock
+  /** T2: repo topology (mono/monorepo/multi-repo) — single source, parity with status. */
+  topology: TopologyBlock
   next_action_hints: string[]
 }
 
@@ -138,8 +141,12 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
 
   // T1.a: org-level universe via the single source (same getUniverse as status).
   const universe = getUniverse(resolution.config, resolution.root)
+  // T2: repo topology via the single source (same detectTopology as status).
+  // Reuse the already-resolved universe block (avoids a second resolution).
+  const topology = detectTopology(resolution.config, resolution.root, {}, universe)
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge })
   if (universe.hint) next_action_hints.push(universe.hint)
+  if (topology.hint) next_action_hints.push(topology.hint)
 
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },
@@ -164,6 +171,7 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
     },
     knowledge,
     universe: universe.block,
+    topology: topology.block,
     next_action_hints,
   }
 }
@@ -181,7 +189,7 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
 
   if (!resolution.rsct_installed) {
     hints.push(
-      'Project is not rsct-managed yet — recommend `/rsct-setup` before applying §B-§H workflow.',
+      'Project is not rsct-managed yet — recommend `/rsct-setup` before applying the RSCT workflow.',
     )
     return hints
   }
@@ -189,7 +197,7 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
   const protected_branches = resolution.config?.protected_branches ?? []
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
-      `On protected branch '${git.branch}' — §D blocks mutating git ops without a per-action OK. Suggest deriving a branch before code phase.`,
+      `On the protected branch '${git.branch}' — mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`,
     )
   }
 
@@ -212,11 +220,11 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
     )
     if (active_plan.branch && git.available && git.branch && active_plan.branch !== git.branch) {
       hints.push(
-        `Plan branch '${active_plan.branch}' differs from current branch '${git.branch}'. §D recommends asking dev which branch to continue in.`,
+        `Plan branch '${active_plan.branch}' differs from the current branch '${git.branch}' — ask the dev which branch to continue in.`,
       )
     }
   } else {
-    hints.push('No active plan file detected — §B requires a plan before code editing for tasks above trivial tier.')
+    hints.push('No active plan file detected — a plan is required before code editing for tasks above the trivial tier.')
   }
 
   if (!knowledge.directory_exists) {

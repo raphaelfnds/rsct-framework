@@ -22,6 +22,12 @@ import {
   getArchitectureTool,
   getArchitectureHandler,
 } from './tools/get-architecture.js'
+import { getUniverseTool, getUniverseHandler } from './tools/get-universe.js'
+import { getTopologyTool, getTopologyHandler } from './tools/get-topology.js'
+import {
+  detectOnboardingTool,
+  detectOnboardingHandler,
+} from './tools/detect-onboarding.js'
 import {
   checkPremiseTool,
   checkPremiseHandler,
@@ -44,6 +50,14 @@ import {
   requestMergeTool,
   requestMergeHandler,
 } from './tools/request-merge.js'
+import {
+  planAuthorizeTool,
+  planAuthorizeHandler,
+} from './tools/plan-authorize.js'
+import {
+  planRevokeTool,
+  planRevokeHandler,
+} from './tools/plan-revoke.js'
 import {
   phaseVerificationStartTool,
   phaseVerificationStartHandler,
@@ -81,6 +95,14 @@ import {
   phaseCodeCompleteTool,
   phaseCodeCompleteHandler,
 } from './tools/phase-code-complete.js'
+import {
+  phaseReviewStartTool,
+  phaseReviewStartHandler,
+} from './tools/phase-review-start.js'
+import {
+  phaseReviewCompleteTool,
+  phaseReviewCompleteHandler,
+} from './tools/phase-review-complete.js'
 import {
   phaseTestStartTool,
   phaseTestStartHandler,
@@ -130,6 +152,9 @@ const TOOLS: Tool[] = [
   getKnowledgeTool,
   getEnvironmentsTool,
   getArchitectureTool,
+  getUniverseTool,
+  getTopologyTool,
+  detectOnboardingTool,
   checkPremiseTool,
   checkBranchTool,
   checkSecretsTool,
@@ -137,6 +162,8 @@ const TOOLS: Tool[] = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  planAuthorizeTool,
+  planRevokeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -147,6 +174,8 @@ const TOOLS: Tool[] = [
   phaseVerificationCompleteTool,
   phaseCodeStartTool,
   phaseCodeCompleteTool,
+  phaseReviewStartTool,
+  phaseReviewCompleteTool,
   phaseTestStartTool,
   phaseTestCompleteTool,
   phaseAbandonTool,
@@ -163,6 +192,9 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_get_knowledge: getKnowledgeHandler,
   rsct_get_environments: getEnvironmentsHandler,
   rsct_get_architecture: getArchitectureHandler,
+  rsct_get_universe: getUniverseHandler,
+  rsct_get_topology: getTopologyHandler,
+  rsct_detect_onboarding: detectOnboardingHandler,
   rsct_check_premise: checkPremiseHandler,
   rsct_check_branch: checkBranchHandler,
   rsct_check_secrets: checkSecretsHandler,
@@ -170,6 +202,8 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_plan_authorize: planAuthorizeHandler,
+  rsct_plan_revoke: planRevokeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,
@@ -180,6 +214,8 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_phase_verification_complete: phaseVerificationCompleteHandler,
   rsct_phase_code_start: phaseCodeStartHandler,
   rsct_phase_code_complete: phaseCodeCompleteHandler,
+  rsct_phase_review_start: phaseReviewStartHandler,
+  rsct_phase_review_complete: phaseReviewCompleteHandler,
   rsct_phase_test_start: phaseTestStartHandler,
   rsct_phase_test_complete: phaseTestCompleteHandler,
   rsct_phase_abandon: phaseAbandonHandler,

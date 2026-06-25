@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 export interface GitState {
   available: boolean
@@ -43,6 +44,26 @@ export function getStagedDiff(projectRoot: string): string | null {
 }
 
 /**
+ * Return the staged file paths (`git diff --cached --name-only -z`) as a
+ * forward-slash-normalized string[]. `-z` is NUL-separated and unquoted, so
+ * paths with spaces/unicode survive intact and `core.quotepath` can't mangle
+ * them. `null` outside a git repo / on git failure; `[]` when nothing is staged.
+ *
+ * Used by the T2 contract-surface gate (INV-7). Deliberately the REAL staged
+ * set — there is NO MCP-substitutable override (the A2/INV-6 lesson: a public
+ * diff override is an enforcement bypass).
+ */
+export function getStagedPaths(projectRoot: string): string[] | null {
+  if (!isGitRepo(projectRoot)) return null
+  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
+  if (raw === null) return null
+  return raw
+    .split('\0')
+    .map((p) => p.replace(/\\/g, '/'))
+    .filter((p) => p.length > 0)
+}
+
+/**
  * Return the unstaged diff (`git diff`) as a unified-diff string.
  * Same semantics as {@link getStagedDiff}.
  */
@@ -54,6 +75,61 @@ export function getUnstagedDiff(projectRoot: string): string | null {
 function isGitRepo(projectRoot: string): boolean {
   const out = safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree'])
   return out === 'true'
+}
+
+export interface WorktreeInfo {
+  in_git_repo: boolean
+  /**
+   * True when running inside a LINKED git worktree (not the main worktree).
+   * T3/FV2: a linked worktree's `git rev-parse --git-dir` ends in
+   * `…/.git/worktrees/<name>`; the main worktree — and any subdir of it —
+   * never does. We detect that tail (OS-path-form-robust) rather than
+   * string-comparing `--git-dir` against `--git-common-dir`.
+   */
+  is_worktree: boolean
+  /** `git rev-parse --show-toplevel` (forward-slash normalized) or null. */
+  toplevel: string | null
+  /** Linked-worktree name (basename of git-dir) or null on the main worktree. */
+  name: string | null
+}
+
+/**
+ * Read git worktree info for the project root. Pure read, never throws
+ * (mirrors {@link readGitState}). Used by T3 to surface that the
+ * plan-authorization token + phase-state + anti-reuse store are isolated to
+ * THIS worktree (each `git worktree` checkout starts with its own gitignored
+ * `.rsct/`). Git emits forward slashes even on Windows; we normalize
+ * defensively before comparing/splitting.
+ */
+export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
+  if (safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree']) !== 'true') {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null }
+  }
+  const norm = (s: string | null): string | null =>
+    s === null ? null : s.replace(/\\/g, '/')
+  const gitDirRaw = safeGit(projectRoot, ['rev-parse', '--git-dir'])
+  const toplevel = norm(safeGit(projectRoot, ['rev-parse', '--show-toplevel']))
+
+  // A LINKED worktree's git-dir lives at `<common>/.git/worktrees/<name>`; the
+  // MAIN worktree — and any SUBDIR of it — never does (its git-dir is `.git` /
+  // `<root>/.git`). Detect the `/worktrees/<name>` tail directly. This is robust
+  // across OS path forms where comparing the absolute `--git-dir` against the
+  // relative `--git-common-dir` as strings is NOT: from a subdir git mixes an
+  // ABSOLUTE git-dir with a RELATIVE common-dir, and the absolute one is
+  // symlink/short-name-resolved (Windows 8.3 + drive casing; macOS /var→
+  // /private/var) while `resolve()` is not — so a same-`.git` pair compared as
+  // strings false-positived the main worktree's subdir as a linked worktree.
+  let isWorktree = false
+  let name: string | null = null
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, '/')
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/)
+    if (m) {
+      isWorktree = true
+      name = m[1] ?? null
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name }
 }
 
 function safeGit(cwd: string, args: string[]): string | null {

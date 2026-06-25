@@ -79,8 +79,9 @@ across OSes, so `verify:dist` is a local, same-environment guard). Sourcemaps
   (see the changelog history for the convention).
 - When bumping the `rsct-mcp` version, change **all** of: `mcp-server/src/lib/version.ts`,
   `mcp-server/package.json`, and `mcp-server/package-lock.json` (they must stay
-  in lockstep), plus the doc references. The framework **protocol** version
-  (`v=1.0.0` markers) and the **code** version are aligned from v1.0.0 on.
+  in lockstep), plus the doc references. The marker **schema id** (`v=1.0.0`)
+  is a SEPARATE axis: it keys marker idempotency, stays frozen across releases,
+  and is NOT bumped with the code version.
 - Open a PR against `main`. Fill in the PR checklist.
 
 ## Tests

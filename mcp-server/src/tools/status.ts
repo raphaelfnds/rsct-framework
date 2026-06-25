@@ -1,10 +1,12 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
-import { readGitState } from '../lib/git.js'
+import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
 import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
+import { detectTopology, type TopologyBlock } from '../lib/topology.js'
+import { getUpdateNotice } from '../lib/update-check.js'
 
 export const statusInputSchema = z
   .object({
@@ -29,7 +31,11 @@ export interface StatusOutput {
     test_framework: string | null
   }
   git: ReturnType<typeof readGitState>
+  /** T3: git worktree context (is this a linked worktree? — isolated rsct state). */
+  worktree: WorktreeInfo
   universe: UniverseBlock
+  /** T2: repo topology (mono/monorepo/multi-repo) — what the contract gate diverges on. */
+  topology: TopologyBlock
   hints: string[]
 }
 
@@ -66,11 +72,34 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
 
   const hints = buildStatusHints(resolution, git)
 
+  // T3: worktree context. When running inside a LINKED worktree, the rsct
+  // runtime state (.rsct/phase-state.json incl. any plan-authorization token,
+  // .rsct/approvals-seen.json) is isolated to THIS worktree — surfacing this
+  // helps an agent reason about parallel/isolated execution. Never throws.
+  const worktree = readWorktreeInfo(resolution.root)
+  if (worktree.is_worktree) {
+    hints.push(
+      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated to THIS worktree (independent of the main worktree and sibling worktrees).`,
+    )
+  }
+
   // T1.a: surface the org-level universe (single source — load_context calls the
   // same getUniverse). Fail-graceful: never throws; absent universe → behaves as
   // before (available:false, no hint).
   const universe = getUniverse(resolution.config, resolution.root)
   if (universe.hint) hints.push(universe.hint)
+
+  // T2: repo topology (single source — load_context calls the same detectTopology).
+  // Fail-graceful: absent config / universe → mono, no hint. The FV1 hint fires only
+  // when topology is confirmed multi-repo but the contract gate can't enforce.
+  const topology = detectTopology(resolution.config, resolution.root, {}, universe)
+  if (topology.hint) hints.push(topology.hint)
+
+  // T4: opt-in, cached, fail-silent "a newer RSCT release is available" hint.
+  // Reads only the ~/.rsct cache (zero network latency); a stale cache fires a
+  // non-blocking background refresh. No-op unless consent was granted at /rsct-setup.
+  const update = getUpdateNotice()
+  if (update.hint) hints.push(update.hint)
 
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },
@@ -84,7 +113,9 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
       test_framework: resolution.config?.test_framework ?? null,
     },
     git,
+    worktree,
     universe: universe.block,
+    topology: topology.block,
     hints,
   }
 }
@@ -105,7 +136,7 @@ function buildStatusHints(
   const protected_branches = resolution.config?.protected_branches ?? []
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
-      `Current branch '${git.branch}' is in protected_branches. §D requires a derived branch (feat/, fix/, chore/, docs/) for any mutating work — confirm with dev before proposing changes.`,
+      `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work — confirm with the dev before proposing changes.`,
     )
   }
 
@@ -117,7 +148,7 @@ function buildStatusHints(
 
   if (!resolution.config?.test_framework) {
     hints.push(
-      'No test_framework recorded in .rsct.json — §G testing strategy will need explicit dev input until detected.',
+      'No test_framework recorded in .rsct.json — the testing strategy needs explicit dev input until detected.',
     )
   }
 

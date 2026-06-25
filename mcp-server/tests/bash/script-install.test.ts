@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, resolve, delimiter } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 
 // T0.b — script-level sandbox smoke for scripts/install.sh +
@@ -114,4 +114,41 @@ describe.skipIf(!BASH)('install/uninstall WSL guard (CAP-38 family)', () => {
     expect(matches('6.5.0-generic')).toBe(false)
     expect(matches('5.10.0-21-amd64')).toBe(false)
   })
+})
+
+describe.skipIf(!BASH)('uninstall plan-line wording under --skip-mcp (A4)', () => {
+  it('reports a detected global rsct-mcp as left untouched, not "will ask separately"', () => {
+    const home = newSandbox()
+    // A fake `rsct-mcp` on PATH so `command -v rsct-mcp` detects a global
+    // deterministically (incl. CI with no real install). path.delimiter so the
+    // inherited PATH hands off correctly to Git Bash (`;` on Windows).
+    const binDir = newSandbox()
+    const fake = join(binDir, 'rsct-mcp')
+    writeFileSync(fake, '#!/bin/sh\nexit 0\n')
+    chmodSync(fake, 0o755)
+
+    let out: string
+    try {
+      out = execFileSync('bash', [UNINSTALL], {
+        env: {
+          ...process.env,
+          HOME: home.replace(/\\/g, '/'),
+          RSCT_ASSUME_YES: '1',
+          RSCT_SKIP_MCP: '1',
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string; message?: string }
+      out = `${err.stdout ?? ''}\n${err.stderr ?? ''}\n${err.message ?? ''}`
+    }
+
+    // The plan line must mirror the SKIP gate: left untouched, not a stale "will ask".
+    expect(out, out).toMatch(/global rsct-mcp at .*\(left untouched; --skip-mcp set\)/)
+    expect(out).not.toMatch(/will ask separately/)
+    // SKIP gate held → no removal attempted (no `npm uninstall -g` path taken).
+    expect(out).not.toMatch(/Removed global rsct-mcp/)
+  }, 60_000)
 })

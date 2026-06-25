@@ -65,6 +65,7 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
       'spec',
       'verification',
       'code',
+      'review',
       'test',
     ])
   })
@@ -73,7 +74,8 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
     expect(nextPhase('research')).toBe('spec')
     expect(nextPhase('spec')).toBe('verification')
     expect(nextPhase('verification')).toBe('code')
-    expect(nextPhase('code')).toBe('test')
+    expect(nextPhase('code')).toBe('review')
+    expect(nextPhase('review')).toBe('test')
   })
 
   it('nextPhase returns null for the terminal phase', () => {

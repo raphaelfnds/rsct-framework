@@ -1,5 +1,5 @@
 # RSCT Canonical Source — 02-canonical-source.md
-# Version: 1.1.0
+# Version: 2.0.0
 
 You are operating inside a software project repository belonging to an organization
 that maintains a central **universe repository** with canonical architectural artifacts.
@@ -134,7 +134,7 @@ Present to the developer:
 
 ```
 ═══════════════════════════════════════════════════════
-RSCT CANONICAL SOURCE — Discovery Report    v1.0.0
+RSCT CANONICAL SOURCE — Discovery Report
 ═══════════════════════════════════════════════════════
 
 ✅ Discovered automatically:
@@ -160,13 +160,13 @@ Wait for explicit OK.
 
 **If universe not found locally**, offer 3 options to the developer:
 
-> "Universe `[UNIVERSE_NAME]-universe` not found locally.
->
-> Choose one:
+> "Universe `[UNIVERSE_NAME]-universe` not found locally. A universe is the shared
+> source of governance + cross-repo contracts for your org — do you want one wired
+> to this project? Choose how:
 >
 > **1. Create it now (recommended for a new organization).**
 >    I will invoke `/rsct-init-universe` to bootstrap a skeleton
->    universe at `~/projetos/[UNIVERSE_NAME]-universe/`. It creates governance
+>    universe at `~/projects/[UNIVERSE_NAME]-universe/`. It creates governance
 >    document templates with TODOs, placeholder folders for applications
 >    and hosts, and a CLAUDE.md operational protocol. You fill the content
 >    over time.

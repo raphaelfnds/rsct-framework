@@ -1,0 +1,12 @@
+{
+  "contract_version": "1.0.0",
+  "_help": "Declare cross-repo contracts here, BY HAND. A contract is a SURFACE: path globs in the PRODUCER repo that CONSUMER apps depend on. In multi-repo mode, rsct_request_commit BLOCKS a producer commit that touches a surface and lists the affected consumers (the dev overrides with dev_approval.override_contract_surface: { reason }). Surface globs support * ** ? only (no {a,b} / [abc]); 'dir/**' needs the trailing slash and does NOT match a sibling 'dir.ext' file, so declare both when needed. The MCP only READS this file. Remove the _help and _example keys (or keep them — they are ignored).",
+  "_example": {
+    "id": "billing-api",
+    "producer": "billing-service",
+    "surface": ["openapi/billing.yaml", "src/api/**"],
+    "consumers": ["web-frontend", "reporting"],
+    "description": "REST API for billing operations"
+  },
+  "contracts": []
+}

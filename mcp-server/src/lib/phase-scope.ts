@@ -147,14 +147,62 @@ export interface LastClassifyBlock {
   signals_summary?: string
 }
 
+/**
+ * T3: plan-scoped batch authorization token. When present + valid,
+ * `rsct_request_commit` authorizes a commit WITHOUT a fresh per-action
+ * dev_approval — one approval (minted by `rsct_plan_authorize` under the full
+ * §C gate) covers up to `max_actions` commits within the plan+branch+time
+ * window. Covers COMMIT only (push/merge keep per-action §C). Cleared by
+ * `rsct_plan_revoke` / `rsct_phase_abandon`, and auto-revoked on branch
+ * switch, plan completion/deletion, expiry, or exhaustion. The token never
+ * bypasses INV-5 (branch protection) or INV-6 (secrets): the token path
+ * carries no dev_approval, hence no overrides. See lib/plan-authorization.ts.
+ */
+export interface PlanAuthorizationBlock {
+  plan_slug: string
+  branch: string
+  covers: string[]
+  authorized_at: string
+  expires_at: string
+  max_actions: number
+  actions_used: number
+  approval_ref: { action_scope: string; timestamp: string }
+  /** Diagnostic only — the session that minted the token. Not used for validation. */
+  session_id?: string
+}
+
+/**
+ * DX-4: the REVIEW decision sub-block. A code review of the diff sits
+ * between Code and Test in the recommended cycle (R→S→V→C→REVIEW→T). The
+ * framework asks ONCE, at spec_complete, whether to include it
+ * (`include_review`); the yes/no is recorded here keyed by `spec_ref`
+ * (ask-once = presence-keyed). `completed_at` is stamped by
+ * `rsct_phase_review_complete`. `rsct_phase_test_start`'s review gate
+ * reads this block: a `decision:'no'` lets tests proceed (the review is
+ * never run); a `decision:'yes'` without `completed_at` blocks until the
+ * review phase completes — mirroring how the code-start gate reads the
+ * `verification` block. Survives `code.complete` (the generic complete
+ * preserves sub-blocks); wiped by `phase_abandon`.
+ */
+export interface PhaseReviewBlock {
+  spec_ref: string
+  decision: 'yes' | 'no'
+  decided_at?: string
+  completed_at?: string
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
   scope_globs?: string[]
   started_at?: string
   verification?: PhaseVerificationBlock
+  /** DX-4: the REVIEW-before-Tests decision (see PhaseReviewBlock). */
+  review?: PhaseReviewBlock
   /** CAP-30: most-recent classify_task verdict (with tier_max ratchet). */
   last_classify?: LastClassifyBlock
+  /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */
+  plan_authorization?: PlanAuthorizationBlock
   /**
    * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
    * call. Mutating tools (phase_code_start, request_*) surface a warning
@@ -407,7 +455,7 @@ export function evaluateBootstrapMarker(args: {
       status: 'missing',
       bootstrap_at: null,
       age_ms: null,
-      hint: `⚠ bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). CLAUDE.md §0 mandates §0 bootstrap at session start — run rsct_status and rsct_load_context first.`,
+      hint: `⚠ bootstrap not detected (no rsct_status / rsct_load_context call recorded in this project's phase-state). Run rsct_status and rsct_load_context first — they establish the session baseline RSCT needs.`,
     }
   }
   const stampedMs = new Date(stamped).getTime()
@@ -473,4 +521,42 @@ export function stampClassifyVerdict(
     last_classify: block,
   }
   return writePhaseState(projectRoot, newState)
+}
+
+/**
+ * DX-4: upsert the REVIEW decision sub-block. Called from TWO places:
+ * `rsct_phase_spec_complete` sets `{spec_ref, decision, decided_at}`;
+ * `rsct_phase_review_complete` sets `{spec_ref, completed_at}`. It is a
+ * single additive read-modify-write (mirroring `stampClassifyVerdict`):
+ * the prior block is merged so review_complete passing only `completed_at`
+ * preserves `decision`/`decided_at`, and vice-versa.
+ *
+ * SPEC_REF CARRY-GUARD (the write-side complement of the gate's read-side
+ * spec_ref match): when a prior `review` block exists for a DIFFERENT
+ * `spec_ref`, this is a re-plan — start a FRESH block instead of inheriting
+ * the stale one, so a re-planned spec never carries the old decision /
+ * completed_at. Never throws — returns the WritePhaseStateResult like the
+ * other stampers; the caller surfaces `!ok` as a hint.
+ */
+export function stampReviewDecision(
+  projectRoot: string,
+  patch: {
+    spec_ref: string
+    decision?: 'yes' | 'no'
+    decided_at?: string
+    completed_at?: string
+  },
+): WritePhaseStateResult {
+  const existing = readPhaseState(projectRoot)
+  const baseState: PhaseState = existing.state ?? {}
+  const prev = baseState.review
+  const carry = prev && prev.spec_ref === patch.spec_ref ? prev : undefined
+  const merged: PhaseReviewBlock = {
+    ...carry,
+    spec_ref: patch.spec_ref,
+    decision: patch.decision ?? carry?.decision ?? 'no',
+  }
+  if (patch.decided_at !== undefined) merged.decided_at = patch.decided_at
+  if (patch.completed_at !== undefined) merged.completed_at = patch.completed_at
+  return writePhaseState(projectRoot, { ...baseState, review: merged })
 }

@@ -54,6 +54,38 @@ export function findActivePlan(projectRoot: string): ActivePlan | null {
 }
 
 /**
+ * T3 (FV1): resolve a plan by its EXACT slug — `plan_<slug>.md` (preferred) or
+ * `spec_<slug>.md` (fallback) at the project root. Unlike {@link findActivePlan}
+ * (which returns the most-recent plan_/spec_ by mtime), this is stable against
+ * mtime drift: touching an unrelated `spec_`/`plan_` mid-session does NOT change
+ * what this returns. The plan-authorization token validates against THIS (its own
+ * plan_slug) so an unrelated edit never falsely revokes the token. Returns null
+ * when neither file exists (the token's plan was deleted → `plan_gone`).
+ */
+export function findPlanBySlug(projectRoot: string, slug: string): ActivePlan | null {
+  const planName = `plan_${slug}.md`
+  const specName = `spec_${slug}.md`
+  let chosen: string | null = null
+  if (safeMtime(join(projectRoot, planName)) !== null) chosen = planName
+  else if (safeMtime(join(projectRoot, specName)) !== null) chosen = specName
+  if (!chosen) return null
+
+  const path = join(projectRoot, chosen)
+  const metadata = extractPlanMetadata(path)
+  const progress_path = join(projectRoot, `progress_${slug}.md`)
+  const progress_exists = safeMtime(progress_path) !== null
+
+  return {
+    slug,
+    plan_path: path,
+    progress_path: progress_exists ? progress_path : null,
+    status: metadata.status,
+    branch: metadata.branch,
+    created: metadata.created,
+  }
+}
+
+/**
  * Heuristic: does a plan-tracking `Status` field denote a finished task?
  * Used by the §C push/merge tools (CAP-53) to SUGGEST — never auto-perform —
  * cleanup of the branch-local `plan_`/`progress_`/`spec_` files before they can

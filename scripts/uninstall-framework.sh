@@ -86,10 +86,10 @@ if [ -z "$PRESENT_RSCT_HOME" ] && [ ${#PRESENT_COMMANDS[@]} -eq 0 ] && [ -z "$PR
 fi
 
 # --- Show plan ---
-# Symmetric with install.sh: report both protocol and code versions so the
-# dev sees exactly what is being removed (the code version is the one that
-# moves between releases; protocol stays at 1.0.0 across the pre-release
-# train and would otherwise look unchanged across re-installs).
+# Symmetric with install.sh: report both the protocol (prompts/rules
+# release, from ~/.rsct/VERSION) and code (~/.rsct/VERSION-CODE) versions so
+# the dev sees exactly what is being removed. Both are RELEASE versions
+# (aligned from v1.0.0 on); neither is the `v=1.0.0` marker schema id.
 EXISTING_VERSION=""
 if [ -f "$RSCT_HOME/VERSION" ]; then
   EXISTING_VERSION=$(cat "$RSCT_HOME/VERSION" 2>/dev/null | head -1)
@@ -121,7 +121,13 @@ for cmd in "${PRESENT_COMMANDS[@]}"; do
   echo "Will remove: $CLAUDE_COMMANDS_DIR/$cmd.md"
 done
 if [ -n "$PRESENT_RSCT_MCP" ]; then
-  echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+  # Mirror the actual companion-removal gate below ([ -z "$SKIP_MCP" ]): under
+  # --skip-mcp the script never asks, so don't claim it "will ask separately".
+  if [ -z "$SKIP_MCP" ]; then
+    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+  else
+    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (left untouched; --skip-mcp set)"
+  fi
 fi
 echo ""
 echo "NOTE: This does NOT remove RSCT from any project. Projects keep their"

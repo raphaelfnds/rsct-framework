@@ -30,13 +30,17 @@ After step 3, branch on the returned tier:
   gated by rsct_check_edit_scope → rsct_phase_code_complete →
   rsct_phase_test_*.
 - standard: rsct_phase_research_start → research → _complete →
-  rsct_phase_spec_start → §B plan → _complete → **V phase**
-  (rsct_phase_verification_start({ declared_paths }) → review
-  findings → rsct_phase_verification_complete) →
+  rsct_phase_spec_start → §B plan → rsct_phase_spec_complete({
+  include_review }) → **V phase** (rsct_phase_verification_start({
+  declared_paths }) → review findings → rsct_phase_verification_complete) →
   rsct_phase_code_start({ scope_globs, spec_tier: 'standard' }) →
-  edits → _complete → rsct_phase_test_*.
+  edits → rsct_phase_code_complete → **REVIEW phase** (when include_review:
+  rsct_phase_review_start → review the diff → rsct_phase_review_complete) →
+  rsct_phase_test_start({ spec_tier: 'standard' }) → rsct_phase_test_complete.
 - complex: same chain as standard; V phase is mandatory (skipping
   requires explicit override_verification_skip=true).
+
+The full cycle is R→S→V→C→REVIEW→T (REVIEW audits the diff, V audits the spec).
 
 **CAP-28 verification gate (v0.7.8+)**: rsct_phase_code_start REJECTS
 when `spec_tier ∈ {standard, complex}` and no completed V block
@@ -44,6 +48,14 @@ matches `spec_ref` in phase-state.json. Pass `spec_tier` from your
 earlier rsct_classify_task; to bypass V intentionally on a
 standard/complex task, pass `override_verification_skip: true` —
 override is audit-logged.
+
+**REVIEW gate (DX-4)**: at spec-closure, pass `include_review` to
+rsct_phase_spec_complete (recorded by spec_ref). For `spec_tier ∈
+{standard, complex}`, rsct_phase_test_start then enforces it:
+include_review=yes requires a completed rsct_phase_review_* for that
+spec_ref; =no skips REVIEW; no decision rejects (record one).
+trivial/small bypass. Pass `override_review_skip: true` to bypass
+intentionally — audit-logged.
 
 For standard and complex, also call
 `mcp__rsct__rsct_auto_persona({ task_description })` after classify

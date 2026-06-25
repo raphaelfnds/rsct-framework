@@ -282,7 +282,7 @@ export async function phaseVerificationStartHandler(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? 'unknown'}). Another writer is active — wait and retry. Verification ran but state was not persisted.`,
+      `⚠ another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}) — wait and retry. Verification ran but state was not persisted.`,
     )
   } else {
     hints.push(

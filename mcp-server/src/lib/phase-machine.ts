@@ -40,6 +40,7 @@ export const RSCT_PHASES = [
   'spec',
   'verification',
   'code',
+  'review',
   'test',
 ] as const
 
@@ -50,13 +51,18 @@ export type RsctPhase = (typeof RSCT_PHASES)[number]
  * `_start` call after a `_complete`. Verification is OPTIONAL between
  * spec and code: when `spec_complete` lands, the next recommended phase
  * is verification; when `verification_complete` lands, it's code; when
- * spec is skipped straight to code, that is the dev's call.
+ * spec is skipped straight to code, that is the dev's call. REVIEW (code
+ * review of the diff) sits between code and test: when `code_complete`
+ * lands the next recommended phase is review; it is opt-in (asked once at
+ * spec_complete via include_review) and the test-start gate honors that
+ * decision. The recommended cycle is R→S→V→C→REVIEW→T.
  */
 const PHASE_ORDER: readonly RsctPhase[] = [
   'research',
   'spec',
   'verification',
   'code',
+  'review',
   'test',
 ]
 
@@ -189,7 +195,7 @@ export function startPhaseGeneric(
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ phase-state.json is locked (held ${writeResult.lock_age_ms}ms by session ${writeResult.held_by_session ?? 'unknown'}). Wait and retry.`,
+      `⚠ another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}). Wait and retry.`,
     )
   } else {
     hints.push(`⚠ phase-state.json write failed: ${writeResult.error}.`)
@@ -359,7 +365,7 @@ export async function gatePhaseComplete(
     toolName: `rsct_phase_${input.phase}_complete`,
     approval: input.devApproval,
     dialog: {
-      title: `RSCT §C — ${input.phase} complete`,
+      title: `RSCT — ${input.phase} complete`,
       message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`,
     },
     projectRoot: input.projectRoot,
@@ -398,7 +404,7 @@ export async function gatePhaseComplete(
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`§C rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -445,7 +451,7 @@ export async function gatePhaseComplete(
     }
   } else if (writeResult.reason === 'locked') {
     hints.push(
-      `⚠ ${input.phase} complete approved but phase-state.json is locked (held ${writeResult.lock_age_ms}ms). State may be inconsistent.`,
+      `⚠ ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`,
     )
   } else {
     hints.push(
@@ -454,7 +460,7 @@ export async function gatePhaseComplete(
   }
   if (!record.ok) {
     hints.push(
-      `⚠ Anti-replay store update failed: ${record.error}. dev_approval may be replayable; rotate or repair .rsct/approvals-seen.json.`,
+      `⚠ I could not record this approval as used: ${record.error}. The dev_approval could be accepted again by mistake for a short time — use a fresh one next time, or repair .rsct/approvals-seen.json.`,
     )
   }
   if (fields.audit_error !== null) {

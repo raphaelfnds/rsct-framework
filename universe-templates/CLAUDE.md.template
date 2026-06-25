@@ -17,7 +17,7 @@ This repository is the single source of truth for:
 
 Any access to artifacts listed in this protocol must follow this order:
 
-1. **Local first**: try the local clone path — typically `~/projetos/[ORG_SLUG]-universe/`.
+1. **Local first**: try the local clone path — typically `~/projects/[ORG_SLUG]-universe/`.
 2. **Remote if not local**: list URLs + reason and wait for explicit user OK before fetching.
 3. This rule applies even in `Edit automatically` mode.
 

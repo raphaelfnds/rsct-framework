@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { PhaseState, PlanAuthorizationBlock } from '../../src/lib/phase-scope.js'
 import {
   requestCommitHandler,
   type RequestCommitOutput,
@@ -100,6 +109,23 @@ function cleanDiff(): string {
 
 const COMMIT_OK: GitExecResult = { ok: true, stdout: '', stderr: '', exitCode: 0 }
 
+// A2 (INV-6 hardening): `staged_diff_override` is no longer a PUBLIC MCP input —
+// the staged-diff test seam now lives on `internal.stagedDiffOverride`. This
+// adapter keeps the existing call-sites readable by lifting a `staged_diff_override`
+// key from the input object into the internal seam. Tests that assert the PUBLIC
+// input is now rejected call `requestCommitHandler` DIRECTLY (see the A2 test below).
+function callCommit(
+  input: Record<string, unknown>,
+  internal: RequestCommitInternal = {},
+): Promise<RequestCommitOutput> {
+  const { staged_diff_override, ...rest } = input
+  const merged: RequestCommitInternal =
+    typeof staged_diff_override === 'string'
+      ? { ...internal, stagedDiffOverride: staged_diff_override }
+      : internal
+  return requestCommitHandler(rest, merged)
+}
+
 describe('rsct_request_commit — happy path', () => {
   it('commits on a non-protected branch with no findings and writes audit', async () => {
     writeConfig(tmpRoot, rsctConfig())
@@ -112,7 +138,7 @@ describe('rsct_request_commit — happy path', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -131,7 +157,7 @@ describe('rsct_request_commit — happy path', () => {
     expect(existsSync(join(tmpRoot, '.rsct', 'audit.log'))).toBe(true)
 
     // Approval consumed: a second call with the same approval must reject as 'reused'.
-    const out2 = (await requestCommitHandler(
+    const out2 = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -165,7 +191,7 @@ describe('rsct_request_commit — CAP-53 plan-tracking reminder', () => {
       join(tmpRoot, 'plan_foo.md'),
       '# Plan\n\n| Field | Value |\n|---|---|\n| Status | in progress |\n',
     )
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x', dev_approval: approval(), staged_diff_override: cleanDiff() },
       COMMIT_INTERNAL('feat/foo'),
     )) as RequestCommitOutput
@@ -175,7 +201,7 @@ describe('rsct_request_commit — CAP-53 plan-tracking reminder', () => {
 
   it('does NOT hint when no plan/spec file exists', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x', dev_approval: approval(), staged_diff_override: cleanDiff() },
       COMMIT_INTERNAL('feat/bar'),
     )) as RequestCommitOutput
@@ -196,7 +222,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -210,6 +236,8 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
     expect(out.bootstrap_marker).toBeDefined()
     expect(out.bootstrap_marker?.status).toBe('missing')
     expect(out.hints.some((h) => h.includes('bootstrap not detected'))).toBe(true)
+    // DX-2b regression fence: no user-facing hint leaks a bare section symbol (§).
+    expect(out.hints.join(' ')).not.toContain('§')
 
     const auditLines = require('node:fs')
       .readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
@@ -244,7 +272,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -263,7 +291,7 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
 describe('rsct_request_commit — branch protection (INV-5)', () => {
   it('rejects with protected_branch when on main without override', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -285,7 +313,7 @@ describe('rsct_request_commit — branch protection (INV-5)', () => {
 
   it('commits on a protected branch when override_protected_branch is provided', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'hotfix: x',
@@ -314,7 +342,7 @@ describe('rsct_request_commit — branch protection (INV-5)', () => {
 describe('rsct_request_commit — secrets scan (INV-6)', () => {
   it('rejects with secrets when staged diff contains a credential and no override', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -336,7 +364,7 @@ describe('rsct_request_commit — secrets scan (INV-6)', () => {
 
   it('commits when override_secrets_check is provided', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -363,7 +391,7 @@ describe('rsct_request_commit — secrets scan (INV-6)', () => {
 describe('rsct_request_commit — dialog refusal', () => {
   it('rejects with dialog_no when the dev says No', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -400,7 +428,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -415,7 +443,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
 
     // Retry with the SAME approval should NOT be 'reused' — mutation_failed
     // does not burn the approval. (We swap the executor to a success path.)
-    const out2 = (await requestCommitHandler(
+    const out2 = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -434,7 +462,7 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
 describe('rsct_request_commit — schema validation', () => {
   it('rejects unknown input keys (zod strict)', async () => {
     await expect(
-      requestCommitHandler({
+      callCommit({
         project_root: tmpRoot,
         message: 'm',
         dev_approval: approval(),
@@ -445,7 +473,7 @@ describe('rsct_request_commit — schema validation', () => {
 
   it('rejects when message is missing', async () => {
     await expect(
-      requestCommitHandler({
+      callCommit({
         project_root: tmpRoot,
         dev_approval: approval(),
       }),
@@ -461,7 +489,7 @@ describe('rsct_request_commit — reused detection via external pre-seed', () =>
       projectRoot: tmpRoot,
       now: new Date(FIXED_NOW.getTime() - 10_000),
     })
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -495,7 +523,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
         error: 'simulated disk full',
       }),
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -530,7 +558,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
         error: 'simulated atomic rename failed',
       }),
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -546,7 +574,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
     expect(
       out.hints.some(
         (h) =>
-          h.includes('anti-replay store update failed') &&
+          h.includes('could not record this approval as used') &&
           h.includes('simulated atomic rename failed') &&
           h.includes('commit:feat/foo:abc1234'),
       ),
@@ -561,7 +589,7 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
       promptFn: dialog({ response: 'no', channel: 'windows' }),
       now: FIXED_NOW,
     }
-    const out = (await requestCommitHandler(
+    const out = (await callCommit(
       {
         project_root: tmpRoot,
         message: 'feat: x',
@@ -575,5 +603,401 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
     expect(out.anti_replay_persisted).toBeNull()
     expect(out.anti_replay_error).toBeNull()
     expect(out.audit_error).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T3 — plan-token authorization path (dev_approval omitted)
+// ---------------------------------------------------------------------------
+
+function tokenBlock(over: Partial<PlanAuthorizationBlock> = {}): PlanAuthorizationBlock {
+  return {
+    plan_slug: 't3',
+    branch: 'feat/foo',
+    covers: ['commit'],
+    authorized_at: FIXED_NOW.toISOString(),
+    expires_at: new Date(FIXED_NOW.getTime() + 60 * 60_000).toISOString(),
+    max_actions: 5,
+    actions_used: 0,
+    approval_ref: { action_scope: 'plan_authorize:t3', timestamp: VALID_TS },
+    ...over,
+  }
+}
+
+function seedState(state: PhaseState): void {
+  mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+  writeFileSync(join(tmpRoot, '.rsct/phase-state.json'), JSON.stringify(state), 'utf8')
+}
+
+function readPhaseState(): PhaseState | null {
+  const p = join(tmpRoot, '.rsct/phase-state.json')
+  if (!existsSync(p)) return null
+  return JSON.parse(readFileSync(p, 'utf8')) as PhaseState
+}
+
+function writePlanFile(slug = 't3', status = 'in progress'): void {
+  writeFileSync(join(tmpRoot, `plan_${slug}.md`), `# Plan\n\n| Status | ${status} |\n`)
+}
+
+function tokenInternal(over: Partial<RequestCommitInternal> = {}): RequestCommitInternal {
+  return {
+    gitStateOverride: gitState('feat/foo'),
+    gitExecutor: gitExecutorMock(
+      { 'commit -m feat: x': COMMIT_OK },
+      { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+    ),
+    now: FIXED_NOW,
+    ...over,
+  }
+}
+
+function hasGit(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+const GIT = hasGit()
+
+describe('rsct_request_commit — plan-token path (T3)', () => {
+  it('commits with NO dev_approval when a valid token covers it; debits one action', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('plan_token')
+    expect(out.channel).toBe('plan_token')
+    expect(out.plan_token?.actions_used).toBe(1)
+    expect(out.plan_token?.max_actions).toBe(5)
+    // debit-first persisted the increment
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
+  })
+
+  it('a second token commit debits again (2/5)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.plan_token?.actions_used).toBe(2)
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(2)
+  })
+
+  it('rejects when no dev_approval and no token (absent)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects an exhausted token (actions_used >= max_actions)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 5, max_actions: 5 }) })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects an expired token', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({
+      plan_authorization: tokenBlock({
+        expires_at: new Date(FIXED_NOW.getTime() - 60_000).toISOString(),
+      }),
+    })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects on branch mismatch (token auto-revokes on branch switch)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ branch: 'feat/foo' }) })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ gitStateOverride: gitState('feat/other') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('rejects when the token plan_/spec_ file is gone (plan_gone)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    // no plan_t3.md written
+    seedState({ plan_authorization: tokenBlock() })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('plan_token_invalid')
+  })
+
+  it('INV-5: token NEVER covers a protected branch (rejects, no override possible)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ branch: 'main' }) })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ gitStateOverride: gitState('main') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+    // token not debited on an INV-5 reject
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
+  })
+
+  it('A2: staged_diff_override is no longer a PUBLIC input (zod strict rejects it)', async () => {
+    // The fabricated-diff INV-6 bypass is closed: the diff seam moved to the
+    // test-only internal arg, so passing staged_diff_override as MCP input is now
+    // an unknown key. Call the handler DIRECTLY (bypass the callCommit adapter,
+    // which would strip the key) to prove the raw input is rejected.
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    await expect(
+      requestCommitHandler(
+        { project_root: tmpRoot, message: 'feat: x', staged_diff_override: dirtyDiff() },
+        tokenInternal(),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it.skipIf(!GIT)('INV-6: token path rejects a REAL staged secret (scans git diff --cached)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    // real git repo with a staged secret so getStagedDiff returns it
+    execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: tmpRoot, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: tmpRoot, stdio: 'ignore' })
+    writeFileSync(join(tmpRoot, 'app.env'), 'API_KEY=sk-AAAAAAAAAAAAAAAAAAAAAAAA\n')
+    execFileSync('git', ['add', 'app.env'], { cwd: tmpRoot, stdio: 'ignore' })
+
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal(),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('secrets')
+    // token not debited on an INV-6 reject
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
+  })
+
+  it('RV3: a failed commit REFUNDS the reserved token action (debit-first)', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 2 }) })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({
+        gitExecutor: gitExecutorMock(
+          { 'commit -m feat: x': { ok: false, stdout: '', stderr: 'nothing to commit', exitCode: 1 } },
+          { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+        ),
+      }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('mutation_failed')
+    // reserved action refunded → counter back to 2
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(2)
+  })
+
+  it('precedence: a dev_approval present uses the per-action path; token untouched', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock({ actions_used: 1 }) })
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      tokenInternal({ promptFn: alwaysYes() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('dev_approval')
+    expect(out.channel).toBe('windows')
+    // token counter NOT touched by the per-action path
+    expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T2 — INV-7 contract-surface gate (multi-repo only)
+// ---------------------------------------------------------------------------
+
+const UNIVERSE_FX = join(__dirname, '..', 'fixtures', 'sample-universe')
+
+function multiRepoCfg(over: Record<string, unknown> = {}) {
+  return {
+    rsct_version: '1.0.0',
+    app: { name: 'registered-app', org: 'acme' },
+    topology: { mode: 'multi-repo' },
+    universe: { local: UNIVERSE_FX },
+    ...over,
+  }
+}
+
+// INV-7 gate internal: a clean staged diff (passes INV-6) + an injected staged
+// path list (the gate's real input is git diff --cached --name-only; the override
+// is a test-only seam, same posture as stagedDiffOverride).
+function gateInternal(
+  stagedPaths: string[],
+  over: Partial<RequestCommitInternal> = {},
+): RequestCommitInternal {
+  return {
+    gitStateOverride: gitState('feat/api'),
+    stagedPathsOverride: stagedPaths,
+    stagedDiffOverride: cleanDiff(),
+    gitExecutor: gitExecutorMock(
+      { 'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 } },
+      COMMIT_OK,
+    ),
+    promptFn: alwaysYes(),
+    now: FIXED_NOW,
+    ...over,
+  }
+}
+
+describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
+  it('multi-repo + produced surface touched + no override → BLOCK with consumers', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: api', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+    expect(out.contract_check?.touched).toEqual(['orders-api'])
+    expect(out.contract_check?.consumers).toEqual(['reporting', 'web-frontend'])
+  })
+
+  it('mono + surface touched → NO-OP (commits); contract_check.mode = mono', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ topology: { mode: 'mono' } }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBe('mono')
+    expect(out.contract_check?.touched).toEqual([])
+  })
+
+  it('multi-repo + non-surface path → NO-OP (commits)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['README.md']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBe('multi-repo')
+    expect(out.contract_check?.touched).toEqual([])
+  })
+
+  it('unconfirmed topology + surface touched → NO-OP (gate off until confirmed)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ topology: undefined }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.mode).toBeNull()
+  })
+
+  it('override_contract_surface → commits + records override_used', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval({ override_contract_surface: { reason: 'coordinated cross-repo bump' } }),
+      },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.contract_check?.override_used).toBe(true)
+    expect(out.contract_check?.touched).toEqual(['orders-api'])
+  })
+
+  it('multi-repo + surface touched + no override → rejects; reason still names override_contract_surface', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+    // DX-2: the reason is reworded plain-language, but the actionable override field
+    // name is an API contract the agent must emit — it must survive the reword.
+    expect(out.reason).toMatch(/override_contract_surface/)
+  })
+
+  it('INV-6 secrets still enforced under multi-repo (rejects before INV-7)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts'], { stagedDiffOverride: dirtyDiff() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('secrets')
+  })
+
+  it('token path + surface touched → HARD BLOCK (token carries no override)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg())
+    writePlanFile()
+    seedState({ plan_authorization: tokenBlock() })
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x' },
+      tokenInternal({ stagedPathsOverride: ['src/api/orders.ts'], stagedDiffOverride: cleanDiff() }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('contract_surface')
+  })
+
+  it('RV3: multi-repo + no contracts.json → NO-OP commit + inactive-gate hint', async () => {
+    const uni = mkdtempSync(join(tmpdir(), 'rsct-uni-nc-'))
+    mkdirSync(join(uni, 'applications', 'registered-app'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"x","registered_apps":["registered-app"]}')
+    writeConfig(tmpRoot, multiRepoCfg({ universe: { local: uni } }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts']),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.hints.join(' ')).toMatch(/did not run/)
+  })
+
+  it('INV-5 protected branch takes precedence over INV-7 (rejects protected_branch first)', async () => {
+    writeConfig(tmpRoot, multiRepoCfg({ protected_branches: ['main'] }))
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval() },
+      gateInternal(['src/api/orders.ts'], { gitStateOverride: gitState('main') }),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch') // INV-5 runs before the INV-7 gate
   })
 })

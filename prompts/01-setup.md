@@ -1,5 +1,5 @@
 # RSCT Setup — 01-setup.md
-# Version: 1.1.0
+# Version: 2.0.0
 
 You are operating inside a software project repository.
 Your task: apply or update the RSCT governance protocol.
@@ -73,6 +73,40 @@ If a code block in this prompt looks like it has a bug, **stop and
 ask** — do not "fix it" by reimplementing. A real bug in a canonical
 block is a framework bug and needs to be fixed at the prompt source,
 not patched per-run.
+
+---
+
+## Phase 0 — universe≠app guard (must run FIRST, before any discovery)
+
+`/rsct-setup` configures **applications**. If THIS repository is a **universe**
+(a governance repo — it carries a `.universe.json` at its root), setup must **not**
+run here. Run this block before anything else:
+
+```bash
+echo "  CHECKPOINT: Phase 0 executing canonical universe-vs-app guard"
+# Anchor to the REPO ROOT, never $PWD: on WSL-from-Windows the shell cwd can be
+# C:\Windows, so a bare relative `.universe.json` test could false-NEGATIVE (the
+# dangerous direction — it would let setup run inside a universe). `git rev-parse`
+# is the robust anchor; `pwd` is the fallback for a not-yet-git-init'd universe.
+GUARD_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [ -f "$GUARD_ROOT/.universe.json" ]; then
+  echo "RSCT-UNIVERSE-REPO-DETECTED"
+  echo "This repository is a UNIVERSE (governance repo), not an application."
+  echo "/rsct-setup configures APPS. Here you edit the universe files"
+  echo "(.universe.json, contracts.json, docs/governance/) and commit them yourself."
+  echo "To refresh just the universe markers/skeleton, use /rsct-init-universe (update mode)."
+fi
+```
+
+**STOP rule (mechanical, read carefully).** If the block above printed
+`RSCT-UNIVERSE-REPO-DETECTED`, **STOP the entire `/rsct-setup` run right now** —
+do **not** read or execute any further Phase, and do **not** mutate anything.
+Report the redirect message to the user and end. A bash `exit` would only end
+*that one block* (every code block here runs in its own context — see the
+Execution mandate), so the halt is **this instruction to you**, not a shell exit.
+Belt-and-suspenders: Phase 1.9b independently re-checks via
+`rsct_detect_onboarding` (`recommended_route: "guard-universe-repo"`) and applies
+the same STOP, so the guard holds even if this file's `.universe.json` were edited.
 
 ---
 
@@ -447,17 +481,59 @@ rather than adding it.
 
 ### 1.9 — Universe local path
 ```bash
-ORG_SLUG="[value from step 1.1]"
+echo "  CHECKPOINT: Phase 1.9 executing canonical universe local-path probe"
+: "${ORG_SLUG:=[value from step 1.1]}"   # AI substitutes from 1.1; tests pre-set it
+# Strip a trailing -<digits> org suffix (e.g. "bluelt-23" → "bluelt"), mirroring
+# 02-canonical-source.md Phase 1.1, so an org-suffixed slug still discovers the
+# canonically-named universe (this is T1.d — Phase 1.9 previously probed only
+# "${ORG_SLUG}-universe" and missed e.g. "bluelt-universe" for org "bluelt-23").
+UNIVERSE_NAME=$(printf '%s' "$ORG_SLUG" | sed 's/-[0-9]*$//')
 for candidate in \
+  "../${UNIVERSE_NAME}-universe" \
   "../${ORG_SLUG}-universe" \
   "../universe" \
-  "$HOME/projetos/${ORG_SLUG}-universe" \
-  "$HOME/projects/${ORG_SLUG}-universe" \
-  "$HOME/dev/${ORG_SLUG}-universe" \
-  "$HOME/workspace/${ORG_SLUG}-universe"; do
-  [ -d "$candidate" ] && echo "FOUND: $candidate" && break
+  "$HOME/projetos/${UNIVERSE_NAME}-universe" \
+  "$HOME/projects/${UNIVERSE_NAME}-universe" \
+  "$HOME/dev/${UNIVERSE_NAME}-universe" \
+  "$HOME/workspace/${UNIVERSE_NAME}-universe" \
+  "$HOME/projetos/${ORG_SLUG}-universe"; do
+  # Require the `.universe.json` marker (not just a dir) — mirrors the MCP
+  # `isUniverseDir`, so a same-named non-universe dir is not a false positive.
+  [ -d "$candidate" ] && [ -f "$candidate/.universe.json" ] && echo "FOUND: $candidate" && break
 done
 ```
+
+The inferred `${UNIVERSE_NAME}-universe` is probed FIRST (the canonical name wins),
+with `${ORG_SLUG}-universe` kept as a fallback for universes literally named with the
+org suffix. If a universe is FOUND here but the project is not yet linked to it (see
+Phase 1.10 / `canonical_source_added`), Phase 3 will OFFER to link it (T1.d).
+
+### 1.9b — Onboarding situation (orchestrator brain, DX-1)
+
+When `rsct-mcp` is installed, call `mcp__rsct__rsct_detect_onboarding` (pass
+`project_root` **explicitly** — same Windows/WSL caveat as Phase 5 step 3). It is the
+single deterministic classifier; store its `situation`, `recommended_route`,
+`siblings`, and `hints`. It drives Phase 3 routing (the prompt narrates in plain
+language; the tool's English `hints` are guidance for you, not user copy):
+
+| `recommended_route` | Phase 3 action |
+|---|---|
+| `guard-universe-repo` | **STOP now** — same as Phase 0 (this is the MCP belt-and-suspenders). |
+| `offer-create-universe` | Render the NEW 🌱 CREATE A UNIVERSE guided offer (siblings found, no universe). |
+| `offer-link-existing` | Render the existing 🌌 UNIVERSE LINK offer. |
+| `fix-universe-link` | Render the 🔧 UNIVERSE LINK BROKEN notice (do NOT register). |
+| `none` (situation `offer-register`) | Nothing extra — Phase 4.8 self-guards registration. |
+| `none` (situation `has-universe-linked` / `solo`) | Nothing extra (near-zero-config). |
+
+When the detector ran, its `recommended_route` is the AUTHORITY for which universe
+offer (if any) Phase 3 shows — it supersedes the Phase 1.9 bash probe for routing.
+
+If `rsct-mcp` is **NOT** installed (typically the very first `/rsct-setup`, before the
+IDE restart that loads the MCP), **SKIP this step**. The create-universe suggestion is
+then honestly a **second-run** capability; Phase 5 step 8 prints an explicit pointer so
+the dev knows to re-run after restarting. Do **NOT** hand-roll a bash sibling scan as a
+fallback (it would reintroduce the cross-OS risk the detector exists to avoid). The
+existing Phase 1.9 bash probe still feeds the 🌌 UNIVERSE LINK offer in this MCP-absent case.
 
 ### 1.10 — Existing `.rsct.json` + discrepancy detection
 
@@ -492,6 +568,9 @@ RSCT_JSON_UNIVERSE_REMOTE=$(extract_json_string "remote")
 RSCT_JSON_PROTECTED_BRANCHES=$(extract_json_array "protected_branches")
 RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 RSCT_JSON_CANONICAL_SOURCE_ADDED=$(extract_json_string "canonical_source_added")
+# DX-1b ask-once: PRESENCE (not value) of install.create_universe_declined_at —
+# robust to nesting + CRLF (literal-key match). Set => suppress the 🌱 create offer.
+RSCT_CREATE_DECLINED=$(grep -q '"create_universe_declined_at"' .rsct.json 2>/dev/null && echo 1 || echo "")
 ```
 
 **Build a DISCREPANCIES list** by comparing each extracted value to the
@@ -543,11 +622,14 @@ fields** are subject to discrepancy resolution.
 
 ## Phase 3 — Discovery report + single question block
 
-Present to the developer:
+Present to the developer. Render the header version (`vX.Y.Z`) from the **release**
+version in `$HOME/.rsct/VERSION` (CRLF-safe: `tr -d '\r' < "$HOME/.rsct/VERSION" | head -1`).
+If that file is absent (prompt invoked directly without an install), fall back to the
+discovered CLAUDE.md `RSCT_VERSION`, else omit the version:
 
 ```
 ═══════════════════════════════════════════════════════
-RSCT SETUP — Discovery Report               v1.0.0
+RSCT SETUP — Discovery Report               v[RELEASE_VERSION]
 Mode: [UPDATE | CREATE]
 ═══════════════════════════════════════════════════════
 
@@ -613,6 +695,102 @@ Mode: [UPDATE | CREATE]
 ❓ Could not discover — please answer:
   [numbered list — only what was NOT found above and is not already
    in DISCREPANCIES]
+
+🌌 UNIVERSE LINK (T1.d) — present ONLY when Phase 1.9 FOUND a universe AND this
+  project is NOT yet linked to it (`.rsct.json` has no `universe.local`, i.e.
+  `canonical_source_added` is false / the `universe` block is absent). Omit entirely
+  when already linked or no universe was found.
+  [Present as a Recommended (§B item 1) consent question:]
+  "Universe `[UNIVERSE_NAME]-universe` found at `[PATH]`, but this project is not linked
+   to it. Link it now? `[Y/n]`
+   ✅ Recommended: yes — runs `/rsct-canonical-source` (adds the canonical-source
+      section to CLAUDE.md + sets `universe.local` in `.rsct.json`), after which this
+      app can be registered in the universe (Phase 4.8).
+   Note: the universe is a SEPARATE repository. Here in the app I only edit `CLAUDE.md`
+   and `.rsct.json`; any change to the universe stays in the universe repo and YOU review
+   and commit it there yourself — RSCT never commits the universe."
+  - On YES → after this setup applies its own mutations, invoke `/rsct-canonical-source`
+    (it OWNS `universe.local` + `canonical_source_added` + the CLAUDE.md section — setup
+    never writes them directly). Once `universe.local` is set, run Phase 4.8 to register
+    the app (it reads `universe.local` fresh from `.rsct.json` at execution time).
+  - On NO → proceed unlinked (no change); the dev can run `/rsct-canonical-source` later.
+
+🌱 CREATE A UNIVERSE (DX-1) — present ONLY when Phase 1.9b returned
+  `recommended_route: "offer-create-universe"` (≥1 same-org sibling app found at `../`
+  and NO universe) AND `RSCT_CREATE_DECLINED` is empty. Omit when the MCP isn't installed,
+  no confirmed sibling was found, or the dev already declined (DX-1b ask-once — Phase 1.10
+  reads `install.create_universe_declined_at`; once declined, this offer stays quiet).
+  [Present as ONE plain-language ORIENTATION prompt, Recommended (§B item 1):]
+  "🌌 You have other apps from the same org (`[list the siblings.dir from the detector]`)
+   with no central *universe*. A universe holds the governance and the *contracts* between
+   those apps — it's what lets RSCT block a commit that breaks a contract another repo
+   depends on. Set this up now? `[y/N]`
+   ✅ Recommended: yes. With your OK at EACH step, I will:
+     1) create the universe (`/rsct-init-universe`),
+     2) link THIS app (`/rsct-canonical-source`),
+     3) register this app in the universe (Phase 4.8).
+   You edit the contract content and commit the universe repository yourself — RSCT never
+   touches the universe's git. The contract gate only activates once a SECOND app is
+   registered in this universe."
+  - On NO → proceed unlinked (mono path), and RECORD the decline so the offer stays quiet on
+    future runs (ask-once) — text-splice `install.create_universe_declined_at` into `.rsct.json`
+    via the block below. **To set up a universe LATER**, delete that field from `.rsct.json`, or
+    run `/rsct-init-universe` directly. (The offer never fires without same-org siblings AND no
+    universe, so it stays quiet for solo/mono projects regardless.)
+
+```bash
+echo "  CHECKPOINT: Phase 3 recording create-universe decline (ask-once, text-splice)"
+RSCT_JSON=".rsct.json"
+DECLINED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)
+# Record the decline in install.create_universe_declined_at by TEXT-SPLICE — never
+# JSON.parse->stringify the managed .rsct.json (CLAUDE.md #5). Path via argv; double-quoted
+# JS only (no apostrophe can appear inside a single-quoted node -e); CRLF-tolerant char
+# classes. The install block always exists in a managed .rsct.json; inject the key right
+# after its "{", empty-object-guarded so we never emit a trailing comma before "}".
+if [ -f "$RSCT_JSON" ] && ! grep -q '"create_universe_declined_at"' "$RSCT_JSON" 2>/dev/null; then
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], at = process.argv[2];
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — decline not recorded."); process.exit(0); }
+    if (/"create_universe_declined_at"/.test(s)) { process.exit(0); }
+    var m = s.match(/("install"[ \t\r\n]*:[ \t\r\n]*\{)([ \t\r\n]*)/);
+    if (!m) { console.error("  WARN: install block not found — decline not recorded."); process.exit(0); }
+    var at_pos = m.index + m[0].length;
+    var sep = (s.charAt(at_pos) === "}") ? "" : ", ";
+    var inject = "\"create_universe_declined_at\": \"" + at + "\"" + sep;
+    s = s.slice(0, at_pos) + inject + s.slice(at_pos);
+    fs.writeFileSync(f, s, "utf8");
+    console.log("  recorded create-universe decline at " + at);
+  ' "$RSCT_JSON" "$DECLINED_AT"
+  if grep -q '"create_universe_declined_at"' "$RSCT_JSON" 2>/dev/null; then echo "  OK: decline recorded (ask-once)"; else echo "  ERROR: decline persistence failed" >&2; exit 1; fi
+fi
+```
+
+  - On YES → run the GUIDED, STATEFUL chain. Each step is consent-gated AND re-probed
+    before the next; a failure or a decline STOPS the chain cleanly (no half-built promise):
+    a) Invoke `/rsct-init-universe`. Then VERIFY the universe exists, using the path
+       `/rsct-init-universe` reports as `Universe created at:` (its final report) as
+       `<universe-path>`: `[ -f "<universe-path>/.universe.json" ]`. If absent (init-universe aborted — e.g.
+       missing templates — or its own OK was declined): **STOP here** and tell the dev
+       "universe creation was cancelled or failed — run `/rsct-setup` whenever you want; nothing was linked."
+    b) Invoke `/rsct-canonical-source` (it OWNS `universe.local` + `canonical_source_added`
+       + the CLAUDE.md section — setup never writes them directly). Then VERIFY linking:
+       `.rsct.json` now has a non-empty `universe.local`. If not: **STOP** and report the app
+       is not linked (the state is re-runnable; nothing else was promised).
+    c) Run Phase 4.8 to register this app (it reads `universe.local` fresh from `.rsct.json`).
+    Report FILESYSTEM-verified results ("created `applications/<app>/` and set `universe.local`;
+    the MCP only reflects this after you restart the IDE") — do NOT claim what the MCP can't
+    confirm this session (the restart is inevitable).
+
+🔧 UNIVERSE LINK BROKEN (DX-1) — present ONLY when Phase 1.9b returned
+  `recommended_route: "fix-universe-link"` (`.rsct.json` `universe.local` is set but the
+  universe does not resolve there).
+  "⚠️ Your `.rsct.json` points to a universe at `[universe.local_path]`, but it isn't there.
+   Fix the path (`universe.local`) or run `/rsct-canonical-source` again. I will NOT register
+   this app into a universe that doesn't exist."
+  - Skip Phase 4.8 registration for this state (registering into a missing universe is a no-op
+    that misleads the dev). No mutation; the dev fixes the path or re-links.
 
 ──────────────────────────────────────────────────────
 Plan:
@@ -834,9 +1012,12 @@ The two-line header shape itself is:
 
 In CREATE mode (no `CLAUDE.md` yet), Phase 4.3 writes this header
 verbatim from `doc-templates/CLAUDE.md.template` (which carries
-RSCT_VERSION as-is and substitutes `[APP_NAME]` and `[YYYY-MM-DD]`).
-In UPDATE mode, only the date rotates — the lines themselves are
-preserved.
+RSCT_VERSION as a literal and substitutes `[APP_NAME]` and `[YYYY-MM-DD]`).
+In UPDATE mode, Phase 4.2 Step D rotates only the RSCT_APP **date**.
+In BOTH modes, the `RSCT_VERSION` value is then (re)stamped to the
+**release** version by the Phase 4.4 display-version stamp (the template's
+literal `1.0.0` is the display default, not a fixed value) — distinct from
+the `v=` marker schema id, which stays `1.0.0`.
 
 **Step E — CONVENTIONS-REF pointer backfill (canonical bash, UPDATE mode)**
 
@@ -1164,6 +1345,70 @@ CREATE mode (.rsct.json absent) still renders from `doc-templates/rsct.json.temp
 via straightforward placeholder substitution (`[APP_NAME]`, `[ORG_SLUG]`,
 …) — that is a fresh write, no preservation concerns.
 
+**Canonical bash — stamp the user-facing (release) version (runs in BOTH modes):**
+
+The framework carries TWO version axes. The **display / release version** (this
+step) is what the user sees — it should reflect the release the project was last
+set up with (e.g. `2.0.0`), NOT the template's literal `1.0.0`. The **marker schema
+id** (`v=1.0.0` on every `RSCT-…-BEGIN` / `RSCT-GENERATED` / gitignore marker, plus
+`RSCT_TEMPLATE_VERSION`) is a STABLE idempotency key and is **never touched here**.
+
+This step stamps the three display surfaces — `.rsct.json rsct_version`, the
+CLAUDE.md `<!-- RSCT_VERSION: -->` marker, and the CLAUDE.md
+`<!-- Generated by RSCT Framework v… -->` provenance line. By this point both files
+exist regardless of mode (CLAUDE.md from Phase 4.2/4.3, `.rsct.json` just above), so
+one unified step covers CREATE (overwrites the template literal) and UPDATE
+(overwrites the prior value). Idempotent: re-running at the same release re-writes the
+same value (no diff). Source = `$HOME/.rsct/VERSION` (written by `scripts/install.sh`);
+CRLF-safe read + semver guard; if it is unreadable or non-numeric (e.g. the prompt was
+invoked directly without an install) the stamp is **skipped** — never destructive.
+
+```bash
+echo "  CHECKPOINT: Phase 4.4 executing canonical display-version stamp"
+RELEASE_VERSION=""
+[ -f "$HOME/.rsct/VERSION" ] && RELEASE_VERSION="$(tr -d '\r' < "$HOME/.rsct/VERSION" | head -1)"
+# Semver guard: accept only digits-and-dots; anything else (empty / garbage) → skip.
+case "$RELEASE_VERSION" in ''|*[!0-9.]*) RELEASE_VERSION="" ;; esac
+
+if [ -z "$RELEASE_VERSION" ]; then
+  echo "  display-version stamp: no readable numeric \$HOME/.rsct/VERSION — leaving version fields as-is"
+else
+  RSCT_JSON="$(pwd)/.rsct.json"
+  CLAUDE_MD="$(pwd)/CLAUDE.md"
+  # In-place value swaps — mirror the applied_at idiom (portable GNU/BSD). Each sed
+  # keys on a DISTINCT anchor, so it can never touch RSCT_APP / RSCT_UNIVERSE or any
+  # `v=` marker (the markers use `v=`, an equals sign; these anchors do not).
+  stamp_version() { # $1=sed-pattern  $2=file
+    case "$(uname -s)" in
+      Darwin) sed -i '' -E "$1" "$2" ;;
+      *)      sed -i    -E "$1" "$2" ;;
+    esac
+  }
+
+  # (a) .rsct.json — "rsct_version": "X" (quoted value swap, like applied_at)
+  if [ -f "$RSCT_JSON" ]; then
+    stamp_version "s|(\"rsct_version\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"|\1\"${RELEASE_VERSION}\"|" "$RSCT_JSON"
+    if grep -q "\"rsct_version\"[[:space:]]*:[[:space:]]*\"${RELEASE_VERSION}\"" "$RSCT_JSON"; then
+      echo "  .rsct.json rsct_version stamped → ${RELEASE_VERSION}"
+    else
+      echo "  ⚠ rsct_version stamp did not land in $RSCT_JSON — inspect manually" >&2
+    fi
+  fi
+
+  # (b)+(c) CLAUDE.md — RSCT_VERSION marker + "Generated by RSCT Framework v…" line.
+  # Each swaps only the numeric version token, leaving the rest of the line intact.
+  if [ -f "$CLAUDE_MD" ]; then
+    stamp_version "s|(<!-- RSCT_VERSION:[[:space:]]*)[0-9][0-9.]*|\1${RELEASE_VERSION}|" "$CLAUDE_MD"
+    stamp_version "s|(Generated by RSCT Framework v)[0-9][0-9.]*|\1${RELEASE_VERSION}|" "$CLAUDE_MD"
+    if grep -q "<!-- RSCT_VERSION:[[:space:]]*${RELEASE_VERSION}" "$CLAUDE_MD"; then
+      echo "  CLAUDE.md RSCT_VERSION + Generated-by stamped → ${RELEASE_VERSION}"
+    else
+      echo "  ⚠ CLAUDE.md version stamp did not land — inspect $CLAUDE_MD manually" >&2
+    fi
+  fi
+fi
+```
+
 **Populate `secrets_extra_patterns[]` from `SENSITIVE_VARS` (MED-16):**
 
 For each entry in `SENSITIVE_VARS` (Phase 1.8), generate an assignment regex
@@ -1404,9 +1649,12 @@ Plan tracking files (`plan_<slug>.md` and `progress_<slug>.md`) are
 **branch-local** by §B item 6 — they must never reach `main`/`test`.
 `spec_<slug>.md` is treated as an **accepted alias of `plan_<slug>.md`**
 (a dev may name the artefact "spec" instead of "plan"; same gitignore
-rule, same NEVER-on-protected guarantee). Setup adds a marker-wrapped
-block to the project's `.gitignore` so `/rsct-uninstall` can excise
-it cleanly later:
+rule, same NEVER-on-protected guarantee). The block also ignores the
+RSCT runtime-state files and, root-anchored, the framework source clone
+(`/rsct-framework/`) in case it is cloned INTO the project — a
+team-safety rule so the clone never travels with the project repo.
+Setup adds a marker-wrapped block to the project's `.gitignore` so
+`/rsct-uninstall` can excise it cleanly later:
 
 ```bash
 echo "  CHECKPOINT: Phase 4.4b executing canonical .gitignore RSCT block install"
@@ -1434,6 +1682,12 @@ spec_*.md
 .rsct/approvals-seen.json
 .rsct/phase-state.json
 .rsct/phase-state.lock
+
+# RSCT framework source clone — if the framework repo is cloned INTO the
+# project (a top-level "rsct-framework" dir) to invoke its prompts, ignore it
+# so it never travels with the project repo. Root-anchored: a clone living
+# elsewhere (e.g. under your home dir) is untouched.
+/rsct-framework/
 $END_MARKER
 EOF
 )
@@ -1512,6 +1766,23 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  CAP-25 backfill: added .rsct/phase-state.lock to existing RSCT .gitignore block"
     else
       echo "  ⚠ CAP-25 backfill: .rsct/phase-state.lock insertion did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # framework-clone backfill: pre-1.1.x RSCT blocks did not list /rsct-framework/
+  # (the framework source clone, root-anchored). Deterministic team-safety rule —
+  # a clone committed into the project repo would travel to the whole team. Same
+  # backfill idiom as CAP-16/CAP-25: append after .rsct/phase-state.lock (the last
+  # runtime-state line — guaranteed present because the CAP-25 lock clause just
+  # ran) when missing, so existing installs ignore a top-level clone on re-run.
+  if ! grep -qF "/rsct-framework/" "$GITIGNORE"; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk '/^\.rsct\/phase-state\.lock$/{print; print "/rsct-framework/"; next} 1' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+
+    if grep -qF "/rsct-framework/" "$GITIGNORE"; then
+      echo "  backfill: added /rsct-framework/ (framework clone) to existing RSCT .gitignore block"
+    else
+      echo "  ⚠ backfill: /rsct-framework/ insertion did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
 elif [ "$HAS_LEGACY_BLOCK" = "yes" ]; then
@@ -1977,16 +2248,15 @@ done
 echo "  Phase 4.6 feedback summary: CREATE=$MEM_CREATE UPDATE=$MEM_UPDATE SKIP=$MEM_SKIP PRESERVE=$MEM_PRESERVE"
 ```
 
-**Why content-SHA (not version-string) comparison:** the framework
-protocol version (`v=1.0.0`) is intentionally stable across the entire
-`v0.x` pre-release train and will only bump on the first stable release.
-A version-string compare would silently SKIP every UPDATE during the
-dev cycle (case observed in v0.6.4: body edits to
-`feedback_architect-code-changes.md` and `feedback_branch-protection.md`
-were skipped by re-runs on existing projects because `v=1.0.0` matched).
-Comparing the user file's body SHA against the resolved template SHA
-captures **every** content change without requiring a protocol-version
-bump.
+**Why content-SHA (not version-string) comparison:** the marker schema
+id (`v=1.0.0`) is intentionally stable — it changes only when the marker
+*format* changes, never per release. A version-string compare would
+silently SKIP every UPDATE during the dev cycle (case observed in v0.6.4:
+body edits to `feedback_architect-code-changes.md` and
+`feedback_branch-protection.md` were skipped by re-runs on existing
+projects because `v=1.0.0` matched). Comparing the user file's body SHA
+against the resolved template SHA captures **every** content change
+without requiring a schema-id bump.
 
 **Backward compat:** the marker shape
 (`<!-- RSCT-GENERATED v=X created=Y sha256-body=Z -->`) is unchanged.
@@ -2314,6 +2584,231 @@ node -e '
 Idempotent: a second run sees `applications/<app>/` and only reconciles the index
 (never overwrites the README). The universe repo is left with **uncommitted** working
 changes on purpose — committing there is the dev's call.
+
+### 4.9 — Update-check consent (optional, ask-once)
+
+T4: `rsct_status` can surface a one-line "a newer RSCT release is available" hint at
+session start. It is **opt-in** — until consent is recorded, the MCP server makes NO
+network call. This step ASKS ONCE (it never re-asks once `~/.rsct/update-check.json`
+carries a `consent` field) and records the answer. The check is **cached (~daily),
+fail-silent, and suggest-only** — it never auto-updates anything.
+
+Ask the dev (only when consent is not yet recorded):
+> *"Allow RSCT to check GitHub for a newer release at session start? It is cached
+> (~once/day), never blocks, and only suggests — never auto-updates. `[y/N]`"*
+
+Set `CONSENT` to `yes` or `no` from the answer (default `no`), then record it:
+
+```bash
+echo "  CHECKPOINT: Phase 4.9 executing canonical update-check consent (ask-once)"
+UPDATE_CHECK_FILE="$HOME/.rsct/update-check.json"
+HAS_CONSENT="no"
+[ -f "$UPDATE_CHECK_FILE" ] && grep -q '"consent"' "$UPDATE_CHECK_FILE" 2>/dev/null && HAS_CONSENT="yes"
+if [ "$HAS_CONSENT" = "yes" ]; then
+  echo "  update-check consent already recorded — no change (ask-once)"
+else
+  # CONSENT is set from the dev's answer above; default to "no" (opt-in / privacy-first).
+  CONSENT="${CONSENT:-no}"
+  mkdir -p "$HOME/.rsct"
+  # RSCT-owned runtime file — a small Node merge is fine (preserves any cache fields).
+  # Path passed as argv (no pwd reliance); double-quoted JS only (no apostrophes — CAP-42).
+  node -e '
+    var fs = require("fs");
+    var p = process.argv[1];
+    var consent = process.argv[2] === "yes" ? "yes" : "no";
+    var o = {};
+    try { var prev = JSON.parse(fs.readFileSync(p, "utf8")); if (prev && typeof prev === "object") o = prev; } catch (e) { o = {}; }
+    o.consent = consent;
+    var tmp = p + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(o, null, 2) + "\n", "utf8");
+    fs.renameSync(tmp, p);
+    console.log("  update-check consent recorded: " + consent);
+  ' "$UPDATE_CHECK_FILE" "$CONSENT"
+fi
+```
+
+### 4.10 — Topology confirmation (mono / monorepo / multi-repo)
+
+T2: record the repo's **topology** so the contract-surface gate knows whether to
+enforce. The MCP **infers** it from on-disk signals; this step lets the dev
+**confirm** it and persists the answer to `.rsct.json` (`topology.mode`). The gate
+(`rsct_request_commit`) enforces contracts **only** when the confirmed mode is
+**`multi-repo`**; `mono` / `monorepo` are recorded but never gated.
+
+Steps:
+1. Call **`mcp__rsct__rsct_get_topology`** and read `topology.confirmed_mode`,
+   `topology.inferred_mode`, `topology.signals` (universe presence, registered-app
+   count, nested app markers), and `hints`.
+2. Decide whether to ASK — **ask-once**: do NOT re-prompt a topology the dev already
+   settled unless the signals changed:
+   - **`confirmed_mode` is null** (first run / a pre-T2 project being upgraded): ASK.
+   - **`confirmed_mode` is set and no hint warns of a contradiction** (the signals still
+     agree): do NOT re-ask — re-confirm SILENTLY with the existing `confirmed_mode`.
+   - **`confirmed_mode` is set but a hint says the signals now suggest a DIFFERENT mode**
+     (e.g. a `mono` repo that grew into `multi-repo` — the RV2 downgrade hint): surface
+     the change and ASK whether to update.
+   When asking:
+   > *"Detected topology: **<inferred_mode>** (signals: <…>). Confirm the repo
+   > topology — `mono` (one repo, one app), `monorepo` (many apps in this repo), or
+   > `multi-repo` (many repos under the universe; the contract gate applies — it
+   > protects the repo that PRODUCES a shared surface, not the consumers)? [default:
+   > <confirmed_mode if set, else inferred_mode>]"*
+3. Set `TOPOLOGY_MODE` to the resulting mode (`mono` / `monorepo` / `multi-repo`) — the
+   dev's answer when asked, or the existing `confirmed_mode` when re-confirming silently
+   (the splice is idempotent — re-writing the same value is a safe no-op). For a
+   non-interactive run, `RSCT_TOPOLOGY_MODE` pre-seeds it.
+
+Idempotent (re-running updates the value in place; no duplicate key) and it **never
+reformats** the rest of `.rsct.json` (text-splice — `.rsct.json` is NOT a documented
+JSON-merge exception; CLAUDE.md #5).
+
+```bash
+echo "  CHECKPOINT: Phase 4.10 executing canonical topology persistence (text-splice)"
+RSCT_JSON=".rsct.json"
+CONFIRMED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)
+# TOPOLOGY_MODE comes from the dev's confirmation above (mono|monorepo|multi-repo).
+# RSCT_TOPOLOGY_MODE pre-seeds it for non-interactive / CI runs.
+TOPOLOGY_MODE="${TOPOLOGY_MODE:-${RSCT_TOPOLOGY_MODE:-}}"
+case "$TOPOLOGY_MODE" in
+  mono|monorepo|multi-repo) ;;
+  *) echo "  No valid topology confirmed (got '${TOPOLOGY_MODE}') — leaving .rsct.json topology unset (gate stays OFF)."; TOPOLOGY_MODE="" ;;
+esac
+if [ -n "$TOPOLOGY_MODE" ] && [ -f "$RSCT_JSON" ]; then
+  # Persist topology.mode by TEXT-SPLICE — never JSON.parse->stringify the managed
+  # .rsct.json (CLAUDE.md #5; .rsct.json is NOT a documented exception). Path via
+  # argv (no pwd reliance); double-quoted JS only (no apostrophes — CAP-42). The
+  # regex is anchored on "topology" so a sibling "install"."mode" is never touched;
+  # the char class [ \t\r\n] is CRLF-tolerant.
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], mode = process.argv[2], at = process.argv[3];
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — topology not persisted."); process.exit(0); }
+    var eol = /\r\n/.test(s) ? "\r\n" : "\n";
+    var hasTopo = /"topology"[ \t\r\n]*:[ \t\r\n]*\{/.test(s);
+    if (hasTopo) {
+      s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"mode"[ \t\r\n]*:[ \t\r\n]*")[^"]*(")/, "$1" + mode + "$2");
+      if (/"topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"confirmed_at"[ \t\r\n]*:[ \t\r\n]*"/.test(s)) {
+        s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"confirmed_at"[ \t\r\n]*:[ \t\r\n]*")[^"]*(")/, "$1" + at + "$2");
+      } else {
+        s = s.replace(/("topology"[ \t\r\n]*:[ \t\r\n]*\{[^}]*?"mode"[ \t\r\n]*:[ \t\r\n]*"[^"]*")/, "$1, \"confirmed_at\": \"" + at + "\"");
+      }
+    } else {
+      var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
+      if (!m) { console.error("  WARN: .rsct.json root object not found — topology not persisted."); process.exit(0); }
+      var block = "\"topology\": { \"mode\": \"" + mode + "\", \"confirmed_at\": \"" + at + "\" }," + eol + "  ";
+      s = s.slice(0, m[0].length) + block + s.slice(m[0].length);
+    }
+    fs.writeFileSync(f, s, "utf8");
+    console.log("  topology.mode persisted: " + mode);
+  ' "$RSCT_JSON" "$TOPOLOGY_MODE" "$CONFIRMED_AT"
+  if grep -q '"topology"' "$RSCT_JSON" 2>/dev/null; then echo "  OK: topology recorded"; else echo "  ERROR: topology persistence failed" >&2; exit 1; fi
+fi
+```
+
+### 4.11 — Declare cross-repo contracts (DX-1b, guided) — multi-repo + ≥2 apps only
+
+Offer guided contract authoring **ONLY** when ALL hold (else skip silently — near-zero-config):
+- `TOPOLOGY_MODE == 'multi-repo'` (confirmed this run or already in `.rsct.json`), AND
+- the LINKED universe resolves (`.rsct.json` `universe.local`), AND
+- `rsct_get_topology` `topology.signals.registered_apps_count >= 2` — i.e. the universe has ≥2
+  `applications/<dir>/` directories (the gate's ground truth; NOT the `registered_apps[]` JSON array).
+  A contract needs a producer AND a consumer, so it's meaningless with fewer than 2 apps.
+If `rsct-mcp` is not installed (no count available), SKIP — this is a second-run capability, like the
+create-offer. Reuse the `rsct_get_topology` call from Phase 4.10; don't re-implement the count.
+
+[Offer — consent-gated, ONE line:]
+> "This universe has N apps (`<list registered apps>`). Want to declare a *contract* — a surface one
+>  app PUBLISHES that others consume (the gate then blocks a producer commit that breaks it)? I'll ask
+>  the details and add it to `contracts.json`; you review + commit the universe yourself. `[y/N]`"
+
+On **NO** → skip (no mutation). On **YES** → the guided Q&A below, then the splice. The framework GUIDES
+the questions but **NEVER invents** the relationships (the contract content is the dev's domain):
+1. **producer** — default = THIS app's name; confirm, or pick another registered app. (The producer is
+   the repo whose surface is gated.)
+2. **id** — a unique slug; suggest `<producer>-api`; the dev confirms/edits.
+3. **surface** — ask the dev for path globs in the producer repo. Glob rules (restate from the template
+   `_help`): `*` `**` `?` only (no brace/char-class sets); a `dir/**` glob needs the trailing slash and
+   does NOT match a sibling `dir.ext`. Need ≥1 glob — WARN if empty (an empty surface can never gate).
+4. **consumers** — present the OTHER registered apps (EXCLUDE the chosen producer — an app can't consume
+   its own surface); the dev picks which depend on the surface.
+5. **description** — optional one-liner.
+PREVIEW the assembled entry as JSON and require an **explicit approval** before writing.
+
+**Safe value handoff (BINDING — injection safety).** The answers are dev free text. To keep them out of
+the shell AND the `node -e` source, WRITE each answer **verbatim** to a scratch file using your
+file-write tool (NOT a shell heredoc/echo — zero shell quoting) under a fresh dir `$CONTRACT_SCRATCH`:
+- `$CONTRACT_SCRATCH/id`, `/producer`, `/description` (one scalar file each; omit `description` if empty),
+- `$CONTRACT_SCRATCH/surface/1`, `/2`, … (one file per glob),
+- `$CONTRACT_SCRATCH/consumers/1`, `/2`, … (one file per app).
+Then set `CONTRACTS_JSON` to the LINKED universe's `contracts.json` path and run the block. `node` reads
+each file and `JSON.stringify`s it, so a `"` / `\` / `$` / newline in any answer is neutralised. The
+write is **additive + idempotent by `id`** (an existing `id` is left untouched) and **RSCT never commits
+the universe** — after it writes, review + commit `contracts.json` in the universe repo yourself.
+
+```bash
+echo "  CHECKPOINT: Phase 4.11 executing contract additive-splice (text-splice)"
+# CONTRACT_SCRATCH: dir of verbatim answer files (see above). CONTRACTS_JSON: the linked
+# universe's contracts.json. Dev free-text reaches node ONLY as opaque file content — never
+# the node -e source nor a shell assignment — so JSON.stringify makes it injection-safe.
+CONTRACT_SCRATCH="${CONTRACT_SCRATCH:-}"
+CONTRACTS_JSON="${CONTRACTS_JSON:-}"
+if [ -z "$CONTRACT_SCRATCH" ] || [ ! -d "$CONTRACT_SCRATCH" ] || [ -z "$CONTRACTS_JSON" ] || [ ! -f "$CONTRACTS_JSON" ]; then
+  echo "  SKIP: contract scratch dir or contracts.json missing — nothing spliced."
+else
+  # Additive bracket-balanced splice into the "contracts": [ ... ] array (mirrors Phase 4.8
+  # appendRegistry). Never JSON.parse->stringify the whole file (CLAUDE.md #5); the only parses
+  # are READ-ONLY (idempotency on the array region + a post-mutation validity check). Double-quoted
+  # JS only (no apostrophe inside the single-quoted node -e); CRLF-tolerant; paths via argv.
+  node -e '
+    var fs = require("fs"), path = require("path");
+    var dir = process.argv[1], target = process.argv[2];
+    function rd(p) { try { return fs.readFileSync(p, "utf8").replace(/\r/g, "").replace(/\n+$/, "").trim(); } catch (e) { return ""; } }
+    function rdArr(sub) { var d = path.join(dir, sub), out = []; try { fs.readdirSync(d).sort().forEach(function (n) { var v = rd(path.join(d, n)); if (v) out.push(v); }); } catch (e) {} return out; }
+    var entry = { id: rd(path.join(dir, "id")), producer: rd(path.join(dir, "producer")), surface: rdArr("surface"), consumers: rdArr("consumers") };
+    var desc = rd(path.join(dir, "description"));
+    if (desc) entry.description = desc;
+    if (!entry.id || !entry.producer) { console.error("  WARN: contract id/producer missing — nothing spliced."); process.exit(0); }
+    var s;
+    try { s = fs.readFileSync(target, "utf8"); } catch (e) { console.error("  WARN: contracts.json unreadable — nothing spliced."); process.exit(0); }
+    var m = s.match(/("contracts"[ \t\r\n]*:[ \t\r\n]*)\[/);
+    if (!m) { console.error("  WARN: contracts array not found — add the entry by hand."); process.exit(0); }
+    var openIdx = m.index + m[0].length - 1;
+    var i = openIdx + 1, depth = 1, inStr = false, esc = false;
+    for (; i < s.length && depth > 0; i++) {
+      var c = s[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === "\"") inStr = !inStr;
+      else if (!inStr && c === "[") depth++;
+      else if (!inStr && c === "]") depth--;
+    }
+    var closeIdx = i - 1;
+    var inner = s.slice(openIdx + 1, closeIdx);
+    var arr;
+    try { arr = JSON.parse("[" + inner + "]"); } catch (e) { console.error("  WARN: existing contracts array is not valid JSON — fix it by hand first."); process.exit(0); }
+    if (arr.some(function (e) { return e && e.id === entry.id; })) { console.log("  contracts.json already has id=" + entry.id + " — left as-is (no overwrite)."); process.exit(0); }
+    var obj = JSON.stringify(entry);
+    var ml = inner.indexOf("\n") !== -1;
+    var rendered;
+    if (inner.trim().length === 0) {
+      rendered = ml ? ("\n    " + obj + "\n  ") : obj;
+    } else {
+      var tail = inner.replace(/[ \t\r\n]+$/, "");
+      rendered = ml ? (tail + ",\n    " + obj + "\n  ") : (tail + ", " + obj);
+    }
+    var out = s.slice(0, openIdx + 1) + rendered + s.slice(closeIdx);
+    try { JSON.parse(out); } catch (e) { console.error("  ERROR: splice would produce invalid JSON — aborted, contracts.json untouched."); process.exit(1); }
+    fs.writeFileSync(target, out, "utf8");
+    console.log("  added contract id=" + entry.id + " to contracts.json — review + commit the universe yourself.");
+  ' "$CONTRACT_SCRATCH" "$CONTRACTS_JSON"
+fi
+```
+
+After a successful splice, offer **"Declare another contract? `[y/N]`"** — each iteration RE-ENTERS the
+Q&A and requires its OWN preview + explicit approval before its write (no blanket up-front yes). When
+done, remind the dev once: the universe repo has **uncommitted** working changes — review + commit
+`contracts.json` there yourself (RSCT never commits the universe).
 
 ### 4.V — INV-2.3 poison-pill closer (SessionStart sanitizer hook)
 
@@ -2740,6 +3235,13 @@ session boot.
    ```
 6. **Wait for updated OK** before `git add` / `commit` / `push`.
 7. If on protected branch: require explicit reconfirmed OK.
+8. **Fresh-install pointer (DX-1):** if `rsct-mcp` was NOT installed/loaded during THIS run
+   (so Phase 1.9b was skipped — typically the first `/rsct-setup`, before the IDE restart
+   that loads the MCP), print: "RSCT installed. Restart the IDE and run `/rsct-setup` again —
+   then I can detect the other repositories in your org and offer to set up shared governance
+   (universe + contracts)." This is the honest second-run capability (the
+   detector loads only after the restart). Skip this line when the MCP was already available
+   this run (the orchestration already happened in Phase 3).
 
 ---
 

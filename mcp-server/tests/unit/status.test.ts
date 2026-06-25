@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { statusHandler, type StatusOutput } from '../../src/tools/status.js'
 import { RSCT_MCP_VERSION } from '../../src/lib/version.js'
 
@@ -38,5 +40,42 @@ describe('rsct_status', () => {
 
   it('rejects unknown input keys (zod strict)', async () => {
     await expect(statusHandler({ unknown_key: 'x' })).rejects.toThrow()
+  })
+
+  // T4: rsct_status surfaces the opt-in update hint when the ~/.rsct cache says a
+  // newer release exists. We point HOME at a seeded temp dir (getUpdateNotice reads
+  // $HOME/.rsct/update-check.json) and restore it after.
+  it('surfaces an update hint when consent+cache show a newer release (and not otherwise)', async () => {
+    const origHome = process.env.HOME
+    const h = mkdtempSync(join(tmpdir(), 'rsct-status-upd-'))
+    try {
+      // No consent yet → no update hint.
+      process.env.HOME = h
+      const before = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+      expect(before.hints.some((x) => /newer RSCT release/.test(x))).toBe(false)
+
+      // Consent + a fresh cache with a newer tag → hint appears.
+      const maj = Number(RSCT_MCP_VERSION.split('.')[0])
+      mkdirSync(join(h, '.rsct'), { recursive: true })
+      writeFileSync(
+        join(h, '.rsct', 'update-check.json'),
+        JSON.stringify({ consent: 'yes', latest_tag: `v${maj + 1}.0.0`, last_checked: new Date().toISOString() }),
+      )
+      const after = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+      expect(after.hints.some((x) => /newer RSCT release/.test(x))).toBe(true)
+    } finally {
+      if (origHome === undefined) delete process.env.HOME
+      else process.env.HOME = origHome
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  // T3: status always reports a worktree block; a plain fixture (or subdir of
+  // the main worktree) is NOT a linked worktree, so no linked-worktree hint.
+  it('includes a worktree block and emits no linked-worktree hint outside one', async () => {
+    const out = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+    expect(out.worktree).toBeDefined()
+    expect(out.worktree.is_worktree).toBe(false)
+    expect(out.hints.some((h) => h.includes('linked git worktree'))).toBe(false)
   })
 })

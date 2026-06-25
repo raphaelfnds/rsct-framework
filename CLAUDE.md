@@ -92,6 +92,31 @@ relevantes, a especificação (ou plano) deve ser **ajustada** antes do
 início da fase Code. A fase V é parte da camada mecânica via
 `rsct_phase_verification_start` / `_complete` no `rsct-mcp`.
 
+## Acréscimo ao ciclo — fase REVIEW (code review)
+
+Após a fase Code, esta implementação introduz uma fase **REVIEW** (revisão
+do código produzido) entre Code e Test:
+
+```
+R → S → V → C → REVIEW → T
+```
+
+A distinção em relação à fase V: a **V audita a especificação/plano**
+(antes de escrever código); a **REVIEW audita o código/diff já escrito**
+(antes dos testes) — buscando bugs de correção, brechas de segurança,
+regressões e quebras cross-OS no que foi efetivamente implementado.
+
+A decisão é **perguntada uma única vez**, no fechamento da especificação:
+a IA recomenda **fortemente** incluir um code review antes dos testes e o
+desenvolvedor escolhe sim/não (parâmetro `include_review` em
+`rsct_phase_spec_complete`). A escolha é gravada e **não é re-perguntada**;
+se recusada, a REVIEW **não é executada**. Para tarefas `standard` e
+`complex`, a fase Test não inicia até a decisão ser honrada — a revisão é
+mecânica via `rsct_phase_review_start` / `_complete`, com um gate em
+`rsct_phase_test_start` (tarefas `trivial`/`small` dispensam a REVIEW). Não
+confundir a fase REVIEW com `rsct_persona_review` (uma lente consultiva,
+sem estado).
+
 ## Regra de edição deste arquivo
 
 Este `CLAUDE.md` é mantido por **desenvolvedores e contribuidores** do

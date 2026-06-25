@@ -24,6 +24,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       'spec',
       'verification',
       'code',
+      'review',
       'test',
     ])
   })

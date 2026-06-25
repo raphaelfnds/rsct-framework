@@ -8,6 +8,10 @@ export interface RsctApprovalModes {
   timestamp_skew_seconds?: number
   fabrication_signal_threshold_ms?: number
   trust_allowed_for?: string[]
+  /** T3: default TTL (minutes) for a plan-authorization token. Bounds 5–480. */
+  plan_token_ttl_minutes?: number
+  /** T3: default max commits a plan-authorization token covers. Bounds 1–100. */
+  plan_token_max_actions?: number
 }
 
 export interface RsctAuditConfig {
@@ -23,6 +27,16 @@ export interface RsctConfig {
     local?: string
     remote?: string
   }
+  /**
+   * T2 — the repo topology, confirmed by the dev at /rsct-setup. The
+   * contract-surface gate (INV-7) diverges ONLY on `mode === 'multi-repo'`.
+   * Additive (Zod top-level `.strip()` keeps older servers tolerant).
+   */
+  topology?: {
+    mode: 'mono' | 'monorepo' | 'multi-repo'
+    confirmed_at?: string
+    detected_signals?: string[]
+  }
   protected_branches?: string[]
   test_framework?: string
   install?: {
@@ -30,6 +44,8 @@ export interface RsctConfig {
     mode?: string
     setup_commit_sha_before?: string
     canonical_source_added?: boolean
+    /** DX-1b: ISO timestamp set when the dev declines the create-universe offer (ask-once). */
+    create_universe_declined_at?: string
   }
   mcp?: {
     server?: string
@@ -68,6 +84,7 @@ const TRUST_ALLOWED_TOOL_NAMES = [
   'rsct_phase_test_complete',
   'rsct_phase_abandon',
   'rsct_capture_issue',
+  'rsct_plan_authorize',
 ] as const
 
 const RsctApprovalModesSchema = z
@@ -75,6 +92,11 @@ const RsctApprovalModesSchema = z
     timestamp_skew_seconds: z.number().int().min(60).max(600).optional(),
     fabrication_signal_threshold_ms: z.number().int().min(100).max(5000).optional(),
     trust_allowed_for: z.array(z.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
+    // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
+    // rejects the whole config (rsct_installed=false) rather than silently
+    // granting an over-wide batch window.
+    plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
+    plan_token_max_actions: z.number().int().min(1).max(100).optional(),
   })
   .strict()
 
@@ -101,6 +123,19 @@ const RsctConfigSchema = z
         remote: z.string().min(1).optional(),
       })
       .optional(),
+    // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
+    // rejects the whole config (rsct_installed=false → the contract gate can't
+    // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
+    // (a silently dropped `mode` would turn enforcement OFF with no signal —
+    // worse); the rejection surfaces via the forced `bounds_violation` audit.
+    topology: z
+      .object({
+        mode: z.enum(['mono', 'monorepo', 'multi-repo']),
+        confirmed_at: z.string().optional(),
+        detected_signals: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
     // `.min(1)`: empty array disables the default protection wholesale and
     // is the HIGH-4 vector. If a project genuinely wants zero protected
     // branches, it should uninstall `.rsct.json`.
@@ -112,6 +147,9 @@ const RsctConfigSchema = z
         mode: z.string().optional(),
         setup_commit_sha_before: z.string().optional(),
         canonical_source_added: z.boolean().optional(),
+        // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
+        // create-universe offer, so /rsct-setup doesn't re-ask every run.
+        create_universe_declined_at: z.string().min(1).optional(),
       })
       .optional(),
     mcp: z

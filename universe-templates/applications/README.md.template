@@ -28,7 +28,9 @@ Each app folder's `README.md` should contain:
 ## Auto-registration
 
 When a developer runs `/rsct-setup` in an app's repository and this universe
-is detected locally, the framework can register the app here automatically.
+is detected locally, the framework offers (consent-gated) to register the app
+here — it writes `applications/<app>/README.md` into this universe's working
+tree for you to review and commit (RSCT never commits the universe itself).
 
-(Auto-registration is planned for RSCT v1.1; in v1.0 manually create
-`applications/<app>/README.md` using `_app.md.template`.)
+You can always register an app by hand instead: create
+`applications/<app>/README.md` from `_app.md.template`.

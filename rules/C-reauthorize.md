@@ -81,3 +81,41 @@ mutation.** Run `rsct_status` + `rsct_load_context` at session start
 Use these tools by default for commit/push/merge. If `rsct-mcp` is not
 installed, the §C prose contract above is the only enforcement —
 follow it strictly.
+
+**Plan execution modes — one-at-a-time (default) vs batch (T3):**
+
+By default, execution is **one-at-a-time**: every commit needs its own fresh
+`dev_approval` (the anti-reuse rule above). This is the safe default and what
+you should assume unless the dev opts in to batch mode.
+
+For longer plan runs, the dev may grant a **plan-scoped batch token** so you
+don't have to stop for an OK on every single commit:
+
+- `mcp__rsct__rsct_plan_authorize` — the dev approves **once** (full §C gate +
+  OS dialog). That single approval then covers up to a bounded number of
+  **commits** (default 20), within the **active plan** and the **current branch**,
+  until it expires (default 120 min). After that, `rsct_request_commit` no
+  longer needs a per-commit `dev_approval`.
+- `mcp__rsct__rsct_plan_revoke` — ends the batch token early (no approval needed
+  — revoking only tightens). The token also **auto-revokes** when you switch
+  branches, when the plan is marked complete or its `plan_`/`spec_` file is
+  deleted, when it expires, or when its commit budget is exhausted.
+
+The batch token is **commit-only by design**. **push and merge ALWAYS require a
+fresh per-action `dev_approval`** — they are outward-facing / hard to reverse.
+The token **never** bypasses §D branch protection or §E secret scanning: a
+token-authorized commit on a protected branch, or one whose diff trips the
+secret scan, still rejects — fall back to a per-action `dev_approval` carrying
+the explicit override for that one commit.
+
+Even under a batch token, **every commit is still individually recorded in
+`.rsct/audit.log`**, and `rsct_phase_status` shows the live token (budget used,
+expiry). Batch mode reduces approval friction; it does not reduce traceability.
+
+**Parallel work via git worktrees:** to run isolated tracks in parallel, use
+separate git worktrees (`git worktree add ../<app>-<feat> <feat>`). Because the
+RSCT runtime state (`.rsct/phase-state.json` — including any batch token — and
+`.rsct/approvals-seen.json`) is gitignored and lives in the working tree, **each
+worktree gets its own isolated token and anti-reuse store**: a batch token in
+one worktree grants nothing in another. `rsct_status` / `rsct_phase_status`
+report when you are inside a linked worktree.
