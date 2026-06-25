@@ -3,8 +3,9 @@
 MCP server for the [RSCT framework](../) — institutional consciousness layer
 for Claude Code.
 
-Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, and the
-**M3 phase machine** (V phase + R/S/C/T pairs + classify_task):
+Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, the
+**M3 phase machine** (V phase + R/S/C/T pairs + classify_task), and the
+**post-M3 multi-repo / onboarding / REVIEW** additions (T1c/T2/T3 + the DX track):
 - **M1 — Recall (`plan_rsct-mcp-v1.md`):** 7 tools + 5 resources that let
   Claude reach into a project's structured documentation (decisions, knowledge
   graph, environment profiles, architecture, infrastructure) before proposing
@@ -25,6 +26,14 @@ Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, and the
   `rsct_persona_review` + `rsct_auto_persona`, and Tutor as the 6th
   persona (opt-in only) with `rsct_tutor_step`. Bilingual EN+pt-BR
   vocabulary across the heuristic keyword sets.
+- **Post-M3 — multi-repo, onboarding & the REVIEW phase:** the 30 M1+M2+M3
+  tools are joined by 7 more, bringing the catalog to **37**: org-universe
+  governance reads (`rsct_get_universe`, T1c), multi-repo topology + the
+  contract-surface gate (`rsct_get_topology`, T2), the guided-onboarding detector
+  (`rsct_detect_onboarding`, DX-1), plan-authorization batch tokens
+  (`rsct_plan_authorize` / `rsct_plan_revoke`, T3), and the mechanical REVIEW
+  phase (`rsct_phase_review_start` / `rsct_phase_review_complete`, DX-4 — the
+  cycle becomes R→S→V→C→REVIEW→T).
 
 **Entry point for non-trivial tasks:** call `rsct_classify_task` with the
 task description. It returns a tier (trivial / small / standard / complex)
@@ -47,7 +56,7 @@ between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
 
 | Milestone | State |
 |---|---|
-| M1 — Recall MVP (F0 + F1 + F2) | ✅ gate passed 2026-06-03; merged to `main` (tag `v0.2.0-m2`) |
+| M1 — Recall MVP (F0 + F1 + F2) | ✅ gate passed 2026-06-03; merged to `main` (tag `v0.2.0-m1`) |
 | M2 — Enforcement MVP (F2.5.0..F2.5.8b) | ✅ gate passed 2026-06-06; merged to `main` (tag `v0.2.0-m2`) |
 | Post-M2 Track 1 (safety hardening) | ✅ closed 2026-06-06; merged to `main` (tag `v0.2.1-track1-safety`) |
 | Post-M2 Track 2 (install + docs + adoption) | ✅ closed 2026-06-06; merged to `main` (tag `v0.2.2-track2-complete`) |
@@ -60,6 +69,7 @@ between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
 | M3 F3 personas (5 personas + persona_review + auto_persona) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.0-m3-personas`) |
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
+| Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 
 **37 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
@@ -92,7 +102,7 @@ node dist/index.js < /dev/null
 Expect on stderr (single JSON line, then clean exit 0):
 
 ```json
-{"level":30,"time":"...","name":"rsct-mcp","version":"0.6.3",
+{"level":30,"time":"...","name":"rsct-mcp","version":"2.0.0",
  "tools":["rsct_status","rsct_load_context","rsct_get_decisions",
           "rsct_get_knowledge","rsct_get_environments",
           "rsct_get_architecture","rsct_get_universe",
@@ -363,6 +373,13 @@ touches a produced surface (listing the affected consumers) unless
 `?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
 sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
 hint (never an error).
+
+**Producer-mismatch warning.** Whenever the contract graph and the universe are both
+readable, `rsct_get_topology` adds a hint for each contract `producer` that matches **no
+registered app** — the gate compares names exactly and case-sensitively (`===`), so an
+unregistered or mis-cased producer silently never gates. A case-only difference is flagged as
+a likely typo with the correctly-cased name to use. Lists the offending producer name(s), not
+just a count.
 
 ### `rsct_detect_onboarding`
 
@@ -758,7 +775,7 @@ companion install (`npm run build && npm install -g .`) and after
 
 - [ ] M1 validation gate signed off (per progress_rsct-mcp-v1.md).
 - [ ] `rsct-mcp` on PATH and `node dist/index.js < /dev/null` prints the
-      ready log including all 13 tool names.
+      ready log including all 13 M1+M2 tool names (the full catalog is 37 now).
 - [ ] `/rsct-setup` re-run in the test project; Phase 4.V reports either
       "Installed RSCT SessionStart sanitizer hook" (fresh) or "already
       present — no change" (idempotent).

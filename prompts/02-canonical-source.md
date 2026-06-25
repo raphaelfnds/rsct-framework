@@ -134,7 +134,7 @@ Present to the developer:
 
 ```
 ═══════════════════════════════════════════════════════
-RSCT CANONICAL SOURCE — Discovery Report    v1.0.0
+RSCT CANONICAL SOURCE — Discovery Report
 ═══════════════════════════════════════════════════════
 
 ✅ Discovered automatically:

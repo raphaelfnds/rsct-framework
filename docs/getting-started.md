@@ -92,6 +92,25 @@ misbehaves, that's a bug worth filing.
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
    the framework from the machine.
 
+## What RSCT does to a task
+
+Beyond scaffolding files, RSCT runs every non-trivial change through a fixed
+engineering cycle, enforced by the `rsct-mcp` phase tools:
+
+**R → S → V → C → REVIEW → T** — Research → Specification → **Verification** →
+Code → **REVIEW** → Test.
+
+- **V (Verification)** audits the *spec/plan* **before** any code is written — a
+  reverse-dependency and gap scan against the approved spec.
+- **REVIEW** audits the *code/diff* **after** it's written and before tests — a
+  correctness / security / regression pass over what actually changed.
+
+They're distinct: V checks the plan, REVIEW checks the diff. At spec-closure RSCT
+asks **once** whether to include the code REVIEW; the choice is recorded and
+honored — for `standard`/`complex` tasks the Test phase won't start until that
+decision is settled (`trivial`/`small` tasks skip it). You don't memorize the
+phases; the tools prompt you through them.
+
 ## Next steps
 
 - The full per-command detail → [Command reference](commands.md).

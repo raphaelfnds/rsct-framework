@@ -144,8 +144,11 @@ surfaces.
 **Producer matching is exact and case-sensitive.** A contract's `producer` must
 equal your app's `name` in `.rsct.json` (`app.name`) character-for-character —
 `MyApp` does not match `myapp`. If the gate isn't firing where you expect, this
-mismatch is the first thing to check (a producer name matching no registered app
-is exactly the kind of slip a future release will warn about).
+mismatch is the first thing to check. `rsct_get_topology` surfaces it for you:
+it **warns when a contract's `producer` matches no registered app** — or matches
+only by case (a case-only typo the gate silently treats as unregistered) — and
+suggests the correctly-cased name to use. So a misspelled or mis-cased producer
+is caught proactively instead of silently never gating.
 
 **Overriding.** When you genuinely intend a surface change, approve it with a
 per-action override carrying a reason (`override_contract_surface: { reason }`).

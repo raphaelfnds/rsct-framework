@@ -3,10 +3,12 @@
 All notable changes to the RSCT Framework are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-> **Stable.** `v1.0.0` is the first stable, open-source release of the RSCT
-> Framework. From this release on, the framework **protocol** version and the
-> **code** version are aligned at `1.0.0` and bump together. New changes are
-> recorded under **[Unreleased]** until the next tagged release.
+> **Stable.** `v1.0.0` was the first stable, open-source release of the RSCT
+> Framework. The framework **release version** (the prompts/rules set plus the
+> `rsct-mcp` code) bumps per release; the embedded **marker schema id** (`v=1.0.0`)
+> is a separate, frozen axis — it keys marker idempotency and changes only when the
+> marker *format* does, not on every release. New changes are recorded under
+> **[Unreleased]** until the next tagged release.
 
 ## [Unreleased]
 
@@ -39,6 +41,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `override_review_skip=true` to bypass (audit-logged). trivial/small bypass the
   gate. Mirrors how the V audit sits between Spec and Code. New tools:
   `rsct_phase_review_start`, `rsct_phase_review_complete`.
+- **Org-universe governance reads (T1c).** `rsct_get_universe` surfaces the linked
+  universe's governance docs (`docs/governance/*.md`, `docs/INDEX.md`); a governance
+  index also appears in `rsct_status` / `rsct_load_context`.
+- **Plan-authorization batch tokens (T3).** `rsct_plan_authorize` / `rsct_plan_revoke`:
+  one approval mints a plan- and branch-scoped token covering up to N commits
+  (default 20) for a time window (default 120 min), so commits within an approved plan
+  don't each stop for an OK. Commit-only (push/merge keep per-action §C); never bypasses
+  branch protection, the secrets scan, or the contract gate; auto-revokes on branch
+  switch / plan completion / expiry / exhaustion; per-git-worktree state.
+- **Guided onboarding orchestrator (DX-1).** `/rsct-setup` becomes the single guided
+  front door: a deterministic universe≠app guard (it stops if run inside a universe
+  repo), same-org sibling-repo detection (`rsct_detect_onboarding`), and a guided offer
+  to create or link an org universe.
+- **Guided contract authoring (DX-1b).** In a confirmed multi-repo setup with ≥2
+  registered apps, `/rsct-setup` can walk the producer through declaring a contract
+  (producer, surface globs, consumers) and write it into the universe's `contracts.json`
+  via an injection-safe additive splice. The create-universe decline is remembered
+  (ask-once, persisted in `.rsct.json`).
+- **Producer-name-mismatch warning (DX-5).** `rsct_get_topology` warns when a
+  `contracts.json` `producer` matches no registered app — or matches only by case (a
+  case-only typo the gate silently treats as unregistered, with the correctly-cased
+  name suggested) — so a dead contract gate is caught proactively instead of silently
+  never firing.
+
+### Changed
+
+- **Plain-language user-facing copy (DX-2 / DX-2b).** De-jargoned the MCP and prompt
+  strings the developer actually sees: gate and decline reasons reworded (e.g.
+  "§C rejected" → "Approval rejected"), and section-symbol (`§C`) + lock-state jargon
+  removed from OS-dialog titles and hints. The project's user-facing language standard
+  is English; `/rsct-setup` migrates legacy pt-BR `CLAUDE.md` sections on update.
+- **Version model clarified (DX-5b).** The `v=1.0.0` carried by every RSCT marker is a
+  **marker schema id** (frozen — it keys idempotency), distinct from the product
+  release version; labels, docs, and install/uninstall comments reworded accordingly.
+  The `v=1.0.0` token stays byte-identical.
+- **Tool catalog grew to 37** (30 → 37 across the post-1.1.0 train: T1c universe reads,
+  T2 topology + contract gate, T3 plan tokens, DX-1 onboarding detector, DX-4 REVIEW
+  phase).
 
 ## [1.1.0] - 2026-06-18
 

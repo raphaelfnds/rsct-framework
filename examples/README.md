@@ -5,7 +5,7 @@ Reference projects showing what an rsct-managed codebase looks like.
 | Example | State | Notes |
 |---|---|---|
 | `java-spring/` | Populated | Pre-dates F0 (the knowledge-graph milestone) — `documentation/knowledge/` and `documentation/infrastructure.md` are not yet shown. The §A–§H protocol, decisions, modules, and impact analyses are current. For the full M1 shape (knowledge graph + infrastructure), see the rsct-framework repo itself, which is the working dogfood. |
-| `react-ts/` | Skeleton only | README placeholder. Will be filled when v1 lands. |
+| `react-ts/` | Skeleton only | README placeholder — a populated TypeScript/React example is planned. |
 
 Both examples are single-repo (`mono`) projects. For the multi-repo / org-universe
 flow — topology modes, contracts, and the producer-vs-consumer gate — see

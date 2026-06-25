@@ -142,7 +142,7 @@ Present to the developer:
 
 ```
 ═══════════════════════════════════════════════════════
-RSCT INIT UNIVERSE — Discovery Report       v1.0.0
+RSCT INIT UNIVERSE — Discovery Report
 Mode: [FRESH | UPDATE]
 ═══════════════════════════════════════════════════════
 
@@ -265,13 +265,13 @@ git add .
 1. List all files created (Category A) and skipped (Category B — already existed).
 2. If `.git/` was initialized, show `git status`.
 3. **Wait for explicit OK** before:
-   - `git commit -m "chore: bootstrap [ORG_SLUG]-universe (RSCT v1.0.0)"`
+   - `git commit -m "chore: bootstrap [ORG_SLUG]-universe"`
    - `git remote add origin [GITHUB_REMOTE]` (if URL was provided)
    - Any push
 
 Suggested commit message:
 ```
-chore: bootstrap [ORG_SLUG]-universe (RSCT v1.0.0)
+chore: bootstrap [ORG_SLUG]-universe
 
 - Skeleton governance docs (templates with TODOs)
 - Empty applications/ and hosts/ folders for inventory
@@ -299,8 +299,8 @@ Next steps for the developer:
      This wires the project's CLAUDE.md to this universe.
   4. To register an application:
        cp applications/_app.md.template applications/<app-name>.md
-     and fill in the placeholders. (Auto-registration via /rsct-setup is
-     planned for RSCT v1.1.)
+     and fill in the placeholders. (Or just re-run /rsct-setup in the app —
+     it offers, consent-gated, to register the app into this universe.)
   5. Declare cross-repo contracts in contracts.json (created empty above).
      A contract is a SURFACE one app PUBLISHES that others consume — in
      multi-repo mode the gate then blocks a producer commit that breaks it.

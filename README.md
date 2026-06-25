@@ -27,7 +27,7 @@ A file structure that turns RSCT theory into concrete AI behavior rules for real
 behavior of reading `CLAUDE.md` and per-project memory entries at session
 start. Other AI tools (Cursor, Copilot, Codex) do not currently load
 `CLAUDE.md` automatically — supporting them with auto-generated
-`.cursorrules` and `.github/copilot-instructions.md` is planned for v1.1.
+`.cursorrules` and `.github/copilot-instructions.md` is planned for a future release.
 
 ```
 Research → Specification → Verification → Code → Review → Test
@@ -469,11 +469,15 @@ The source and the installed copy are decoupled — you edit the source, run
 
 ## RSCT → Development phases mapping
 
+The full cycle is **R → S → V → C → REVIEW → T**:
+
 | RSCT Phase | Real development | Guardrails |
 |---|---|---|
 | Research | Requirements + reuse analysis + impact | §A (bug mode), §H (ADR) |
 | Specification | Plan with 2+ options + approval | §B (plan), §F (IDA/VOLTA), §G (tests in plan) |
+| Verification | Audit the approved spec — reverse-dep walk + gap scan, before any code | §B (plan); enforced at code-start |
 | Code | Execution | §C (reauthorize), §D (branches) |
+| REVIEW | Code review of the diff — correctness / security / regression, before tests | §G (testing); asked once at spec-closure, enforced at test-start |
 | Test | Automated or manual + approval | §G (testing) |
 | — | Commit + Push | §C, §D, §E (leak review) |
 
@@ -513,10 +517,10 @@ work safely.
 
 ## Roadmap
 
-### After v1.0.0 (v1.1+)
+### Future
 
 - **Memory write protocol** — currently the AI may write to `MEMORY.md` and
-  add memory entries without explicit dev OK. v1.1 will require dev
+  add memory entries without explicit dev OK. A future release will require dev
   authorization, with proposal at end of planning, and surface space/eviction
   list when storage gets crowded
 - **Two-pass audit before proposing plans** — strengthen §B item 2 to enforce
@@ -553,82 +557,16 @@ work safely.
   `.gitignore` patterns added by `/rsct-setup`. `spec_<slug>.md` is an
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
-- **`rsct-mcp` — M1 Recall + M2 Enforcement + M3 phase machine + personas + Tutor + issue capture** (shipped in `v1.0.0`). Companion MCP server at
-  [`mcp-server/`](mcp-server/README.md). **37 tools + 5 resources**
-  covering:
-  - **Recall (M1):** 7 read-only tools (status, decisions, knowledge,
-    environments with INV-6 secret masking, architecture, module
-    impact, premise/anti-decisions check) + 5 `rsct://` resources.
-  - **Enforcement (M2):** 3 pure-query checks (`rsct_check_branch`,
-    `rsct_check_secrets`, `rsct_check_edit_scope`) + 3 §C-gated
-    mutating ops (`rsct_request_commit`, `_push`, `_merge`) that
-    require a single-use `dev_approval` payload AND pop a cross-platform
-    OS dialog for out-of-band confirmation.
-  - **Plan execution modes (T3):** `rsct_plan_authorize` / `rsct_plan_revoke`.
-    Opt-in **batch mode** — one approval mints a plan- + branch-scoped token
-    that covers up to N **commits** (default 20) for a time window (default
-    120 min), so commits within the plan don't each stop for an OK. Commit
-    only (push/merge keep per-action §C); never bypasses branch protection or
-    the secrets scan; auto-revokes on branch switch / plan completion / expiry
-    / exhaustion. State is per-git-worktree, so parallel worktrees stay isolated.
-  - **SessionStart sanitizer hook** — strips poison-pill entries
-    (`Bash(git commit:*)` etc) from `.claude/settings.local.json` on
-    every session start. INV-2.3 closer.
-  - **`.rsct/audit.log`** — append-only JSONL forensic trail for every
-    §C-gated invocation, override, and tamper attempt.
-  - **`.rsct.json` shape + bounds validation** — Zod schema rejects
-    config-side bypass vectors (audit-off, infinite skew, empty
-    protected list, wildcard trust).
-  - **M3 V phase (v0.3.0):** `rsct_phase_verification_start/_complete`.
-    Reverse-dep walk over declared affected paths + four-category
-    checklist (gap / breakage / redundancy / forgotten) consulting
-    decisions + anti-decisions + knowledge categories +
-    architecture.md + impact/*.md. RSCT acronym extends to **R→S→V→C→T**.
-    `_complete` is §C-gated; per-finding actions captured in audit.
-  - **M3 CAPs batch 1 (v0.4.0):** INV-2.2 fabrication detection now
-    5/5 signals (added `scope_mismatch` + `burst_pattern`).
-    `rsct_load_context` surfaces `active_phase` (with verification
-    summary when active). `lib/phase-scope.ts` `writePhaseState`
-    guarded by an advisory file lock (`.rsct/phase-state.lock`,
-    30s stale threshold).
-  - **M3 L4 phase machine (v0.5.0):** 10 new tools — `rsct_classify_task`
-    (heuristic tier classifier: trivial / small / standard / complex),
-    `rsct_phase_status` (pure-query phase snapshot), and the four
-    R/S/C/T `_start/_complete` pairs symmetric with V phase. Shared
-    `lib/phase-machine.ts` backs the R/S/C/T pairs; V phase keeps its
-    own plumbing. `rsct_classify_task` is the entry point: call it
-    with the task description, get back a tier + recommended phase
-    sequence + hints.
-  - **M3 polish (v0.5.1):** `rsct_phase_abandon` — §C-gated discard of
-    the active phase without advancing (use when a phase was started
-    against the wrong spec_ref or the task pivoted). Plus
-    `lib/version.ts` single source of truth, `TRUST_ALLOWED_TOOL_NAMES`
-    extended for all phase complete tools.
-  - **M3 issue capture (v0.5.2):** `rsct_capture_issue` — captures a
-    non-blocking finding as a GitHub issue, either as a draft body
-    (mode=draft, no §C) or via `gh issue create` (mode=create,
-    §C-gated). `lib/gh.ts` thin wrapper. Use during sweeps to log
-    "we should fix this later" items without scope-creep.
-  - **M3 F3 personas (v0.6.0):** 5 personas (Architect, Senior Dev,
-    QA, DevOps, Security) defined in `lib/personas.ts` with structured
-    lenses (focus areas, questions, anti-patterns, knowledge
-    categories to consult, keywords). 2 read-only tools:
-    `rsct_persona_review` (returns a persona's lens against a subject)
-    and `rsct_auto_persona` (heuristic recommendation by task
-    description). The `persona?` parameter on phase tools now
-    resolves to one of these 5 slugs (was no-op since v0.3.0).
-  - **M3 Tutor (v0.6.1):** Tutor as the 6th persona — interactive
-    step-by-step facilitator. Opt-in only (`rsct_auto_persona` never
-    recommends it; `auto_pickable=false`). Companion tool
-    `rsct_tutor_step` logs each step (propose / execute / read-batch
-    / observe / complete) to audit so the session can resume after
-    `/clear` via a generated `resume_block`.
-  - **i18n (v0.6.2):** keyword sets in `rsct_classify_task` and
-    `lib/personas.ts` extended with pt-BR (Brazilian Portuguese)
-    AND modern EN tech jargon (CQRS, terraform, OWASP top 10,
-    hexagonal architecture, p99, etc.). Other languages follow the
-    same pattern when added — append entries to existing arrays
-    (zero-dep substring scan, deterministic).
+- **`rsct-mcp` companion MCP server** (in [`mcp-server/`](mcp-server/README.md)) —
+  the mechanical recall + enforcement layer: **37 tools + 5 resources** spanning
+  Recall (M1), Enforcement (M2: §C-gated commit/push/merge + the SessionStart
+  sanitizer hook + the append-only `.rsct/audit.log`), the
+  **R→S→V→C→REVIEW→T** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
+  topology & the contract-surface gate (T2), guided onboarding (DX-1), and
+  plan-authorization batch tokens (T3). The per-tool catalog, the boot-log tool
+  list, and the full milestone history live in
+  [`mcp-server/README.md`](mcp-server/README.md) — the single source for the
+  field-level reference (this README does not restate it).
 
 ## Trying rsct-mcp locally
 
@@ -661,12 +599,17 @@ sequence.
 The validation guides in [`mcp-server/README.md`](mcp-server/README.md)
 walk the surface end-to-end:
 - **M1 — Recall:** 7 read-only tools + 5 resources.
-- **M2 — Enforcement:** 3 pure-query checks + 3 §C-gated mutating ops
+- **M2 — Enforcement:** 6 tools — 3 pure-query checks + 3 §C-gated mutating ops
   + SessionStart sanitizer + cross-platform OS dialog + audit log.
 - **M3 — Phase machine + V phase + personas + Tutor + issue capture:**
-  17 additional tools across the RSCT cycle. Smoke: ask Claude to
-  call `rsct_classify_task` with any task description and confirm the
-  returned tier + `recommended_phases[]` is sensible.
+  17 tools across the RSCT cycle.
+- **Post-M3 — multi-repo, onboarding & REVIEW (T1c/T2/T3 + DX):** 7 more —
+  `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
+  `rsct_plan_authorize`/`_revoke`, and `rsct_phase_review_start`/`_complete`.
+
+That's **7 + 6 + 17 + 7 = 37 tools**. Smoke: ask Claude to call
+`rsct_classify_task` with any task description and confirm the returned tier +
+`recommended_phases[]` is sensible.
 
 ## Manual uninstall (pre-1.0.0 projects)
 
