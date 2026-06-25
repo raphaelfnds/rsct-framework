@@ -22775,13 +22775,6 @@ function emitConfigViolation(projectRoot, reason, extras) {
 
 // src/lib/git.ts
 init_esm_shims();
-function realpathOrSelf(p) {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
 function readGitState(projectRoot) {
   if (!isGitRepo(projectRoot)) {
     return { available: false, branch: null, head_sha: null, is_clean: null };
@@ -22820,17 +22813,15 @@ function readWorktreeInfo(projectRoot) {
   }
   const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
   const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
-  const commonDirRaw = safeGit(projectRoot, ["rev-parse", "--git-common-dir"]);
   const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
   let isWorktree = false;
   let name = null;
-  if (gitDirRaw !== null && commonDirRaw !== null) {
-    const gitDirAbs = resolve(projectRoot, gitDirRaw);
-    const commonDirAbs = resolve(projectRoot, commonDirRaw);
-    isWorktree = realpathOrSelf(gitDirAbs) !== realpathOrSelf(commonDirAbs);
-    if (isWorktree) {
-      const parts = gitDirAbs.replace(/\\/g, "/").split("/").filter((p) => p.length > 0);
-      name = parts.length > 0 ? parts[parts.length - 1] : null;
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
+    if (m) {
+      isWorktree = true;
+      name = m[1] ?? null;
     }
   }
   return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };

@@ -1,15 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
-
-/** realpath if it resolves (collapses macOS /var→/private/var, Win 8.3/casing); else the input. */
-function realpathOrSelf(p: string): string {
-  try {
-    return realpathSync(p)
-  } catch {
-    return p
-  }
-}
 
 export interface GitState {
   available: boolean
@@ -91,10 +81,10 @@ export interface WorktreeInfo {
   in_git_repo: boolean
   /**
    * True when running inside a LINKED git worktree (not the main worktree).
-   * T3/FV2: decided by `git-dir !== git-common-dir` — the canonical signal.
-   * Empirically the main worktree reports both as `.git`, while a linked
-   * worktree reports an absolute `…/.git/worktrees/<name>` git-dir vs a
-   * `…/.git` common-dir.
+   * T3/FV2: a linked worktree's `git rev-parse --git-dir` ends in
+   * `…/.git/worktrees/<name>`; the main worktree — and any subdir of it —
+   * never does. We detect that tail (OS-path-form-robust) rather than
+   * string-comparing `--git-dir` against `--git-common-dir`.
    */
   is_worktree: boolean
   /** `git rev-parse --show-toplevel` (forward-slash normalized) or null. */
@@ -118,28 +108,25 @@ export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
   const norm = (s: string | null): string | null =>
     s === null ? null : s.replace(/\\/g, '/')
   const gitDirRaw = safeGit(projectRoot, ['rev-parse', '--git-dir'])
-  const commonDirRaw = safeGit(projectRoot, ['rev-parse', '--git-common-dir'])
   const toplevel = norm(safeGit(projectRoot, ['rev-parse', '--show-toplevel']))
 
-  // git reports --git-dir / --git-common-dir relative to the cwd (projectRoot)
-  // OR absolute, and MIXES the two forms: a subdirectory of the MAIN worktree
-  // yields an ABSOLUTE --git-dir but a RELATIVE --git-common-dir (e.g.
-  // 'C:/repo/.git' vs '../../.git'). A raw string compare would treat the same
-  // .git as different → falsely report the main worktree as a linked one.
-  // Resolve BOTH against projectRoot first so identical .git dirs compare equal.
-  // Then realpath BOTH: git emits its absolute paths symlink-resolved while
-  // `resolve()` does not, so on macOS (`tmpdir()` = /var→/private/var) / Windows
-  // (8.3 short-names, drive casing) the abs --git-dir and the resolved relative
-  // --git-common-dir would differ for the SAME .git → false linked-worktree.
+  // A LINKED worktree's git-dir lives at `<common>/.git/worktrees/<name>`; the
+  // MAIN worktree — and any SUBDIR of it — never does (its git-dir is `.git` /
+  // `<root>/.git`). Detect the `/worktrees/<name>` tail directly. This is robust
+  // across OS path forms where comparing the absolute `--git-dir` against the
+  // relative `--git-common-dir` as strings is NOT: from a subdir git mixes an
+  // ABSOLUTE git-dir with a RELATIVE common-dir, and the absolute one is
+  // symlink/short-name-resolved (Windows 8.3 + drive casing; macOS /var→
+  // /private/var) while `resolve()` is not — so a same-`.git` pair compared as
+  // strings false-positived the main worktree's subdir as a linked worktree.
   let isWorktree = false
   let name: string | null = null
-  if (gitDirRaw !== null && commonDirRaw !== null) {
-    const gitDirAbs = resolve(projectRoot, gitDirRaw)
-    const commonDirAbs = resolve(projectRoot, commonDirRaw)
-    isWorktree = realpathOrSelf(gitDirAbs) !== realpathOrSelf(commonDirAbs)
-    if (isWorktree) {
-      const parts = gitDirAbs.replace(/\\/g, '/').split('/').filter((p) => p.length > 0)
-      name = parts.length > 0 ? parts[parts.length - 1]! : null
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, '/')
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/)
+    if (m) {
+      isWorktree = true
+      name = m[1] ?? null
     }
   }
   return { in_git_repo: true, is_worktree: isWorktree, toplevel, name }
