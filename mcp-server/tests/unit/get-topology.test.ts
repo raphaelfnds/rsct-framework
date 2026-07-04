@@ -201,4 +201,184 @@ describe('rsct_get_topology', () => {
     const out = await getTopologyHandler({ project_root: proj })
     expect(out.hints.join(' ')).toMatch(/not active yet/)
   })
+
+  it('PH-2: unregistered CONSUMER surfaces a consumer hint (not a producer dup)', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app-a')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(join(uni, 'applications', 'app-a'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":["app-a"]}')
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        // producer registered; consumer 'ghost-consumer' is NOT a producer anywhere
+        contracts: [{ id: 'x', producer: 'app-a', surface: ['api/**'], consumers: ['ghost-consumer'] }],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'app-a', org: 'acme' },
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    const joined = out.hints.join(' ')
+    expect(joined).toMatch(/Contract consumer 'ghost-consumer' matches no registered app/)
+    expect(joined).not.toMatch(/Contract producer/) // proves it's a consumer-only hint, no producer dup
+  })
+
+  it('PH-2: consumer case-only typo → consumer case_mismatch hint + suggestion', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app-a')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(join(uni, 'applications', 'app-a'), { recursive: true })
+    mkdirSync(join(uni, 'applications', 'web'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":["app-a","web"]}')
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        contracts: [{ id: 'x', producer: 'app-a', surface: ['api/**'], consumers: ['Web'] }],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'app-a', org: 'acme' },
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    expect(out.hints.join(' ')).toMatch(/Contract consumer 'Web' looks like the registered app 'web'/)
+  })
+
+  it('PH-2: app.name case-drift → app.name hint (gate never fires for own commits)', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app-a')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(join(uni, 'applications', 'app-a'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":["app-a"]}')
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        contracts: [{ id: 'x', producer: 'app-a', surface: ['api/**'], consumers: ['app-a'] }],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'App-A', org: 'acme' }, // folder-cased app.name vs registered 'app-a'
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    const joined = out.hints.join(' ')
+    expect(joined).toMatch(/Your app\.name 'App-A' is registered in the universe as 'app-a'/)
+    expect(joined).toMatch(/never fire for THIS repo's own commits/)
+  })
+
+  it('PH-2: app.name merely unregistered (not case-drift) → NO app.name hint', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app-x')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(join(uni, 'applications', 'app-a'), { recursive: true })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":["app-a"]}')
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        contracts: [{ id: 'x', producer: 'app-a', surface: ['api/**'], consumers: ['app-a'] }],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'totally-different', org: 'acme' }, // not registered, not a case variant
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    expect(out.hints.join(' ')).not.toMatch(/Your app\.name/)
+  })
+
+  it('PH-2: a producer registered ONLY via .universe.json (no dir) → no hint (pins dirs∪json union)', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app-a')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(join(uni, 'applications', 'app-a'), { recursive: true })
+    // 'idx-only' is in registered_apps[] but has NO applications/ dir — union must accept it.
+    writeFileSync(
+      join(uni, '.universe.json'),
+      '{"name":"acme-universe","registered_apps":["app-a","idx-only"]}',
+    )
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        contracts: [{ id: 'x', producer: 'idx-only', surface: ['api/**'], consumers: ['app-a'] }],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'app-a', org: 'acme' },
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    // json-registered producer accepted via the union → no producer hint
+    expect(out.hints.join(' ')).not.toMatch(/Contract producer 'idx-only'/)
+  })
+
+  it('PH-2: empty registry + contracts → ONE summary hint, not a per-name wall', async () => {
+    const parent = tmp()
+    const proj = join(parent, 'app')
+    mkdirSync(proj)
+    const uni = join(parent, 'acme-universe')
+    mkdirSync(uni, { recursive: true })
+    // .universe.json present (isUniverseDir) but ZERO registered apps + no applications/
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":[]}')
+    writeFileSync(
+      join(uni, 'contracts.json'),
+      JSON.stringify({
+        contract_version: '1.0.0',
+        contracts: [
+          { id: 'x', producer: 'p1', surface: ['a/**'], consumers: ['c1', 'c2'] },
+          { id: 'y', producer: 'p2', surface: ['b/**'], consumers: ['c3'] },
+        ],
+      }),
+    )
+    writeFileSync(
+      join(proj, '.rsct.json'),
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'app', org: 'acme' },
+        topology: { mode: 'multi-repo' },
+        universe: { local: uni },
+      }),
+    )
+    const out = await getTopologyHandler({ project_root: proj })
+    const joined = out.hints.join(' ')
+    expect(joined).toMatch(/no registered apps/)
+    expect(joined).not.toMatch(/Contract producer/) // wall suppressed
+    expect(joined).not.toMatch(/Contract consumer/)
+  })
 })

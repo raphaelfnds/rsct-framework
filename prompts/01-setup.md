@@ -2733,6 +2733,11 @@ the questions but **NEVER invents** the relationships (the contract content is t
 4. **consumers** — present the OTHER registered apps (EXCLUDE the chosen producer — an app can't consume
    its own surface); the dev picks which depend on the surface.
 5. **description** — optional one-liner.
+**Registered-name check (PH-2):** if the chosen producer or any consumer is NOT one of the universe's
+registered apps (the `applications/<dir>/` names ∪ `.universe.json` `registered_apps[]`), **WARN** the dev —
+the gate matches names **exactly** (case-sensitive), so an unregistered / mis-cased name silently never gates
+(this is what `rsct_get_topology` flags later). The dev may still proceed (contract content is theirs), but it
+is usually a typo or a not-yet-registered app; prefer the canonical `app.name`, never the folder name.
 PREVIEW the assembled entry as JSON and require an **explicit approval** before writing.
 
 **Safe value handoff (BINDING — injection safety).** The answers are dev free text. To keep them out of

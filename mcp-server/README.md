@@ -374,12 +374,18 @@ touches a produced surface (listing the affected consumers) unless
 sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
 hint (never an error).
 
-**Producer-mismatch warning.** Whenever the contract graph and the universe are both
-readable, `rsct_get_topology` adds a hint for each contract `producer` that matches **no
-registered app** — the gate compares names exactly and case-sensitively (`===`), so an
-unregistered or mis-cased producer silently never gates. A case-only difference is flagged as
-a likely typo with the correctly-cased name to use. Lists the offending producer name(s), not
-just a count.
+**Name-mismatch warnings.** Whenever the contract graph and the universe are both
+readable, `rsct_get_topology` validates every contract `producer`, every contract `consumer`,
+and this repo's own `app.name` against the **registered apps** (the union of the
+`applications/` directories and `.universe.json` `registered_apps[]`). The gate compares names
+exactly and case-sensitively (`===`), so an unregistered or mis-cased name silently never
+gates/matches — a case-only difference is flagged as a likely typo with the correctly-cased
+name to use. The **`app.name` check is load-bearing**: because the gate's own left operand is
+`config.app.name`, a folder-cased `app.name` (e.g. `Api-AdminBluelt` vs the registered
+`api-adminbluelt`) makes the gate silently never fire for **this** repo's own commits — that
+case-drift is surfaced explicitly (an outright-unregistered `app.name` is just "not registered
+yet" and is not flagged here). When the universe has **zero** registered apps, a single summary
+hint replaces the per-name wall. Lists the offending name(s), not just a count.
 
 ### `rsct_detect_onboarding`
 

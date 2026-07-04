@@ -25135,7 +25135,7 @@ function contractsConsumedBy(graph, app) {
 function affectedConsumers(contracts) {
   return [...new Set(contracts.flatMap((c) => c.consumers))].sort((a, b) => a.localeCompare(b));
 }
-function unregisteredProducers(producers, registered) {
+function unregisteredNames(names, registered) {
   const exact = new Set(registered);
   const byLower = /* @__PURE__ */ new Map();
   for (const r of registered) {
@@ -25144,13 +25144,13 @@ function unregisteredProducers(producers, registered) {
   }
   const issues = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const p of producers) {
+  for (const p of names) {
     if (seen.has(p)) continue;
     seen.add(p);
     if (exact.has(p)) continue;
     const suggestion = byLower.get(p.toLowerCase());
-    if (suggestion !== void 0) issues.push({ producer: p, kind: "case_mismatch", suggestion });
-    else issues.push({ producer: p, kind: "unregistered" });
+    if (suggestion !== void 0) issues.push({ name: p, kind: "case_mismatch", suggestion });
+    else issues.push({ name: p, kind: "unregistered" });
   }
   return issues;
 }
@@ -25213,16 +25213,47 @@ async function getTopologyHandler(rawInput) {
     const universe = readUniverse(universe_root);
     if (universe) {
       const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson];
-      const producers = contracts.contracts.map((c) => c.producer);
-      for (const issue2 of unregisteredProducers(producers, registered)) {
-        if (issue2.kind === "case_mismatch") {
-          hints.push(
-            `Contract producer '${issue2.producer}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue2.suggestion}'.`
-          );
-        } else {
-          hints.push(
-            `Contract producer '${issue2.producer}' matches no registered app in the universe \u2014 that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`
-          );
+      if (registered.length === 0) {
+        hints.push(
+          `The universe has no registered apps (empty applications/ + registered_apps[]), so no contract producer/consumer can be validated \u2014 register the apps by running /rsct-setup in each.`
+        );
+      } else {
+        for (const issue2 of unregisteredNames(
+          contracts.contracts.map((c) => c.producer),
+          registered
+        )) {
+          if (issue2.kind === "case_mismatch") {
+            hints.push(
+              `Contract producer '${issue2.name}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue2.suggestion}'.`
+            );
+          } else {
+            hints.push(
+              `Contract producer '${issue2.name}' matches no registered app in the universe \u2014 that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`
+            );
+          }
+        }
+        for (const issue2 of unregisteredNames(
+          contracts.contracts.flatMap((c) => c.consumers),
+          registered
+        )) {
+          if (issue2.kind === "case_mismatch") {
+            hints.push(
+              `Contract consumer '${issue2.name}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 names are matched exactly, so this consumer relationship won't be recognized. Fix the case in contracts.json to '${issue2.suggestion}'.`
+            );
+          } else {
+            hints.push(
+              `Contract consumer '${issue2.name}' matches no registered app in the universe \u2014 that consumer relationship won't be recognized. Register the app (run /rsct-setup in it) or fix the consumer name in contracts.json.`
+            );
+          }
+        }
+        if (appName) {
+          for (const issue2 of unregisteredNames([appName], registered)) {
+            if (issue2.kind === "case_mismatch") {
+              hints.push(
+                `Your app.name '${issue2.name}' is registered in the universe as '${issue2.suggestion}' (the case differs). The contract gate matches names exactly (case-sensitive), so it will never fire for THIS repo's own commits. Fix app.name in .rsct.json to '${issue2.suggestion}' (or re-register the app).`
+              );
+            }
+          }
         }
       }
     }

@@ -7,7 +7,7 @@ import {
   contractsProducedBy,
   contractsConsumedBy,
   affectedConsumers,
-  unregisteredProducers,
+  unregisteredNames,
   type Contract,
   type ContractGraph,
 } from '../lib/contracts.js'
@@ -111,28 +111,67 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
       `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface — the producer — not the consumer, so it never blocks commits here. That's expected; nothing to configure.`,
     )
   }
-  // Producer-name-mismatch warning (DX-5) — fire whenever computable (any topology
-  // mode): a contract whose `producer` matches no registered app, the way the gate
-  // compares (`===`, case-SENSITIVE), can never gate. A case-only typo is the worst
-  // case — it looks right but the gate silently treats it as unregistered. Re-read
-  // the universe here: the registered NAME arrays don't escape universe.ts —
-  // getUniverse/TopologyBlock expose only the count (§9.A). readUniverse may still
-  // return null on a degraded-but-resolvable universe → that null is the real guard.
+  // Name-mismatch warnings (DX-5 + PH-2) — fire whenever computable (any topology
+  // mode): a producer / consumer / app.name that matches no registered app the way
+  // the gate compares (`===`, case-SENSITIVE) can never gate/match. A case-only typo
+  // is the worst case — it looks right but the gate silently treats it as
+  // unregistered. Re-read the universe here: the registered NAME arrays don't escape
+  // universe.ts — getUniverse/TopologyBlock expose only the count (§9.A). readUniverse
+  // may still return null on a degraded-but-resolvable universe → that null is the guard.
   if (contracts.available && universe_root) {
     const universe = readUniverse(universe_root)
     if (universe) {
       // Union dirs∪json mirrors `this_app_registered = inDirs || inJson` (universe.ts).
       const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson]
-      const producers = contracts.contracts.map((c) => c.producer)
-      for (const issue of unregisteredProducers(producers, registered)) {
-        if (issue.kind === 'case_mismatch') {
-          hints.push(
-            `Contract producer '${issue.producer}' looks like the registered app '${issue.suggestion}' but the case differs — the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue.suggestion}'.`,
-          )
-        } else {
-          hints.push(
-            `Contract producer '${issue.producer}' matches no registered app in the universe — that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`,
-          )
+      if (registered.length === 0) {
+        // Empty registry → EVERY name is trivially unregistered; emit ONE summary
+        // instead of a wall of per-name hints (V-P2-G — amplified now by consumers).
+        hints.push(
+          `The universe has no registered apps (empty applications/ + registered_apps[]), so no contract producer/consumer can be validated — register the apps by running /rsct-setup in each.`,
+        )
+      } else {
+        // (1) producers
+        for (const issue of unregisteredNames(
+          contracts.contracts.map((c) => c.producer),
+          registered,
+        )) {
+          if (issue.kind === 'case_mismatch') {
+            hints.push(
+              `Contract producer '${issue.name}' looks like the registered app '${issue.suggestion}' but the case differs — the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue.suggestion}'.`,
+            )
+          } else {
+            hints.push(
+              `Contract producer '${issue.name}' matches no registered app in the universe — that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`,
+            )
+          }
+        }
+        // (2) consumers (PH-2 net-new) — flat across all contracts, deduped by the classifier.
+        for (const issue of unregisteredNames(
+          contracts.contracts.flatMap((c) => c.consumers),
+          registered,
+        )) {
+          if (issue.kind === 'case_mismatch') {
+            hints.push(
+              `Contract consumer '${issue.name}' looks like the registered app '${issue.suggestion}' but the case differs — names are matched exactly, so this consumer relationship won't be recognized. Fix the case in contracts.json to '${issue.suggestion}'.`,
+            )
+          } else {
+            hints.push(
+              `Contract consumer '${issue.name}' matches no registered app in the universe — that consumer relationship won't be recognized. Register the app (run /rsct-setup in it) or fix the consumer name in contracts.json.`,
+            )
+          }
+        }
+        // (3) app.name (PH-2 — the load-bearing one): the gate's LEFT operand is raw
+        // config.app.name. If it's registered under a DIFFERENT case, the gate silently
+        // never fires for THIS repo's own commits. Only case_mismatch is a bug here — an
+        // outright-unregistered app.name is just "not registered yet" (surfaced elsewhere).
+        if (appName) {
+          for (const issue of unregisteredNames([appName], registered)) {
+            if (issue.kind === 'case_mismatch') {
+              hints.push(
+                `Your app.name '${issue.name}' is registered in the universe as '${issue.suggestion}' (the case differs). The contract gate matches names exactly (case-sensitive), so it will never fire for THIS repo's own commits. Fix app.name in .rsct.json to '${issue.suggestion}' (or re-register the app).`,
+              )
+            }
+          }
         }
       }
     }
