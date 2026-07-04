@@ -370,11 +370,60 @@ export interface ScopeMatch {
   matched_glob?: string
 }
 
-export function matchesAnyGlob(path: string, globs: readonly string[]): ScopeMatch {
-  const normalized = path.replace(/\\/g, '/')
+/** Backslashes → forward slashes. Single source shared with reverse-dep-walk. */
+export function toPosix(p: string): string {
+  return p.split('\\').join('/')
+}
+
+/**
+ * Normalize a path for prefix comparison: `\`→`/`, drop a single trailing
+ * slash (keep a bare "/"), and case-fold a leading Windows drive letter
+ * (`C:` ≡ `c:`) so a drive-case mismatch never causes a spurious miss.
+ */
+function normForMatch(p: string): string {
+  let s = toPosix(p)
+  if (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1)
+  if (/^[A-Za-z]:/.test(s)) s = s[0]!.toLowerCase() + s.slice(1)
+  return s
+}
+
+export function matchesAnyGlob(
+  path: string,
+  globs: readonly string[],
+  projectRoot?: string,
+): ScopeMatch {
+  // Candidate forms the globs are tested against. [0] is the absolute/raw
+  // form (backward-compatible with every existing caller + glob authored
+  // absolute or with a leading `**/`).
+  const candidates: string[] = [toPosix(path)]
+
+  // Cross-OS relativization by PREFIX-STRIP on the normalized forms — NOT
+  // node:path.relative, which is platform-bound and silently no-ops on
+  // mixed path styles (e.g. a win32 server resolving a posix file_path).
+  // When `path` sits under `projectRoot`, also try the project-relative
+  // form so a scope glob authored relative (`pom.xml`, `src/**`) matches an
+  // absolute file_path. Genuinely cross-namespace inputs (win32 root vs
+  // posix file) don't share a prefix → fall through to the absolute form.
+  // Limits (advisory tool — a wrong verdict only mis-hints): matching is
+  // case-SENSITIVE except a leading drive letter (a glob `pom.xml` won't
+  // match `Pom.xml`); and `path` is NOT symlink-resolved, so an unresolved
+  // file_path under a realpath'd root (macOS /var vs /private/var) can
+  // under-match. Pass an already-resolved file_path when that matters.
+  if (projectRoot !== undefined && projectRoot.length > 0) {
+    const nf = normForMatch(path)
+    const nr = normForMatch(projectRoot)
+    if (nf === nr) {
+      candidates.push('') // file === root (degenerate; lets a `*` glob match)
+    } else if (nf.startsWith(`${nr}/`)) {
+      candidates.push(nf.slice(nr.length + 1))
+    }
+  }
+
   for (const glob of globs) {
     const re = globToRegex(glob.replace(/\\/g, '/'))
-    if (re.test(normalized)) return { matched: true, matched_glob: glob }
+    for (const candidate of candidates) {
+      if (re.test(candidate)) return { matched: true, matched_glob: glob }
+    }
   }
   return { matched: false }
 }

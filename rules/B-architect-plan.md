@@ -42,8 +42,11 @@ NEVER edit code without first presenting the user a plan containing:
      silently. `CONVENTIONS.md` is the standing *how*; `decisions.md` is the
      *why/when*.
 6. **Plan tracking files (after developer approval):**
-   Immediately after the dev approves the plan, write two files at the
-   project root:
+   **Immediately** after the dev approves the plan — *before writing any
+   code* — write two files at the project root. Do not defer this: the MCP
+   gate `rsct_phase_code_start` mechanically **rejects** the Code phase for
+   `standard`/`complex` tasks when `plan_<slug>.md` + `progress_<slug>.md`
+   are absent (pass `plan_slug`; override only with `override_plan_tracking`).
    - `plan_<slug>.md` — the approved plan, using the framework template
      `doc-templates/plan_slug.md.template`.
    - `progress_<slug>.md` — execution log, using the framework template
@@ -52,12 +55,22 @@ NEVER edit code without first presenting the user a plan containing:
    Slug derives from the current branch name (e.g.,
    `feat/aprovacao-requisicao-compra` → `aprovacao-requisicao-compra`).
 
-   **Accepted alias**: `spec_<slug>.md` is a synonym for `plan_<slug>.md`
-   when the dev prefers the "spec" wording (consistent with the M3
-   phase machine's `rsct_phase_spec_start`). Same gitignore rule, same
-   NEVER-on-protected guarantee, same template
-   (`doc-templates/plan_slug.md.template`). The canonical name remains
-   `plan_<slug>.md`; prefer it unless the dev explicitly asks for `spec_`.
+   **Multi-phase plans (one spec per phase):** when the plan has more than
+   one phase, write **one `spec_<phase-slug>.md` per phase**, created before
+   that phase's Code — each phase carries its own detailed spec while the
+   master `plan_<slug>.md` holds the overall arc. A **single-phase** plan
+   needs NO spec file: detail the spec in memory/chat at that moment and
+   proceed. When starting Code, pass `plan_slug` (and `spec_slug` when
+   multi-phase) to `rsct_phase_code_start`: the gate requires
+   `plan_/progress_` for the plan, plus `spec_<spec_slug>.md` whenever
+   `spec_slug` differs from `plan_slug` (its multi-phase signal).
+
+   **Accepted alias (single-phase only):** `spec_<slug>.md` may stand in for
+   `plan_<slug>.md` when the dev prefers the "spec" wording — same gitignore
+   rule, same NEVER-on-protected guarantee, same template
+   (`doc-templates/plan_slug.md.template`). For multi-phase plans keep the
+   master doc named `plan_<slug>.md` so the per-phase `spec_` files never
+   collide with it.
 
    These files are **gitignored by default** (see `.gitignore` patterns
    `plan_*.md`, `progress_*.md`, and `spec_*.md` added by `/rsct-setup`).

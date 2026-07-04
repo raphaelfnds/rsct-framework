@@ -117,7 +117,7 @@ export async function checkEditScopeHandler(
   if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = 'unknown'
   } else {
-    const match = matchesAnyGlob(input.file_path, scope_globs)
+    const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root)
     status = match.matched ? 'in_scope' : 'out_of_scope'
     matched_glob = match.matched_glob ?? null
   }

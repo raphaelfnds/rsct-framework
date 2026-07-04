@@ -18,6 +18,7 @@ import {
   matchesAnyGlob,
   readPhaseState,
 } from '../../src/lib/phase-scope.js'
+import { resolveProjectRoot } from '../../src/lib/project-root.js'
 
 let tmpRoot: string
 
@@ -81,6 +82,60 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
     const r = matchesAnyGlob('docs/readme.md', ['src/**'])
     expect(r.matched).toBe(false)
     expect(r.matched_glob).toBeUndefined()
+  })
+
+  // PH-1: relativization via prefix-strip against projectRoot (the reported
+  // bug — an absolute file_path never matched a root-relative glob).
+  it('matches an ABSOLUTE path under root against a root-relative glob', () => {
+    const r = matchesAnyGlob('/proj/pom.xml', ['pom.xml'], '/proj')
+    expect(r.matched).toBe(true)
+    expect(r.matched_glob).toBe('pom.xml')
+  })
+
+  it('matches an absolute path against a nested relative glob', () => {
+    const r = matchesAnyGlob('/proj/mcp-server/src/foo.ts', ['mcp-server/src/**'], '/proj')
+    expect(r.matched).toBe(true)
+  })
+
+  it('does NOT match a subdir file against a root-level glob (no basename FP)', () => {
+    const r = matchesAnyGlob('/proj/sub/pom.xml', ['pom.xml'], '/proj')
+    expect(r.matched).toBe(false)
+  })
+
+  it('matches a subdir file against a **/-prefixed glob', () => {
+    const r = matchesAnyGlob('/proj/sub/pom.xml', ['**/pom.xml'], '/proj')
+    expect(r.matched).toBe(true)
+  })
+
+  it('folds Windows drive-letter case when relativizing', () => {
+    const r = matchesAnyGlob('C:\\proj\\pom.xml', ['pom.xml'], 'c:/proj')
+    expect(r.matched).toBe(true)
+  })
+
+  it('matches when file_path === projectRoot with a `*` glob (guard boundary)', () => {
+    const r = matchesAnyGlob('/proj', ['*'], '/proj')
+    expect(r.matched).toBe(true)
+  })
+
+  it('falls back to the absolute form when path is not under root (no regression)', () => {
+    // glob loose enough to match the absolute form still matches
+    const hit = matchesAnyGlob('/other/src/x.ts', ['**/src/**'], '/proj')
+    expect(hit.matched).toBe(true)
+    // a root-relative glob does NOT spuriously match an out-of-root path
+    const miss = matchesAnyGlob('/other/pom.xml', ['pom.xml'], '/proj')
+    expect(miss.matched).toBe(false)
+  })
+
+  it('preserves 2-arg behavior when projectRoot is omitted', () => {
+    expect(matchesAnyGlob('/proj/pom.xml', ['pom.xml']).matched).toBe(false)
+    expect(matchesAnyGlob('src/lib/foo.ts', ['src/**']).matched).toBe(true)
+  })
+
+  it('is case-sensitive in the glob body (only the drive letter folds)', () => {
+    // documented limit — a lowercase glob does not match a differently-cased body
+    expect(matchesAnyGlob('/proj/Pom.xml', ['pom.xml'], '/proj').matched).toBe(
+      false,
+    )
   })
 })
 
@@ -216,6 +271,20 @@ describe('rsct_check_edit_scope — handler', () => {
         bogus: 'x',
       }),
     ).rejects.toThrow()
+  })
+
+  it('matches an ABSOLUTE file_path against a root-relative glob (PH-1, end-to-end)', async () => {
+    // Build the abs path from the SAME root the handler resolves, so this is
+    // robust to any symlink/realpath normalization (macOS /var→/private/var).
+    const root = resolveProjectRoot(tmpRoot).root
+    const abs = join(root, 'pom.xml')
+    const out = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: abs,
+      phase_state_override: { scope_globs: ['pom.xml'] },
+    })) as CheckEditScopeOutput
+    expect(out.status).toBe('in_scope')
+    expect(out.matched_glob).toBe('pom.xml')
   })
 })
 

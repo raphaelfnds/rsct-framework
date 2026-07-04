@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 
-import { matchesAnyGlob } from './phase-scope.js'
+import { matchesAnyGlob, toPosix } from './phase-scope.js'
 
 /**
  * Reverse-dependency walk for the V phase "possible breakages" check.
@@ -88,10 +88,6 @@ export interface ReverseDepResult {
   discovered: DiscoveredImporter[]
   stats: ReverseDepStats
   hints: string[]
-}
-
-function toPosix(p: string): string {
-  return p.split('\\').join('/')
 }
 
 function relPosix(projectRoot: string, abs: string): string {
