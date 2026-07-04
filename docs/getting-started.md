@@ -25,7 +25,7 @@ cd ~/dev/rsct-framework
 bash scripts/install.sh
 ```
 
-The installer copies the runtime to `~/.rsct/`, registers the four `rsct-*`
+The installer copies the runtime to `~/.rsct/`, registers the five `rsct-*`
 slash commands, and asks where to register the `rsct-mcp` companion (User scope
 is the simplest for a solo dev). For unattended/CI installs and the registration
 scopes, see the [root README](../README.md#installation).

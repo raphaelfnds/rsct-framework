@@ -276,6 +276,14 @@ description: Bootstrap a new universe repository for an organization (skeleton)
 @$RSCT_HOME_FOR_CLAUDE/prompts/04-init-universe.md
 EOF
 
+cat > "$CLAUDE_COMMANDS_DIR/rsct-clean-code.md" <<EOF
+---
+description: Sweep for duplication, scalability and dependency-update opportunities, then route fixes through the RSCT cycle
+---
+
+@$RSCT_HOME_FOR_CLAUDE/prompts/05-clean-code.md
+EOF
+
 # --- Done with framework ---
 echo ""
 echo "════════════════════════════════════════════════════════"
@@ -287,6 +295,7 @@ echo "  /rsct-setup              — setup or update a project"
 echo "  /rsct-init-universe      — bootstrap a new universe repository"
 echo "  /rsct-canonical-source   — add universe canonical source section"
 echo "  /rsct-uninstall          — reverse setup in a project"
+echo "  /rsct-clean-code         — sweep for duplication/scalability/dep updates"
 echo ""
 
 # --- Optional: install rsct-mcp companion ---
@@ -296,7 +305,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp (Model Context Protocol server)"
   echo "────────────────────────────────────────────────────────"
-  echo "Adds 13 tools + 5 resources to Claude Code — §C-gated"
+  echo "Adds 37 tools + 5 resources to Claude Code — §C-gated"
   echo "commit/push/merge, SessionStart sanitizer hook, audit log,"
   echo "and structured project recall. Strongly recommended."
   echo ""

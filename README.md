@@ -51,7 +51,7 @@ The end-user guides live in [`docs/`](docs/):
 - **[Getting started](docs/getting-started.md)** — prerequisites, install,
   restart, `/rsct-setup`, and a 5-minute first-project walkthrough (the
   single-repo happy path).
-- **[Command reference](docs/commands.md)** — a per-command manual for all four
+- **[Command reference](docs/commands.md)** — a per-command manual for all five
   slash commands.
 - **[Multi-repo & contracts](docs/multi-repo.md)** — the T2 layer: topology
   modes, the org universe, contracts & surfaces, producer-vs-consumer, and a
@@ -92,7 +92,7 @@ bash scripts/install.sh
 > `/rsct-setup` and see *"No matching commands"*, that's the symptom —
 > restart fixes it.
 
-After install (and restart), four slash commands are available in **any**
+After install (and restart), five slash commands are available in **any**
 project on this machine — no path needed.
 
 ### Unattended / non-interactive install (CI, provisioning)
@@ -407,7 +407,8 @@ rsct-framework/                    # dev/source — version controlled in git
 │   ├── 01-setup.md                # main: setup or update project
 │   ├── 02-canonical-source.md     # universe canonical source section
 │   ├── 03-uninstall.md            # reverse setup in a project (full or selective)
-│   └── 04-init-universe.md        # bootstrap a new universe repository
+│   ├── 04-init-universe.md        # bootstrap a new universe repository
+│   └── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
 ├── rules/                         # individual rule files (inserted into CLAUDE.md)
 │   ├── A-bug-mode.md
 │   ├── B-architect-plan.md
@@ -461,7 +462,8 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ├── rsct-setup.md                  # @~/.rsct/prompts/01-setup.md
 ├── rsct-init-universe.md          # @~/.rsct/prompts/04-init-universe.md
 ├── rsct-canonical-source.md       # @~/.rsct/prompts/02-canonical-source.md
-└── rsct-uninstall.md              # @~/.rsct/prompts/03-uninstall.md
+├── rsct-uninstall.md              # @~/.rsct/prompts/03-uninstall.md
+└── rsct-clean-code.md             # @~/.rsct/prompts/05-clean-code.md
 ```
 
 The source and the installed copy are decoupled — you edit the source, run

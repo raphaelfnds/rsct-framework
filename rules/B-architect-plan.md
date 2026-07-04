@@ -19,7 +19,19 @@ NEVER edit code without first presenting the user a plan containing:
    must always be visible.
 2. Reuse analysis: existing functions, classes, services, components or
    algorithms in the project that fully or partially cover the need —
-   list which and where they are.
+   list which and where they are. **Cleanliness lens:** while researching
+   reuse, also flag **duplication / centralization** opportunities
+   (duplication is the inverse of reuse — several implementations of the
+   same thing that could collapse into one) and any evident **scalability**
+   risk in the code the plan touches. These are *inputs to the plan*, not
+   automatic refactors — nothing mutates without an option + OK.
+
+   > **Dependency hygiene (separate axis, not reuse):** when the plan
+   > touches dependency manifests, note pinned-version drift or loose
+   > ranges relevant to the scope. Report only what is verifiable offline —
+   > never assert a "latest" target version. For a full, on-demand sweep of
+   > duplication / scalability / dependency hygiene across a module or the
+   > whole repo, use the dedicated **`/rsct-clean-code`** command.
 3. Explicit no-reuse option when a reuse alternative exists, so the user
    can compare reuse vs. greenfield.
 4. Merging possibility: the user can choose one of the options, request

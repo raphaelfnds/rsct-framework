@@ -18,7 +18,7 @@ const INSTALL = resolve(ROOT, 'scripts', 'install.sh')
 const UNINSTALL = resolve(ROOT, 'scripts', 'uninstall-framework.sh')
 
 const RUNTIME_DIRS = ['prompts', 'rules', 'doc-templates', 'memory-templates', 'universe-templates']
-const COMMANDS = ['rsct-setup', 'rsct-canonical-source', 'rsct-uninstall', 'rsct-init-universe']
+const COMMANDS = ['rsct-setup', 'rsct-canonical-source', 'rsct-uninstall', 'rsct-init-universe', 'rsct-clean-code']
 
 const sandboxes: string[] = []
 function newSandbox(): string {
