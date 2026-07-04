@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "smoke": "node dist/index.js < /dev/null"
+    "smoke": "node dist/index.js < /dev/null",
+    "sync-version": "node ../scripts/sync-version.mjs"
   },
   "keywords": [
     "mcp",

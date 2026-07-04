@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, chmodSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, delimiter } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
@@ -63,6 +63,12 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
     }
     expect(existsSync(join(rsctHome(home), 'VERSION'))).toBe(true)
     expect(existsSync(join(rsctHome(home), 'VERSION-CODE'))).toBe(true)
+    // PH-6 (issue #7): install reads the single-source /VERSION and stamps it into
+    // ~/.rsct/VERSION. Trim both sides — install.sh writes via `echo` (adds \n) and
+    // the source file's trailing newline is unpinned (V-P1).
+    const installedVersion = readFileSync(join(rsctHome(home), 'VERSION'), 'utf8').replace(/\r/g, '').trim()
+    const sourceVersion = readFileSync(join(ROOT, 'VERSION'), 'utf8').replace(/\r/g, '').trim()
+    expect(installedVersion, 'installed ~/.rsct/VERSION should equal source /VERSION').toBe(sourceVersion)
     expect(existsSync(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
     for (const c of COMMANDS) {
       expect(existsSync(join(commandsDir(home), `${c}.md`)), `missing command ${c}.md`).toBe(true)

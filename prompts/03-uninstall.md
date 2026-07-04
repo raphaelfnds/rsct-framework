@@ -1,5 +1,4 @@
 # RSCT Uninstall — 03-uninstall.md
-# Version: 2.0.0
 
 You are operating inside a software project repository that was previously
 configured by `/rsct-setup` (and optionally `/rsct-canonical-source`).

@@ -1,17 +1,16 @@
 /**
- * Single source of truth for the rsct-mcp server version.
+ * The rsct-mcp server version (CODE axis) — the bundled `RSCT_MCP_VERSION` literal
+ * imported by `src/index.ts` (boot log), `src/tools/status.ts`, `src/tools/load-context.ts`,
+ * and `src/tools/update-check.ts`. Adding a new consumer? Import from here — do NOT
+ * duplicate the literal.
  *
- * Bumped per release; imported by `src/index.ts` (boot log), `src/tools/status.ts`
- * (status output), and `src/tools/load-context.ts` (load-context output). Adding
- * a new consumer? Import from here — do NOT duplicate the literal, or the next
- * bump will desync (the post-v0.3.0 bump caught load-context.ts out of sync;
- * post-v0.4.0 caught status.ts).
- *
- * MUST stay in lockstep with `mcp-server/package.json` `"version"`. CAP-15
- * (v0.7.0) caught these drifted: this file was at 0.6.7 while package.json
- * was still at 0.2.1, so `npm install -g rsct-mcp` reported "up to date"
- * against the stale package version even after the binary changed. Bump
- * BOTH on every release, or `npm install -g` will silently skip the new
- * binary.
+ * NOT the single edit point (issue #7 / PH-6): the ONE hand-edited product version
+ * lives in `/VERSION` at the repo root. This literal is a DERIVED mirror written by
+ * `scripts/sync-version.mjs` (run `npm run sync-version` after editing `/VERSION`).
+ * Do NOT hand-edit this value — it will drift from `/VERSION` (the CI parity test
+ * `version-source.test.ts` and install.sh's two-axis report both catch that). MUST
+ * stay in lockstep with `mcp-server/package.json` `"version"`, which sync-version
+ * also updates via `npm version`. CAP-15 (v0.7.0) caught these drifted (0.6.7 vs
+ * 0.2.1) → `npm install -g` reported "up to date" against a stale package.
  */
 export const RSCT_MCP_VERSION = '2.0.0'

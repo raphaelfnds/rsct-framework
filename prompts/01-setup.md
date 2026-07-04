@@ -1,5 +1,4 @@
 # RSCT Setup — 01-setup.md
-# Version: 2.0.0
 
 You are operating inside a software project repository.
 Your task: apply or update the RSCT governance protocol.
@@ -1349,7 +1348,7 @@ via straightforward placeholder substitution (`[APP_NAME]`, `[ORG_SLUG]`,
 
 The framework carries TWO version axes. The **display / release version** (this
 step) is what the user sees — it should reflect the release the project was last
-set up with (e.g. `2.0.0`), NOT the template's literal `1.0.0`. The **marker schema
+set up with (e.g. the current release), NOT the template's literal `1.0.0`. The **marker schema
 id** (`v=1.0.0` on every `RSCT-…-BEGIN` / `RSCT-GENERATED` / gitignore marker, plus
 `RSCT_TEMPLATE_VERSION`) is a STABLE idempotency key and is **never touched here**.
 

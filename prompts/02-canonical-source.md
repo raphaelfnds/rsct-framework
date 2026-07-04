@@ -1,5 +1,4 @@
 # RSCT Canonical Source — 02-canonical-source.md
-# Version: 2.0.0
 
 You are operating inside a software project repository belonging to an organization
 that maintains a central **universe repository** with canonical architectural artifacts.
