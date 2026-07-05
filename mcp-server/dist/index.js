@@ -23198,7 +23198,7 @@ function stampReviewDecision(projectRoot, patch) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.1.0";
+var RSCT_MCP_VERSION = "2.1.1";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23601,6 +23601,18 @@ function getUpdateNotice(opts = {}) {
   }
 }
 
+// src/lib/version-drift.ts
+init_esm_shims();
+function getInstallDriftNotice(projectVersion, mcpVersion) {
+  if (!projectVersion) return { hint: null };
+  if (!isNewer(mcpVersion, projectVersion)) return { hint: null };
+  const p = projectVersion.replace(/^v/, "");
+  const m = mcpVersion.replace(/^v/, "");
+  return {
+    hint: `This project was set up with RSCT v${p}; the installed rsct-mcp is v${m}. Re-run /rsct-setup to apply the current version's rules/prompts to this project. (suggestion only)`
+  };
+}
+
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
@@ -23640,6 +23652,10 @@ async function statusHandler(rawInput) {
   if (topology.hint) hints.push(topology.hint);
   const update = getUpdateNotice();
   if (update.hint) hints.push(update.hint);
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION);
+    if (drift.hint) hints.push(drift.hint);
+  }
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION },
     rsct_installed: resolution.rsct_installed,
@@ -24013,6 +24029,10 @@ async function loadContextHandler(rawInput) {
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION2);
+    if (drift.hint) next_action_hints.push(drift.hint);
+  }
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION2 },
     rsct_installed: resolution.rsct_installed,

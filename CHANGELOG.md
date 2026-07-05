@@ -10,6 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.1.1] - 2026-07-05
+
+Patch: surface a version drift that was previously silent.
+
+### Added
+- **Install-drift hint.** `rsct_status` and `rsct_load_context` now emit a
+  suggest-only hint when a project's stamped `.rsct.json` `rsct_version` is older
+  than the running `rsct-mcp` (`RSCT_MCP_VERSION`) — e.g. a project set up under
+  v2.0.0 while the installed framework has moved to v2.1.x — pointing you to
+  re-run `/rsct-setup` to apply the current version's rules/prompts. It is a
+  **local, always-on comparison** (no network, no consent) and is distinct from
+  and complementary to the opt-in remote update check (binary vs the latest
+  GitHub release), whose opt-in/network logic is untouched. Fail-safe and
+  suggestion-only: a missing/unparseable version, an equal version, or a project
+  newer than the binary all stay silent. New helper `lib/version-drift.ts`
+  (`getInstallDriftNotice`, reusing `isNewer`). 37 tools unchanged.
+
 ## [2.1.0] - 2026-07-05
 
 Flow-hardening release (the `flow-lock` track): promotes several prose-only

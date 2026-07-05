@@ -7,6 +7,7 @@ import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import { readPhaseState, stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
+import { getInstallDriftNotice } from '../lib/version-drift.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 import { detectTopology, type TopologyBlock } from '../lib/topology.js'
 
@@ -147,6 +148,12 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge })
   if (universe.hint) next_action_hints.push(universe.hint)
   if (topology.hint) next_action_hints.push(topology.hint)
+  // Install-drift: local compare of this project's stamped rsct_version vs the
+  // running binary (parity with rsct_status — same helper/text). Handler level.
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION)
+    if (drift.hint) next_action_hints.push(drift.hint)
+  }
 
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },

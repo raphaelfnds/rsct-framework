@@ -7,6 +7,7 @@ import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 import { detectTopology, type TopologyBlock } from '../lib/topology.js'
 import { getUpdateNotice } from '../lib/update-check.js'
+import { getInstallDriftNotice } from '../lib/version-drift.js'
 
 export const statusInputSchema = z
   .object({
@@ -100,6 +101,14 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
   // non-blocking background refresh. No-op unless consent was granted at /rsct-setup.
   const update = getUpdateNotice()
   if (update.hint) hints.push(update.hint)
+
+  // Install-drift: local compare of this project's stamped rsct_version vs the
+  // running binary (no network / no consent). Distinct axis from the T4 update
+  // check above. Only meaningful when a project config exists.
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION)
+    if (drift.hint) hints.push(drift.hint)
+  }
 
   return {
     mcp_server: { name: 'rsct-mcp', version: MCP_VERSION },

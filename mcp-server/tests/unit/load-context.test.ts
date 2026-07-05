@@ -13,6 +13,7 @@ import {
   loadContextHandler,
   type LoadContextOutput,
 } from '../../src/tools/load-context.js'
+import { statusHandler, type StatusOutput } from '../../src/tools/status.js'
 
 const SAMPLE_RSCT = resolve(__dirname, '..', 'fixtures', 'sample-rsct')
 const NO_RSCT = resolve(__dirname, '..', 'fixtures', 'no-rsct')
@@ -54,6 +55,28 @@ describe('rsct_load_context', () => {
     expect(out.active_plan).toBeNull()
     expect(out.decisions.file_exists).toBe(false)
     expect(out.next_action_hints.some((h) => h.includes('/rsct-setup'))).toBe(true)
+  })
+
+  it('surfaces the install-drift hint in next_action_hints (parity with rsct_status)', async () => {
+    // SAMPLE_RSCT is stamped rsct_version "1.0.0" < the running RSCT_MCP_VERSION.
+    const out = (await loadContextHandler({ project_root: SAMPLE_RSCT })) as LoadContextOutput
+    expect(out.next_action_hints.some((h) => /was set up with RSCT v/.test(h))).toBe(true)
+  })
+
+  it('does NOT surface the install-drift hint when not an rsct project', async () => {
+    const out = (await loadContextHandler({ project_root: NO_RSCT })) as LoadContextOutput
+    expect(out.next_action_hints.some((h) => /was set up with RSCT v/.test(h))).toBe(false)
+  })
+
+  it('emits the SAME drift hint text as rsct_status (byte-for-byte parity)', async () => {
+    const DRIFT = /was set up with RSCT v/
+    const lc = (await loadContextHandler({ project_root: SAMPLE_RSCT })) as LoadContextOutput
+    const st = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+    const lcHint = lc.next_action_hints.find((h) => DRIFT.test(h))
+    const stHint = st.hints.find((h) => DRIFT.test(h))
+    expect(lcHint).toBeDefined()
+    expect(stHint).toBeDefined()
+    expect(lcHint).toBe(stHint)
   })
 
   it('honors decisions_excerpt_count', async () => {

@@ -78,4 +78,48 @@ describe('rsct_status', () => {
     expect(out.worktree.is_worktree).toBe(false)
     expect(out.hints.some((h) => h.includes('linked git worktree'))).toBe(false)
   })
+
+  // Install-drift: local compare of project rsct_version vs the running binary.
+  const DRIFT = /was set up with RSCT v/
+
+  it('surfaces an install-drift hint when the project version is behind the binary', async () => {
+    // SAMPLE_RSCT is stamped rsct_version "1.0.0" < the running RSCT_MCP_VERSION.
+    const out = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
+    expect(out.hints.some((h) => DRIFT.test(h))).toBe(true)
+  })
+
+  it('does NOT surface an install-drift hint when not an rsct project', async () => {
+    const out = (await statusHandler({ project_root: NO_RSCT })) as StatusOutput
+    expect(out.hints.some((h) => DRIFT.test(h))).toBe(false)
+  })
+
+  it('does NOT surface an install-drift hint when the project version equals the binary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-drift-eq-'))
+    try {
+      writeFileSync(
+        join(dir, '.rsct.json'),
+        JSON.stringify({ rsct_version: RSCT_MCP_VERSION, app: { name: 'a', org: 'o' } }),
+      )
+      const out = (await statusHandler({ project_root: dir })) as StatusOutput
+      expect(out.rsct_installed).toBe(true) // guard: the negative isn't masked by a rejected config
+      expect(out.hints.some((h) => DRIFT.test(h))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does NOT surface an install-drift hint when the project version is newer than the binary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-drift-new-'))
+    try {
+      writeFileSync(
+        join(dir, '.rsct.json'),
+        JSON.stringify({ rsct_version: '999.0.0', app: { name: 'a', org: 'o' } }),
+      )
+      const out = (await statusHandler({ project_root: dir })) as StatusOutput
+      expect(out.rsct_installed).toBe(true) // guard: the negative isn't masked by a rejected config
+      expect(out.hints.some((h) => DRIFT.test(h))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
