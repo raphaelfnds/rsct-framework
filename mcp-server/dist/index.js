@@ -23198,7 +23198,7 @@ function stampReviewDecision(projectRoot, patch) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.0.0";
+var RSCT_MCP_VERSION = "2.1.0";
 
 // src/lib/universe.ts
 init_esm_shims();

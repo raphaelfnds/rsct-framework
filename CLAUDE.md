@@ -136,7 +136,8 @@ um OK específico.
 
 Para detalhes operacionais completos do framework — instalação,
 comandos slash (`/rsct-setup`, `/rsct-init-universe`,
-`/rsct-canonical-source`, `/rsct-uninstall`), estrutura do repositório,
+`/rsct-canonical-source`, `/rsct-uninstall`, `/rsct-clean-code`),
+estrutura do repositório,
 catálogo das ferramentas do `rsct-mcp`, fluxo de uso e estado de
 versão — consulte o **[README.md](README.md)** na raiz do projeto.
 
