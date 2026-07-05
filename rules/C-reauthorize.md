@@ -112,6 +112,17 @@ Even under a batch token, **every commit is still individually recorded in
 `.rsct/audit.log`**, and `rsct_phase_status` shows the live token (budget used,
 expiry). Batch mode reduces approval friction; it does not reduce traceability.
 
+**When to offer it:** proactively suggest `rsct_plan_authorize` right after you
+approve a **multi-phase** plan (§B marks it Recommended for multi-phase runs).
+"Reset per new planning" needs no extra mechanism — it is already mechanical: a
+new plan normally means a new branch (`1 plan = 1 branch`) which auto-revokes the
+token via `branch_mismatch`, and marking the prior plan complete revokes it too;
+the TTL (default 120 min) bounds any stale grant and the budget caps the commits.
+Note the token is **disk-persisted** in `.rsct/phase-state.json`, so it does **not**
+clear just because the session restarts — end it explicitly with `rsct_plan_revoke`
+(or let it expire) if you want it gone sooner. Don't offer it for a single-phase
+plan (overkill).
+
 **Parallel work via git worktrees:** to run isolated tracks in parallel, use
 separate git worktrees (`git worktree add ../<app>-<feat> <feat>`). Because the
 RSCT runtime state (`.rsct/phase-state.json` — including any batch token — and
