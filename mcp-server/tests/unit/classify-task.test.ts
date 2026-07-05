@@ -64,6 +64,42 @@ describe('rsct_classify_task — heuristic per tier', () => {
     expect(r.hints.some((h) => h.toLowerCase().includes('complex'))).toBe(true)
   })
 
+  it('PH-3: complex tier emits BOTH the verification guidance AND the worktree nudge', async () => {
+    const r = (await classifyTaskHandler({
+      task_description: 'rewrite the authentication subsystem end-to-end',
+    })) as ClassifyTaskOutput
+    expect(r.tier).toBe('complex')
+    // additive, not a replacement — the verification guidance must survive
+    expect(r.hints.some((h) => h.includes('rsct_phase_code_start'))).toBe(true)
+    // and the worktree nudge is present
+    expect(r.hints.some((h) => h.includes('git worktree'))).toBe(true)
+    expect(r.hints.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('PH-3: the worktree nudge does NOT leak into standard tier', async () => {
+    const r = (await classifyTaskHandler({
+      task_description: 'rename OrderService across the codebase and update all callers',
+    })) as ClassifyTaskOutput
+    expect(r.tier).toBe('standard')
+    expect(r.hints.some((h) => h.includes('git worktree'))).toBe(false)
+  })
+
+  it('PH-3: the worktree nudge does NOT leak into small tier', async () => {
+    const r = (await classifyTaskHandler({
+      task_description: 'add a new field to the OrderResponse DTO',
+    })) as ClassifyTaskOutput
+    expect(r.tier).toBe('small')
+    expect(r.hints.some((h) => h.includes('git worktree'))).toBe(false)
+  })
+
+  it('PH-3: the worktree nudge does NOT leak into trivial tier', async () => {
+    const r = (await classifyTaskHandler({
+      task_description: 'fix typo in readme',
+    })) as ClassifyTaskOutput
+    expect(r.tier).toBe('trivial')
+    expect(r.hints.some((h) => h.includes('git worktree'))).toBe(false)
+  })
+
   it('rejects empty / too-short description (zod)', async () => {
     await expect(classifyTaskHandler({ task_description: 'a' })).rejects.toThrow()
   })

@@ -77,6 +77,25 @@
 2. <TODO>
 3. <TODO>
 
+## Phases & parallelization (multi-phase plans only)
+
+> Single-phase plan? Skip this — "Plan steps" above is enough.
+> Multi-phase plan (3+ phases)? List each phase and the **file group** it
+> mutates. Phases whose groups DON'T overlap can run in parallel in separate
+> `git worktree`s (RSCT phase-state + any batch token + the anti-reuse store are
+> isolated per worktree — see §C "Parallel work via git worktrees"). Phases that
+> share a file group must run **serially**. A repo whose build bundle is tracked
+> (e.g. a committed `dist/`) usually stays serial too.
+
+| Phase | Goal | File group (scope_globs) | Group | Depends on |
+|---|---|---|---|---|
+| 1 | <TODO> | <TODO> | A | — |
+| 2 | <TODO> | <TODO> | B | — |
+| 3 | <TODO> | <TODO> | A | 1 |
+
+- **Parallelization decision:** <TODO: which groups run in parallel worktrees, or
+  "serial — shared file groups / tracked bundle">
+
 ## Open questions for dev
 
 - <TODO: pending decisions>

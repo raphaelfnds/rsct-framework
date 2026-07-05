@@ -111,6 +111,20 @@ NEVER edit code without first presenting the user a plan containing:
    **push and merge ALWAYS stay per-action** (§C). For a **single-phase** plan,
    don't offer it (overkill). See §C "Plan execution modes" for the mechanics.
 
+   **Parallel orchestration — offer worktrees for 3+-phase plans (after approval):**
+   When the approved plan has **3 or more phases** whose file groups are DISJOINT,
+   ASK the dev whether to run the non-overlapping groups in parallel via separate
+   `git worktree`s — fill the "Phases & parallelization" table in the plan template
+   (`doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
+   state (phase-state, any batch token, the anti-reuse store) — see §C "Parallel
+   work via git worktrees" for the mechanics. Phases that share a file group stay
+   **serial**; a repo whose build bundle is tracked (e.g. a committed `dist/`) also
+   usually stays serial (parallel worktrees would conflict on the bundle). **Never
+   auto-create worktrees** — the dev weighs it against the written plan. For a
+   single- or two-phase plan, don't offer it (overkill). `rsct_classify_task` may
+   surface a first nudge for a `complex` tier, but the phase-count decision is made
+   here, against the written plan.
+
    **Session resume — proactive context-pressure detection:**
 
    The AI cannot reliably introspect its own context window (no direct
