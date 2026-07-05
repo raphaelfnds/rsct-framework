@@ -77,11 +77,13 @@ across OSes, so `verify:dist` is a local, same-environment guard). Sourcemaps
 - User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under
   `[Unreleased]`. Substantial changes are tracked with a **CAP-NN** number
   (see the changelog history for the convention).
-- When bumping the `rsct-mcp` version, change **all** of: `mcp-server/src/lib/version.ts`,
-  `mcp-server/package.json`, and `mcp-server/package-lock.json` (they must stay
-  in lockstep), plus the doc references. The marker **schema id** (`v=1.0.0`)
-  is a SEPARATE axis: it keys marker idempotency, stays frozen across releases,
-  and is NOT bumped with the code version.
+- When bumping the product version, the single edit point is **`/VERSION`** at
+  the repo root (issue #7). Edit `/VERSION`, then run `npm run sync-version` from
+  `mcp-server/` — it regenerates `src/lib/version.ts` and updates
+  `package.json` + `package-lock.json` in lockstep. **Do NOT hand-edit
+  `version.ts`** (it is derived — the `version-source.test.ts` parity test catches
+  drift). The marker **schema id** (`v=1.0.0`) is a SEPARATE axis: it keys marker
+  idempotency, stays frozen across releases, and is NOT bumped with the version.
 - Open a PR against `main`. Fill in the PR checklist.
 
 ## Tests

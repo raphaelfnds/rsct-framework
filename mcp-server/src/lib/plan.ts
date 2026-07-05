@@ -86,6 +86,16 @@ export function findPlanBySlug(projectRoot: string, slug: string): ActivePlan | 
 }
 
 /**
+ * PH-1 plan-tracking gate: does a per-phase spec file `spec_<slug>.md` exist
+ * at the project root? Distinct from {@link findPlanBySlug} (which also accepts
+ * the `plan_` alias) — this checks the `spec_` form SPECIFICALLY, used to
+ * require one spec per phase in a multi-phase plan.
+ */
+export function phaseSpecExists(projectRoot: string, slug: string): boolean {
+  return safeMtime(join(projectRoot, `spec_${slug}.md`)) !== null
+}
+
+/**
  * Heuristic: does a plan-tracking `Status` field denote a finished task?
  * Used by the §C push/merge tools (CAP-53) to SUGGEST — never auto-perform —
  * cleanup of the branch-local `plan_`/`progress_`/`spec_` files before they can

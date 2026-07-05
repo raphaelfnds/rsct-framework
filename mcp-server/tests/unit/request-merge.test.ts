@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   requestMergeHandler,
+  requestMergeTool,
   type RequestMergeInternal,
   type RequestMergeOutput,
 } from '../../src/tools/request-merge.js'
@@ -32,6 +33,34 @@ function approval(overrides: Record<string, unknown> = {}) {
     action_scope: 'merge:feat/foo->feat/integration',
     reason: 'merge checkpoint for unit test coverage',
     ...overrides,
+  }
+}
+
+// PH-5: a fully-satisfied pre_merge_ack (all self-attestations true + a note, so
+// the note-when-attested rule is met). Override individual fields per test.
+function ack(overrides: Record<string, unknown> = {}) {
+  return {
+    plan_complete: true,
+    adr_confirmed: true,
+    issues_resolved: true,
+    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed (unit test)',
+    ...overrides,
+  }
+}
+
+// A promptFn seam that counts invocations — proves the OS dialog is NOT shown on
+// an ack reject (the ack-check returns before gateRequest).
+function countingPrompt(): {
+  fn: (opts: DialogOptions) => Promise<DialogResult>
+  calls: () => number
+} {
+  let n = 0
+  return {
+    fn: async () => {
+      n += 1
+      return { response: 'yes', channel: 'windows' }
+    },
+    calls: () => n,
   }
 }
 
@@ -94,6 +123,7 @@ describe('rsct_request_merge — happy path', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       internal,
     )) as RequestMergeOutput
@@ -121,6 +151,7 @@ describe('rsct_request_merge — happy path', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       internal,
     )) as RequestMergeOutput
@@ -152,6 +183,7 @@ describe('rsct_request_merge — happy path', () => {
         source_branch: 'feat/foo',
         no_ff: false,
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('feat/integration'),
@@ -177,6 +209,7 @@ describe('rsct_request_merge — branch protection on the TARGET', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('main'),
@@ -199,6 +232,7 @@ describe('rsct_request_merge — branch protection on the TARGET', () => {
         dev_approval: approval({
           override_protected_branch: { reason: 'shipping the 2.0 release branch into main' },
         }),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('main'),
@@ -224,6 +258,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('feat/foo'),
@@ -243,6 +278,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState(null),
@@ -263,6 +299,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         source_branch: 'feat/foo',
         allow_unrelated_histories: true,
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('feat/integration'),
@@ -286,6 +323,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         dev_approval: approval({
           override_protected_branch: { reason: 'monorepo merge of imported history' },
         }),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('feat/integration'),
@@ -310,6 +348,7 @@ describe('rsct_request_merge — failure surfaces', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('feat/integration'),
@@ -344,6 +383,7 @@ describe('rsct_request_merge — failure surfaces', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       internal,
     )) as RequestMergeOutput
@@ -356,6 +396,7 @@ describe('rsct_request_merge — failure surfaces', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       { ...internal, gitExecutor: gitExec({}, MERGE_OK) },
     )) as RequestMergeOutput
@@ -369,6 +410,7 @@ describe('rsct_request_merge — schema', () => {
       requestMergeHandler({
         project_root: tmpRoot,
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       }),
     ).rejects.toThrow()
   })
@@ -379,9 +421,26 @@ describe('rsct_request_merge — schema', () => {
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
         bogus: true,
       }),
     ).rejects.toThrow()
+  })
+
+  it('exposes pre_merge_ack in inputSchema, all-optional (parity with the Zod schema)', () => {
+    const schema = requestMergeTool.inputSchema as {
+      properties: Record<string, { additionalProperties?: boolean; properties?: Record<string, unknown>; required?: unknown }>
+      required?: string[]
+    }
+    const ackProp = schema.properties.pre_merge_ack
+    expect(ackProp).toBeDefined()
+    expect(ackProp.additionalProperties).toBe(false)
+    for (const k of ['plan_complete', 'adr_confirmed', 'issues_resolved', 'note']) {
+      expect(ackProp.properties?.[k]).toBeDefined()
+    }
+    // parity: neither the outer key nor any inner key is required
+    expect(schema.required ?? []).not.toContain('pre_merge_ack')
+    expect(ackProp.required).toBeUndefined()
   })
 })
 
@@ -404,6 +463,7 @@ describe('rsct_request_merge — post-mutation write failures (HIGH-2 / HIGH-3)'
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       internal,
     )) as RequestMergeOutput
@@ -435,6 +495,7 @@ describe('rsct_request_merge — post-mutation write failures (HIGH-2 / HIGH-3)'
         project_root: tmpRoot,
         source_branch: 'feat/foo',
         dev_approval: approval(),
+        pre_merge_ack: ack(),
       },
       internal,
     )) as RequestMergeOutput
@@ -471,7 +532,7 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
       '# Plan\n\n| Field | Value |\n|---|---|\n| Status | completed |\n',
     )
     const out = (await requestMergeHandler(
-      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
       mergeInternal(),
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
@@ -486,10 +547,175 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
       '# Plan\n\n| Field | Value |\n|---|---|\n| Status | in progress |\n',
     )
     const out = (await requestMergeHandler(
-      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
       mergeInternal(),
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
     expect(out.hints.some((h) => h.includes('working branch'))).toBe(false)
+  })
+})
+
+describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
+  const okInternal = (branch = 'feat/integration'): RequestMergeInternal => ({
+    gitStateOverride: gitState(branch),
+    gitExecutor: gitExec({}, MERGE_OK),
+    promptFn: alwaysYes(),
+    now: FIXED_NOW,
+  })
+
+  it('rejects pre_merge_ack_missing when the ack is absent — and NO OS dialog is shown', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const prompt = countingPrompt()
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      { gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_missing')
+    expect(prompt.calls()).toBe(0)
+    expect(out.channel).toBeNull()
+  })
+
+  it('rejects pre_merge_ack_incomplete when plan_complete is false', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ plan_complete: false }) },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('plan_complete')
+  })
+
+  it('rejects pre_merge_ack_incomplete when adr_confirmed is false', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ adr_confirmed: false }) },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('adr_confirmed')
+  })
+
+  it('rejects pre_merge_ack_incomplete when issues_resolved is false (the third lock)', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ issues_resolved: false }) },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('issues_resolved')
+  })
+
+  it('lists all three items in failing when every attestation is false', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      {
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        dev_approval: approval(),
+        pre_merge_ack: ack({ plan_complete: false, adr_confirmed: false, issues_resolved: false }),
+      },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    for (const item of ['plan_complete', 'adr_confirmed', 'issues_resolved']) {
+      expect(out.reason).toContain(item)
+    }
+  })
+
+  it('requires a non-empty note when adr_confirmed or issues_resolved is true', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ note: '   ' }) },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('note')
+  })
+
+  it('merges when the ack is fully satisfied (all true + note)', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out.status).toBe('merged')
+  })
+
+  it('rejects an unknown key inside pre_merge_ack (nested .strict())', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    await expect(
+      requestMergeHandler({
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        dev_approval: approval(),
+        pre_merge_ack: { ...ack(), bogus: true },
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('the ack-check precedes the structural rejects: detached HEAD without ack ⇒ pre_merge_ack_missing', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      { gitStateOverride: gitState(null), gitExecutor: gitExec({}, MERGE_OK), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_missing')
+  })
+
+  it('audits the ack reject with the self-attested label', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      okInternal(),
+    )
+    const audit = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+    expect(audit).toContain('pre_merge_ack_missing')
+    expect(audit).toContain('pre_merge_ack_self_attested')
+  })
+
+  it('audits the incomplete reject with the failing items', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ plan_complete: false }) },
+      okInternal(),
+    )
+    const audit = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+    expect(audit).toContain('pre_merge_ack_incomplete')
+    expect(audit).toContain('plan_complete')
+  })
+
+  it('an ack reject does NOT consume the dev_approval — the same approval works on retry', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const appr = approval()
+    const out1 = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: appr },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out1.status).toBe('rejected')
+    expect(out1.reject_kind).toBe('pre_merge_ack_missing')
+    // retry with the SAME approval + a valid ack — must NOT be 'reused'
+    const out2 = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: appr, pre_merge_ack: ack() },
+      okInternal(),
+    )) as RequestMergeOutput
+    expect(out2.status).toBe('merged')
+  })
+
+  it('shows the OS dialog exactly once on a satisfied ack (pairs the 0-call reject test)', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const prompt = countingPrompt()
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      { gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('merged')
+    expect(prompt.calls()).toBe(1)
   })
 })

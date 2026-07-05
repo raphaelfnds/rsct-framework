@@ -142,9 +142,9 @@ export function affectedConsumers(contracts: readonly Contract[]): string[] {
   return [...new Set(contracts.flatMap((c) => c.consumers))].sort((a, b) => a.localeCompare(b))
 }
 
-/** A contract producer that won't actually gate because it isn't a registered app. */
-export interface ProducerRegistrationIssue {
-  producer: string
+/** A name (contract producer, consumer, or the app's own name) that won't match a registered app. */
+export interface NameRegistrationIssue {
+  name: string
   /** `unregistered` = no app matches (any case); `case_mismatch` = only the case differs. */
   kind: 'unregistered' | 'case_mismatch'
   /** `case_mismatch` only: the correctly-cased registered app name to fix it to. */
@@ -152,29 +152,29 @@ export interface ProducerRegistrationIssue {
 }
 
 /**
- * Contract producers that match NO registered app the way the gate compares them.
- * The gate is `c.producer === app` — exact, case-SENSITIVE, no trim (see
- * {@link contractsTouchingPaths}). A producer that isn't registered under that
- * exact comparison can never gate, so this surfaces it as a latent-bug diagnostic:
+ * Names (a contract producer, a contract consumer, or the app's own `app.name`)
+ * that match NO registered app the way the gate compares them. The gate is
+ * `c.producer === app` — exact, case-SENSITIVE, no trim (see
+ * {@link contractsTouchingPaths}). A name that isn't registered under that exact
+ * comparison can never gate/match, so this surfaces it as a latent-bug diagnostic:
  * - `unregistered` — no registered app matches, even case-insensitively.
  * - `case_mismatch` — a registered app matches case-insensitively but NOT exactly
  *   (e.g. `Web-Frontend` vs `web-frontend`); the gate silently treats it as
- *   unregistered, so the contract never fires though it looks correct. The
- *   `suggestion` is the correctly-cased name to fix it to.
+ *   unregistered, so it never fires though it looks correct. The `suggestion` is
+ *   the correctly-cased name to fix it to.
  *
  * Pure string-set logic — the caller supplies the registered set (no universe
- * import here). §9.C: the producer is NOT trimmed (the gate doesn't trim, so a
- * stray-whitespace producer is genuinely unregistered + SHOULD warn). §9.D: an
- * empty `registered` set → every producer is `unregistered`, which is intentional
- * (a contracts.json with producers but zero registered apps is genuinely broken).
- * §9.B: on a case-insensitive collision (a degenerate universe with both `App` and
- * `APP`), the FIRST registered name in input order wins. Output is input-order,
- * deduped. Empty/blank producers can't occur (`isValidContract` requires non-empty).
+ * import here) and the role wording for the hint. §9.C: the name is NOT trimmed
+ * (the gate doesn't trim, so a stray-whitespace name is genuinely unregistered +
+ * SHOULD warn). §9.D: an empty `registered` set → every name is `unregistered`
+ * (callers cap that wall — see get-topology). §9.B: on a case-insensitive
+ * collision (a degenerate universe with both `App` and `APP`), the FIRST
+ * registered name in input order wins. Output is input-order, deduped.
  */
-export function unregisteredProducers(
-  producers: readonly string[],
+export function unregisteredNames(
+  names: readonly string[],
   registered: readonly string[],
-): ProducerRegistrationIssue[] {
+): NameRegistrationIssue[] {
   const exact = new Set(registered)
   // §9.B first-wins: iterate registered in order, never overwrite a lowercase key.
   const byLower = new Map<string, string>()
@@ -182,15 +182,15 @@ export function unregisteredProducers(
     const k = r.toLowerCase()
     if (!byLower.has(k)) byLower.set(k, r)
   }
-  const issues: ProducerRegistrationIssue[] = []
+  const issues: NameRegistrationIssue[] = []
   const seen = new Set<string>()
-  for (const p of producers) {
+  for (const p of names) {
     if (seen.has(p)) continue // dedupe, preserving input order
     seen.add(p)
     if (exact.has(p)) continue // registered exactly — the gate honors it (§9.C: no trim)
     const suggestion = byLower.get(p.toLowerCase())
-    if (suggestion !== undefined) issues.push({ producer: p, kind: 'case_mismatch', suggestion })
-    else issues.push({ producer: p, kind: 'unregistered' })
+    if (suggestion !== undefined) issues.push({ name: p, kind: 'case_mismatch', suggestion })
+    else issues.push({ name: p, kind: 'unregistered' })
   }
   return issues
 }

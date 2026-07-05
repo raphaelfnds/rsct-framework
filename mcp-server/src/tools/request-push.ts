@@ -32,6 +32,13 @@ import {
   evaluateBootstrapMarker,
   type BootstrapMarker,
 } from '../lib/phase-scope.js'
+import {
+  evaluatePreMergeAck,
+  preMergeAckHint,
+  preMergeAckSchema,
+  preMergeAckJsonSchema,
+  PRE_MERGE_ACK_ITEMS,
+} from '../lib/pre-merge-ack.js'
 
 export const requestPushInputSchema = z
   .object({
@@ -52,6 +59,14 @@ export const requestPushInputSchema = z
       .describe(
         'The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication).',
       ),
+    pre_merge_ack: preMergeAckSchema
+      .optional()
+      .describe(
+        'PH-5 pre-integration hygiene checklist (self-attested). Required when pushing to a PROTECTED branch: ' +
+          'absence ⇒ rejected in chat (no OS dialog). Feature/WIP pushes to a non-protected branch do not require ' +
+          'it. Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev; when ' +
+          'adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").',
+      ),
   })
   .strict()
 
@@ -59,7 +74,11 @@ export type RequestPushInput = z.infer<typeof requestPushInputSchema>
 
 export type RequestPushStatus = 'pushed' | 'rejected' | 'mutation_failed'
 
-export type RequestPushRejectKind = GateRejectKind | 'protected_branch'
+export type RequestPushRejectKind =
+  | GateRejectKind
+  | 'protected_branch'
+  | 'pre_merge_ack_missing'
+  | 'pre_merge_ack_incomplete'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -113,6 +132,7 @@ export const requestPushTool: Tool = {
         type: 'object',
         description: 'dev_approval payload.',
       },
+      pre_merge_ack: preMergeAckJsonSchema,
     },
     required: ['dev_approval'],
     additionalProperties: false,
@@ -136,6 +156,50 @@ export async function requestPushHandler(
   const branchLabel = branch ?? '<no-branch>'
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
+
+  const { list: protectedList } = effectiveProtectedList(config)
+  const branchProtected = isProtectedBranch(branch, protectedList)
+
+  // PH-5: pre-integration hygiene gate. Scoped to PROTECTED-branch pushes only
+  // (MCP-P1-D) — a feature/WIP push to a non-protected branch (e.g. to trigger CI
+  // on an open PR) is legitimate and must not force a dishonest attestation.
+  // Checked BEFORE gateRequest so a missing ack rejects in chat WITHOUT popping
+  // the §C OS dialog (V-P1·PH-5); the dev_approval is never validated/consumed here.
+  if (branchProtected) {
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack)
+    if (!ackDecision.ok) {
+      const hint = preMergeAckHint(ackDecision)
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_push.rejected',
+          tool: 'rsct_request_push',
+          reject_kind: ackDecision.kind,
+          reason: hint,
+          branch,
+          remote,
+          pre_merge_ack: input.pre_merge_ack ?? null,
+          pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+          ...(ackDecision.kind === 'pre_merge_ack_incomplete' && { failing: ackDecision.failing }),
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch,
+        remote,
+        channel: null,
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [hint],
+      }
+    }
+  }
 
   const gate = await gateRequest({
     toolName: 'rsct_request_push',
@@ -182,9 +246,6 @@ export async function requestPushHandler(
 
   const approval = gate.approval
   const overrideBranch = approval.override_protected_branch
-
-  const { list: protectedList } = effectiveProtectedList(config)
-  const branchProtected = isProtectedBranch(branch, protectedList)
 
   if (branchProtected && !overrideBranch) {
     const reason = `branch '${branchLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to push`

@@ -1,16 +1,17 @@
 # Command reference
 
-RSCT installs four slash commands. Each is documented below with the same
+RSCT installs five slash commands. Each is documented below with the same
 structure: **purpose · when to use · preconditions · what it does · outputs ·
 consent gates · re-run behavior · recovery.**
 
-All four become available in *any* project on the machine after install +
+All five become available in *any* project on the machine after install +
 an IDE restart. None of them push or commit to git on your behalf.
 
 - [`/rsct-setup`](#rsct-setup) — set up or update project governance (the front door)
 - [`/rsct-init-universe`](#rsct-init-universe) — bootstrap an org-level universe skeleton
 - [`/rsct-canonical-source`](#rsct-canonical-source) — link a project to its universe
 - [`/rsct-uninstall`](#rsct-uninstall) — reverse RSCT in a project
+- [`/rsct-clean-code`](#rsct-clean-code) — sweep for duplication/scalability/dependency hygiene
 
 ---
 
@@ -162,6 +163,56 @@ no separate backup files are created.
 
 **Recovery.** Restore from git (the pre-setup SHA, or your branch history). This
 command never pushes.
+
+---
+
+## `/rsct-clean-code`
+
+**Purpose.** Run a **clean-code sweep** over existing code: surface **duplication
+/ centralization**, **scalability** risks, and **dependency hygiene**, then route
+any change you accept through the normal RSCT cycle. It is the on-demand
+counterpart to the cleanliness lens that §B already applies inline during
+planning. It writes nothing and edits nothing on its own.
+
+**How it differs from the other review surfaces.** `/rsct-clean-code` is a
+*pre-Research* sweep of **existing** code that feeds a **new** cycle. The **REVIEW
+phase** is a *post-Code* audit of a **diff inside** an open cycle.
+`rsct_persona_review` is a *stateless* consultative lens (focus areas + questions
++ anti-patterns). Three distinct tools; this one is the "should we open a cycle to
+clean this up?" entry point.
+
+**When to use it.** In any repo, when you want a structured pass for duplication,
+scalability, or stale/loose dependencies — before committing to a refactor. Works
+whether or not RSCT is installed in the target repo (it falls back to the
+prose-only §B discipline when the `rsct_*` tools are absent).
+
+**Preconditions.** None hard. If the MCP companion is installed, accepted findings
+are routed through the phase tools + the §C gate; if not, they are routed through
+the prose §B plan (options + explicit OK).
+
+**What it does.** (1) Agrees the scope with you (whole repo if small; otherwise
+which modules). (2) Sweeps read-only across three lenses, each finding carrying
+`file:line` evidence. (3) Presents findings and **debates** each — code may be the
+way it is for a real business rule — so you decide **keep / refactor / defer**.
+(4) For accepted items, hands off to `rsct_classify_task` + the phase tools (or
+the prose §B plan) so the change goes through a real cycle. Dependency findings
+report only what is verifiable offline (inventory, internal version drift, loose
+ranges) and **never assert a "latest" target version**.
+
+**Outputs.** Findings **in chat only** — there is no report file. The concrete
+output is the set of accepted items, each routed into its own §B cycle (which then
+creates the usual `plan_/progress_/spec_` — this command does not).
+
+**Consent gates.** It **never mutates** anything: no edit, no dependency update, no
+commit. Every accepted change is applied only later, through §B + your explicit OK
+(and the §C dialog when the companion is installed).
+
+**Re-run behavior.** Stateless — each run is a fresh sweep. Items you marked
+**defer** will resurface next time; that is intentional, not a duplicate.
+
+**Recovery.** N/A — nothing is written, so there is nothing to undo. Any change you
+*routed* through the cycle is recovered like any other edit (git, or
+[`/rsct-uninstall`](#rsct-uninstall) for RSCT-added artifacts).
 
 ---
 

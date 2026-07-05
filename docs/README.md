@@ -6,7 +6,7 @@ reach for the others as you need them.
 | Doc | What it covers | Read it when |
 |---|---|---|
 | [Getting started](getting-started.md) | Prerequisites, install, restart, `/rsct-setup`, what gets written, the **R→S→V→C→REVIEW→T** task cycle, and a 5-minute first-project walkthrough. The **single-repo (mono) happy path** — near-zero config. | You are setting RSCT up for the first time. |
-| [Command reference](commands.md) | A per-command manual for the four slash commands (`/rsct-setup`, `/rsct-init-universe`, `/rsct-canonical-source`, `/rsct-uninstall`): purpose, preconditions, what each does, outputs, consent gates, recovery. | You want the full detail on one command. |
+| [Command reference](commands.md) | A per-command manual for the five slash commands (`/rsct-setup`, `/rsct-init-universe`, `/rsct-canonical-source`, `/rsct-uninstall`, `/rsct-clean-code`): purpose, preconditions, what each does, outputs, consent gates, recovery. | You want the full detail on one command. |
 | [Multi-repo & contracts](multi-repo.md) | The T2 layer: the app ↔ org-universe model, topology modes, the universe repo, contracts & surfaces, **producer-vs-consumer** (the gate is producer-side), and a step-by-step multi-repo walkthrough. | Your organization has more than one repo and you want cross-repo contract governance. |
 | [Troubleshooting](troubleshooting.md) | Common failures and their fixes — command not found, the MCP server not connecting, the contract gate firing (or not) when you expected. | Something didn't behave as the docs describe. |
 

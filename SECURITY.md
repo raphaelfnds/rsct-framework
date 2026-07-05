@@ -17,8 +17,8 @@ fix and disclosure timeline. Responsible disclosure is appreciated.
 
 | Version | Supported |
 |---|---|
-| `2.0.x` | ✅ |
-| `< 2.0` | ❌ (superseded — upgrade to 2.0.x) |
+| `2.1.x` | ✅ |
+| `< 2.1` | ❌ (superseded — upgrade to 2.1.x) |
 
 ## Scope notes
 

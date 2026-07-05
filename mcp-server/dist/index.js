@@ -23075,11 +23075,31 @@ function globToRegex(glob) {
   out += "$";
   return new RegExp(out);
 }
-function matchesAnyGlob(path2, globs) {
-  const normalized = path2.replace(/\\/g, "/");
+function toPosix(p) {
+  return p.split("\\").join("/");
+}
+function normForMatch(p) {
+  let s = toPosix(p);
+  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  if (/^[A-Za-z]:/.test(s)) s = s[0].toLowerCase() + s.slice(1);
+  return s;
+}
+function matchesAnyGlob(path2, globs, projectRoot) {
+  const candidates = [toPosix(path2)];
+  if (projectRoot !== void 0 && projectRoot.length > 0) {
+    const nf = normForMatch(path2);
+    const nr = normForMatch(projectRoot);
+    if (nf === nr) {
+      candidates.push("");
+    } else if (nf.startsWith(`${nr}/`)) {
+      candidates.push(nf.slice(nr.length + 1));
+    }
+  }
   for (const glob of globs) {
     const re = globToRegex(glob.replace(/\\/g, "/"));
-    if (re.test(normalized)) return { matched: true, matched_glob: glob };
+    for (const candidate of candidates) {
+      if (re.test(candidate)) return { matched: true, matched_glob: glob };
+    }
   }
   return { matched: false };
 }
@@ -23178,7 +23198,7 @@ function stampReviewDecision(projectRoot, patch) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.0.0";
+var RSCT_MCP_VERSION = "2.1.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23716,6 +23736,9 @@ function findPlanBySlug(projectRoot, slug) {
     branch: metadata.branch,
     created: metadata.created
   };
+}
+function phaseSpecExists(projectRoot, slug) {
+  return safeMtime(join(projectRoot, `spec_${slug}.md`)) !== null;
 }
 function isPlanComplete(status) {
   if (!status) return false;
@@ -25112,7 +25135,7 @@ function contractsConsumedBy(graph, app) {
 function affectedConsumers(contracts) {
   return [...new Set(contracts.flatMap((c) => c.consumers))].sort((a, b) => a.localeCompare(b));
 }
-function unregisteredProducers(producers, registered) {
+function unregisteredNames(names, registered) {
   const exact = new Set(registered);
   const byLower = /* @__PURE__ */ new Map();
   for (const r of registered) {
@@ -25121,13 +25144,13 @@ function unregisteredProducers(producers, registered) {
   }
   const issues = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const p of producers) {
+  for (const p of names) {
     if (seen.has(p)) continue;
     seen.add(p);
     if (exact.has(p)) continue;
     const suggestion = byLower.get(p.toLowerCase());
-    if (suggestion !== void 0) issues.push({ producer: p, kind: "case_mismatch", suggestion });
-    else issues.push({ producer: p, kind: "unregistered" });
+    if (suggestion !== void 0) issues.push({ name: p, kind: "case_mismatch", suggestion });
+    else issues.push({ name: p, kind: "unregistered" });
   }
   return issues;
 }
@@ -25190,16 +25213,47 @@ async function getTopologyHandler(rawInput) {
     const universe = readUniverse(universe_root);
     if (universe) {
       const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson];
-      const producers = contracts.contracts.map((c) => c.producer);
-      for (const issue2 of unregisteredProducers(producers, registered)) {
-        if (issue2.kind === "case_mismatch") {
-          hints.push(
-            `Contract producer '${issue2.producer}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue2.suggestion}'.`
-          );
-        } else {
-          hints.push(
-            `Contract producer '${issue2.producer}' matches no registered app in the universe \u2014 that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`
-          );
+      if (registered.length === 0) {
+        hints.push(
+          `The universe has no registered apps (empty applications/ + registered_apps[]), so no contract producer/consumer can be validated \u2014 register the apps by running /rsct-setup in each.`
+        );
+      } else {
+        for (const issue2 of unregisteredNames(
+          contracts.contracts.map((c) => c.producer),
+          registered
+        )) {
+          if (issue2.kind === "case_mismatch") {
+            hints.push(
+              `Contract producer '${issue2.name}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 the contract gate matches names exactly (case-sensitive), so this contract will never gate. Fix the case in contracts.json to '${issue2.suggestion}'.`
+            );
+          } else {
+            hints.push(
+              `Contract producer '${issue2.name}' matches no registered app in the universe \u2014 that contract will never gate. Register the app (run /rsct-setup in it) or fix the producer name in contracts.json.`
+            );
+          }
+        }
+        for (const issue2 of unregisteredNames(
+          contracts.contracts.flatMap((c) => c.consumers),
+          registered
+        )) {
+          if (issue2.kind === "case_mismatch") {
+            hints.push(
+              `Contract consumer '${issue2.name}' looks like the registered app '${issue2.suggestion}' but the case differs \u2014 names are matched exactly, so this consumer relationship won't be recognized. Fix the case in contracts.json to '${issue2.suggestion}'.`
+            );
+          } else {
+            hints.push(
+              `Contract consumer '${issue2.name}' matches no registered app in the universe \u2014 that consumer relationship won't be recognized. Register the app (run /rsct-setup in it) or fix the consumer name in contracts.json.`
+            );
+          }
+        }
+        if (appName) {
+          for (const issue2 of unregisteredNames([appName], registered)) {
+            if (issue2.kind === "case_mismatch") {
+              hints.push(
+                `Your app.name '${issue2.name}' is registered in the universe as '${issue2.suggestion}' (the case differs). The contract gate matches names exactly (case-sensitive), so it will never fire for THIS repo's own commits. Fix app.name in .rsct.json to '${issue2.suggestion}' (or re-register the app).`
+              );
+            }
+          }
         }
       }
     }
@@ -26111,7 +26165,7 @@ async function checkEditScopeHandler(rawInput) {
   if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = "unknown";
   } else {
-    const match = matchesAnyGlob(input.file_path, scope_globs);
+    const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root);
     status = match.matched ? "in_scope" : "out_of_scope";
     matched_glob = match.matched_glob ?? null;
   }
@@ -27204,12 +27258,61 @@ function auditFields(r) {
 
 // src/tools/request-push.ts
 init_esm_shims();
+
+// src/lib/pre-merge-ack.ts
+init_esm_shims();
+var preMergeAckSchema = external_exports.object({
+  plan_complete: external_exports.boolean().optional(),
+  adr_confirmed: external_exports.boolean().optional(),
+  issues_resolved: external_exports.boolean().optional(),
+  note: external_exports.string().optional()
+}).strict();
+var preMergeAckJsonSchema = {
+  type: "object",
+  properties: {
+    plan_complete: { type: "boolean" },
+    adr_confirmed: { type: "boolean" },
+    issues_resolved: { type: "boolean" },
+    note: { type: "string" }
+  },
+  additionalProperties: false,
+  description: 'Pre-integration hygiene checklist (self-attested). Required for a merge, and for a push to a protected branch. Set plan_complete/adr_confirmed/issues_resolved true only after confirming each with the dev; when adr_confirmed or issues_resolved is true, `note` must state what (e.g. "ADR-012 recorded; issue #7 closed").'
+};
+var PRE_MERGE_ACK_ITEMS = [
+  "plan_complete",
+  "adr_confirmed",
+  "issues_resolved"
+];
+function evaluatePreMergeAck(ack) {
+  if (ack === void 0) return { ok: false, kind: "pre_merge_ack_missing" };
+  const failing = [];
+  if (ack.plan_complete !== true) failing.push("plan_complete");
+  if (ack.adr_confirmed !== true) failing.push("adr_confirmed");
+  if (ack.issues_resolved !== true) failing.push("issues_resolved");
+  const attestedPositive = ack.adr_confirmed === true || ack.issues_resolved === true;
+  const noteBlank = typeof ack.note !== "string" || ack.note.trim() === "";
+  if (attestedPositive && noteBlank) {
+    failing.push("note (required when adr_confirmed or issues_resolved is true)");
+  }
+  return failing.length > 0 ? { ok: false, kind: "pre_merge_ack_incomplete", failing } : { ok: true };
+}
+function preMergeAckHint(decision) {
+  if (decision.kind === "pre_merge_ack_missing") {
+    return 'Pre-integration hygiene checklist (pre_merge_ack) is required before this integration. Supply pre_merge_ack: { plan_complete, adr_confirmed, issues_resolved } \u2014 set each true ONLY after confirming it with the dev (they are self-attestations, not machine-checked). When adr_confirmed or issues_resolved is true, add a non-empty `note` stating WHAT (e.g. "ADR-012 recorded; issue #7 closed"). No OS dialog was shown \u2014 nothing ran.';
+  }
+  return `Pre-integration hygiene checklist (pre_merge_ack) is incomplete \u2014 you declared/omitted: ${(decision.failing ?? []).join(", ")}. Resolve each item (finish the work, record pending ADRs via \xA7H, close associated issues) and re-attest. Items you mark false mean "not ready" and are honored as a stop.`;
+}
+
+// src/tools/request-push.ts
 var requestPushInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   remote: external_exports.string().optional().describe("Remote name (default: origin)."),
   branch: external_exports.string().optional().describe("Branch name to push (default: current HEAD)."),
   dev_approval: external_exports.unknown().describe(
     "The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."
+  ),
+  pre_merge_ack: preMergeAckSchema.optional().describe(
+    'PH-5 pre-integration hygiene checklist (self-attested). Required when pushing to a PROTECTED branch: absence \u21D2 rejected in chat (no OS dialog). Feature/WIP pushes to a non-protected branch do not require it. Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev; when adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").'
   )
 }).strict();
 var requestPushTool = {
@@ -27227,7 +27330,8 @@ var requestPushTool = {
       dev_approval: {
         type: "object",
         description: "dev_approval payload."
-      }
+      },
+      pre_merge_ack: preMergeAckJsonSchema
     },
     required: ["dev_approval"],
     additionalProperties: false
@@ -27247,6 +27351,43 @@ async function requestPushHandler(rawInput, internal = {}) {
   const branchLabel = branch ?? "<no-branch>";
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const { list: protectedList } = effectiveProtectedList(config2);
+  const branchProtected = isProtectedBranch(branch, protectedList);
+  if (branchProtected) {
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+    if (!ackDecision.ok) {
+      const hint = preMergeAckHint(ackDecision);
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_push.rejected",
+          tool: "rsct_request_push",
+          reject_kind: ackDecision.kind,
+          reason: hint,
+          branch,
+          remote,
+          pre_merge_ack: input.pre_merge_ack ?? null,
+          pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+          ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch,
+        remote,
+        channel: null,
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields2(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [hint]
+      };
+    }
+  }
   const gate = await gateRequest({
     toolName: "rsct_request_push",
     approval: input.dev_approval,
@@ -27290,8 +27431,6 @@ async function requestPushHandler(rawInput, internal = {}) {
   }
   const approval = gate.approval;
   const overrideBranch = approval.override_protected_branch;
-  const { list: protectedList } = effectiveProtectedList(config2);
-  const branchProtected = isProtectedBranch(branch, protectedList);
   if (branchProtected && !overrideBranch) {
     const reason = `branch '${branchLabel}' is protected \u2014 pass dev_approval.override_protected_branch: { reason } to push`;
     const audit2 = appendAudit(
@@ -27479,6 +27618,9 @@ var requestMergeInputSchema = external_exports.object({
   ),
   dev_approval: external_exports.unknown().describe(
     "The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."
+  ),
+  pre_merge_ack: preMergeAckSchema.optional().describe(
+    'PH-5 pre-integration hygiene checklist (self-attested). REQUIRED in practice: absence \u21D2 rejected in chat (no OS dialog). Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev \u2014 honest self-attestations, not machine-verified. When adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").'
   )
 }).strict();
 var requestMergeTool = {
@@ -27506,7 +27648,8 @@ var requestMergeTool = {
       dev_approval: {
         type: "object",
         description: "dev_approval payload."
-      }
+      },
+      pre_merge_ack: preMergeAckJsonSchema
     },
     required: ["source_branch", "dev_approval"],
     additionalProperties: false
@@ -27527,6 +27670,41 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+  if (!ackDecision.ok) {
+    const hint = preMergeAckHint(ackDecision);
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_merge.rejected",
+        tool: "rsct_request_merge",
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        pre_merge_ack: input.pre_merge_ack ?? null,
+        pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      source_branch: input.source_branch,
+      target_branch: targetBranch,
+      channel: null,
+      reject_kind: ackDecision.kind,
+      reason: hint,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      ...auditFields3(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [hint]
+    };
+  }
   const gate = await gateRequest({
     toolName: "rsct_request_merge",
     approval: input.dev_approval,
@@ -28232,9 +28410,6 @@ var IMPORT_PATTERNS = [
   /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g
 ];
-function toPosix(p) {
-  return p.split("\\").join("/");
-}
 function relPosix(projectRoot, abs) {
   return toPosix(relative(projectRoot, abs));
 }
@@ -29610,6 +29785,9 @@ async function classifyTaskHandler(rawInput) {
     hints.push(
       "Complex tier \u2014 run the full cycle (research \u2192 spec \u2192 verification \u2192 code \u2192 review \u2192 test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it)."
     );
+    hints.push(
+      "Complex tier \u2014 if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated per worktree (\xA7C). Decide this against the WRITTEN plan \u2014 this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial."
+    );
   }
   if (activePlan) {
     hints.push(
@@ -30274,7 +30452,7 @@ async function phaseSpecCompleteHandler(rawInput, internal = {}) {
 // src/tools/phase-code-start.ts
 init_esm_shims();
 var TIER_VALUES2 = ["trivial", "small", "standard", "complex"];
-var TIERS_BYPASSING_V_GATE = /* @__PURE__ */ new Set(["trivial", "small"]);
+var TIERS_BYPASSING_CEREMONY = /* @__PURE__ */ new Set(["trivial", "small"]);
 var phaseCodeStartInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
@@ -30289,6 +30467,12 @@ var phaseCodeStartInputSchema = external_exports.object({
   ),
   override_classify_downgrade: external_exports.boolean().default(false).describe(
     "CAP-30: when true, allows spec_tier lower than the highest tier ever returned by rsct_classify_task (`last_classify.tier_max` in phase-state). Override is audit-logged. Use only when the dev has explicitly chosen to downgrade."
+  ),
+  plan_slug: external_exports.string().optional().describe(
+    "PH-1: the master-plan slug. Required for tier \u2208 {standard, complex} \u2014 the plan-tracking gate verifies plan_<slug>.md + progress_<slug>.md exist at the project root. When spec_slug is also present and differs from plan_slug, the plan is treated as multi-phase and spec_<spec_slug>.md is additionally required."
+  ),
+  override_plan_tracking: external_exports.boolean().default(false).describe(
+    "PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Override is audit-logged. Use only when the dev has explicitly chosen to proceed without the tracking docs."
   )
 }).strict();
 var phaseCodeStartTool = {
@@ -30318,6 +30502,15 @@ var phaseCodeStartTool = {
         type: "boolean",
         default: false,
         description: "When true, bypass the CAP-30 classify-downgrade gate (audit-logged)."
+      },
+      plan_slug: {
+        type: "string",
+        description: "PH-1: master-plan slug. Required for standard/complex \u2014 gate checks plan_<slug>.md + progress_<slug>.md exist; multi-phase (spec_slug\u2260plan_slug) also requires spec_<spec_slug>.md."
+      },
+      override_plan_tracking: {
+        type: "boolean",
+        default: false,
+        description: "PH-1: when true, bypass the plan-tracking gate (audit-logged)."
       }
     },
     additionalProperties: false
@@ -30333,7 +30526,7 @@ function auditFields9(audit) {
 }
 function evaluateVerificationGate(args) {
   const { specRef, specTier, overrideVerificationSkip } = args;
-  if (TIERS_BYPASSING_V_GATE.has(specTier)) {
+  if (TIERS_BYPASSING_CEREMONY.has(specTier)) {
     return {
       status: "bypassed_tier",
       spec_tier: specTier,
@@ -30428,9 +30621,134 @@ function evaluateClassifyGate(args) {
     hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass, OR re-classify with rsct_classify_task if the task scope genuinely changed.`
   };
 }
+var SLUG_RE = /^[A-Za-z0-9._-]+$/;
+var PLAN_TRACKING_REJECTS = /* @__PURE__ */ new Set([
+  "rejected_slug_indeterminate",
+  "rejected_invalid_slug",
+  "rejected_plan_missing",
+  "rejected_progress_missing",
+  "rejected_phase_spec_missing"
+]);
+function evaluatePlanTrackingGate(args) {
+  const { projectRoot, planSlug, specSlug, specTier, overridePlanTracking } = args;
+  const planSlugOrNull = planSlug ?? null;
+  if (TIERS_BYPASSING_CEREMONY.has(specTier)) {
+    return {
+      status: "bypassed_tier",
+      spec_tier: specTier,
+      plan_slug: planSlugOrNull,
+      is_multi_phase: false,
+      plan_present: false,
+      progress_present: false,
+      phase_spec_present: null,
+      hint: `tier=${specTier} bypasses the plan-tracking gate per canonical tier table.`
+    };
+  }
+  const specSlugGiven = specSlug !== void 0 && specSlug.length > 0 ? specSlug : null;
+  const isMultiPhase = planSlug !== void 0 && planSlug.length > 0 && specSlugGiven !== null && specSlugGiven !== planSlug;
+  const overriddenGate = (hint) => ({
+    status: "overridden",
+    spec_tier: specTier,
+    plan_slug: planSlugOrNull,
+    is_multi_phase: isMultiPhase,
+    plan_present: false,
+    progress_present: false,
+    phase_spec_present: isMultiPhase ? false : null,
+    hint
+  });
+  if (planSlug === void 0 || planSlug.length === 0) {
+    if (overridePlanTracking) {
+      return overriddenGate(
+        "override_plan_tracking=true acknowledged (no plan_slug). Override logged to audit."
+      );
+    }
+    return {
+      status: "rejected_slug_indeterminate",
+      spec_tier: specTier,
+      plan_slug: null,
+      is_multi_phase: false,
+      plan_present: false,
+      progress_present: false,
+      phase_spec_present: null,
+      hint: `tier='${specTier}' requires plan_slug so the gate can verify plan_<slug>.md + progress_<slug>.md exist. Pass plan_slug (the master-plan slug), OR override_plan_tracking=true (audit-logged).`
+    };
+  }
+  if (!SLUG_RE.test(planSlug) || specSlugGiven !== null && !SLUG_RE.test(specSlugGiven)) {
+    if (overridePlanTracking) {
+      return overriddenGate(
+        "override_plan_tracking=true acknowledged (invalid slug). Override logged to audit."
+      );
+    }
+    return {
+      status: "rejected_invalid_slug",
+      spec_tier: specTier,
+      plan_slug: planSlugOrNull,
+      is_multi_phase: isMultiPhase,
+      plan_present: false,
+      progress_present: false,
+      phase_spec_present: isMultiPhase ? false : null,
+      hint: `plan_slug/spec_slug must match ${SLUG_RE.source} (no path separators). Rejected before any filesystem read.`
+    };
+  }
+  const plan = findPlanBySlug(projectRoot, planSlug);
+  const planPresent = plan !== null;
+  const progressPresent = plan?.progress_path != null;
+  const phaseSpecPresent = isMultiPhase ? phaseSpecExists(projectRoot, specSlugGiven) : null;
+  const gateBase = {
+    spec_tier: specTier,
+    plan_slug: planSlugOrNull,
+    is_multi_phase: isMultiPhase,
+    plan_present: planPresent,
+    progress_present: progressPresent,
+    phase_spec_present: phaseSpecPresent
+  };
+  if (overridePlanTracking) {
+    return {
+      ...gateBase,
+      status: "overridden",
+      hint: "override_plan_tracking=true acknowledged. Override logged to audit."
+    };
+  }
+  if (!planPresent) {
+    return {
+      ...gateBase,
+      status: "rejected_plan_missing",
+      hint: `plan_${planSlug}.md not found at the project root. Write it immediately after the dev approves the plan (rules/B \xA76), before starting Code.`
+    };
+  }
+  if (!progressPresent) {
+    return {
+      ...gateBase,
+      status: "rejected_progress_missing",
+      hint: `progress_${planSlug}.md not found at the project root. Create the running progress log alongside the plan before starting Code.`
+    };
+  }
+  if (isMultiPhase && phaseSpecPresent === false) {
+    return {
+      ...gateBase,
+      status: "rejected_phase_spec_missing",
+      hint: `multi-phase plan: spec_${specSlugGiven}.md not found. Each phase needs its own spec file before its Code phase. (Single-phase? omit spec_slug or set it equal to plan_slug.)`
+    };
+  }
+  return {
+    ...gateBase,
+    status: "satisfied",
+    hint: isMultiPhase ? `plan_${planSlug}.md + progress + spec_${specSlugGiven}.md present. Plan-tracking gate satisfied.` : `plan_${planSlug}.md + progress present (single-phase; spec in memory/chat). Plan-tracking gate satisfied.`
+  };
+}
 async function phaseCodeStartHandler(rawInput) {
   const input = phaseCodeStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
+  const notEvaluatedPlanTracking = {
+    status: "not_evaluated",
+    spec_tier: input.spec_tier,
+    plan_slug: input.plan_slug ?? null,
+    is_multi_phase: false,
+    plan_present: false,
+    progress_present: false,
+    phase_spec_present: null,
+    hint: "plan-tracking gate not evaluated (an earlier gate rejected first)."
+  };
   const classifyGate = evaluateClassifyGate({
     projectRoot: resolution.root,
     specTier: input.spec_tier,
@@ -30466,6 +30784,7 @@ async function phaseCodeStartHandler(rawInput) {
       spec_ref: input.spec_ref,
       verification_gate: placeholderVGate,
       classify_gate: classifyGate,
+      plan_tracking_gate: notEvaluatedPlanTracking,
       phase_state_path: "",
       phase_state_written: false,
       audit_path: fields.audit_path,
@@ -30482,6 +30801,66 @@ async function phaseCodeStartHandler(rawInput) {
         spec_ref: input.spec_ref,
         spec_tier: input.spec_tier,
         tier_max_recorded: classifyGate.tier_max_recorded
+      },
+      resolution.config?.audit
+    );
+  }
+  const planTrackingGate = evaluatePlanTrackingGate({
+    projectRoot: resolution.root,
+    planSlug: input.plan_slug,
+    specSlug: input.spec_slug,
+    specTier: input.spec_tier,
+    overridePlanTracking: input.override_plan_tracking
+  });
+  if (PLAN_TRACKING_REJECTS.has(planTrackingGate.status)) {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "code.start.rejected",
+        tool: "rsct_phase_code_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: "plan_tracking",
+        plan_tracking_status: planTrackingGate.status,
+        plan_slug: planTrackingGate.plan_slug,
+        is_multi_phase: planTrackingGate.is_multi_phase
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields9(audit);
+    const placeholderVGate = {
+      status: "bypassed_tier",
+      spec_tier: input.spec_tier,
+      v_block_found: false,
+      v_spec_ref: null,
+      v_completed_at: null,
+      hint: "verification gate not evaluated (plan-tracking gate rejected first)"
+    };
+    return {
+      status: "plan_tracking_gate_rejected",
+      reject_kind: "plan_tracking",
+      reason: planTrackingGate.hint,
+      spec_ref: input.spec_ref,
+      verification_gate: placeholderVGate,
+      classify_gate: classifyGate,
+      plan_tracking_gate: planTrackingGate,
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [planTrackingGate.hint]
+    };
+  }
+  if (planTrackingGate.status === "overridden") {
+    appendAuditEntry(
+      resolution.root,
+      {
+        event: "code.start.plan_tracking_override",
+        tool: "rsct_phase_code_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        plan_slug: planTrackingGate.plan_slug,
+        is_multi_phase: planTrackingGate.is_multi_phase
       },
       resolution.config?.audit
     );
@@ -30516,6 +30895,7 @@ async function phaseCodeStartHandler(rawInput) {
       spec_ref: input.spec_ref,
       verification_gate: gate,
       classify_gate: classifyGate,
+      plan_tracking_gate: planTrackingGate,
       phase_state_path: "",
       phase_state_written: false,
       audit_path: fields.audit_path,
@@ -30564,6 +30944,7 @@ async function phaseCodeStartHandler(rawInput) {
   const extras = {
     verification_gate: gate,
     classify_gate: classifyGate,
+    plan_tracking_gate: planTrackingGate,
     bootstrap_marker: bootstrap
   };
   const baseHints = result.hints ?? [];

@@ -557,6 +557,13 @@ export async function classifyTaskHandler(
     hints.push(
       'Complex tier — run the full cycle (research → spec → verification → code → review → test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it).',
     )
+    // PH-3: worktree-orchestration nudge. Advisory only, complex-tier only. The
+    // threshold "how many phases" belongs to the §B prose question, NOT here —
+    // classify runs BEFORE the plan exists, so the wording stays conditional and
+    // never claims a phase count. Never auto-creates a worktree.
+    hints.push(
+      'Complex tier — if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated per worktree (§C). Decide this against the WRITTEN plan — this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial.',
+    )
   }
   if (activePlan) {
     hints.push(

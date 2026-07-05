@@ -82,6 +82,33 @@ Use these tools by default for commit/push/merge. If `rsct-mcp` is not
 installed, the §C prose contract above is the only enforcement —
 follow it strictly.
 
+**Pre-integration hygiene — `pre_merge_ack` (PH-5):** `rsct_request_merge`
+(always) and `rsct_request_push` (**only when pushing to a protected
+branch**) require a `pre_merge_ack` checklist ALONGSIDE the
+`dev_approval`. It is checked **before** the OS dialog, so a missing or
+incomplete ack rejects **in chat with no new popup**. Be honest about what
+it is:
+
+- **Presence is a forcing function, not a substantive lock.** It makes you
+  stop and assemble the checklist at the integration point (the MCP
+  re-surfaces the hygiene the prose forgets in a long session). It does
+  **not** machine-verify that the work is actually done.
+- The three items — `plan_complete`, `adr_confirmed`, `issues_resolved` —
+  are **agent self-attestations** you confirm with the dev, not
+  machine-checked facts. Set each true only after actually confirming it.
+  When `adr_confirmed` or `issues_resolved` is true, `note` must state WHAT
+  (e.g. "ADR-012 recorded; issue #7 closed") so the attestation leaves an
+  auditable written claim.
+- **The one behavioral lock is honoring `false`:** if you mark any item
+  `false`, you declared "not ready" and the merge/push is rejected. Every
+  ack (pass or reject) is recorded in `.rsct/audit.log`. Like batch mode,
+  this raises rigor at the integration point without reducing traceability
+  — and without claiming a guarantee it cannot make.
+
+A push to a **non-protected** feature/WIP branch (e.g. to trigger CI on an
+open PR) does **not** require the ack — forcing an attestation there would
+only train dishonest "all true" stamps.
+
 **Plan execution modes — one-at-a-time (default) vs batch (T3):**
 
 By default, execution is **one-at-a-time**: every commit needs its own fresh
@@ -111,6 +138,17 @@ the explicit override for that one commit.
 Even under a batch token, **every commit is still individually recorded in
 `.rsct/audit.log`**, and `rsct_phase_status` shows the live token (budget used,
 expiry). Batch mode reduces approval friction; it does not reduce traceability.
+
+**When to offer it:** proactively suggest `rsct_plan_authorize` right after you
+approve a **multi-phase** plan (§B marks it Recommended for multi-phase runs).
+"Reset per new planning" needs no extra mechanism — it is already mechanical: a
+new plan normally means a new branch (`1 plan = 1 branch`) which auto-revokes the
+token via `branch_mismatch`, and marking the prior plan complete revokes it too;
+the TTL (default 120 min) bounds any stale grant and the budget caps the commits.
+Note the token is **disk-persisted** in `.rsct/phase-state.json`, so it does **not**
+clear just because the session restarts — end it explicitly with `rsct_plan_revoke`
+(or let it expire) if you want it gone sooner. Don't offer it for a single-phase
+plan (overkill).
 
 **Parallel work via git worktrees:** to run isolated tracks in parallel, use
 separate git worktrees (`git worktree add ../<app>-<feat> <feat>`). Because the

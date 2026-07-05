@@ -19,7 +19,19 @@ NEVER edit code without first presenting the user a plan containing:
    must always be visible.
 2. Reuse analysis: existing functions, classes, services, components or
    algorithms in the project that fully or partially cover the need —
-   list which and where they are.
+   list which and where they are. **Cleanliness lens:** while researching
+   reuse, also flag **duplication / centralization** opportunities
+   (duplication is the inverse of reuse — several implementations of the
+   same thing that could collapse into one) and any evident **scalability**
+   risk in the code the plan touches. These are *inputs to the plan*, not
+   automatic refactors — nothing mutates without an option + OK.
+
+   > **Dependency hygiene (separate axis, not reuse):** when the plan
+   > touches dependency manifests, note pinned-version drift or loose
+   > ranges relevant to the scope. Report only what is verifiable offline —
+   > never assert a "latest" target version. For a full, on-demand sweep of
+   > duplication / scalability / dependency hygiene across a module or the
+   > whole repo, use the dedicated **`/rsct-clean-code`** command.
 3. Explicit no-reuse option when a reuse alternative exists, so the user
    can compare reuse vs. greenfield.
 4. Merging possibility: the user can choose one of the options, request
@@ -42,8 +54,11 @@ NEVER edit code without first presenting the user a plan containing:
      silently. `CONVENTIONS.md` is the standing *how*; `decisions.md` is the
      *why/when*.
 6. **Plan tracking files (after developer approval):**
-   Immediately after the dev approves the plan, write two files at the
-   project root:
+   **Immediately** after the dev approves the plan — *before writing any
+   code* — write two files at the project root. Do not defer this: the MCP
+   gate `rsct_phase_code_start` mechanically **rejects** the Code phase for
+   `standard`/`complex` tasks when `plan_<slug>.md` + `progress_<slug>.md`
+   are absent (pass `plan_slug`; override only with `override_plan_tracking`).
    - `plan_<slug>.md` — the approved plan, using the framework template
      `doc-templates/plan_slug.md.template`.
    - `progress_<slug>.md` — execution log, using the framework template
@@ -52,12 +67,22 @@ NEVER edit code without first presenting the user a plan containing:
    Slug derives from the current branch name (e.g.,
    `feat/aprovacao-requisicao-compra` → `aprovacao-requisicao-compra`).
 
-   **Accepted alias**: `spec_<slug>.md` is a synonym for `plan_<slug>.md`
-   when the dev prefers the "spec" wording (consistent with the M3
-   phase machine's `rsct_phase_spec_start`). Same gitignore rule, same
-   NEVER-on-protected guarantee, same template
-   (`doc-templates/plan_slug.md.template`). The canonical name remains
-   `plan_<slug>.md`; prefer it unless the dev explicitly asks for `spec_`.
+   **Multi-phase plans (one spec per phase):** when the plan has more than
+   one phase, write **one `spec_<phase-slug>.md` per phase**, created before
+   that phase's Code — each phase carries its own detailed spec while the
+   master `plan_<slug>.md` holds the overall arc. A **single-phase** plan
+   needs NO spec file: detail the spec in memory/chat at that moment and
+   proceed. When starting Code, pass `plan_slug` (and `spec_slug` when
+   multi-phase) to `rsct_phase_code_start`: the gate requires
+   `plan_/progress_` for the plan, plus `spec_<spec_slug>.md` whenever
+   `spec_slug` differs from `plan_slug` (its multi-phase signal).
+
+   **Accepted alias (single-phase only):** `spec_<slug>.md` may stand in for
+   `plan_<slug>.md` when the dev prefers the "spec" wording — same gitignore
+   rule, same NEVER-on-protected guarantee, same template
+   (`doc-templates/plan_slug.md.template`). For multi-phase plans keep the
+   master doc named `plan_<slug>.md` so the per-phase `spec_` files never
+   collide with it.
 
    These files are **gitignored by default** (see `.gitignore` patterns
    `plan_*.md`, `progress_*.md`, and `spec_*.md` added by `/rsct-setup`).
@@ -70,6 +95,35 @@ NEVER edit code without first presenting the user a plan containing:
    Before any merge or push to a protected branch, verify they are absent
    from the diff being merged. Always remind the developer of this rule
    when creating the files.
+
+   **Execution mode — offer batch commits for multi-phase plans (after approval):**
+   Once the plan is approved and its tracking files exist, if the plan is
+   **multi-phase** (several phases, each with its own `spec_`), OFFER the dev a
+   plan-scoped **batch-commit** token — mark it **Recommended** for multi-phase
+   runs so you don't stop for an OK on every single commit:
+   `mcp__rsct__rsct_plan_authorize` (one dev OK covers up to `max_actions` commits
+   of this plan on this branch; end it early with `rsct_plan_revoke`). It
+   **auto-resets per new planning** without any extra step: a new plan normally
+   means a new branch (`1 plan = 1 branch`) which revokes it, marking the prior
+   plan complete revokes it too, the TTL bounds any stale grant, and the budget
+   caps the commits. (It is disk-persisted, so it does not clear on a session
+   restart — use `rsct_plan_revoke` to end it early.)
+   **push and merge ALWAYS stay per-action** (§C). For a **single-phase** plan,
+   don't offer it (overkill). See §C "Plan execution modes" for the mechanics.
+
+   **Parallel orchestration — offer worktrees for 3+-phase plans (after approval):**
+   When the approved plan has **3 or more phases** whose file groups are DISJOINT,
+   ASK the dev whether to run the non-overlapping groups in parallel via separate
+   `git worktree`s — fill the "Phases & parallelization" table in the plan template
+   (`doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
+   state (phase-state, any batch token, the anti-reuse store) — see §C "Parallel
+   work via git worktrees" for the mechanics. Phases that share a file group stay
+   **serial**; a repo whose build bundle is tracked (e.g. a committed `dist/`) also
+   usually stays serial (parallel worktrees would conflict on the bundle). **Never
+   auto-create worktrees** — the dev weighs it against the written plan. For a
+   single- or two-phase plan, don't offer it (overkill). `rsct_classify_task` may
+   surface a first nudge for a `complex` tier, but the phase-count decision is made
+   here, against the written plan.
 
    **Session resume — proactive context-pressure detection:**
 

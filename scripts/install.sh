@@ -41,9 +41,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ ! -f "$SOURCE_DIR/prompts/01-setup.md" ]; then
+if [ ! -f "$SOURCE_DIR/prompts/01-setup.md" ] || [ ! -f "$SOURCE_DIR/VERSION" ]; then
   echo "ERROR: $SOURCE_DIR does not look like the RSCT framework source."
-  echo "Expected to find: $SOURCE_DIR/prompts/01-setup.md"
+  echo "Expected to find: $SOURCE_DIR/prompts/01-setup.md and $SOURCE_DIR/VERSION"
   exit 1
 fi
 
@@ -91,8 +91,8 @@ fi
 
 # --- Detect existing install (protocol + code versions) ---
 # Two RELEASE version axes are reported (aligned from v1.0.0 on):
-#   PROTOCOL version (e.g., "1.1.0") — the prompts/rules release, read
-#     from the `# Version:` header of 01-setup.md. Lives in ~/.rsct/VERSION.
+#   PROTOCOL version (e.g., "2.0.0") — the prompts/rules release, read from
+#     the single-source /VERSION file at the repo root. Lives in ~/.rsct/VERSION.
 #   CODE version (e.g., "1.1.0") — the rsct-mcp companion + prompt
 #     mechanics, from version.ts. Lives in ~/.rsct/VERSION-CODE.
 # Reporting both lets the dev see drift (e.g. "code 0.6.7 → 0.7.0") even
@@ -110,8 +110,18 @@ if [ -f "$RSCT_HOME/VERSION-CODE" ]; then
 fi
 
 # --- Read incoming versions ---
-NEW_VERSION=$(grep -E "^# Version:" "$SOURCE_DIR/prompts/01-setup.md" | head -1 | awk '{print $3}')
-[ -z "$NEW_VERSION" ] && NEW_VERSION="unknown"
+# PROTOCOL/product version from the single-source /VERSION (issue #7). Missing file →
+# the `[ -f ]` guard keeps NEW_VERSION="unknown". CRLF-safe (tr -d '\r'); `head -1`
+# keeps the pipeline's exit status = head's (0), so `set -e` can't trip on a tr/redirect
+# hiccup. The case-guard then maps any value with a non-digit/non-dot char (incl. a
+# `-rc` prerelease) to "unknown" — this axis is display/marker only, never destructive.
+NEW_VERSION="unknown"
+if [ -f "$SOURCE_DIR/VERSION" ]; then
+  NEW_VERSION="$(tr -d '\r' < "$SOURCE_DIR/VERSION" | head -1)"
+fi
+case "$NEW_VERSION" in
+  ''|*[!0-9.]*) NEW_VERSION="unknown" ;;
+esac
 # Code version from mcp-server/src/lib/version.ts (single source of truth
 # per its own docstring; mirrored in mcp-server/package.json).
 NEW_CODE_VERSION=""
@@ -266,6 +276,14 @@ description: Bootstrap a new universe repository for an organization (skeleton)
 @$RSCT_HOME_FOR_CLAUDE/prompts/04-init-universe.md
 EOF
 
+cat > "$CLAUDE_COMMANDS_DIR/rsct-clean-code.md" <<EOF
+---
+description: Sweep for duplication, scalability and dependency-update opportunities, then route fixes through the RSCT cycle
+---
+
+@$RSCT_HOME_FOR_CLAUDE/prompts/05-clean-code.md
+EOF
+
 # --- Done with framework ---
 echo ""
 echo "════════════════════════════════════════════════════════"
@@ -277,6 +295,7 @@ echo "  /rsct-setup              — setup or update a project"
 echo "  /rsct-init-universe      — bootstrap a new universe repository"
 echo "  /rsct-canonical-source   — add universe canonical source section"
 echo "  /rsct-uninstall          — reverse setup in a project"
+echo "  /rsct-clean-code         — sweep for duplication/scalability/dep updates"
 echo ""
 
 # --- Optional: install rsct-mcp companion ---
@@ -286,7 +305,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp (Model Context Protocol server)"
   echo "────────────────────────────────────────────────────────"
-  echo "Adds 13 tools + 5 resources to Claude Code — §C-gated"
+  echo "Adds 37 tools + 5 resources to Claude Code — §C-gated"
   echo "commit/push/merge, SessionStart sanitizer hook, audit log,"
   echo "and structured project recall. Strongly recommended."
   echo ""

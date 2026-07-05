@@ -148,7 +148,10 @@ mismatch is the first thing to check. `rsct_get_topology` surfaces it for you:
 it **warns when a contract's `producer` matches no registered app** — or matches
 only by case (a case-only typo the gate silently treats as unregistered) — and
 suggests the correctly-cased name to use. So a misspelled or mis-cased producer
-is caught proactively instead of silently never gating.
+is caught proactively instead of silently never gating. The same check also
+covers every contract **`consumer`** and this repo's own **`app.name`**, flagging
+case-only drift (e.g. a folder-cased `app.name`) as a likely typo — only the
+`producer` actually gates, but the warnings catch the mistakes early.
 
 **Overriding.** When you genuinely intend a surface change, approve it with a
 per-action override carrying a reason (`override_contract_surface: { reason }`).

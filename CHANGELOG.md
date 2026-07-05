@@ -10,6 +10,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.1.0] - 2026-07-05
+
+Flow-hardening release (the `flow-lock` track): promotes several prose-only
+disciplines into mechanical MCP gates and adds a clean-code command — without new
+OS popups and without new tools (**37 tools, unchanged**). The product version
+moves to **2.1.0**; the marker **schema id stays at `v=1.0.0`** (frozen — format
+unchanged). Backward-compatible.
+
+### Added
+
+- **Pre-integration hygiene gate — `pre_merge_ack` (PH-5).** `rsct_request_merge`
+  (always) and `rsct_request_push` (only to a protected branch) now require a
+  self-attested hygiene checklist (`plan_complete` / `adr_confirmed` /
+  `issues_resolved`, with a `note` when ADRs/issues are attested), checked
+  **before** the OS dialog — a missing/incomplete ack rejects **in chat, no new
+  popup**. Honest by design: presence is a forcing function, not a substantive
+  lock; the one behavioral lock is honoring a declared `false`. New reject kinds
+  `pre_merge_ack_missing` / `pre_merge_ack_incomplete`.
+- **Plan-tracking gate on the Code phase (PH-1).** `rsct_phase_code_start` refuses
+  the Code phase for `standard`/`complex` tasks unless the plan is on disk
+  (`plan_<slug>.md` + `progress_<slug>.md`, plus per-phase `spec_<slug>.md` for a
+  multi-phase plan). New inputs `plan_slug` + `override_plan_tracking` (bypass is
+  audit-logged); `trivial`/`small` skip it.
+- **`/rsct-clean-code` command (PH-7).** A read-only, advisory sweep through three
+  lenses — duplication/centralization, scalability, dependency hygiene (offline
+  only) — that debates findings with the dev and never mutates on its own. The
+  same duplication/centralization lens is folded into `/rsct-setup`'s §B Research.
+- **Worktree-orchestration nudge (PH-3).** `rsct_classify_task` suggests, for a
+  `complex` tier, running disjoint file-group phases in parallel via isolated
+  `git worktree`s; the plan template gains a "Phases & parallelization" section
+  and §B a worktree question for 3+-phase plans. Advisory — never auto-creates.
+- **`/VERSION` single-source of the product version (PH-6, closes #7).** The repo
+  root `/VERSION` file is the one hand-edited version; `mcp-server/src/lib/version.ts`,
+  `package.json`, and `package-lock.json` are derived via `npm run sync-version`.
+
+### Changed
+
+- **Batch-commit token is now OFFERED at planning (PH-4).** After a **multi-phase**
+  plan is approved, RSCT proactively suggests `rsct_plan_authorize` (marked
+  Recommended for multi-phase runs); single-phase plans are not offered it. Clarified
+  that the token auto-resets via branch scope / plan completion / TTL / budget.
+- **Name-mismatch warnings broadened (PH-2).** `rsct_get_topology` now validates every
+  contract **`consumer`** and this repo's own **`app.name`** against the registered
+  apps (not just the `producer`), flagging case-only drift as a likely typo. Only the
+  `producer` gates; the extra checks are warn-only.
+- **`§C`/`§D`/`§H` prose** updated for the `pre_merge_ack` checklist (mechanics, the
+  pre-integration hygiene checklist, and the ADR-confirmed rollup).
+- **User docs synced** (README, `docs/`, `mcp-server/README.md`, CONTRIBUTING) to the
+  above behaviors ahead of the release.
+
+### Fixed
+
+- **Cross-OS edit-scope matching (PH-1).** `rsct_check_edit_scope` now matches an
+  absolute `file_path` against relative scope globs via normalized prefix-strip
+  (was anchored `^…$` and silently never matched an absolute path).
+
 ## [2.0.0] - 2026-06-25
 
 Multi-repo governance + a guided onboarding orchestrator + the mechanical REVIEW
