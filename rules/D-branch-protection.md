@@ -31,6 +31,26 @@ branch** (local + remote — `git branch -d` / `git push origin --delete`, GitHu
 `plan_/progress_/spec_<slug>.md` tracking files. The squash/rebase paths run via
 `gh` / the web UI (not `rsct_request_merge`), so raising the suggestion is on you.
 
+**Pre-integration hygiene checklist (before any outward integration):**
+
+Before you integrate outward — a merge, a GitHub PR (any of the three
+methods), or a **push to a protected branch** — run a quick hygiene
+checklist and confirm it with the dev:
+
+1. Is the task/phase work actually **complete**?
+2. Are the pertinent **ADRs recorded** (→ §H)? (Confirm the ones already
+   surfaced this session are written — this is not a new proposal round.)
+3. Are the associated **issues resolved**?
+
+When `rsct-mcp` is installed, `rsct_request_merge` (always) and
+`rsct_request_push` (when the branch is protected) enforce this mechanically
+via `pre_merge_ack` (§C) — the ack is a self-attestation, so answer it
+honestly; marking any item false is honored as a stop. **Rebase and PR
+merges run via `git`/`gh`, which have no MCP tool** — there the checklist is
+**yours to run as prose** before the outward-facing action. A push to a
+non-protected feature/WIP branch is not an integration and does not need the
+checklist.
+
 Even if the user authorized a push on a protected branch in the same session,
 the next push on that branch requires an updated OK (§C — authorization does
 not reuse). Exception: the current session may be working directly on a

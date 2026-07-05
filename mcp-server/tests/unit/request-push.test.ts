@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   requestPushHandler,
+  requestPushTool,
   type RequestPushInternal,
   type RequestPushOutput,
 } from '../../src/tools/request-push.js'
@@ -32,6 +33,32 @@ function approval(overrides: Record<string, unknown> = {}) {
     action_scope: 'push:feat/foo:abc1234',
     reason: 'push checkpoint for unit test coverage',
     ...overrides,
+  }
+}
+
+// PH-5: a fully-satisfied pre_merge_ack (all self-attestations true + a note).
+function ack(overrides: Record<string, unknown> = {}) {
+  return {
+    plan_complete: true,
+    adr_confirmed: true,
+    issues_resolved: true,
+    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed (unit test)',
+    ...overrides,
+  }
+}
+
+// promptFn seam that counts invocations — proves no OS dialog on an ack reject.
+function countingPrompt(): {
+  fn: (opts: DialogOptions) => Promise<DialogResult>
+  calls: () => number
+} {
+  let n = 0
+  return {
+    fn: async () => {
+      n += 1
+      return { response: 'yes', channel: 'windows' }
+    },
+    calls: () => n,
   }
 }
 
@@ -157,7 +184,7 @@ describe('rsct_request_push — branch protection', () => {
   it('rejects when pushing to a protected branch without override', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestPushHandler(
-      { project_root: tmpRoot, dev_approval: approval() },
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack() },
       {
         gitStateOverride: gitState('main'),
         gitExecutor: gitExec({}, PUSH_OK),
@@ -179,6 +206,7 @@ describe('rsct_request_push — branch protection', () => {
         dev_approval: approval({
           override_protected_branch: { reason: 'release tag push' },
         }),
+        pre_merge_ack: ack(),
       },
       {
         gitStateOverride: gitState('main'),
@@ -268,6 +296,21 @@ describe('rsct_request_push — schema', () => {
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('schema')
   })
+
+  it('exposes pre_merge_ack in inputSchema, all-optional (parity with the Zod schema)', () => {
+    const schema = requestPushTool.inputSchema as {
+      properties: Record<string, { additionalProperties?: boolean; properties?: Record<string, unknown>; required?: unknown }>
+      required?: string[]
+    }
+    const ackProp = schema.properties.pre_merge_ack
+    expect(ackProp).toBeDefined()
+    expect(ackProp.additionalProperties).toBe(false)
+    for (const k of ['plan_complete', 'adr_confirmed', 'issues_resolved', 'note']) {
+      expect(ackProp.properties?.[k]).toBeDefined()
+    }
+    expect(schema.required ?? []).not.toContain('pre_merge_ack')
+    expect(ackProp.required).toBeUndefined()
+  })
 })
 
 describe('rsct_request_push — post-mutation write failures (HIGH-2 / HIGH-3)', () => {
@@ -324,5 +367,113 @@ describe('rsct_request_push — post-mutation write failures (HIGH-2 / HIGH-3)',
         (h) => h.includes('audit log write failed') && h.includes('simulated read-only fs'),
       ),
     ).toBe(true)
+  })
+})
+
+describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branch scope)', () => {
+  it('does NOT require an ack for a non-protected (feature/WIP) push — scope MCP-P1-D', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+    expect(out.status).toBe('pushed')
+  })
+
+  it('rejects pre_merge_ack_missing on a protected push with no ack — and shows NO dialog', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const prompt = countingPrompt()
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({}, PUSH_OK), promptFn: prompt.fn, now: FIXED_NOW },
+    )) as RequestPushOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_missing')
+    expect(prompt.calls()).toBe(0)
+    expect(out.branch_check.protected).toBe(true)
+  })
+
+  it('rejects pre_merge_ack_incomplete on a protected push with issues_resolved false', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack({ issues_resolved: false }) },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({}, PUSH_OK), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('issues_resolved')
+  })
+
+  it('requires a non-empty note when adr_confirmed is true (protected push)', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack({ note: '' }) },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({}, PUSH_OK), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('note')
+  })
+
+  it('pushes a protected branch when ack is satisfied AND override is present', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestPushHandler(
+      {
+        project_root: tmpRoot,
+        dev_approval: approval({ override_protected_branch: { reason: 'release tag push' } }),
+        pre_merge_ack: ack(),
+      },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+    expect(out.status).toBe('pushed')
+  })
+
+  it('rejects an unknown key inside pre_merge_ack (nested .strict())', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    await expect(
+      requestPushHandler({
+        project_root: tmpRoot,
+        dev_approval: approval(),
+        pre_merge_ack: { ...ack(), bogus: true },
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('audits the ack reject with the self-attested label', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({}, PUSH_OK), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    const audit = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+    expect(audit).toContain('pre_merge_ack_missing')
+    expect(audit).toContain('pre_merge_ack_self_attested')
+  })
+
+  it('an ack reject does NOT consume the dev_approval (protected push retry)', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const appr = approval({ override_protected_branch: { reason: 'release tag push' } })
+    const internal: RequestPushInternal = {
+      gitStateOverride: gitState('main'),
+      gitExecutor: gitExec({ 'push origin main': PUSH_OK }),
+      promptFn: alwaysYes(),
+      now: FIXED_NOW,
+    }
+    const out1 = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: appr },
+      internal,
+    )) as RequestPushOutput
+    expect(out1.status).toBe('rejected')
+    expect(out1.reject_kind).toBe('pre_merge_ack_missing')
+    const out2 = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: appr, pre_merge_ack: ack() },
+      internal,
+    )) as RequestPushOutput
+    expect(out2.status).toBe('pushed')
   })
 })

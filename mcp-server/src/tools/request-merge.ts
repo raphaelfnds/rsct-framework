@@ -32,6 +32,13 @@ import {
   evaluateBootstrapMarker,
   type BootstrapMarker,
 } from '../lib/phase-scope.js'
+import {
+  evaluatePreMergeAck,
+  preMergeAckHint,
+  preMergeAckSchema,
+  preMergeAckJsonSchema,
+  PRE_MERGE_ACK_ITEMS,
+} from '../lib/pre-merge-ack.js'
 
 export const requestMergeInputSchema = z
   .object({
@@ -58,6 +65,14 @@ export const requestMergeInputSchema = z
       .describe(
         'The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication).',
       ),
+    pre_merge_ack: preMergeAckSchema
+      .optional()
+      .describe(
+        'PH-5 pre-integration hygiene checklist (self-attested). REQUIRED in practice: absence ⇒ rejected in ' +
+          'chat (no OS dialog). Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each ' +
+          'with the dev — honest self-attestations, not machine-verified. When adr_confirmed or issues_resolved ' +
+          'is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").',
+      ),
   })
   .strict()
 
@@ -71,6 +86,8 @@ export type RequestMergeRejectKind =
   | 'detached_head'
   | 'same_branch'
   | 'unrelated_histories_without_override'
+  | 'pre_merge_ack_missing'
+  | 'pre_merge_ack_incomplete'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
@@ -137,6 +154,7 @@ export const requestMergeTool: Tool = {
         type: 'object',
         description: 'dev_approval payload.',
       },
+      pre_merge_ack: preMergeAckJsonSchema,
     },
     required: ['source_branch', 'dev_approval'],
     additionalProperties: false,
@@ -161,6 +179,46 @@ export async function requestMergeHandler(
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
+
+  // PH-5: pre-integration hygiene gate. Checked BEFORE gateRequest so a missing
+  // ack rejects in chat WITHOUT popping the §C OS dialog (V-P1·PH-5). A reject
+  // here returns before the gate, so the dev_approval is never validated or
+  // consumed. A merge is always an integration event ⇒ the ack is always required.
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack)
+  if (!ackDecision.ok) {
+    const hint = preMergeAckHint(ackDecision)
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_merge.rejected',
+        tool: 'rsct_request_merge',
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        pre_merge_ack: input.pre_merge_ack ?? null,
+        pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        ...(ackDecision.kind === 'pre_merge_ack_incomplete' && { failing: ackDecision.failing }),
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      source_branch: input.source_branch,
+      target_branch: targetBranch,
+      channel: null,
+      reject_kind: ackDecision.kind,
+      reason: hint,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [hint],
+    }
+  }
 
   const gate = await gateRequest({
     toolName: 'rsct_request_merge',

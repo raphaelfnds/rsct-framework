@@ -27258,12 +27258,61 @@ function auditFields(r) {
 
 // src/tools/request-push.ts
 init_esm_shims();
+
+// src/lib/pre-merge-ack.ts
+init_esm_shims();
+var preMergeAckSchema = external_exports.object({
+  plan_complete: external_exports.boolean().optional(),
+  adr_confirmed: external_exports.boolean().optional(),
+  issues_resolved: external_exports.boolean().optional(),
+  note: external_exports.string().optional()
+}).strict();
+var preMergeAckJsonSchema = {
+  type: "object",
+  properties: {
+    plan_complete: { type: "boolean" },
+    adr_confirmed: { type: "boolean" },
+    issues_resolved: { type: "boolean" },
+    note: { type: "string" }
+  },
+  additionalProperties: false,
+  description: 'Pre-integration hygiene checklist (self-attested). Required for a merge, and for a push to a protected branch. Set plan_complete/adr_confirmed/issues_resolved true only after confirming each with the dev; when adr_confirmed or issues_resolved is true, `note` must state what (e.g. "ADR-012 recorded; issue #7 closed").'
+};
+var PRE_MERGE_ACK_ITEMS = [
+  "plan_complete",
+  "adr_confirmed",
+  "issues_resolved"
+];
+function evaluatePreMergeAck(ack) {
+  if (ack === void 0) return { ok: false, kind: "pre_merge_ack_missing" };
+  const failing = [];
+  if (ack.plan_complete !== true) failing.push("plan_complete");
+  if (ack.adr_confirmed !== true) failing.push("adr_confirmed");
+  if (ack.issues_resolved !== true) failing.push("issues_resolved");
+  const attestedPositive = ack.adr_confirmed === true || ack.issues_resolved === true;
+  const noteBlank = typeof ack.note !== "string" || ack.note.trim() === "";
+  if (attestedPositive && noteBlank) {
+    failing.push("note (required when adr_confirmed or issues_resolved is true)");
+  }
+  return failing.length > 0 ? { ok: false, kind: "pre_merge_ack_incomplete", failing } : { ok: true };
+}
+function preMergeAckHint(decision) {
+  if (decision.kind === "pre_merge_ack_missing") {
+    return 'Pre-integration hygiene checklist (pre_merge_ack) is required before this integration. Supply pre_merge_ack: { plan_complete, adr_confirmed, issues_resolved } \u2014 set each true ONLY after confirming it with the dev (they are self-attestations, not machine-checked). When adr_confirmed or issues_resolved is true, add a non-empty `note` stating WHAT (e.g. "ADR-012 recorded; issue #7 closed"). No OS dialog was shown \u2014 nothing ran.';
+  }
+  return `Pre-integration hygiene checklist (pre_merge_ack) is incomplete \u2014 you declared/omitted: ${(decision.failing ?? []).join(", ")}. Resolve each item (finish the work, record pending ADRs via \xA7H, close associated issues) and re-attest. Items you mark false mean "not ready" and are honored as a stop.`;
+}
+
+// src/tools/request-push.ts
 var requestPushInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   remote: external_exports.string().optional().describe("Remote name (default: origin)."),
   branch: external_exports.string().optional().describe("Branch name to push (default: current HEAD)."),
   dev_approval: external_exports.unknown().describe(
     "The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."
+  ),
+  pre_merge_ack: preMergeAckSchema.optional().describe(
+    'PH-5 pre-integration hygiene checklist (self-attested). Required when pushing to a PROTECTED branch: absence \u21D2 rejected in chat (no OS dialog). Feature/WIP pushes to a non-protected branch do not require it. Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev; when adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").'
   )
 }).strict();
 var requestPushTool = {
@@ -27281,7 +27330,8 @@ var requestPushTool = {
       dev_approval: {
         type: "object",
         description: "dev_approval payload."
-      }
+      },
+      pre_merge_ack: preMergeAckJsonSchema
     },
     required: ["dev_approval"],
     additionalProperties: false
@@ -27301,6 +27351,43 @@ async function requestPushHandler(rawInput, internal = {}) {
   const branchLabel = branch ?? "<no-branch>";
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const { list: protectedList } = effectiveProtectedList(config2);
+  const branchProtected = isProtectedBranch(branch, protectedList);
+  if (branchProtected) {
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+    if (!ackDecision.ok) {
+      const hint = preMergeAckHint(ackDecision);
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_push.rejected",
+          tool: "rsct_request_push",
+          reject_kind: ackDecision.kind,
+          reason: hint,
+          branch,
+          remote,
+          pre_merge_ack: input.pre_merge_ack ?? null,
+          pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+          ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch,
+        remote,
+        channel: null,
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields2(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [hint]
+      };
+    }
+  }
   const gate = await gateRequest({
     toolName: "rsct_request_push",
     approval: input.dev_approval,
@@ -27344,8 +27431,6 @@ async function requestPushHandler(rawInput, internal = {}) {
   }
   const approval = gate.approval;
   const overrideBranch = approval.override_protected_branch;
-  const { list: protectedList } = effectiveProtectedList(config2);
-  const branchProtected = isProtectedBranch(branch, protectedList);
   if (branchProtected && !overrideBranch) {
     const reason = `branch '${branchLabel}' is protected \u2014 pass dev_approval.override_protected_branch: { reason } to push`;
     const audit2 = appendAudit(
@@ -27533,6 +27618,9 @@ var requestMergeInputSchema = external_exports.object({
   ),
   dev_approval: external_exports.unknown().describe(
     "The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."
+  ),
+  pre_merge_ack: preMergeAckSchema.optional().describe(
+    'PH-5 pre-integration hygiene checklist (self-attested). REQUIRED in practice: absence \u21D2 rejected in chat (no OS dialog). Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev \u2014 honest self-attestations, not machine-verified. When adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").'
   )
 }).strict();
 var requestMergeTool = {
@@ -27560,7 +27648,8 @@ var requestMergeTool = {
       dev_approval: {
         type: "object",
         description: "dev_approval payload."
-      }
+      },
+      pre_merge_ack: preMergeAckJsonSchema
     },
     required: ["source_branch", "dev_approval"],
     additionalProperties: false
@@ -27581,6 +27670,41 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+  if (!ackDecision.ok) {
+    const hint = preMergeAckHint(ackDecision);
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_merge.rejected",
+        tool: "rsct_request_merge",
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        pre_merge_ack: input.pre_merge_ack ?? null,
+        pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      source_branch: input.source_branch,
+      target_branch: targetBranch,
+      channel: null,
+      reject_kind: ackDecision.kind,
+      reason: hint,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      ...auditFields3(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [hint]
+    };
+  }
   const gate = await gateRequest({
     toolName: "rsct_request_merge",
     approval: input.dev_approval,

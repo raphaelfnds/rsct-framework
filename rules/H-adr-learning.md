@@ -65,3 +65,10 @@ Add to the "Out of scope" section with 1 descriptive line.
 - If the developer does not accept the recording, proceed without
   registering a pending item.
 - Propose once per relevant decision — do not repeat in the same session.
+
+**Relation to `pre_merge_ack.adr_confirmed` (§C/§D, PH-5):** the
+`adr_confirmed` item of the pre-integration checklist is a **rollup** — it
+attests that the ADRs surfaced/agreed **during this session** are already
+recorded via the flow above. It is **not** a cue to open a fresh round of
+ADR proposals at merge time (that would violate "propose once per session"
+here). If nothing was recordable, `adr_confirmed` is trivially true.
