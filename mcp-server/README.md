@@ -52,6 +52,14 @@ between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
 `trivial`/`small` bypass the gate. NOTE: the REVIEW *phase* is distinct from
 `rsct_persona_review` (a stateless advisory lens).
 
+**Plan-tracking gate (PH-1)** — symmetrically, `rsct_phase_code_start` refuses
+the Code phase for `spec_tier ∈ {standard, complex}` unless the plan is tracked
+on disk: `plan_<slug>.md` + `progress_<slug>.md` must exist (a multi-phase plan
+also needs the per-phase `spec_<slug>.md`). Pass `plan_slug` to name the plan the
+gate checks; `override_plan_tracking=true` bypasses (audit-logged). `trivial`/
+`small` skip it. A well-behaved §B flow creates these files at planning, so it
+never trips the gate.
+
 ## Status
 
 | Milestone | State |
@@ -70,6 +78,7 @@ between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
 | M3 Tutor persona (6th persona + tutor_step) — closes M3 | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.1-m3-tutor`) |
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
+| flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
 
 **37 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
@@ -102,7 +111,7 @@ node dist/index.js < /dev/null
 Expect on stderr (single JSON line, then clean exit 0):
 
 ```json
-{"level":30,"time":"...","name":"rsct-mcp","version":"2.0.0",
+{"level":30,"time":"...","name":"rsct-mcp","version":"x.y.z",
  "tools":["rsct_status","rsct_load_context","rsct_get_decisions",
           "rsct_get_knowledge","rsct_get_environments",
           "rsct_get_architecture","rsct_get_universe",
@@ -469,6 +478,15 @@ These three tools require a valid `dev_approval` payload on every call
 Fabrication signals (INV-2.2) auto-elevate to forced-dialog mode
 regardless of trust.
 
+**Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always) and
+`rsct_request_push` (only when the target branch is protected) additionally
+require a `pre_merge_ack` hygiene checklist. It is checked **before** the OS
+dialog — a missing/incomplete ack rejects **in chat with no dialog**. The three
+items (`plan_complete` / `adr_confirmed` / `issues_resolved`, plus a `note` when
+ADRs/issues are attested) are honest **self-attestations**, not machine-verified;
+the mechanical teeth are that you cannot integrate without the checklist and that
+a declared `false` is honored as a stop.
+
 The `dev_approval` shape (validated by `lib/dev-approval.ts`):
 
 ```ts
@@ -511,16 +529,16 @@ consumed by design).
 Pushes the current branch if `dev_approval` is valid + branch is not
 protected (or `override_protected_branch` is set with reason).
 
-- Input: `project_root?`, `remote?` (default `origin`), `branch?` (default HEAD), `dev_approval`
-- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?`, `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Input: `project_root?`, `remote?` (default `origin`), `branch?` (default HEAD), `dev_approval`, `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
+- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
 
 #### `rsct_request_merge`
 
 Merges `source_branch` into `target_branch` (extra-strict — refuses
 force-pushy patterns by default).
 
-- Input: `project_root?`, `source_branch`, `target_branch?` (default current HEAD), `dev_approval`, `allow_unrelated_histories?` (default false)
-- Output: `status: 'merged' | 'rejected' | 'mutation_failed'`, `sha_before`, `sha_after?`, `reject_kind?`, `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Input: `project_root?`, `source_branch`, `target_branch?` (default current HEAD), `dev_approval`, `pre_merge_ack` (PH-5 — REQUIRED; the pre-integration hygiene checklist; rejects in chat if absent/incomplete, no OS dialog), `allow_unrelated_histories?` (default false)
+- Output: `status: 'merged' | 'rejected' | 'mutation_failed'`, `sha_before`, `sha_after?`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
 
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs

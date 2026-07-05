@@ -328,6 +328,20 @@ modified. Detects developer edits via SHA256 and protects them from accidental
 deletion. Supports full uninstall and selective scopes (memory-only, specific
 rules, docs-only, etc.).
 
+### Clean-code sweep
+```
+/rsct-clean-code
+```
+A **read-only, advisory** sweep (by module, or the whole repo if small) through
+three lenses — **duplication / centralization** (several implementations of the
+same thing that could collapse into one), **scalability** risks, and **dependency
+hygiene** (pinned-version drift / loose ranges, reported offline only). It
+**debates** each finding with you (code may be that way for a real business
+reason) and proposes keep / refactor / defer — it never mutates on its own; any
+change goes back through the plan cycle. The same duplication/centralization lens
+is also folded into `/rsct-setup`'s §B Research so it surfaces during normal
+planning.
+
 ### Invoking the prompts directly (without install)
 
 If you prefer not to install — useful for one-off use or testing — you can
@@ -337,6 +351,7 @@ invoke each prompt by its path in the cloned framework:
 @/path/to/rsct-framework/prompts/04-init-universe.md
 @/path/to/rsct-framework/prompts/02-canonical-source.md
 @/path/to/rsct-framework/prompts/03-uninstall.md
+@/path/to/rsct-framework/prompts/05-clean-code.md
 ```
 
 ## First project walkthrough (5 minutes)

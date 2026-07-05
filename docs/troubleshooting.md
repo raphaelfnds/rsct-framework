@@ -77,7 +77,9 @@ If a `contracts.json` `producer` matches no registered `app.name`, the gate for
 that contract silently never fires (the names must match exactly,
 case-sensitively). **`rsct_get_topology` surfaces this for you**: it warns when a
 `producer` matches no registered app, and flags a case-only mismatch as a likely
-typo with the correctly-cased name to use. If you'd rather check by hand, the
+typo with the correctly-cased name to use. The same warning covers every contract
+`consumer` and this repo's own `app.name` (a case-only drift is flagged as a
+likely typo, though only the `producer` gates). If you'd rather check by hand, the
 `producer` string must equal the app's `name` in its `.rsct.json` exactly.
 
 ## Uninstall says the project is a legacy (pre-marker) install

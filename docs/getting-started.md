@@ -111,9 +111,17 @@ honored — for `standard`/`complex` tasks the Test phase won't start until that
 decision is settled (`trivial`/`small` tasks skip it). You don't memorize the
 phases; the tools prompt you through them.
 
+The cycle is bracketed by a **plan-tracking gate**: for `standard`/`complex`
+tasks the **Code** phase won't start until the plan is written to disk
+(`plan_<slug>.md` + `progress_<slug>.md`), so the work stays anchored to an
+approved plan. The tools create these at the planning step, so a well-behaved
+flow never trips the gate (`trivial`/`small` tasks skip it).
+
 ## Next steps
 
 - The full per-command detail → [Command reference](commands.md).
+- Want a duplication / scalability / dependency sweep before refactoring →
+  [`/rsct-clean-code`](commands.md#rsct-clean-code).
 - More than one repo in your org? The universe, topology modes, contracts, and
   [which session edits which repo](multi-repo.md#which-session-edits-which-repo)
   → [Multi-repo & contracts](multi-repo.md).
