@@ -12,6 +12,16 @@ export interface RsctApprovalModes {
   plan_token_ttl_minutes?: number
   /** T3: default max commits a plan-authorization token covers. Bounds 1–100. */
   plan_token_max_actions?: number
+  /** plan-lifecycle-v2: max free (dialog-free) commits per plan before lock. Bounds 1–50. */
+  free_commit_max?: number
+  /** plan-lifecycle-v2: cumulative file cap for the free lane before lock. Bounds 1–500. */
+  free_commit_max_files?: number
+  /** plan-lifecycle-v2: cumulative changed-line cap for the free lane before lock. Bounds 1–100000. */
+  free_commit_max_lines?: number
+  /** plan-lifecycle-v2: sliding-window re-arm width (minutes) for a plan token. Bounds 5–1440. */
+  plan_token_ttl_slide_minutes?: number
+  /** plan-lifecycle-v2: absolute hard cap (minutes) a plan token can ever live. Bounds 5–10080. */
+  plan_token_ttl_abs_minutes?: number
 }
 
 export interface RsctAuditConfig {
@@ -97,8 +107,29 @@ const RsctApprovalModesSchema = z
     // granting an over-wide batch window.
     plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
     plan_token_max_actions: z.number().int().min(1).max(100).optional(),
+    // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
+    // still nulls the whole config, so a config-side attempt to grant an
+    // over-wide free-commit window is rejected loudly.
+    free_commit_max: z.number().int().min(1).max(50).optional(),
+    free_commit_max_files: z.number().int().min(1).max(500).optional(),
+    free_commit_max_lines: z.number().int().min(1).max(100000).optional(),
+    plan_token_ttl_slide_minutes: z.number().int().min(5).max(1440).optional(),
+    // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
+    // enforced at the re-arm use-site via min(now+slide, abs).
+    plan_token_ttl_abs_minutes: z.number().int().min(5).max(10080).optional(),
   })
-  .strict()
+  // plan-lifecycle-v2 Fork 3/A: RELAXED from `.strict()` to `.strip()`. The
+  // old `.strict()` rejected the ENTIRE config on any unknown approval_modes
+  // key, which (a) broke forward-compat — a config written by a newer server
+  // and read by an older one nulled out, silently dropping the dev's custom
+  // protected_branches/secrets_extra_patterns to DEFAULT — and (b) created a
+  // hard downgrade cliff. `.strip()` drops an unknown/typo'd key to its safe
+  // DEFAULT (fail-CLOSED) while the per-field bounds above keep the HIGH-4
+  // dangerous-value defense intact. .strip() >= .strict() enforcement in every
+  // unknown-key case. RELEASE NOTE: downgrading below plan-lifecycle-v2 still
+  // requires stripping the new keys first (an already-shipped `.strict()`
+  // server can't be patched retroactively).
+  .strip()
 
 const RsctAuditConfigSchema = z
   .object({

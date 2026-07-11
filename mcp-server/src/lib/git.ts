@@ -63,6 +63,88 @@ export function getStagedPaths(projectRoot: string): string[] | null {
     .filter((p) => p.length > 0)
 }
 
+export interface StagedStats {
+  /** Distinct files in the staged diff (renames count once, as the new path). */
+  files: number
+  /** Sum of added lines across text files (binary files contribute 0). */
+  insertions: number
+  /** Sum of deleted lines across text files (binary files contribute 0). */
+  deletions: number
+  /** New-side, forward-slash-normalized paths (rename-safe). */
+  paths: string[]
+}
+
+/**
+ * Return per-file line stats for the staged diff via
+ * `git diff --cached --numstat -z` (plan-lifecycle-v2, Bloco 1.2).
+ *
+ * `null` outside a git repo / on git failure; an all-zero `StagedStats`
+ * when nothing is staged. `-z` is NUL-separated so paths with spaces /
+ * unicode survive intact and renames emit old+new as separate fields.
+ *
+ * BINARY-SAFE: numstat renders `-\t-\t<path>` for binary blobs. Parsing the
+ * dashes as integers would yield `NaN`, which then poisons any cumulative
+ * counter (`NaN + n === NaN`, `JSON.stringify(NaN) === "null"`) and makes a
+ * `lines > cap` check always false (cap fails open). Here a `-` contributes
+ * **0 lines** but the file IS still counted, and every numeric is
+ * `Number.isFinite`-guarded so the result can never carry `NaN`.
+ */
+export function getStagedStats(projectRoot: string): StagedStats | null {
+  if (!isGitRepo(projectRoot)) return null
+  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--numstat', '-z'])
+  if (raw === null) return null
+  return parseNumstatZ(raw)
+}
+
+/**
+ * Pure parser for `git diff --cached --numstat -z` output. Exported for unit
+ * testing (the real reader is {@link getStagedStats}); NOT an MCP input — a
+ * caller-substitutable stats value would be an enforcement bypass (the A2 /
+ * INV-6 lesson), so the request-commit override for this is test-only.
+ */
+export function parseNumstatZ(raw: string): StagedStats {
+  const tokens = raw.split('\0')
+  const paths: string[] = []
+  let insertions = 0
+  let deletions = 0
+  let i = 0
+  while (i < tokens.length) {
+    const tok = tokens[i]!
+    if (tok === '') {
+      i += 1
+      continue
+    }
+    const firstTab = tok.indexOf('\t')
+    const secondTab = firstTab >= 0 ? tok.indexOf('\t', firstTab + 1) : -1
+    if (firstTab < 0 || secondTab < 0) {
+      // Malformed record — skip defensively (never throw).
+      i += 1
+      continue
+    }
+    const addedRaw = tok.slice(0, firstTab)
+    const deletedRaw = tok.slice(firstTab + 1, secondTab)
+    const rest = tok.slice(secondTab + 1)
+    // Binary files show '-' for added/deleted → contribute 0 lines.
+    const added = addedRaw === '-' ? 0 : Number.parseInt(addedRaw, 10)
+    const deleted = deletedRaw === '-' ? 0 : Number.parseInt(deletedRaw, 10)
+    insertions += Number.isFinite(added) ? added : 0
+    deletions += Number.isFinite(deleted) ? deleted : 0
+    if (rest !== '') {
+      // Normal record: `rest` is the path (may contain tabs — sliced, not split).
+      paths.push(rest.replace(/\\/g, '/'))
+      i += 1
+    } else {
+      // Rename/copy: the next two NUL-tokens are old-path then new-path.
+      const newPath = tokens[i + 2]
+      if (newPath !== undefined && newPath !== '') {
+        paths.push(newPath.replace(/\\/g, '/'))
+      }
+      i += 3
+    }
+  }
+  return { files: paths.length, insertions, deletions, paths }
+}
+
 /**
  * Return the unstaged diff (`git diff`) as a unified-diff string.
  * Same semantics as {@link getStagedDiff}.

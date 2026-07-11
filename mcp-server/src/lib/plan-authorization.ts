@@ -25,6 +25,14 @@ export const PLAN_TOKEN_MAX_ACTIONS_DEFAULT = 20
 export const PLAN_TOKEN_MAX_ACTIONS_MIN = 1
 export const PLAN_TOKEN_MAX_ACTIONS_MAX = 100
 
+// plan-lifecycle-v2 (Bloco 1.4): sliding-window re-arm width + absolute cap.
+export const PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN = 480
+export const PLAN_TOKEN_TTL_SLIDE_MIN = 5
+export const PLAN_TOKEN_TTL_SLIDE_MAX = 1440
+export const PLAN_TOKEN_TTL_ABS_DEFAULT_MIN = 1440
+export const PLAN_TOKEN_TTL_ABS_MIN = 5
+export const PLAN_TOKEN_TTL_ABS_MAX = 10080
+
 export type TokenInvalidReason =
   | 'absent'
   | 'not_covered'
@@ -42,14 +50,36 @@ export interface EmitTokenArgs {
   approvalRef: { action_scope: string; timestamp: string }
   now: Date
   sessionId?: string
+  /**
+   * plan-lifecycle-v2: sliding-window width (minutes). When provided, the
+   * initial `expires_at` uses this window (instead of `ttlMinutes`) and the
+   * token re-arms to it on each successful commit. Omit for pre-v2 fixed-TTL
+   * semantics.
+   */
+  slideMinutes?: number
+  /** plan-lifecycle-v2: absolute cap (minutes) the sliding window can never exceed. */
+  absTtlMinutes?: number
 }
 
 /**
  * Build a fresh token block. Caller persists it via `writePhaseState`
  * (merged into the existing PhaseState). `actions_used` starts at 0.
+ *
+ * plan-lifecycle-v2: when `slideMinutes`/`absTtlMinutes` are supplied the
+ * token carries a sliding window (re-armed by {@link rearmToken} on each
+ * successful commit) bounded by an immutable absolute cap. The initial
+ * `expires_at` is `min(now + slide, now + abs)`. Omitting them yields the
+ * pre-v2 fixed-`ttlMinutes` window with no cap (backward-compatible).
  */
 export function emitToken(args: EmitTokenArgs): PlanAuthorizationBlock {
-  const expiresMs = args.now.getTime() + args.ttlMinutes * 60_000
+  const nowMs = args.now.getTime()
+  const windowMin = args.slideMinutes ?? args.ttlMinutes
+  let expiresMs = nowMs + windowMin * 60_000
+  let absMs: number | null = null
+  if (args.absTtlMinutes !== undefined) {
+    absMs = nowMs + args.absTtlMinutes * 60_000
+    if (expiresMs > absMs) expiresMs = absMs // clamp the initial window to the cap
+  }
   const block: PlanAuthorizationBlock = {
     plan_slug: args.planSlug,
     branch: args.branch,
@@ -61,7 +91,34 @@ export function emitToken(args: EmitTokenArgs): PlanAuthorizationBlock {
     approval_ref: args.approvalRef,
   }
   if (args.sessionId !== undefined) block.session_id = args.sessionId
+  if (args.slideMinutes !== undefined) block.slide_minutes = args.slideMinutes
+  if (absMs !== null) block.absolute_expires_at = new Date(absMs).toISOString()
   return block
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 1.4): return a copy of the token with `expires_at`
+ * re-armed to `min(now + slide_minutes, absolute_expires_at)`. Caller invokes
+ * this ONLY in the post-commit success path (never in the pre-commit reserve),
+ * so a failed/refunded commit never leaves an extended window. A pre-v2 token
+ * (no `slide_minutes`) is returned unchanged, as is a re-arm that would move
+ * `expires_at` backward (the window only ever extends, up to the cap).
+ */
+export function rearmToken(
+  token: PlanAuthorizationBlock,
+  now: Date,
+): PlanAuthorizationBlock {
+  if (token.slide_minutes === undefined || !Number.isFinite(token.slide_minutes)) {
+    return token
+  }
+  let nextMs = now.getTime() + token.slide_minutes * 60_000
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime()
+    if (Number.isFinite(absMs)) nextMs = Math.min(nextMs, absMs)
+  }
+  const currentMs = new Date(token.expires_at).getTime()
+  if (Number.isFinite(currentMs) && nextMs <= currentMs) return token
+  return { ...token, expires_at: new Date(nextMs).toISOString() }
 }
 
 export interface ValidateTokenCtx {
@@ -97,6 +154,16 @@ export function validateToken(
   const expiresMs = new Date(token.expires_at).getTime()
   if (Number.isNaN(expiresMs) || ctx.now.getTime() >= expiresMs) {
     return { valid: false, reason: 'expired' }
+  }
+  // plan-lifecycle-v2 (Bloco 1.4): the sliding window can never live past the
+  // absolute cap even if repeatedly re-armed. Optional + NaN-guarded so pre-v2
+  // tokens (no cap) keep pure fixed-`expires_at` semantics. Folded into the
+  // same first-fail `expired` reason so ordering stays coherent.
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime()
+    if (!Number.isNaN(absMs) && ctx.now.getTime() >= absMs) {
+      return { valid: false, reason: 'expired' }
+    }
   }
   if (ctx.branch !== token.branch) return { valid: false, reason: 'branch_mismatch' }
   if (!ctx.tokenPlan) return { valid: false, reason: 'plan_gone' }
@@ -158,4 +225,24 @@ export function resolveMaxActions(
     PLAN_TOKEN_MAX_ACTIONS_MAX,
     Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v),
   )
+}
+
+/** plan-lifecycle-v2: resolve the sliding-window width (minutes), clamped to bounds. */
+export function resolveSlideMinutes(
+  input: number | undefined,
+  configDefault: number | undefined,
+): number {
+  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN
+  return Math.min(PLAN_TOKEN_TTL_SLIDE_MAX, Math.max(PLAN_TOKEN_TTL_SLIDE_MIN, v))
+}
+
+/** plan-lifecycle-v2: resolve the absolute cap (minutes), clamped to bounds. */
+export function resolveAbsTtlMinutes(
+  input: number | undefined,
+  configDefault: number | undefined,
+): number {
+  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_ABS_DEFAULT_MIN
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_ABS_DEFAULT_MIN
+  return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v))
 }
