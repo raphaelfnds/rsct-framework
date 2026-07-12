@@ -1,11 +1,15 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
-import { readGitState } from '../lib/git.js'
+import { readGitState, gitBranchMerged } from '../lib/git.js'
 import { findActivePlan, type ActivePlan } from '../lib/plan.js'
 import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
-import { readPhaseState, stampBootstrapMarker } from '../lib/phase-scope.js'
+import {
+  readPhaseState,
+  readPlanDisposition,
+  stampBootstrapMarker,
+} from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
@@ -148,6 +152,37 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge })
   if (universe.hint) next_action_hints.push(universe.hint)
   if (topology.hint) next_action_hints.push(topology.hint)
+  // plan-lifecycle-v2 (Bloco 2.4): retroactive reconciliation. If the active
+  // plan's branch already looks integrated into the mainline and no keep|delete
+  // disposition was recorded, nudge the dev to run rsct_plan_dispose. LOCAL
+  // check only (offline; no `gh` round-trip on every bootstrap) — a squash/rebase
+  // PR merge is blind to `git branch --merged` and is instead caught when the
+  // dev runs rsct_plan_dispose explicitly (documented residual). Read-only; opens
+  // no gate.
+  // Only reconcile once you've LEFT the plan's branch (git.branch differs) — a
+  // branch you're still on cannot already be integrated, so this skips the git
+  // subprocess on every bootstrap during active feature work (the common case).
+  if (
+    resolution.rsct_installed &&
+    active_plan?.branch &&
+    git.branch !== active_plan.branch
+  ) {
+    const disposition = readPlanDisposition(
+      readPhaseState(resolution.root).state,
+      active_plan.slug,
+    )
+    if (!disposition) {
+      const mainline = resolution.config?.protected_branches?.[0] ?? 'main'
+      if (
+        active_plan.branch !== mainline &&
+        gitBranchMerged(resolution.root, active_plan.branch, mainline)
+      ) {
+        next_action_hints.push(
+          `ℹ Plan '${active_plan.slug}' (branch '${active_plan.branch}') appears merged into '${mainline}' with no recorded disposition — run rsct_plan_dispose({ plan_slug: '${active_plan.slug}', decision: 'keep'|'delete' }) to confirm and get the cleanup advisory.`,
+        )
+      }
+    }
+  }
   // Install-drift: local compare of this project's stamped rsct_version vs the
   // running binary (parity with rsct_status — same helper/text). Handler level.
   if (resolution.rsct_installed) {

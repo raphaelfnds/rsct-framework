@@ -22870,6 +22870,11 @@ function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
   if (r.exitCode === 1) return false;
   return true;
 }
+function gitBranchMerged(projectRoot, branch, target, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["branch", "--merged", target]);
+  if (!r.ok) return false;
+  return r.stdout.split("\n").map((l) => l.replace(/^[*+]?\s*/, "").trim()).includes(branch);
+}
 function readWorktreeInfo(projectRoot) {
   if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
     return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
@@ -22973,6 +22978,32 @@ function gitMerge(projectRoot, sourceBranch, options, executor = defaultGitExecu
   args.push(sourceBranch);
   const sha_before = getHeadSha(projectRoot, executor);
   const exec = executor(projectRoot, args);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitRebase(projectRoot, upstream, executor = defaultGitExecutor) {
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["rebase", upstream]);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["merge", "--squash", sourceBranch]);
   if (!exec.ok) {
     const result = { ok: false, sha_before, sha_after: null };
     if (exec.stderr) result.stderr = exec.stderr.trim();
@@ -23267,6 +23298,10 @@ function stampPlanDisposition(projectRoot, patch) {
     decided_at: patch.decided_at
   };
   return writePhaseState(projectRoot, { ...baseState, disposition: merged });
+}
+function readPlanDisposition(state, slug) {
+  const d = state?.disposition;
+  return d && d.plan_slug === slug ? d : null;
 }
 
 // src/lib/version.ts
@@ -24158,6 +24193,20 @@ async function loadContextHandler(rawInput) {
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
+  if (resolution.rsct_installed && active_plan?.branch && git.branch !== active_plan.branch) {
+    const disposition = readPlanDisposition(
+      readPhaseState(resolution.root).state,
+      active_plan.slug
+    );
+    if (!disposition) {
+      const mainline = resolution.config?.protected_branches?.[0] ?? "main";
+      if (active_plan.branch !== mainline && gitBranchMerged(resolution.root, active_plan.branch, mainline)) {
+        next_action_hints.push(
+          `\u2139 Plan '${active_plan.slug}' (branch '${active_plan.branch}') appears merged into '${mainline}' with no recorded disposition \u2014 run rsct_plan_dispose({ plan_slug: '${active_plan.slug}', decision: 'keep'|'delete' }) to confirm and get the cleanup advisory.`
+        );
+      }
+    }
+  }
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION2);
     if (drift.hint) next_action_hints.push(drift.hint);
@@ -29115,6 +29164,229 @@ async function planDisposeHandler(rawInput, internal = {}) {
   };
 }
 
+// src/tools/request-rebase.ts
+init_esm_shims();
+var requestRebaseInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  mode: external_exports.enum(["rebase", "squash"]).optional().describe("'rebase' = git rebase current onto ref; 'squash' = git merge --squash ref into current (default 'rebase')."),
+  ref: external_exports.string().min(1, "ref required").describe("For mode='rebase': the upstream to rebase onto. For mode='squash': the branch to squash-merge into the current HEAD."),
+  dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
+  pre_merge_ack: preMergeAckSchema.optional().describe("PH-5 pre-integration hygiene checklist (self-attested). REQUIRED \u2014 absence \u21D2 rejected in chat (no OS dialog).")
+}).strict();
+var requestRebaseTool = {
+  name: "rsct_request_rebase",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token or the free-commit lane). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: { type: "string", description: "Optional absolute path to override project root detection." },
+      mode: { type: "string", enum: ["rebase", "squash"], description: "'rebase' or 'squash' (default 'rebase')." },
+      ref: { type: "string", description: "Upstream to rebase onto, or branch to squash-merge." },
+      dev_approval: { type: "object", description: "dev_approval payload." },
+      pre_merge_ack: preMergeAckJsonSchema
+    },
+    required: ["ref", "dev_approval"],
+    additionalProperties: false
+  }
+};
+function auditFields7(r) {
+  if (r.ok) return { audit_path: r.path, audit_error: null };
+  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
+  return { audit_path: r.path ?? null, audit_error: r.error ?? "write_failed" };
+}
+async function requestRebaseHandler(rawInput, internal = {}) {
+  const input = requestRebaseInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config ?? void 0;
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const gitExecutor = internal.gitExecutor ?? defaultGitExecutor;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const gitState = internal.gitStateOverride ?? readGitState(projectRoot);
+  const currentBranch = gitState.branch;
+  const currentLabel = currentBranch ?? "<no-branch>";
+  const mode = input.mode ?? "rebase";
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const base = (over) => ({
+    status: "rejected",
+    mode,
+    ref: input.ref,
+    current_branch: currentBranch,
+    channel: null,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: [],
+    sha_before: gitState.head_sha,
+    sha_after: null,
+    branch_check: { protected: false, override_used: false },
+    audit_path: null,
+    audit_error: null,
+    anti_replay_persisted: null,
+    anti_replay_error: null,
+    hints: [],
+    ...over
+  });
+  const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null;
+  const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : void 0;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
+  if (!ackDecision.ok) {
+    const hint = preMergeAckHint(ackDecision);
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_rebase.rejected",
+        tool: "rsct_request_rebase",
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        mode,
+        ref: input.ref,
+        pre_merge_ack: input.pre_merge_ack ?? null,
+        pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+      },
+      config2?.audit
+    );
+    return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields7(audit2), hints: [hint] });
+  }
+  const gate = await gateRequest({
+    toolName: "rsct_request_rebase",
+    approval: input.dev_approval,
+    dialog: {
+      title: "RSCT \u2014 rebase approval",
+      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)`
+    },
+    projectRoot,
+    ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_rebase.rejected",
+        tool: "rsct_request_rebase",
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        mode,
+        ref: input.ref,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    return base({
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      ...auditFields7(audit2),
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+    });
+  }
+  const approval = gate.approval;
+  const overrideBranch = approval.override_protected_branch;
+  if (currentBranch === null) {
+    const reason = "cannot rebase/squash on a detached HEAD \u2014 checkout a branch first";
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "detached_head", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "detached_head", reason, fabrication_signals: gate.fabrication_signals, sha_before: null, ...auditFields7(audit2), hints: [reason] });
+  }
+  if (input.ref === currentBranch) {
+    const reason = `cannot ${mode} '${currentBranch}' against itself`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "same_ref", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "same_ref", reason, fabrication_signals: gate.fabrication_signals, ...auditFields7(audit2), hints: [reason] });
+  }
+  const { list: protectedList } = effectiveProtectedList(config2);
+  const currentProtected = isProtectedBranch(currentBranch, protectedList);
+  if (currentProtected && !overrideBranch) {
+    const reason = `branch '${currentLabel}' is protected \u2014 ${mode} rewrites its history; pass dev_approval.override_protected_branch: { reason } to proceed`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "protected_branch", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "protected_branch", reason, fabrication_signals: gate.fabrication_signals, branch_check: { protected: true, override_used: false }, ...auditFields7(audit2), hints: [reason] });
+  }
+  if (currentProtected && overrideBranch) {
+    appendAudit(
+      projectRoot,
+      { event: "request_rebase.override_invoked", tool: "rsct_request_rebase", override_kind: "protected_branch", override_reason: overrideBranch.reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+  }
+  const result = mode === "rebase" ? gitRebase(projectRoot, input.ref, gitExecutor) : gitSquash(projectRoot, input.ref, gitExecutor);
+  if (!result.ok) {
+    const reason = result.error ?? result.stderr ?? `git ${mode} failed`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.mutation_failed", tool: "rsct_request_rebase", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({
+      status: "mutation_failed",
+      channel: gate.channel,
+      reason,
+      fabrication_signals: gate.fabrication_signals,
+      sha_before: result.sha_before,
+      branch_check: { protected: currentProtected, override_used: currentProtected },
+      ...auditFields7(audit2),
+      hints: [
+        `git ${mode} failed \u2014 ${mode === "rebase" ? "resolve conflicts (git rebase --continue) or abort (git rebase --abort)" : "resolve conflicts, then commit via rsct_request_commit"}. Approval NOT consumed; retry with a fresh dev_approval.`
+      ]
+    });
+  }
+  const record2 = recordApproval(approval, { projectRoot, now });
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "request_rebase.done",
+      tool: "rsct_request_rebase",
+      mode,
+      ref: input.ref,
+      current_branch: currentBranch,
+      channel: gate.channel,
+      sha_before: result.sha_before,
+      sha_after: result.sha_after,
+      fabrication_signals: gate.fabrication_signals
+    },
+    config2?.audit
+  );
+  const hints = [
+    mode === "rebase" ? `Rebased '${currentLabel}' onto '${input.ref}' (${result.sha_before ?? "?"} \u2192 ${result.sha_after ?? "?"}).` : `Squash-staged '${input.ref}' into '${currentLabel}' \u2014 NOT committed. Commit the squashed change via rsct_request_commit.`
+  ];
+  const bootstrap = evaluateBootstrapMarker({ projectRoot, now });
+  if (bootstrap.status !== "fresh" && bootstrap.hint) hints.push(bootstrap.hint);
+  if (!record2.ok) {
+    hints.push(`\u26A0 ${mode} landed but the approval could not be recorded as used: ${record2.error}.`);
+  }
+  const donePlan = currentPlan ?? findActivePlan(projectRoot);
+  if (donePlan) {
+    const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
+    hints.push(`${report.hint} Record keep|delete with rsct_plan_dispose.`);
+  }
+  return base({
+    status: mode === "rebase" ? "rebased" : "squashed",
+    channel: gate.channel,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    sha_before: result.sha_before,
+    sha_after: result.sha_after,
+    branch_check: { protected: currentProtected, override_used: currentProtected },
+    bootstrap_marker: bootstrap,
+    ...auditFields7(audit),
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error,
+    hints
+  });
+}
+
 // src/tools/phase-verification-start.ts
 init_esm_shims();
 
@@ -29609,7 +29881,7 @@ var phaseVerificationStartTool = {
     additionalProperties: false
   }
 };
-function auditFields7(audit) {
+function auditFields8(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29652,7 +29924,7 @@ async function phaseVerificationStartHandler(rawInput) {
       },
       config2?.audit
     );
-    const fields2 = auditFields7(skipAudit);
+    const fields2 = auditFields8(skipAudit);
     return {
       status: "skipped_tier",
       rsct_installed: resolution.rsct_installed,
@@ -29725,7 +29997,7 @@ async function phaseVerificationStartHandler(rawInput) {
       config2?.audit
     );
   }
-  const fields = auditFields7(startAudit);
+  const fields = auditFields8(startAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29830,7 +30102,7 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function auditFields8(audit) {
+function auditFields9(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29894,7 +30166,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29926,7 +30198,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29975,7 +30247,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -30040,7 +30312,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     config2?.audit
   );
   const record2 = recordApproval(gate.approval, { projectRoot, now });
-  const fields = auditFields8(completeAudit);
+  const fields = auditFields9(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30583,7 +30855,7 @@ function nextPhase(current) {
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
   return PHASE_ORDER[idx + 1];
 }
-function auditFields9(audit) {
+function auditFields10(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30609,7 +30881,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit2);
+    const fields2 = auditFields10(audit2);
     return {
       status: "phase_already_active",
       phase: input.phase,
@@ -30649,7 +30921,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields9(audit);
+  const fields = auditFields10(audit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30717,7 +30989,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30749,7 +31021,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30796,7 +31068,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30839,7 +31111,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields9(completeAudit);
+  const fields = auditFields10(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     if (recommended) {
@@ -31269,7 +31541,7 @@ var phaseCodeStartTool = {
     additionalProperties: false
   }
 };
-function auditFields10(audit) {
+function auditFields11(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31521,7 +31793,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields10(audit);
+    const fields = auditFields11(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31580,7 +31852,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields10(audit);
+    const fields = auditFields11(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31640,7 +31912,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields10(audit);
+    const fields = auditFields11(audit);
     return {
       status: "verification_gate_rejected",
       reject_kind: rejectKind,
@@ -31878,7 +32150,7 @@ var phaseTestStartTool = {
     additionalProperties: false
   }
 };
-function auditFields11(audit) {
+function auditFields12(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31985,7 +32257,7 @@ async function phaseTestStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields11(audit);
+    const fields = auditFields12(audit);
     return {
       status: "review_gate_rejected",
       reject_kind: rejectKind,
@@ -32105,7 +32377,7 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields12(audit) {
+function auditFields13(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -32179,7 +32451,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: "rejected",
       channel: null,
@@ -32215,7 +32487,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields12(abandonedAudit);
+  const fields = auditFields13(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -32358,7 +32630,7 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields13(audit) {
+function auditFields14(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -32432,7 +32704,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields13(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -32485,7 +32757,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields13(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -32537,7 +32809,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields13(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -32578,7 +32850,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields13(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -32615,7 +32887,7 @@ GH CLI will run in '${projectRoot}'.`
     },
     config2?.audit
   );
-  const fields = auditFields13(createdAudit);
+  const fields = auditFields14(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
@@ -33457,7 +33729,7 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields14(audit) {
+function auditFields15(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -33518,7 +33790,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields14(audit);
+  const fields = auditFields15(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,
@@ -33661,6 +33933,7 @@ var TOOLS = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  requestRebaseTool,
   planAuthorizeTool,
   planRevokeTool,
   planDisposeTool,
@@ -33701,6 +33974,7 @@ var HANDLERS = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_request_rebase: requestRebaseHandler,
   rsct_plan_authorize: planAuthorizeHandler,
   rsct_plan_revoke: planRevokeHandler,
   rsct_plan_dispose: planDisposeHandler,
