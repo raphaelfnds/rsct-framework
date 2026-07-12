@@ -525,33 +525,36 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
     now: FIXED_NOW,
   })
 
-  it('suggests deleting the working branch + plan files when the plan is complete', async () => {
+  // plan-lifecycle-v2 (Bloco 2.3): the cleanup trigger moved from the plan
+  // FILE's Status field to the plan_complete ACK (a merge only reaches
+  // post-success when the ack passed), and the hint now comes from
+  // planCleanupReport + points at rsct_plan_dispose (advisory-only).
+  it('surfaces the artifact-cleanup advisory (suggest delete) after a merge when progress is all-closed', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
-    writeFileSync(
-      join(tmpRoot, 'plan_foo.md'),
-      '# Plan\n\n| Field | Value |\n|---|---|\n| Status | completed |\n',
-    )
+    writeFileSync(join(tmpRoot, 'plan_foo.md'), '# Plan\n\n| Branch | feat/foo |\n| Status | completed |\n')
+    writeFileSync(join(tmpRoot, 'progress_foo.md'), '- [x] done\n')
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
       mergeInternal(),
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
-    expect(out.hints.some((h) => h.includes("working branch 'feat/foo'"))).toBe(true)
-    expect(out.hints.some((h) => h.includes('squash, or rebase'))).toBe(true)
+    expect(out.hints.some((h) => h.includes('rsct_plan_dispose'))).toBe(true)
+    expect(out.hints.some((h) => h.includes('looks complete'))).toBe(true)
   })
 
-  it('does NOT suggest cleanup when the plan is not complete', async () => {
+  // plan-lifecycle-v2 (Bloco 2.2): a plan_complete:true attestation that
+  // contradicts visible open `- [ ]` items in the plan's progress is now
+  // rejected mechanically, BEFORE the OS dialog.
+  it('REJECTS the merge when plan_complete is attested but the plan progress has open items', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
-    writeFileSync(
-      join(tmpRoot, 'plan_foo.md'),
-      '# Plan\n\n| Field | Value |\n|---|---|\n| Status | in progress |\n',
-    )
+    writeFileSync(join(tmpRoot, 'plan_foo.md'), '# Plan\n\n| Branch | feat/foo |\n| Status | in progress |\n')
+    writeFileSync(join(tmpRoot, 'progress_foo.md'), '- [ ] still open\n')
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
       mergeInternal(),
     )) as RequestMergeOutput
-    expect(out.status).toBe('merged')
-    expect(out.hints.some((h) => h.includes('working branch'))).toBe(false)
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
   })
 })
 

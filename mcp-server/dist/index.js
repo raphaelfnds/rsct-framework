@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join21 } = __require("path");
+    var { join: join22 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join21(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join22(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join21, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join22, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join21(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join21(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,7 +9461,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join21(__dirname$1, "..", "file.js");
+          return join22(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join21 = ",";
+            let join22 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join21 = `,
+                join22 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join21;
+                res += join22;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join21 = `,
+              join22 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join21;
+                separator = join22;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join21;
+              separator = join22;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join21 = ",";
+            let join22 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join21 = `,
+                join22 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join21;
+                res += join22;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join21 = `,
+              join22 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join21;
+                separator = join22;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join22 = `,
+              const join23 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join22;
+                res2 += join23;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join21 = `,
+            const join22 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join21, maximumBreadth);
+              res += stringifyTypedArray(value, join22, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join21;
+              separator = join22;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join21;
+                separator = join22;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join21;
+              separator = join22;
             }
             if (separator !== "") {
               res = `
@@ -22864,6 +22864,12 @@ function isGitRepo(projectRoot) {
   const out = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
   return out === "true";
 }
+function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
+  if (r.ok) return true;
+  if (r.exitCode === 1) return false;
+  return true;
+}
 function readWorktreeInfo(projectRoot) {
   if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
     return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
@@ -23251,6 +23257,16 @@ function stampReviewDecision(projectRoot, patch) {
   if (patch.decided_at !== void 0) merged.decided_at = patch.decided_at;
   if (patch.completed_at !== void 0) merged.completed_at = patch.completed_at;
   return writePhaseState(projectRoot, { ...baseState, review: merged });
+}
+function stampPlanDisposition(projectRoot, patch) {
+  const existing = readPhaseState(projectRoot);
+  const baseState = existing.state ?? {};
+  const merged = {
+    plan_slug: patch.plan_slug,
+    decision: patch.decision,
+    decided_at: patch.decided_at
+  };
+  return writePhaseState(projectRoot, { ...baseState, disposition: merged });
 }
 
 // src/lib/version.ts
@@ -23816,6 +23832,62 @@ function phaseSpecExists(projectRoot, slug) {
 function isPlanComplete(status) {
   if (!status) return false;
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status);
+}
+function findPlanByBranch(projectRoot, branch) {
+  let entries;
+  try {
+    entries = readdirSync(projectRoot);
+  } catch {
+    return null;
+  }
+  const winner = entries.filter((name) => /^(?:plan|spec)_.+\.md$/.test(name)).map((name) => {
+    const path2 = join(projectRoot, name);
+    return {
+      slug: name.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, ""),
+      mtime: safeMtime(path2),
+      branch: extractPlanMetadata(path2).branch
+    };
+  }).filter((e) => e.mtime !== null).filter((e) => e.branch !== null && e.branch === branch).sort((a, b) => b.mtime - a.mtime)[0];
+  return winner ? findPlanBySlug(projectRoot, winner.slug) : null;
+}
+function scanProgressCheckboxes(body) {
+  const norm = body.replace(/\r\n?/g, "\n");
+  let inFence = false;
+  let open = 0;
+  let closed = 0;
+  for (const line of norm.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^[ \t]*[-*+] \[ \]/.test(line)) open += 1;
+    else if (/^[ \t]*[-*+] \[[xX]\]/.test(line)) closed += 1;
+  }
+  return { open, closed };
+}
+function progressHasOpenItems(projectRoot, slug) {
+  const path2 = join(projectRoot, `progress_${slug}.md`);
+  let body;
+  try {
+    body = readFileSync(path2, "utf8");
+  } catch {
+    return false;
+  }
+  return scanProgressCheckboxes(body).open > 0;
+}
+function progressCompletionState(projectRoot, slug) {
+  const path2 = join(projectRoot, `progress_${slug}.md`);
+  let body;
+  try {
+    body = readFileSync(path2, "utf8");
+  } catch {
+    return "no_file";
+  }
+  const { open, closed } = scanProgressCheckboxes(body);
+  if (open > 0) return "has_open";
+  if (closed === 0) return "no_checkboxes";
+  return "all_closed";
 }
 function safeMtime(path2) {
   try {
@@ -27769,6 +27841,49 @@ function auditFields(r) {
 // src/tools/request-push.ts
 init_esm_shims();
 
+// src/lib/plan-cleanup.ts
+init_esm_shims();
+function retentionMode(config2) {
+  return config2?.plan_file_retention === "documented" ? "documented" : "ephemeral";
+}
+function planCleanupReport(projectRoot, slug, config2, executor = defaultGitExecutor) {
+  const documented = retentionMode(config2) === "documented";
+  const names = [`plan_${slug}.md`, `progress_${slug}.md`, `spec_${slug}.md`];
+  const artifacts = [];
+  for (const name of names) {
+    if (documented && name.startsWith("spec_")) continue;
+    if (existsSync(join(projectRoot, name))) {
+      artifacts.push({ name, tracked: gitIsTracked(projectRoot, name, executor) });
+    }
+  }
+  const completion = progressCompletionState(projectRoot, slug);
+  const can_suggest_delete = completion === "all_closed";
+  let hint;
+  if (artifacts.length === 0) {
+    hint = `No branch-local plan artifacts found for '${slug}'.`;
+  } else {
+    const loose = artifacts.filter((a) => !a.tracked).map((a) => a.name);
+    const tracked = artifacts.filter((a) => a.tracked).map((a) => a.name);
+    const parts = [];
+    parts.push(
+      can_suggest_delete ? `Plan '${slug}' looks complete (progress all-closed).` : `Plan '${slug}' progress is '${completion}' \u2014 NOT confirmed complete; keep the artifacts unless you are sure.`
+    );
+    if (loose.length > 0) {
+      parts.push(
+        can_suggest_delete ? `Loose (gitignored) artifacts you can remove: ${loose.join(", ")}.` : `Loose artifacts (keep for now): ${loose.join(", ")}.`
+      );
+    }
+    if (tracked.length > 0) {
+      parts.push(
+        `\u26A0 TRACKED artifacts \u2014 remove deliberately with \`git rm\` only if intended: ${tracked.join(", ")}.`
+      );
+    }
+    parts.push("(RSCT never auto-deletes plan artifacts \u2014 you remove them.)");
+    hint = parts.join(" ");
+  }
+  return { slug, artifacts, completion, can_suggest_delete, hint };
+}
+
 // src/lib/pre-merge-ack.ts
 init_esm_shims();
 var preMergeAckSchema = external_exports.object({
@@ -27793,10 +27908,13 @@ var PRE_MERGE_ACK_ITEMS = [
   "adr_confirmed",
   "issues_resolved"
 ];
-function evaluatePreMergeAck(ack, progressHasOpenItems) {
+function evaluatePreMergeAck(ack, progressHasOpenItems2) {
   if (ack === void 0) return { ok: false, kind: "pre_merge_ack_missing" };
   const failing = [];
   if (ack.plan_complete !== true) failing.push("plan_complete");
+  else if (progressHasOpenItems2 === true) {
+    failing.push("plan_complete (progress_<slug>.md still has open `- [ ]` items)");
+  }
   if (ack.adr_confirmed !== true) failing.push("adr_confirmed");
   if (ack.issues_resolved !== true) failing.push("issues_resolved");
   const attestedPositive = ack.adr_confirmed === true || ack.issues_resolved === true;
@@ -27864,7 +27982,9 @@ async function requestPushHandler(rawInput, internal = {}) {
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(branch, protectedList);
   if (branchProtected) {
-    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+    const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null;
+    const progressOpen = pushingPlan ? progressHasOpenItems(projectRoot, pushingPlan.slug) : void 0;
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision);
       const audit2 = appendAudit(
@@ -28086,11 +28206,14 @@ async function requestPushHandler(rawInput, internal = {}) {
       config2?.audit
     );
   }
-  const activePlan = findActivePlan(projectRoot);
-  if (activePlan && isPlanComplete(activePlan.status)) {
-    hints.push(
-      `\u2139 Plan '${activePlan.slug}' is marked complete. Optional, with your OK (not automated): delete plan_/progress_/spec_${activePlan.slug}.md so they never land on a protected branch.`
-    );
+  if (branchProtected) {
+    const donePlan = (branch ? findPlanByBranch(projectRoot, branch) : null) ?? findActivePlan(projectRoot);
+    if (donePlan) {
+      const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
+      hints.push(
+        `\u2139 Pushed to protected '${branchLabel}'. ${report.hint} Record keep|delete with rsct_plan_dispose, or remove the loose files yourself.`
+      );
+    }
   }
   return {
     status: "pushed",
@@ -28180,7 +28303,9 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+  const integratingPlan = findPlanByBranch(projectRoot, input.source_branch);
+  const progressOpen = integratingPlan ? progressHasOpenItems(projectRoot, integratingPlan.slug) : void 0;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision);
     const audit2 = appendAudit(
@@ -28491,10 +28616,11 @@ async function requestMergeHandler(rawInput, internal = {}) {
       config2?.audit
     );
   }
-  const activePlan = findActivePlan(projectRoot);
-  if (activePlan && isPlanComplete(activePlan.status)) {
+  const donePlan = integratingPlan ?? findActivePlan(projectRoot);
+  if (donePlan) {
+    const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
     hints.push(
-      `\u2139 Plan '${activePlan.slug}' is marked complete. Optional, with your OK (never automated): (1) delete the merged working branch '${input.source_branch}' (local + remote), and (2) delete plan_/progress_/spec_${activePlan.slug}.md so they never reach a protected branch. The same cleanup applies after a GitHub PR merge \u2014 merge commit, squash, or rebase.`
+      `\u2139 Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself \u2014 RSCT never auto-deletes.`
     );
   }
   return {
@@ -28884,6 +29010,108 @@ async function planRevokeHandler(rawInput, internal = {}) {
     hints: [
       `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`
     ]
+  };
+}
+
+// src/tools/plan-dispose.ts
+init_esm_shims();
+var planDisposeInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  plan_slug: external_exports.string().min(1).describe("The plan slug (as in plan_<slug>.md) whose artifacts to dispose."),
+  decision: external_exports.enum(["keep", "delete"]).describe("'keep' retains the plan artifacts; 'delete' advises removing the loose ones.")
+}).strict();
+var planDisposeTool = {
+  name: "rsct_plan_dispose",
+  description: 'plan-lifecycle-v2: record the keep|delete disposition for a plan slug and surface the ADVISORY artifact-cleanup report. Flow-INDEPENDENT \u2014 use it after ANY integration terminal, INCLUDING a GitHub PR merge/squash/rebase that never ran rsct_request_merge/_push (the blind spot those tools cannot see). ADVISORY-ONLY (Fork 2/A): decision:"delete" NEVER auto-deletes \u2014 it lists the loose gitignored plan_/progress_/spec_ files for YOU to remove, and flags any TRACKED ones for a deliberate `git rm`. The decision is recorded once (keyed by plan_slug, with a read-side slug guard) so a later action does not re-prompt. NOT \xA7C-gated \u2014 it records intent and prints advice; it performs no git or filesystem mutation.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      },
+      plan_slug: {
+        type: "string",
+        description: "The plan slug (as in plan_<slug>.md) whose artifacts to dispose."
+      },
+      decision: {
+        type: "string",
+        enum: ["keep", "delete"],
+        description: "'keep' retains the artifacts; 'delete' advises removing the loose ones."
+      }
+    },
+    required: ["plan_slug", "decision"],
+    additionalProperties: false
+  }
+};
+function auditFields6(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return { audit_path: audit.path ?? null, audit_error: audit.error ?? "write_failed" };
+}
+async function planDisposeHandler(rawInput, internal = {}) {
+  const input = planDisposeInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const write = stampPlanDisposition(projectRoot, {
+    plan_slug: input.plan_slug,
+    decision: input.decision,
+    decided_at: now.toISOString()
+  });
+  const report = planCleanupReport(projectRoot, input.plan_slug, config2 ?? null);
+  if (!write.ok) {
+    const reason = write.reason === "locked" ? `another session is editing phase-state.json (locked ${write.lock_age_ms}ms ago) \u2014 wait and retry` : `phase-state.json write failed: ${write.error}`;
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_dispose.state_write_failed",
+        tool: "rsct_plan_dispose",
+        plan_slug: input.plan_slug,
+        decision: input.decision,
+        reason
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      plan_slug: input.plan_slug,
+      decision: input.decision,
+      artifacts: report.artifacts,
+      can_suggest_delete: report.can_suggest_delete,
+      ...auditFields6(audit2),
+      hints: [`\u26A0 disposition NOT recorded \u2014 ${reason}. ${report.hint}`]
+    };
+  }
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "plan_dispose.recorded",
+      tool: "rsct_plan_dispose",
+      plan_slug: input.plan_slug,
+      decision: input.decision,
+      decided_at: now.toISOString()
+    },
+    config2?.audit
+  );
+  const hints = [];
+  if (input.decision === "delete") {
+    hints.push(
+      report.can_suggest_delete ? `Disposition 'delete' recorded for '${input.plan_slug}'. ${report.hint}` : `Disposition 'delete' recorded, but the plan is NOT confirmed complete (progress='${report.completion}') \u2014 double-check before removing anything. ${report.hint}`
+    );
+  } else {
+    hints.push(`Disposition 'keep' recorded for '${input.plan_slug}' \u2014 artifacts retained. ${report.hint}`);
+  }
+  return {
+    status: "recorded",
+    plan_slug: input.plan_slug,
+    decision: input.decision,
+    artifacts: report.artifacts,
+    can_suggest_delete: report.can_suggest_delete,
+    ...auditFields6(audit),
+    hints
   };
 }
 
@@ -29381,7 +29609,7 @@ var phaseVerificationStartTool = {
     additionalProperties: false
   }
 };
-function auditFields6(audit) {
+function auditFields7(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29424,7 +29652,7 @@ async function phaseVerificationStartHandler(rawInput) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(skipAudit);
+    const fields2 = auditFields7(skipAudit);
     return {
       status: "skipped_tier",
       rsct_installed: resolution.rsct_installed,
@@ -29497,7 +29725,7 @@ async function phaseVerificationStartHandler(rawInput) {
       config2?.audit
     );
   }
-  const fields = auditFields6(startAudit);
+  const fields = auditFields7(startAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29602,7 +29830,7 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function auditFields7(audit) {
+function auditFields8(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29666,7 +29894,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29698,7 +29926,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29747,7 +29975,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields8(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29812,7 +30040,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     config2?.audit
   );
   const record2 = recordApproval(gate.approval, { projectRoot, now });
-  const fields = auditFields7(completeAudit);
+  const fields = auditFields8(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30355,7 +30583,7 @@ function nextPhase(current) {
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
   return PHASE_ORDER[idx + 1];
 }
-function auditFields8(audit) {
+function auditFields9(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30381,7 +30609,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit2);
+    const fields2 = auditFields9(audit2);
     return {
       status: "phase_already_active",
       phase: input.phase,
@@ -30421,7 +30649,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields8(audit);
+  const fields = auditFields9(audit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30489,7 +30717,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30521,7 +30749,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30568,7 +30796,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30611,7 +30839,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields8(completeAudit);
+  const fields = auditFields9(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     if (recommended) {
@@ -31041,7 +31269,7 @@ var phaseCodeStartTool = {
     additionalProperties: false
   }
 };
-function auditFields9(audit) {
+function auditFields10(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31293,7 +31521,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields10(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31352,7 +31580,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields10(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31412,7 +31640,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields10(audit);
     return {
       status: "verification_gate_rejected",
       reject_kind: rejectKind,
@@ -31650,7 +31878,7 @@ var phaseTestStartTool = {
     additionalProperties: false
   }
 };
-function auditFields10(audit) {
+function auditFields11(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31757,7 +31985,7 @@ async function phaseTestStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields10(audit);
+    const fields = auditFields11(audit);
     return {
       status: "review_gate_rejected",
       reject_kind: rejectKind,
@@ -31877,7 +32105,7 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields11(audit) {
+function auditFields12(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31951,7 +32179,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields12(audit);
     return {
       status: "rejected",
       channel: null,
@@ -31987,7 +32215,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields11(abandonedAudit);
+  const fields = auditFields12(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -32130,7 +32358,7 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields12(audit) {
+function auditFields13(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -32204,7 +32432,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -32257,7 +32485,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -32309,7 +32537,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -32350,7 +32578,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -32387,7 +32615,7 @@ GH CLI will run in '${projectRoot}'.`
     },
     config2?.audit
   );
-  const fields = auditFields12(createdAudit);
+  const fields = auditFields13(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
@@ -33229,7 +33457,7 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields13(audit) {
+function auditFields14(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -33290,7 +33518,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields13(audit);
+  const fields = auditFields14(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,
@@ -33435,6 +33663,7 @@ var TOOLS = [
   requestMergeTool,
   planAuthorizeTool,
   planRevokeTool,
+  planDisposeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -33474,6 +33703,7 @@ var HANDLERS = {
   rsct_request_merge: requestMergeHandler,
   rsct_plan_authorize: planAuthorizeHandler,
   rsct_plan_revoke: planRevokeHandler,
+  rsct_plan_dispose: planDisposeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,

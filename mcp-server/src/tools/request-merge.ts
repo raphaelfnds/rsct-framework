@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
-import { findActivePlan, isPlanComplete } from '../lib/plan.js'
+import {
+  findActivePlan,
+  findPlanByBranch,
+  progressHasOpenItems,
+} from '../lib/plan.js'
+import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
   gitMerge,
@@ -184,7 +189,16 @@ export async function requestMergeHandler(
   // ack rejects in chat WITHOUT popping the §C OS dialog (V-P1·PH-5). A reject
   // here returns before the gate, so the dev_approval is never validated or
   // consumed. A merge is always an integration event ⇒ the ack is always required.
-  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack)
+  // plan-lifecycle-v2 (Bloco 2.2, HOLE A): resolve the plan being integrated by
+  // the SOURCE branch (not the mtime-winner findActivePlan) and, when found,
+  // feed the LIGHT plan_complete cross-check the boolean — does that plan's
+  // progress file still have open `- [ ]` items? A `plan_complete:true`
+  // attestation that contradicts visible open items is rejected mechanically.
+  const integratingPlan = findPlanByBranch(projectRoot, input.source_branch)
+  const progressOpen = integratingPlan
+    ? progressHasOpenItems(projectRoot, integratingPlan.slug)
+    : undefined
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen)
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision)
     const audit = appendAudit(
@@ -519,10 +533,17 @@ export async function requestMergeHandler(
   // commit / squash / rebase) — those run via `gh pr merge` / the web UI, not
   // this tool, so recall it from §D / the plan-tracking memory there. The dev
   // decides; nothing is automated.
-  const activePlan = findActivePlan(projectRoot)
-  if (activePlan && isPlanComplete(activePlan.status)) {
+  // plan-lifecycle-v2 (Bloco 2.3, Fork 2/A — ADVISORY-ONLY): the ack that let
+  // this merge proceed attested plan_complete, so surface the artifact-cleanup
+  // advisory for the plan on the merged branch (resolved by branch — HOLE A —
+  // falling back to the active plan). Never auto-deletes; points at
+  // rsct_plan_dispose. The same cleanup applies after a GitHub PR merge (merge
+  // commit / squash / rebase), which run via `gh pr merge`, not this tool.
+  const donePlan = integratingPlan ?? findActivePlan(projectRoot)
+  if (donePlan) {
+    const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)
     hints.push(
-      `ℹ Plan '${activePlan.slug}' is marked complete. Optional, with your OK (never automated): (1) delete the merged working branch '${input.source_branch}' (local + remote), and (2) delete plan_/progress_/spec_${activePlan.slug}.md so they never reach a protected branch. The same cleanup applies after a GitHub PR merge — merge commit, squash, or rebase.`,
+      `ℹ Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself — RSCT never auto-deletes.`,
     )
   }
 
