@@ -135,9 +135,11 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const knowledge = readKnowledgeIndex(resolution.root)
 
   // CAP-31: stamp bootstrap marker — load_context is the §0 entry
-  // point. Best-effort write; failures swallowed.
+  // point. Best-effort write; failures swallowed. plan-lifecycle-v2 (D4):
+  // load_context is the ONLY caller that actually re-reads plan/decisions/
+  // knowledge, so it (and only it) clears the context_stale re-bootstrap flag.
   if (resolution.rsct_installed) {
-    stampBootstrapMarker(resolution.root)
+    stampBootstrapMarker(resolution.root, { clearStale: true })
   }
 
   const excerptCount = input.decisions_excerpt_count

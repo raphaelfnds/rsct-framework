@@ -23208,13 +23208,15 @@ function tierRank(tier) {
   return TIER_RANK[tier] ?? 0;
 }
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
-function stampBootstrapMarker(projectRoot, now = /* @__PURE__ */ new Date()) {
+function stampBootstrapMarker(projectRoot, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
   const newState = {
     ...baseState,
     bootstrap_at: now.toISOString()
   };
+  if (opts.clearStale) delete newState.context_stale;
   return writePhaseState(projectRoot, newState);
 }
 function evaluateBootstrapMarker(args) {
@@ -24183,7 +24185,7 @@ async function loadContextHandler(rawInput) {
   const decisionsSnapshot = readDecisions(resolution.root);
   const knowledge = readKnowledgeIndex(resolution.root);
   if (resolution.rsct_installed) {
-    stampBootstrapMarker(resolution.root);
+    stampBootstrapMarker(resolution.root, { clearStale: true });
   }
   const excerptCount = input.decisions_excerpt_count;
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse();
@@ -26297,7 +26299,10 @@ var phaseStateOverrideSchema = external_exports.object({
   spec_slug: external_exports.string().optional(),
   phase: external_exports.string().optional(),
   scope_globs: external_exports.array(external_exports.string()).optional(),
-  started_at: external_exports.string().optional()
+  started_at: external_exports.string().optional(),
+  // plan-lifecycle-v2 (Bloco 3.3, F9): the override must be able to carry the
+  // re-bootstrap flag so tests / the guard can simulate a stale context.
+  context_stale: external_exports.object({ since: external_exports.string(), reason: external_exports.enum(["plan_closed", "pivot"]) }).strict().optional()
 }).strict();
 var checkEditScopeInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
@@ -26327,7 +26332,15 @@ var checkEditScopeTool = {
           spec_slug: { type: "string" },
           phase: { type: "string" },
           scope_globs: { type: "array", items: { type: "string" } },
-          started_at: { type: "string" }
+          started_at: { type: "string" },
+          context_stale: {
+            type: "object",
+            properties: {
+              since: { type: "string" },
+              reason: { type: "string", enum: ["plan_closed", "pivot"] }
+            },
+            additionalProperties: false
+          }
         },
         additionalProperties: false
       }
@@ -26350,6 +26363,7 @@ async function checkEditScopeHandler(rawInput) {
     if (override.phase !== void 0) rebuilt.phase = override.phase;
     if (override.scope_globs !== void 0) rebuilt.scope_globs = override.scope_globs;
     if (override.started_at !== void 0) rebuilt.started_at = override.started_at;
+    if (override.context_stale !== void 0) rebuilt.context_stale = override.context_stale;
     state = rebuilt;
   } else {
     const read = readPhaseState(resolution.root);
@@ -26360,7 +26374,9 @@ async function checkEditScopeHandler(rawInput) {
   const scope_globs = state?.scope_globs ?? [];
   let status;
   let matched_glob = null;
-  if (!phase_state_exists || state === null || scope_globs.length === 0) {
+  if (state?.context_stale) {
+    status = "stale_context";
+  } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = "unknown";
   } else {
     const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root);
@@ -26393,6 +26409,12 @@ function buildHints8(input) {
   const hints = [];
   if (!input.rsct_installed) {
     hints.push("No .rsct.json \u2014 running scope check with no project context.");
+  }
+  if (input.status === "stale_context") {
+    hints.push(
+      "\u26D4 Context is STALE \u2014 a plan closed (or a pivot was declared). Run rsct_status + rsct_load_context to re-read plan / universe / decisions before editing. This edit is blocked until context is reloaded."
+    );
+    return hints;
   }
   if (!input.phase_state_exists) {
     hints.push(
@@ -31090,6 +31112,9 @@ async function gatePhaseComplete(input, config2, internal = {}) {
   delete newState.phase;
   delete newState.scope_globs;
   delete newState.started_at;
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
+  }
   const writeResult = writePhaseState(input.projectRoot, newState);
   const record2 = recordApproval(gate.approval, {
     projectRoot: input.projectRoot,

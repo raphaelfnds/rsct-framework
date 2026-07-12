@@ -235,6 +235,19 @@ export interface PlanDispositionBlock {
   decided_at: string
 }
 
+/**
+ * plan-lifecycle-v2 (Bloco 3.1): the "re-bootstrap needed" flag. A POSITIVE
+ * marker set when a plan closes (or on a declared pivot) — NOT an overload of
+ * the decaying `bootstrap_at` timestamp. While set, the edit-scope guard treats
+ * managed edits as blocked (`stale_context`) until `rsct_load_context` actually
+ * re-reads plan/decisions/knowledge and clears it (D4: only load_context
+ * clears; a cheap rsct_status must not discharge the re-load obligation).
+ */
+export interface ContextStaleBlock {
+  since: string
+  reason: 'plan_closed' | 'pivot'
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
@@ -251,6 +264,8 @@ export interface PhaseState {
   free_commit_budget?: FreeCommitBudget
   /** plan-lifecycle-v2: the keep|delete disposition for a plan's artifacts (see PlanDispositionBlock). */
   disposition?: PlanDispositionBlock
+  /** plan-lifecycle-v2: the re-bootstrap-needed flag (see ContextStaleBlock). */
+  context_stale?: ContextStaleBlock
   /**
    * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
    * call. Mutating tools (phase_code_start, request_*) surface a warning
@@ -514,15 +529,47 @@ export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
  */
 export function stampBootstrapMarker(
   projectRoot: string,
-  now: Date = new Date(),
+  opts: { now?: Date; clearStale?: boolean } = {},
 ): WritePhaseStateResult {
+  const now = opts.now ?? new Date()
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
   const newState: PhaseState = {
     ...baseState,
     bootstrap_at: now.toISOString(),
   }
+  // plan-lifecycle-v2 (D4): clear the re-bootstrap flag ONLY when the caller
+  // actually re-loaded context. rsct_load_context passes clearStale:true;
+  // rsct_status stamps bootstrap_at but must NOT discharge the re-load
+  // obligation (a cheap diagnostic call is not a real re-load).
+  if (opts.clearStale) delete newState.context_stale
   return writePhaseState(projectRoot, newState)
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 3.2): set the `context_stale` flag. Called when a
+ * plan reaches its terminal phase or a declared pivot happens. Best-effort,
+ * additive read-modify-write (preserves every other field). Cleared only via
+ * {@link stampBootstrapMarker} with `clearStale:true` (i.e. rsct_load_context).
+ */
+export function stampContextStale(
+  projectRoot: string,
+  reason: ContextStaleBlock['reason'],
+  now: Date = new Date(),
+): WritePhaseStateResult {
+  const existing = readPhaseState(projectRoot)
+  const baseState: PhaseState = existing.state ?? {}
+  return writePhaseState(projectRoot, {
+    ...baseState,
+    context_stale: { since: now.toISOString(), reason },
+  })
+}
+
+/** Read the context_stale flag (null when absent). */
+export function readContextStale(
+  state: PhaseState | null | undefined,
+): ContextStaleBlock | null {
+  return state?.context_stale ?? null
 }
 
 /**
