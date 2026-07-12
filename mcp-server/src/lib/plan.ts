@@ -108,6 +108,105 @@ export function isPlanComplete(status: string | null | undefined): boolean {
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status)
 }
 
+/**
+ * plan-lifecycle-v2 (Bloco 2.2 / HOLE A): resolve the plan whose `Branch`
+ * metadata equals `branch` — the plan actually being integrated — rather than
+ * the mtime-winner {@link findActivePlan}. The integration gate keys the
+ * plan_complete check on THIS so an agent can't touch an unrelated completed
+ * plan to win mtime and pass the check while the real plan still has open
+ * items. Returns the most-recent matching plan, or null when none matches.
+ */
+export function findPlanByBranch(projectRoot: string, branch: string): ActivePlan | null {
+  let entries: string[]
+  try {
+    entries = readdirSync(projectRoot)
+  } catch {
+    return null
+  }
+  const winner = entries
+    .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
+    .map((name) => {
+      const path = join(projectRoot, name)
+      return {
+        slug: name.replace(/^(?:plan|spec)_/, '').replace(/\.md$/, ''),
+        mtime: safeMtime(path),
+        branch: extractPlanMetadata(path).branch,
+      }
+    })
+    .filter((e): e is { slug: string; mtime: number; branch: string | null } => e.mtime !== null)
+    .filter((e) => e.branch !== null && e.branch === branch)
+    .sort((a, b) => b.mtime - a.mtime)[0]
+  return winner ? findPlanBySlug(projectRoot, winner.slug) : null
+}
+
+export type ProgressCompletionState = 'no_file' | 'no_checkboxes' | 'has_open' | 'all_closed'
+
+/**
+ * Scan a `progress_<slug>.md` body for GitHub-style task checkboxes, ignoring
+ * any inside fenced code blocks (a `- [ ]` in a doc example must not count).
+ * CRLF-normalized so Windows autocrlf files parse identically. Matches indented
+ * and `*`/`+` list markers, not just column-0 `-`.
+ */
+function scanProgressCheckboxes(body: string): { open: number; closed: number } {
+  const norm = body.replace(/\r\n?/g, '\n')
+  let inFence = false
+  let open = 0
+  let closed = 0
+  for (const line of norm.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+    if (/^[ \t]*[-*+] \[ \]/.test(line)) open += 1
+    else if (/^[ \t]*[-*+] \[[xX]\]/.test(line)) closed += 1
+  }
+  return { open, closed }
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.2, D2 — LIGHT plan_complete check): does the
+ * plan's progress file have any OPEN `- [ ]` items? Returns FALSE when the file
+ * is absent/empty — the light check is lenient (it only blocks a
+ * `plan_complete:true` attestation on VISIBLE open items; it never
+ * machine-verifies completion). The destructive cleanup gate uses the stricter
+ * {@link progressCompletionState} instead.
+ */
+export function progressHasOpenItems(projectRoot: string, slug: string): boolean {
+  const path = join(projectRoot, `progress_${slug}.md`)
+  let body: string
+  try {
+    body = readFileSync(path, 'utf8')
+  } catch {
+    return false
+  }
+  return scanProgressCheckboxes(body).open > 0
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.3 — FAIL-CLOSED destructive gate): the POSITIVE
+ * completion evidence for a plan's progress file. Only `'all_closed'` (≥1
+ * closed item, zero open) authorizes suggesting artifact cleanup; a missing
+ * file, an empty/checkbox-less file, or any open item all BLOCK — mere absence
+ * of open items never vacuously green-lights destroying an unfinished plan.
+ */
+export function progressCompletionState(
+  projectRoot: string,
+  slug: string,
+): ProgressCompletionState {
+  const path = join(projectRoot, `progress_${slug}.md`)
+  let body: string
+  try {
+    body = readFileSync(path, 'utf8')
+  } catch {
+    return 'no_file'
+  }
+  const { open, closed } = scanProgressCheckboxes(body)
+  if (open > 0) return 'has_open'
+  if (closed === 0) return 'no_checkboxes'
+  return 'all_closed'
+}
+
 function safeMtime(path: string): number | null {
   try {
     return statSync(path).mtimeMs

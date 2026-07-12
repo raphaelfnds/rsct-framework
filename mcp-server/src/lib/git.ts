@@ -159,6 +159,47 @@ function isGitRepo(projectRoot: string): boolean {
   return out === 'true'
 }
 
+/**
+ * plan-lifecycle-v2 (Bloco 2.3): is `relPath` TRACKED by git (`git ls-files
+ * --error-unmatch`)? Used only to LABEL a plan artifact at cleanup time
+ * (tracked → surfaced as `deferred_tracked`, never fs.rm'd). FAIL-SAFE: any
+ * ambiguous git error is treated as TRACKED so a real git failure can never
+ * green-light deleting something that might be under version control. Only a
+ * clean exit-1 ("not tracked") returns false.
+ */
+export function gitIsTracked(
+  projectRoot: string,
+  relPath: string,
+  executor: GitExecutor = defaultGitExecutor,
+): boolean {
+  const r = executor(projectRoot, ['ls-files', '--error-unmatch', '--', relPath])
+  if (r.ok) return true
+  if (r.exitCode === 1) return false
+  return true // fail-safe: unknown error → assume tracked
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.4): is `branch`'s tip an ancestor of `target`
+ * (i.e. reported by `git branch --merged <target>`)? Used for retroactive
+ * reconciliation. NOTE: this is blind to SQUASH and REBASE merges (they create
+ * new SHAs) and to already-deleted branches — the `gh pr list` signal covers
+ * those; this local check is the cheap first pass. Returns false on any git
+ * failure (never falsely claims merged).
+ */
+export function gitBranchMerged(
+  projectRoot: string,
+  branch: string,
+  target: string,
+  executor: GitExecutor = defaultGitExecutor,
+): boolean {
+  const r = executor(projectRoot, ['branch', '--merged', target])
+  if (!r.ok) return false
+  return r.stdout
+    .split('\n')
+    .map((l) => l.replace(/^[*+]?\s*/, '').trim())
+    .includes(branch)
+}
+
 export interface WorktreeInfo {
   in_git_repo: boolean
   /**
@@ -401,6 +442,54 @@ export function gitMerge(
 
   const sha_before = getHeadSha(projectRoot, executor)
   const exec = executor(projectRoot, args)
+  if (!exec.ok) {
+    const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
+    if (exec.stderr) result.stderr = exec.stderr.trim()
+    if (exec.stdout) result.stdout = exec.stdout.trim()
+    if (exec.error) result.error = exec.error
+    return result
+  }
+  const sha_after = getHeadSha(projectRoot, executor)
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() }
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.5): run `git rebase <upstream>` via the injectable
+ * executor, capturing HEAD before/after. Never throws — conflicts / missing
+ * upstream surface via `ok: false` (the caller aborts nothing; the working tree
+ * is left as git leaves it, and stderr says so). Reuses {@link GitMergeResult}.
+ */
+export function gitRebase(
+  projectRoot: string,
+  upstream: string,
+  executor: GitExecutor = defaultGitExecutor,
+): GitMergeResult {
+  const sha_before = getHeadSha(projectRoot, executor)
+  const exec = executor(projectRoot, ['rebase', upstream])
+  if (!exec.ok) {
+    const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
+    if (exec.stderr) result.stderr = exec.stderr.trim()
+    if (exec.stdout) result.stdout = exec.stdout.trim()
+    if (exec.error) result.error = exec.error
+    return result
+  }
+  const sha_after = getHeadSha(projectRoot, executor)
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() }
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.5): run `git merge --squash <sourceBranch>` — it
+ * STAGES the combined change but does NOT commit (git's `--squash` semantics),
+ * so `sha_after` normally equals `sha_before`; the caller commits separately
+ * (through the §C gate). Never throws — conflicts surface via `ok: false`.
+ */
+export function gitSquash(
+  projectRoot: string,
+  sourceBranch: string,
+  executor: GitExecutor = defaultGitExecutor,
+): GitMergeResult {
+  const sha_before = getHeadSha(projectRoot, executor)
+  const exec = executor(projectRoot, ['merge', '--squash', sourceBranch])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
     if (exec.stderr) result.stderr = exec.stderr.trim()

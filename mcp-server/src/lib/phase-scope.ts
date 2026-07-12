@@ -222,6 +222,19 @@ export interface PhaseReviewBlock {
   completed_at?: string
 }
 
+/**
+ * plan-lifecycle-v2 (Bloco 2.1): the keep|delete decision for a plan's
+ * branch-local `plan_`/`progress_`/`spec_` artifacts at integration time,
+ * keyed by `plan_slug`. Recorded ONCE (ask-once, mirroring PhaseReviewBlock)
+ * so a merge followed by a push of the merged result does NOT re-prompt.
+ * Survives the generic phase-complete; wiped by phase_abandon.
+ */
+export interface PlanDispositionBlock {
+  plan_slug: string
+  decision: 'keep' | 'delete'
+  decided_at: string
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
@@ -236,6 +249,8 @@ export interface PhaseState {
   plan_authorization?: PlanAuthorizationBlock
   /** plan-lifecycle-v2: per-plan free-commit budget/ceiling (see FreeCommitBudget). */
   free_commit_budget?: FreeCommitBudget
+  /** plan-lifecycle-v2: the keep|delete disposition for a plan's artifacts (see PlanDispositionBlock). */
+  disposition?: PlanDispositionBlock
   /**
    * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
    * call. Mutating tools (phase_code_start, request_*) surface a warning
@@ -641,4 +656,38 @@ export function stampReviewDecision(
   if (patch.decided_at !== undefined) merged.decided_at = patch.decided_at
   if (patch.completed_at !== undefined) merged.completed_at = patch.completed_at
   return writePhaseState(projectRoot, { ...baseState, review: merged })
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.1): record the keep|delete disposition for a
+ * plan's artifacts, keyed by `plan_slug`. Recorded ONCE — the block is
+ * replaced wholesale each call (a single decision, not accumulated), so a
+ * prior decision for a DIFFERENT plan never carries over. Read it back with
+ * {@link readPlanDisposition} (which enforces the slug match).
+ */
+export function stampPlanDisposition(
+  projectRoot: string,
+  patch: { plan_slug: string; decision: 'keep' | 'delete'; decided_at: string },
+): WritePhaseStateResult {
+  const existing = readPhaseState(projectRoot)
+  const baseState: PhaseState = existing.state ?? {}
+  const merged: PlanDispositionBlock = {
+    plan_slug: patch.plan_slug,
+    decision: patch.decision,
+    decided_at: patch.decided_at,
+  }
+  return writePhaseState(projectRoot, { ...baseState, disposition: merged })
+}
+
+/**
+ * Read a plan's disposition, enforcing the READ-side slug guard (Cluster A
+ * F4): the block is returned ONLY when `disposition.plan_slug === slug`, so a
+ * stale `delete` recorded for plan A can never be applied to plan B's files.
+ */
+export function readPlanDisposition(
+  state: PhaseState | null | undefined,
+  slug: string,
+): PlanDispositionBlock | null {
+  const d = state?.disposition
+  return d && d.plan_slug === slug ? d : null
 }

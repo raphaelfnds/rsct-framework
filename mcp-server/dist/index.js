@@ -22662,6 +22662,9 @@ var RsctConfigSchema = external_exports.object({
   // branches, it should uninstall `.rsct.json`.
   protected_branches: external_exports.array(external_exports.string().min(1)).min(1).optional(),
   test_framework: external_exports.string().optional(),
+  // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
+  // tolerant of its presence). Absent ⇒ 'ephemeral'.
+  plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -27790,7 +27793,7 @@ var PRE_MERGE_ACK_ITEMS = [
   "adr_confirmed",
   "issues_resolved"
 ];
-function evaluatePreMergeAck(ack) {
+function evaluatePreMergeAck(ack, progressHasOpenItems) {
   if (ack === void 0) return { ok: false, kind: "pre_merge_ack_missing" };
   const failing = [];
   if (ack.plan_complete !== true) failing.push("plan_complete");

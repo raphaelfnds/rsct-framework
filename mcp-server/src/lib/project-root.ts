@@ -49,6 +49,15 @@ export interface RsctConfig {
   }
   protected_branches?: string[]
   test_framework?: string
+  /**
+   * plan-lifecycle-v2 toggle: how the branch-local plan tracking artifacts are
+   * treated. `ephemeral` (default / absent) = today's behavior (gitignored,
+   * cleaned at integration). `documented` = `spec_<slug>.md` is tracked at the
+   * project ROOT and never suggested for deletion (progress_ stays gitignored).
+   * NB: named `plan_file_retention`, NOT `plan_tracking` — the latter is the
+   * PH-1 code-start gate vocabulary and would collide.
+   */
+  plan_file_retention?: 'ephemeral' | 'documented'
   install?: {
     applied_at?: string
     mode?: string
@@ -172,6 +181,9 @@ const RsctConfigSchema = z
     // branches, it should uninstall `.rsct.json`.
     protected_branches: z.array(z.string().min(1)).min(1).optional(),
     test_framework: z.string().optional(),
+    // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
+    // tolerant of its presence). Absent ⇒ 'ephemeral'.
+    plan_file_retention: z.enum(['ephemeral', 'documented']).optional(),
     install: z
       .object({
         applied_at: z.string().optional(),
