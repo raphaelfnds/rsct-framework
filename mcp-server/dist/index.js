@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join20 } = __require("path");
+    var { join: join21 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join20(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join21(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join20, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join21, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join21(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join21(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,7 +9461,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join20(__dirname$1, "..", "file.js");
+          return join21(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join20 = ",";
+            let join21 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join20 = `,
+                join21 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join20;
+                res += join21;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join20 = `,
+              join21 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join20;
+                separator = join21;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join20;
+              separator = join21;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join20 = ",";
+            let join21 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join20 = `,
+                join21 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join20;
+                res += join21;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join20 = `,
+              join21 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join20;
+                separator = join21;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join21 = `,
+              const join22 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join21;
+                res2 += join22;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join20 = `,
+            const join21 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join20, maximumBreadth);
+              res += stringifyTypedArray(value, join21, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join20;
+              separator = join21;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join20;
+                separator = join21;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join20;
+              separator = join21;
             }
             if (separator !== "") {
               res = `
@@ -22618,8 +22618,18 @@ var RsctApprovalModesSchema = external_exports.object({
   // rejects the whole config (rsct_installed=false) rather than silently
   // granting an over-wide batch window.
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
-  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional()
-}).strict();
+  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
+  // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
+  // still nulls the whole config, so a config-side attempt to grant an
+  // over-wide free-commit window is rejected loudly.
+  free_commit_max: external_exports.number().int().min(1).max(50).optional(),
+  free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
+  free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
+  plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
+  // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
+  // enforced at the re-arm use-site via min(now+slide, abs).
+  plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
+}).strip();
 var RsctAuditConfigSchema = external_exports.object({
   // `false` is the documented bypass vector — schema literal blocks it.
   // Absent or `true` are equivalent (audit defaults on).
@@ -22798,6 +22808,50 @@ function getStagedPaths(projectRoot) {
   const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--name-only", "-z"]);
   if (raw === null) return null;
   return raw.split("\0").map((p) => p.replace(/\\/g, "/")).filter((p) => p.length > 0);
+}
+function getStagedStats(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--numstat", "-z"]);
+  if (raw === null) return null;
+  return parseNumstatZ(raw);
+}
+function parseNumstatZ(raw) {
+  const tokens = raw.split("\0");
+  const paths = [];
+  let insertions = 0;
+  let deletions = 0;
+  let i = 0;
+  while (i < tokens.length) {
+    const tok = tokens[i];
+    if (tok === "") {
+      i += 1;
+      continue;
+    }
+    const firstTab = tok.indexOf("	");
+    const secondTab = firstTab >= 0 ? tok.indexOf("	", firstTab + 1) : -1;
+    if (firstTab < 0 || secondTab < 0) {
+      i += 1;
+      continue;
+    }
+    const addedRaw = tok.slice(0, firstTab);
+    const deletedRaw = tok.slice(firstTab + 1, secondTab);
+    const rest = tok.slice(secondTab + 1);
+    const added = addedRaw === "-" ? 0 : Number.parseInt(addedRaw, 10);
+    const deleted = deletedRaw === "-" ? 0 : Number.parseInt(deletedRaw, 10);
+    insertions += Number.isFinite(added) ? added : 0;
+    deletions += Number.isFinite(deleted) ? deleted : 0;
+    if (rest !== "") {
+      paths.push(rest.replace(/\\/g, "/"));
+      i += 1;
+    } else {
+      const newPath = tokens[i + 2];
+      if (newPath !== void 0 && newPath !== "") {
+        paths.push(newPath.replace(/\\/g, "/"));
+      }
+      i += 3;
+    }
+  }
+  return { files: paths.length, insertions, deletions, paths };
 }
 function getUnstagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
@@ -26249,6 +26303,243 @@ function buildHints8(input) {
 // src/tools/request-commit.ts
 init_esm_shims();
 
+// src/lib/free-commit.ts
+init_esm_shims();
+
+// src/lib/health.ts
+init_esm_shims();
+var LOCK_STALE_MS2 = 3e4;
+function evaluateMcpHealth(projectRoot, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const reasons = [];
+  const configPath = join(projectRoot, ".rsct.json");
+  if (!existsSync(configPath)) {
+    reasons.push("config_absent");
+  } else {
+    try {
+      JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {
+      reasons.push("config_unparseable");
+    }
+  }
+  if (readPhaseState(projectRoot).parse_error) {
+    reasons.push("phase_state_corrupt");
+  }
+  const lockPath = join(projectRoot, ".rsct", "phase-state.lock");
+  if (existsSync(lockPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
+      const lockedAtMs = parsed.locked_at ? new Date(parsed.locked_at).getTime() : NaN;
+      const ageMs = now.getTime() - lockedAtMs;
+      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS2) {
+        reasons.push("phase_state_lock_stale");
+      }
+    } catch {
+      reasons.push("phase_state_lock_stale");
+    }
+  }
+  const auditPath = resolveAuditPath(projectRoot, opts.config?.audit);
+  let historyOk = false;
+  try {
+    if (existsSync(auditPath)) {
+      const stat = statSync(auditPath);
+      historyOk = stat.isFile() && stat.size > 0;
+    }
+  } catch {
+    historyOk = false;
+  }
+  if (!historyOk) {
+    reasons.push("audit_history_absent");
+  }
+  return { healthy: reasons.length === 0, reasons };
+}
+
+// src/lib/free-commit.ts
+var FREE_COMMIT_MAX_DEFAULT = 5;
+var FREE_COMMIT_MAX_MIN = 1;
+var FREE_COMMIT_MAX_MAX = 50;
+var FREE_COMMIT_MAX_FILES_DEFAULT = 20;
+var FREE_COMMIT_MAX_FILES_MIN = 1;
+var FREE_COMMIT_MAX_FILES_MAX = 500;
+var FREE_COMMIT_MAX_LINES_DEFAULT = 600;
+var FREE_COMMIT_MAX_LINES_MIN = 1;
+var FREE_COMMIT_MAX_LINES_MAX = 1e5;
+function isFreeTier(tier) {
+  return tier === "trivial" || tier === "small";
+}
+function higherTier(a, b) {
+  const av = a ?? void 0;
+  const bv = b ?? void 0;
+  if (av === void 0) return bv;
+  if (bv === void 0) return av;
+  return tierRank(av) >= tierRank(bv) ? av : bv;
+}
+function clampInt(v, def, min, max) {
+  if (v === void 0 || !Number.isFinite(v)) return def;
+  return Math.min(max, Math.max(min, Math.trunc(v)));
+}
+function resolveFreeBudgetLimits(config2) {
+  const m = config2?.approval_modes;
+  return {
+    maxCommits: clampInt(m?.free_commit_max, FREE_COMMIT_MAX_DEFAULT, FREE_COMMIT_MAX_MIN, FREE_COMMIT_MAX_MAX),
+    maxFiles: clampInt(
+      m?.free_commit_max_files,
+      FREE_COMMIT_MAX_FILES_DEFAULT,
+      FREE_COMMIT_MAX_FILES_MIN,
+      FREE_COMMIT_MAX_FILES_MAX
+    ),
+    maxLines: clampInt(
+      m?.free_commit_max_lines,
+      FREE_COMMIT_MAX_LINES_DEFAULT,
+      FREE_COMMIT_MAX_LINES_MIN,
+      FREE_COMMIT_MAX_LINES_MAX
+    )
+  };
+}
+function deriveAuditCeiling(projectRoot, config2, planSlug) {
+  const failClosed = {
+    classifyEvidencePresent: false,
+    auditTierMax: null,
+    freeCommitsUsed: 0,
+    auditLocked: false,
+    readable: false
+  };
+  const auditPath = resolveAuditPath(projectRoot, config2?.audit);
+  let raw;
+  try {
+    if (!existsSync(auditPath)) return failClosed;
+    raw = readFileSync(auditPath, "utf8");
+  } catch {
+    return failClosed;
+  }
+  let classifyEvidencePresent = false;
+  let maxRank = -1;
+  let auditTierMax = null;
+  let freeCommitsUsed = 0;
+  let auditLocked = false;
+  for (const line of raw.split("\n")) {
+    const clean = line.replace(/\r/g, "").trim();
+    if (!clean) continue;
+    let entry;
+    try {
+      const parsed = JSON.parse(clean);
+      if (!parsed || typeof parsed !== "object") continue;
+      entry = parsed;
+    } catch {
+      continue;
+    }
+    const event = entry.event;
+    if (event === "classify.verdict" && typeof entry.tier === "string") {
+      classifyEvidencePresent = true;
+      const r = tierRank(entry.tier);
+      if (r > maxRank) {
+        maxRank = r;
+        auditTierMax = entry.tier;
+      }
+    } else if (event === "free_commit.committed" && entry.plan_slug === planSlug) {
+      freeCommitsUsed += 1;
+    } else if (event === "free_commit.locked" && entry.plan_slug === planSlug) {
+      auditLocked = true;
+    }
+  }
+  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true };
+}
+function reserveFreeBudget(args) {
+  const prev = args.prev && args.prev.plan_slug === args.planSlug ? args.prev : void 0;
+  const wasLocked = prev?.locked ?? false;
+  const unionPaths = Array.from(
+    /* @__PURE__ */ new Set([...prev?.files_touched_paths ?? [], ...args.stats.paths])
+  );
+  const commitsUsed = (prev?.commits_used ?? 0) + 1;
+  const thisCommitLines = args.stats.insertions + args.stats.deletions;
+  const linesChanged = (prev?.lines_changed ?? 0) + thisCommitLines;
+  const signals = [];
+  let lockedReason;
+  if (args.stats.files > args.limits.maxFiles || thisCommitLines > args.limits.maxLines) {
+    signals.push("tier_volume_divergence");
+    lockedReason = "tier_divergence";
+  }
+  if (lockedReason === void 0) {
+    if (commitsUsed >= args.limits.maxCommits) {
+      lockedReason = "commit_cap";
+    } else if (unionPaths.length > args.limits.maxFiles || linesChanged > args.limits.maxLines) {
+      lockedReason = "volume_cap";
+    }
+  }
+  const locked = wasLocked || lockedReason !== void 0;
+  const nextBudget = {
+    plan_slug: args.planSlug,
+    files_touched_paths: unionPaths,
+    commits_used: commitsUsed,
+    lines_changed: linesChanged,
+    locked
+  };
+  const effectiveReason = lockedReason ?? prev?.locked_reason;
+  if (locked && effectiveReason !== void 0) nextBudget.locked_reason = effectiveReason;
+  return { nextBudget, newlyLocked: locked && !wasLocked, signals };
+}
+function evaluateFreeEligibility(args) {
+  const health = args.healthOverride ?? evaluateMcpHealth(args.projectRoot, { now: args.now, config: args.config });
+  if (!health.healthy) {
+    return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(", ")}` };
+  }
+  if (!args.activePlanSlug) {
+    return { eligible: false, reason: "no active plan" };
+  }
+  const planSlug = args.activePlanSlug;
+  const stateTierMax = args.state?.last_classify?.tier_max;
+  if (stateTierMax !== void 0 && !isFreeTier(stateTierMax)) {
+    return {
+      eligible: false,
+      reason: `tier_max '${stateTierMax}' is not in {trivial, small}`,
+      planSlug,
+      tierMax: stateTierMax
+    };
+  }
+  const ceiling = deriveAuditCeiling(args.projectRoot, args.config, planSlug);
+  if (!ceiling.readable) {
+    return { eligible: false, reason: "audit ceiling unreadable" };
+  }
+  if (!ceiling.classifyEvidencePresent) {
+    return { eligible: false, reason: "no classify evidence in audit history" };
+  }
+  const effTierMax = higherTier(stateTierMax, ceiling.auditTierMax);
+  if (effTierMax === void 0) {
+    return { eligible: false, reason: "no tier_max" };
+  }
+  if (!isFreeTier(effTierMax)) {
+    return {
+      eligible: false,
+      reason: `tier_max '${effTierMax}' is not in {trivial, small}`,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  const stateBudget = args.state?.free_commit_budget && args.state.free_commit_budget.plan_slug === planSlug ? args.state.free_commit_budget : void 0;
+  const locked = (stateBudget?.locked ?? false) || ceiling.auditLocked;
+  if (locked) {
+    return {
+      eligible: false,
+      reason: "free budget locked for this plan",
+      lockedHint: true,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  const effUsed = Math.max(stateBudget?.commits_used ?? 0, ceiling.freeCommitsUsed);
+  const limits = resolveFreeBudgetLimits(args.config);
+  if (effUsed >= limits.maxCommits) {
+    return {
+      eligible: false,
+      reason: "free commit budget exhausted",
+      lockedHint: true,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  return { eligible: true, planSlug, tierMax: effTierMax };
+}
+
 // src/lib/dev-approval.ts
 init_esm_shims();
 var DevApprovalSchema = external_exports.object({
@@ -26653,8 +26944,21 @@ var PLAN_TOKEN_TTL_MAX = 480;
 var PLAN_TOKEN_MAX_ACTIONS_DEFAULT = 20;
 var PLAN_TOKEN_MAX_ACTIONS_MIN = 1;
 var PLAN_TOKEN_MAX_ACTIONS_MAX = 100;
+var PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN = 480;
+var PLAN_TOKEN_TTL_SLIDE_MIN = 5;
+var PLAN_TOKEN_TTL_SLIDE_MAX = 1440;
+var PLAN_TOKEN_TTL_ABS_DEFAULT_MIN = 1440;
+var PLAN_TOKEN_TTL_ABS_MIN = 5;
+var PLAN_TOKEN_TTL_ABS_MAX = 10080;
 function emitToken(args) {
-  const expiresMs = args.now.getTime() + args.ttlMinutes * 6e4;
+  const nowMs = args.now.getTime();
+  const windowMin = args.slideMinutes ?? args.ttlMinutes;
+  let expiresMs = nowMs + windowMin * 6e4;
+  let absMs = null;
+  if (args.absTtlMinutes !== void 0) {
+    absMs = nowMs + args.absTtlMinutes * 6e4;
+    if (expiresMs > absMs) expiresMs = absMs;
+  }
   const block = {
     plan_slug: args.planSlug,
     branch: args.branch,
@@ -26666,7 +26970,22 @@ function emitToken(args) {
     approval_ref: args.approvalRef
   };
   if (args.sessionId !== void 0) block.session_id = args.sessionId;
+  if (args.slideMinutes !== void 0) block.slide_minutes = args.slideMinutes;
+  if (absMs !== null) block.absolute_expires_at = new Date(absMs).toISOString();
   return block;
+}
+function rearmToken(token, now) {
+  if (token.slide_minutes === void 0 || !Number.isFinite(token.slide_minutes)) {
+    return token;
+  }
+  let nextMs = now.getTime() + token.slide_minutes * 6e4;
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime();
+    if (Number.isFinite(absMs)) nextMs = Math.min(nextMs, absMs);
+  }
+  const currentMs = new Date(token.expires_at).getTime();
+  if (Number.isFinite(currentMs) && nextMs <= currentMs) return token;
+  return { ...token, expires_at: new Date(nextMs).toISOString() };
 }
 function validateToken(token, ctx) {
   if (!token) return { valid: false, reason: "absent" };
@@ -26676,6 +26995,12 @@ function validateToken(token, ctx) {
   const expiresMs = new Date(token.expires_at).getTime();
   if (Number.isNaN(expiresMs) || ctx.now.getTime() >= expiresMs) {
     return { valid: false, reason: "expired" };
+  }
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime();
+    if (!Number.isNaN(absMs) && ctx.now.getTime() >= absMs) {
+      return { valid: false, reason: "expired" };
+    }
   }
   if (ctx.branch !== token.branch) return { valid: false, reason: "branch_mismatch" };
   if (!ctx.tokenPlan) return { valid: false, reason: "plan_gone" };
@@ -26706,6 +27031,16 @@ function resolveMaxActions(input, configDefault) {
     PLAN_TOKEN_MAX_ACTIONS_MAX,
     Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v)
   );
+}
+function resolveSlideMinutes(input, configDefault) {
+  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
+  return Math.min(PLAN_TOKEN_TTL_SLIDE_MAX, Math.max(PLAN_TOKEN_TTL_SLIDE_MIN, v));
+}
+function resolveAbsTtlMinutes(input, configDefault) {
+  const v = configDefault ?? PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
+  return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v));
 }
 
 // src/tools/request-commit.ts
@@ -26774,6 +27109,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
   let approval = null;
   let fabricationSignals = [];
   let tokenCtx = null;
+  let freeCtx = null;
   if (input.dev_approval !== void 0) {
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
@@ -26827,50 +27163,67 @@ message: ${input.message}`
     fabricationSignals = gate.fabrication_signals;
   } else {
     const existing = readPhaseState(projectRoot);
-    const token = readToken(existing.state);
-    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
-    const verdict = validateToken(token, {
+    const activePlan2 = findActivePlan(projectRoot);
+    const elig = evaluateFreeEligibility({
+      projectRoot,
+      config: config2 ?? null,
       now,
-      branch: gitState.branch,
-      tokenPlan,
-      action: "commit"
+      state: existing.state,
+      activePlanSlug: activePlan2?.slug ?? null
     });
-    if (!verdict.valid) {
-      const reason = planTokenRejectReason(verdict.reason);
-      const audit2 = appendAudit(
-        projectRoot,
-        {
-          event: "request_commit.rejected",
-          tool: "rsct_request_commit",
-          reject_kind: "plan_token_invalid",
-          token_reason: verdict.reason,
-          reason,
-          branch: gitState.branch
-        },
-        config2?.audit
-      );
-      return {
-        status: "rejected",
+    if (elig.eligible && elig.planSlug !== void 0) {
+      channel = "free_commit";
+      authorizedVia = "free_commit";
+      freeCtx = { planSlug: elig.planSlug, baseState: existing.state ?? {} };
+    } else {
+      const token = readToken(existing.state);
+      const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
+      const verdict = validateToken(token, {
+        now,
         branch: gitState.branch,
-        channel: null,
-        authorized_via: null,
-        reject_kind: "plan_token_invalid",
-        reason,
-        fabrication_signals: [],
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: false, override_used: false },
-        secrets_check: { findings_count: 0, findings: [], override_used: false },
-        plan_token: null,
-        ...auditFields(audit2),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: [`Approval rejected (plan_token_invalid): ${reason}`]
-      };
+        tokenPlan,
+        action: "commit"
+      });
+      if (!verdict.valid) {
+        let reason = planTokenRejectReason(verdict.reason);
+        if (verdict.reason === "absent" && elig.lockedHint) {
+          reason = `free-commit budget is locked for this plan (${elig.reason}) \u2014 re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`;
+        }
+        const audit2 = appendAudit(
+          projectRoot,
+          {
+            event: "request_commit.rejected",
+            tool: "rsct_request_commit",
+            reject_kind: "plan_token_invalid",
+            token_reason: verdict.reason,
+            reason,
+            branch: gitState.branch
+          },
+          config2?.audit
+        );
+        return {
+          status: "rejected",
+          branch: gitState.branch,
+          channel: null,
+          authorized_via: null,
+          reject_kind: "plan_token_invalid",
+          reason,
+          fabrication_signals: [],
+          sha_before: gitState.head_sha,
+          sha_after: null,
+          branch_check: { protected: false, override_used: false },
+          secrets_check: { findings_count: 0, findings: [], override_used: false },
+          plan_token: null,
+          ...auditFields(audit2),
+          anti_replay_persisted: null,
+          anti_replay_error: null,
+          hints: [`Approval rejected (plan_token_invalid): ${reason}`]
+        };
+      }
+      channel = "plan_token";
+      authorizedVia = "plan_token";
+      tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
     }
-    channel = "plan_token";
-    authorizedVia = "plan_token";
-    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
   }
   const overrideBranch = approval?.override_protected_branch;
   const overrideSecrets = approval?.override_secrets_check;
@@ -27061,6 +27414,8 @@ message: ${input.message}`
     }
   }
   let reservedToken = null;
+  let reservedFreeBudget = null;
+  let freeNewlyLocked = false;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
     const reserve = writePhaseState(projectRoot, {
@@ -27107,6 +27462,67 @@ message: ${input.message}`
         hints: [reason]
       };
     }
+  } else if (freeCtx) {
+    const rejectFreeReserve = (reason) => {
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
+          reject_kind: "free_budget_reserve_failed",
+          reason,
+          branch: gitState.branch,
+          channel
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: "free_budget_reserve_failed",
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: false },
+        plan_token: null,
+        free_commit: null,
+        contract_check: contractResult,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [reason]
+      };
+    };
+    const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot);
+    if (stats === null) {
+      return rejectFreeReserve(
+        "could not measure the staged diff (git unavailable) \u2014 commit with a per-action dev_approval"
+      );
+    }
+    const limits = resolveFreeBudgetLimits(config2 ?? null);
+    const reserve = reserveFreeBudget({
+      planSlug: freeCtx.planSlug,
+      prev: freeCtx.baseState.free_commit_budget,
+      stats,
+      limits
+    });
+    reservedFreeBudget = reserve.nextBudget;
+    freeNewlyLocked = reserve.newlyLocked;
+    fabricationSignals = [...fabricationSignals, ...reserve.signals];
+    const write = writePhaseState(projectRoot, {
+      ...freeCtx.baseState,
+      free_commit_budget: reserve.nextBudget
+    });
+    if (!write.ok) {
+      const detail = write.reason === "locked" ? `phase-state.json is being edited by another session (locked ${write.lock_age_ms}ms ago)` : write.error;
+      return rejectFreeReserve(
+        `could not reserve the free-commit budget (${detail}) \u2014 retry, or commit with a per-action dev_approval`
+      );
+    }
   }
   const commit = gitCommit(projectRoot, input.message, gitExecutor);
   if (!commit.ok) {
@@ -27118,6 +27534,13 @@ message: ${input.message}`
         plan_authorization: tokenCtx.token
       });
       refundNote = refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
+    } else if (freeCtx) {
+      const prevBudget = freeCtx.baseState.free_commit_budget;
+      const restored = { ...freeCtx.baseState };
+      if (prevBudget) restored.free_commit_budget = prevBudget;
+      else delete restored.free_commit_budget;
+      const refund = writePhaseState(projectRoot, restored);
+      refundNote = refund.ok ? " The reserved free-commit budget was refunded." : " \u26A0 the reserved free-commit budget could NOT be refunded (phase-state write failed) \u2014 the spend stays (fail-safe).";
     }
     const audit2 = appendAudit(
       projectRoot,
@@ -27148,18 +27571,20 @@ message: ${input.message}`
         override_used: findings.length > 0
       },
       plan_token: null,
+      free_commit: null,
       contract_check: contractResult,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+        authorizedVia === "plan_token" || authorizedVia === "free_commit" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
       ]
     };
   }
   let antiReplayPersisted;
   let antiReplayError = null;
   let tokenSummary = null;
+  let freeSummary = null;
   const bookkeepingHints = [];
   if (approval) {
     const record2 = recordApproval(approval, { projectRoot, now });
@@ -27170,7 +27595,7 @@ message: ${input.message}`
         `\u26A0 commit landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
       );
     }
-  } else {
+  } else if (tokenCtx) {
     antiReplayPersisted = true;
     tokenSummary = {
       plan_slug: reservedToken.plan_slug,
@@ -27178,6 +27603,60 @@ message: ${input.message}`
       max_actions: reservedToken.max_actions,
       expires_at: reservedToken.expires_at
     };
+    const rearmed = rearmToken(reservedToken, now);
+    if (rearmed !== reservedToken) {
+      const w = writePhaseState(projectRoot, {
+        ...tokenCtx.baseState,
+        plan_authorization: rearmed
+      });
+      if (w.ok) {
+        tokenSummary.expires_at = rearmed.expires_at;
+      } else {
+        bookkeepingHints.push(
+          "\u26A0 token sliding-window re-arm did not persist \u2014 the token keeps its current expiry (fail-safe)."
+        );
+      }
+    }
+  } else {
+    antiReplayPersisted = true;
+    freeSummary = {
+      plan_slug: reservedFreeBudget.plan_slug,
+      commits_used: reservedFreeBudget.commits_used,
+      files_touched: reservedFreeBudget.files_touched_paths.length,
+      lines_changed: reservedFreeBudget.lines_changed,
+      locked: reservedFreeBudget.locked,
+      ...reservedFreeBudget.locked_reason !== void 0 && {
+        locked_reason: reservedFreeBudget.locked_reason
+      }
+    };
+    const ledger = appendAudit(
+      projectRoot,
+      {
+        event: "free_commit.committed",
+        tool: "rsct_request_commit",
+        channel: "free_commit",
+        plan_slug: reservedFreeBudget.plan_slug,
+        sha_after: commit.sha_after
+      },
+      config2?.audit
+    );
+    if (!ledger.ok && ledger.reason !== "disabled") {
+      bookkeepingHints.push(
+        `\u26A0 the durable free_commit.committed ledger event did not persist (${ledger.error ?? "write failed"}) \u2014 if phase-state is later wiped, the free-commit count could under-count by one.`
+      );
+    }
+    if (freeNewlyLocked) {
+      appendAudit(
+        projectRoot,
+        {
+          event: "free_commit.locked",
+          tool: "rsct_request_commit",
+          plan_slug: reservedFreeBudget.plan_slug,
+          reason: reservedFreeBudget.locked_reason ?? "commit_cap"
+        },
+        config2?.audit
+      );
+    }
   }
   const audit = appendAudit(
     projectRoot,
@@ -27210,6 +27689,13 @@ message: ${input.message}`
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used;
     hints.push(
       `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`
+    );
+  }
+  if (freeSummary) {
+    const limit = resolveFreeBudgetLimits(config2 ?? null).maxCommits;
+    const remaining = Math.max(0, limit - freeSummary.commits_used);
+    hints.push(
+      freeSummary.locked ? `Free commit on '${freeSummary.plan_slug}' \u2014 budget is now LOCKED (${freeSummary.locked_reason}). Further commits need a per-action dev_approval or a batch token (rsct_plan_authorize).` : `Free (dialog-free) commit on '${freeSummary.plan_slug}' \u2014 ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`
     );
   }
   hints.push(...bookkeepingHints);
@@ -27259,6 +27745,7 @@ message: ${input.message}`
       override_used: findings.length > 0
     },
     plan_token: tokenSummary,
+    free_commit: freeSummary,
     contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,
@@ -28197,6 +28684,14 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
     input.max_actions,
     config2?.approval_modes?.plan_token_max_actions
   );
+  const slideMinutes = resolveSlideMinutes(
+    input.ttl_minutes,
+    config2?.approval_modes?.plan_token_ttl_slide_minutes
+  );
+  const absTtlMinutes = resolveAbsTtlMinutes(
+    void 0,
+    config2?.approval_modes?.plan_token_ttl_abs_minutes
+  );
   const token = emitToken({
     planSlug: activePlan.slug,
     branch,
@@ -28206,7 +28701,9 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       action_scope: gate.approval.action_scope,
       timestamp: gate.approval.timestamp
     },
-    now
+    now,
+    slideMinutes,
+    absTtlMinutes
   });
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
@@ -29782,6 +30279,11 @@ async function classifyTaskHandler(rawInput) {
       tier,
       signalsSummary: signals.join(" | ")
     });
+    appendAuditEntry(
+      resolution.root,
+      { event: "classify.verdict", tool: "rsct_classify_task", tier },
+      resolution.config?.audit
+    );
   }
   let activePlan = null;
   if (input.use_active_plan_slug) {

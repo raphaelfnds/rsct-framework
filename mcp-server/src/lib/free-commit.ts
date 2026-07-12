@@ -276,6 +276,23 @@ export function evaluateFreeEligibility(args: {
   }
   const planSlug = args.activePlanSlug
 
+  // Efficiency short-circuit (safe): if the DURABLE state ratchet already says
+  // non-free, the audit-derived max is >= that (audit is the superset a
+  // phase-state wipe cannot lower — both are the max over the same classify
+  // sequence, and a wipe can only UNDER-state the state ratchet, never push it
+  // above the audit). So the result is ineligible regardless — skip the O(n)
+  // audit-log scan. This keeps the hot path cheap for token users (standard/
+  // complex plans), whose every commit would otherwise re-scan the whole log.
+  const stateTierMax = args.state?.last_classify?.tier_max
+  if (stateTierMax !== undefined && !isFreeTier(stateTierMax)) {
+    return {
+      eligible: false,
+      reason: `tier_max '${stateTierMax}' is not in {trivial, small}`,
+      planSlug,
+      tierMax: stateTierMax,
+    }
+  }
+
   // Audit-derived anchor (fail-closed if unreadable).
   const ceiling = deriveAuditCeiling(args.projectRoot, args.config, planSlug)
   if (!ceiling.readable) {
@@ -287,7 +304,6 @@ export function evaluateFreeEligibility(args: {
   }
 
   // (2) tier_max present + membership, using max(state, audit).
-  const stateTierMax = args.state?.last_classify?.tier_max
   const effTierMax = higherTier(stateTierMax, ceiling.auditTierMax)
   if (effTierMax === undefined) {
     return { eligible: false, reason: 'no tier_max' }

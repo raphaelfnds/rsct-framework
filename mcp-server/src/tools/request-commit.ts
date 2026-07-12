@@ -6,11 +6,18 @@ import {
   defaultGitExecutor,
   getStagedDiff,
   getStagedPaths,
+  getStagedStats,
   gitCommit,
   readGitState,
   type GitExecutor,
   type GitState,
+  type StagedStats,
 } from '../lib/git.js'
+import {
+  evaluateFreeEligibility,
+  reserveFreeBudget,
+  resolveFreeBudgetLimits,
+} from '../lib/free-commit.js'
 import {
   effectiveProtectedList,
   isProtectedBranch,
@@ -41,6 +48,7 @@ import {
   readPhaseState,
   writePhaseState,
   type BootstrapMarker,
+  type FreeCommitBudget,
   type PhaseState,
   type PlanAuthorizationBlock,
 } from '../lib/phase-scope.js'
@@ -48,6 +56,7 @@ import {
   readToken,
   validateToken,
   consumeTokenAction,
+  rearmToken,
   type TokenInvalidReason,
 } from '../lib/plan-authorization.js'
 import { confirmedTopologyMode } from '../lib/topology.js'
@@ -87,12 +96,16 @@ export type RequestCommitRejectKind =
   | 'secrets'
   | 'contract_surface'
   | 'plan_token_invalid'
+  | 'free_budget_reserve_failed'
 
-/** How the commit was authorized: a per-action dev_approval or a plan token. */
-export type CommitAuthVia = 'dev_approval' | 'plan_token'
+/**
+ * How the commit was authorized: a per-action dev_approval, a plan token, or
+ * the dialog-free free-commit lane (plan-lifecycle-v2, trivial/small tiers).
+ */
+export type CommitAuthVia = 'dev_approval' | 'plan_token' | 'free_commit'
 
-/** Commit authorization channel — the gate channels plus the T3 plan-token path. */
-export type CommitChannel = GateChannel | 'plan_token'
+/** Commit authorization channel — the gate channels plus the token / free-commit paths. */
+export type CommitChannel = GateChannel | 'plan_token' | 'free_commit'
 
 /** T2/INV-7: the contract-surface gate result (multi-repo only). */
 export interface ContractCheckResult {
@@ -133,6 +146,15 @@ export interface RequestCommitOutput {
     actions_used: number
     max_actions: number
     expires_at: string
+  } | null
+  /** plan-lifecycle-v2: free-commit budget after this commit (null when not a free commit). */
+  free_commit?: {
+    plan_slug: string
+    commits_used: number
+    files_touched: number
+    lines_changed: number
+    locked: boolean
+    locked_reason?: 'commit_cap' | 'volume_cap' | 'tier_divergence'
   } | null
   /** CAP-33: §0 bootstrap visibility — null when not evaluated (reject paths). */
   bootstrap_marker?: BootstrapMarker | null
@@ -183,6 +205,13 @@ export interface RequestCommitInternal {
    * real git repo. NOT an MCP input (same posture as stagedDiffOverride).
    */
   stagedPathsOverride?: string[]
+  /**
+   * Test-only seam: substitute the staged line stats (`git diff --cached
+   * --numstat -z`) so the free-commit budget/ceiling can be exercised without
+   * a real git repo. NOT an MCP input (same posture as stagedDiffOverride /
+   * stagedPathsOverride — a caller-declared volume would be a bypass).
+   */
+  stagedStatsOverride?: StagedStats
   /**
    * Test-only seam: replace `appendAuditEntry`. Production uses the
    * default lib helper; tests inject simulated I/O failures to verify
@@ -264,6 +293,7 @@ export async function requestCommitHandler(
   let approval: DevApproval | null = null
   let fabricationSignals: FabricationSignal[] = []
   let tokenCtx: { token: PlanAuthorizationBlock; baseState: PhaseState } | null = null
+  let freeCtx: { planSlug: string; baseState: PhaseState } | null = null
 
   if (input.dev_approval !== undefined) {
     const gate = await gateRequest({
@@ -317,54 +347,79 @@ export async function requestCommitHandler(
     authorizedVia = 'dev_approval'
     fabricationSignals = gate.fabrication_signals
   } else {
-    // Token path: no dev_approval supplied — try an active plan-scoped token.
+    // No dev_approval supplied. Read phase-state ONCE for both the free-commit
+    // lane and the token fallback. Try the dialog-free free-commit lane first
+    // (plan-lifecycle-v2, Bloco 1.1) — eligible ONLY for a healthy MCP + an
+    // active plan classified trivial/small + within the audit-anchored budget.
     const existing = readPhaseState(projectRoot)
-    const token = readToken(existing.state)
-    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null
-    const verdict = validateToken(token, {
+    const activePlan = findActivePlan(projectRoot)
+    const elig = evaluateFreeEligibility({
+      projectRoot,
+      config: config ?? null,
       now,
-      branch: gitState.branch,
-      tokenPlan,
-      action: 'commit',
+      state: existing.state,
+      activePlanSlug: activePlan?.slug ?? null,
     })
 
-    if (!verdict.valid) {
-      const reason = planTokenRejectReason(verdict.reason)
-      const audit = appendAudit(
-        projectRoot,
-        {
-          event: 'request_commit.rejected',
-          tool: 'rsct_request_commit',
-          reject_kind: 'plan_token_invalid',
-          token_reason: verdict.reason,
-          reason,
-          branch: gitState.branch,
-        },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
+    if (elig.eligible && elig.planSlug !== undefined) {
+      channel = 'free_commit'
+      authorizedVia = 'free_commit'
+      freeCtx = { planSlug: elig.planSlug, baseState: existing.state ?? {} }
+    } else {
+      // Not eligible for the free lane — fall through to the plan-token path.
+      const token = readToken(existing.state)
+      const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null
+      const verdict = validateToken(token, {
+        now,
         branch: gitState.branch,
-        channel: null,
-        authorized_via: null,
-        reject_kind: 'plan_token_invalid',
-        reason,
-        fabrication_signals: [],
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: false, override_used: false },
-        secrets_check: { findings_count: 0, findings: [], override_used: false },
-        plan_token: null,
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: [`Approval rejected (plan_token_invalid): ${reason}`],
-      }
-    }
+        tokenPlan,
+        action: 'commit',
+      })
 
-    channel = 'plan_token'
-    authorizedVia = 'plan_token'
-    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} }
+      if (!verdict.valid) {
+        let reason = planTokenRejectReason(verdict.reason)
+        // Cluster C corr#4: when the free lane was refused because its budget
+        // is LOCKED/exhausted (not merely absent), surface that instead of a
+        // bare "no token" — the dev needs the re-classify / mint-token hint.
+        if (verdict.reason === 'absent' && elig.lockedHint) {
+          reason = `free-commit budget is locked for this plan (${elig.reason}) — re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`
+        }
+        const audit = appendAudit(
+          projectRoot,
+          {
+            event: 'request_commit.rejected',
+            tool: 'rsct_request_commit',
+            reject_kind: 'plan_token_invalid',
+            token_reason: verdict.reason,
+            reason,
+            branch: gitState.branch,
+          },
+          config?.audit,
+        )
+        return {
+          status: 'rejected',
+          branch: gitState.branch,
+          channel: null,
+          authorized_via: null,
+          reject_kind: 'plan_token_invalid',
+          reason,
+          fabrication_signals: [],
+          sha_before: gitState.head_sha,
+          sha_after: null,
+          branch_check: { protected: false, override_used: false },
+          secrets_check: { findings_count: 0, findings: [], override_used: false },
+          plan_token: null,
+          ...auditFields(audit),
+          anti_replay_persisted: null,
+          anti_replay_error: null,
+          hints: [`Approval rejected (plan_token_invalid): ${reason}`],
+        }
+      }
+
+      channel = 'plan_token'
+      authorizedVia = 'plan_token'
+      tokenCtx = { token: verdict.token, baseState: existing.state ?? {} }
+    }
   }
 
   // Overrides ONLY come from a per-action dev_approval. The token path leaves
@@ -602,6 +657,8 @@ export async function requestCommitHandler(
   // later commit failure we best-effort refund so a failed commit doesn't waste
   // a slot.
   let reservedToken: PlanAuthorizationBlock | null = null
+  let reservedFreeBudget: FreeCommitBudget | null = null
+  let freeNewlyLocked = false
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token)
     const reserve = writePhaseState(projectRoot, {
@@ -651,6 +708,79 @@ export async function requestCommitHandler(
         hints: [reason],
       }
     }
+  } else if (freeCtx) {
+    // Free lane: RESERVE the budget (debit-first, same discipline as the token
+    // path) BEFORE the commit. getStagedStats reads the REAL staged set (the
+    // override is a test-only seam). A cap-tripping commit is NOT rejected here
+    // — it lands and only LOCKS the budget; the NEXT free commit is refused by
+    // evaluateFreeEligibility. If we can't measure the diff or can't persist the
+    // reserve, REFUSE to commit (fail-closed → falls back to a per-action §C).
+    const rejectFreeReserve = (reason: string): RequestCommitOutput => {
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.rejected',
+          tool: 'rsct_request_commit',
+          reject_kind: 'free_budget_reserve_failed',
+          reason,
+          branch: gitState.branch,
+          channel,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: 'free_budget_reserve_failed',
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: false },
+        plan_token: null,
+        free_commit: null,
+        contract_check: contractResult,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [reason],
+      }
+    }
+
+    // Fail-CLOSED on an unmeasurable diff: falling back to zero stats would let
+    // the cumulative volume cap silently under-count on a git failure.
+    const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot)
+    if (stats === null) {
+      return rejectFreeReserve(
+        'could not measure the staged diff (git unavailable) — commit with a per-action dev_approval',
+      )
+    }
+    const limits = resolveFreeBudgetLimits(config ?? null)
+    const reserve = reserveFreeBudget({
+      planSlug: freeCtx.planSlug,
+      prev: freeCtx.baseState.free_commit_budget,
+      stats,
+      limits,
+    })
+    reservedFreeBudget = reserve.nextBudget
+    freeNewlyLocked = reserve.newlyLocked
+    fabricationSignals = [...fabricationSignals, ...reserve.signals]
+    const write = writePhaseState(projectRoot, {
+      ...freeCtx.baseState,
+      free_commit_budget: reserve.nextBudget,
+    })
+    if (!write.ok) {
+      const detail =
+        write.reason === 'locked'
+          ? `phase-state.json is being edited by another session (locked ${write.lock_age_ms}ms ago)`
+          : write.error
+      return rejectFreeReserve(
+        `could not reserve the free-commit budget (${detail}) — retry, or commit with a per-action dev_approval`,
+      )
+    }
   }
 
   const commit = gitCommit(projectRoot, input.message, gitExecutor)
@@ -669,6 +799,18 @@ export async function requestCommitHandler(
       refundNote = refund.ok
         ? ' The reserved token action was refunded.'
         : ' ⚠ the reserved token action could NOT be refunded (phase-state write failed) — one action was forfeited (fail-safe).'
+    } else if (freeCtx) {
+      // Restore the pre-reserve budget (or clear it if there was none) so a
+      // failed commit doesn't burn a free-commit slot. If the refund write also
+      // fails, the spend stays (fail-safe: tightens the bound, never loosens).
+      const prevBudget = freeCtx.baseState.free_commit_budget
+      const restored: PhaseState = { ...freeCtx.baseState }
+      if (prevBudget) restored.free_commit_budget = prevBudget
+      else delete restored.free_commit_budget
+      const refund = writePhaseState(projectRoot, restored)
+      refundNote = refund.ok
+        ? ' The reserved free-commit budget was refunded.'
+        : ' ⚠ the reserved free-commit budget could NOT be refunded (phase-state write failed) — the spend stays (fail-safe).'
     }
     const audit = appendAudit(
       projectRoot,
@@ -699,12 +841,13 @@ export async function requestCommitHandler(
         override_used: findings.length > 0,
       },
       plan_token: null,
+      free_commit: null,
       contract_check: contractResult,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        authorizedVia === 'plan_token'
+        authorizedVia === 'plan_token' || authorizedVia === 'free_commit'
           ? `git commit failed — fix the underlying error and retry.${refundNote}`
           : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
       ],
@@ -718,6 +861,7 @@ export async function requestCommitHandler(
   let antiReplayPersisted: boolean
   let antiReplayError: string | null = null
   let tokenSummary: RequestCommitOutput['plan_token'] = null
+  let freeSummary: RequestCommitOutput['free_commit'] = null
   const bookkeepingHints: string[] = []
 
   if (approval) {
@@ -729,7 +873,7 @@ export async function requestCommitHandler(
         `⚠ commit landed, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,
       )
     }
-  } else {
+  } else if (tokenCtx) {
     // Token path: the action was already debited (reserved) BEFORE the commit
     // (debit-first — see the reserve block above), so nothing to persist here.
     antiReplayPersisted = true
@@ -738,6 +882,72 @@ export async function requestCommitHandler(
       actions_used: reservedToken!.actions_used,
       max_actions: reservedToken!.max_actions,
       expires_at: reservedToken!.expires_at,
+    }
+    // plan-lifecycle-v2 (Bloco 1.4): re-arm the sliding window — SUCCESS ONLY,
+    // never in the pre-commit reserve, so a failed/refunded commit never leaves
+    // an extended window. Best-effort: a failed re-arm keeps the un-slid expiry
+    // (tightens, never loosens).
+    const rearmed = rearmToken(reservedToken!, now)
+    if (rearmed !== reservedToken!) {
+      const w = writePhaseState(projectRoot, {
+        ...tokenCtx.baseState,
+        plan_authorization: rearmed,
+      })
+      if (w.ok) {
+        tokenSummary.expires_at = rearmed.expires_at
+      } else {
+        bookkeepingHints.push(
+          '⚠ token sliding-window re-arm did not persist — the token keeps its current expiry (fail-safe).',
+        )
+      }
+    }
+  } else {
+    // Free lane: the budget was already debited (reserved) BEFORE the commit, so
+    // nothing more to persist. Emit the DURABLE free-commit ledger events —
+    // deriveAuditCeiling reconstructs the per-plan count/lock from these, which
+    // is what makes a phase-state wipe fail-CLOSED.
+    antiReplayPersisted = true
+    freeSummary = {
+      plan_slug: reservedFreeBudget!.plan_slug,
+      commits_used: reservedFreeBudget!.commits_used,
+      files_touched: reservedFreeBudget!.files_touched_paths.length,
+      lines_changed: reservedFreeBudget!.lines_changed,
+      locked: reservedFreeBudget!.locked,
+      ...(reservedFreeBudget!.locked_reason !== undefined && {
+        locked_reason: reservedFreeBudget!.locked_reason,
+      }),
+    }
+    const ledger = appendAudit(
+      projectRoot,
+      {
+        event: 'free_commit.committed',
+        tool: 'rsct_request_commit',
+        channel: 'free_commit',
+        plan_slug: reservedFreeBudget!.plan_slug,
+        sha_after: commit.sha_after,
+      },
+      config?.audit,
+    )
+    // The state budget is the primary counter (persisted in the reserve above);
+    // this ledger event is the durable anti-rollback backstop. If it didn't
+    // persist, warn: a later phase-state wipe could then under-count by one
+    // (until then the state budget still bounds the lane).
+    if (!ledger.ok && ledger.reason !== 'disabled') {
+      bookkeepingHints.push(
+        `⚠ the durable free_commit.committed ledger event did not persist (${ledger.error ?? 'write failed'}) — if phase-state is later wiped, the free-commit count could under-count by one.`,
+      )
+    }
+    if (freeNewlyLocked) {
+      appendAudit(
+        projectRoot,
+        {
+          event: 'free_commit.locked',
+          tool: 'rsct_request_commit',
+          plan_slug: reservedFreeBudget!.plan_slug,
+          reason: reservedFreeBudget!.locked_reason ?? 'commit_cap',
+        },
+        config?.audit,
+      )
     }
   }
 
@@ -776,6 +986,15 @@ export async function requestCommitHandler(
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used
     hints.push(
       `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`,
+    )
+  }
+  if (freeSummary) {
+    const limit = resolveFreeBudgetLimits(config ?? null).maxCommits
+    const remaining = Math.max(0, limit - freeSummary.commits_used)
+    hints.push(
+      freeSummary.locked
+        ? `Free commit on '${freeSummary.plan_slug}' — budget is now LOCKED (${freeSummary.locked_reason}). Further commits need a per-action dev_approval or a batch token (rsct_plan_authorize).`
+        : `Free (dialog-free) commit on '${freeSummary.plan_slug}' — ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`,
     )
   }
   hints.push(...bookkeepingHints)
@@ -835,6 +1054,7 @@ export async function requestCommitHandler(
       override_used: findings.length > 0,
     },
     plan_token: tokenSummary,
+    free_commit: freeSummary,
     contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,

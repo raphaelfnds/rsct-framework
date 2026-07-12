@@ -31,6 +31,8 @@ import {
   emitToken,
   resolveTtlMinutes,
   resolveMaxActions,
+  resolveSlideMinutes,
+  resolveAbsTtlMinutes,
   PLAN_TOKEN_COVERS,
   PLAN_TOKEN_TTL_MIN,
   PLAN_TOKEN_TTL_MAX,
@@ -276,6 +278,19 @@ export async function planAuthorizeHandler(
     input.max_actions,
     config?.approval_modes?.plan_token_max_actions,
   )
+  // plan-lifecycle-v2 (Bloco 1.4): sliding-window re-arm width + absolute cap.
+  // The token re-arms `expires_at` on each successful commit (so an actively
+  // worked plan never expires mid-flight) but can never live past the cap. The
+  // dev's explicit `ttl_minutes` IS the sliding window width (respected, not
+  // ignored); config slide / the built-in default only apply when it's absent.
+  const slideMinutes = resolveSlideMinutes(
+    input.ttl_minutes,
+    config?.approval_modes?.plan_token_ttl_slide_minutes,
+  )
+  const absTtlMinutes = resolveAbsTtlMinutes(
+    undefined,
+    config?.approval_modes?.plan_token_ttl_abs_minutes,
+  )
 
   const token = emitToken({
     planSlug: activePlan.slug,
@@ -287,6 +302,8 @@ export async function planAuthorizeHandler(
       timestamp: gate.approval.timestamp,
     },
     now,
+    slideMinutes,
+    absTtlMinutes,
   })
 
   const existing = readPhaseState(projectRoot)
