@@ -56,7 +56,15 @@ const POISON_PILL_PATTERNS: RegExp[] = [
 
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'] as const
 
-export type FileStatus = 'absent' | 'malformed' | 'no_change' | 'sanitized'
+export type FileStatus =
+  | 'absent'
+  | 'malformed'
+  | 'no_change'
+  | 'sanitized'
+  // plan-lifecycle-v2 Trilha 2: machine-absolute additionalDirectories moved
+  // from the versioned settings.json into the per-user settings.local.json.
+  | 'migrated'
+  | 'migration_skipped'
 
 export interface FileResult {
   path: string
@@ -78,6 +86,7 @@ export interface SanitizeOptions {
 interface SettingsShape {
   permissions?: {
     allow?: unknown[]
+    additionalDirectories?: unknown[]
     [k: string]: unknown
   }
   [k: string]: unknown
@@ -88,6 +97,95 @@ export function isPoisonPill(entry: unknown): entry is string {
   return POISON_PILL_PATTERNS.some((re) => re.test(entry))
 }
 
+/**
+ * plan-lifecycle-v2 Trilha 2: is `v` a machine-absolute path? `isAbsolute`
+ * catches POSIX `/...` and, on win32, `C:\...`; the drive-letter regex is the
+ * OR-complement so a `C:\...` / `C:/...` string is ALSO flagged when this runs
+ * on a POSIX-built Node (where `isAbsolute('C:/x')` is false). Host-independent.
+ */
+export function isAbsoluteEntry(v: unknown): v is string {
+  return typeof v === 'string' && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v))
+}
+
+/**
+ * plan-lifecycle-v2 Trilha 2: move machine-absolute `additionalDirectories`
+ * out of the VERSIONED `.claude/settings.json` into the per-user, auto-
+ * gitignored `.claude/settings.local.json` (a `C:\Users\me\...` path in the
+ * shared file breaks teammates and leaks the local layout).
+ *
+ * LOCAL-WRITE-FIRST for atomicity: write the entries into settings.local.json
+ * BEFORE stripping them from settings.json, and ABORT (leaving settings.json
+ * untouched) if the local file is malformed or unwritable — so a failed
+ * migration can never lose the entries. Dedups against what local already has.
+ * Returns a FileResult for the source, or null when there is nothing to migrate.
+ */
+function migrateAbsoluteDirs(
+  projectRoot: string,
+  audit: (entry: Record<string, unknown>) => void,
+): FileResult | null {
+  const settingsPath = join(projectRoot, '.claude', 'settings.json')
+  if (!existsSync(settingsPath)) return null
+  let settings: SettingsShape
+  try {
+    settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as SettingsShape
+  } catch {
+    return null // the main loop reports settings.json as malformed
+  }
+  const dirs = settings.permissions?.additionalDirectories
+  if (!Array.isArray(dirs) || dirs.length === 0) return null
+  const absolute = dirs.filter(isAbsoluteEntry)
+  if (absolute.length === 0) return null
+
+  const localPath = join(projectRoot, '.claude', 'settings.local.json')
+  let local: SettingsShape = {}
+  if (existsSync(localPath)) {
+    try {
+      local = JSON.parse(readFileSync(localPath, 'utf8')) as SettingsShape
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      audit({ event: 'sanitize.migration_skipped', file: settingsPath, reason: 'local_malformed', error })
+      return { path: settingsPath, status: 'migration_skipped', error: `settings.local.json malformed: ${error}` }
+    }
+  }
+  const localPerms =
+    local.permissions && typeof local.permissions === 'object' ? { ...local.permissions } : {}
+  const localDirs = Array.isArray(localPerms.additionalDirectories)
+    ? localPerms.additionalDirectories
+    : []
+  const localSet = new Set(localDirs.filter((x): x is string => typeof x === 'string'))
+  const toAdd = absolute.filter((a) => !localSet.has(a))
+  const nextLocal: SettingsShape = {
+    ...local,
+    permissions: { ...localPerms, additionalDirectories: [...localDirs, ...toAdd] },
+  }
+  try {
+    mkdirSync(dirname(localPath), { recursive: true })
+    writeFileSync(localPath, JSON.stringify(nextLocal, null, 2) + '\n', 'utf8')
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    audit({ event: 'sanitize.migration_skipped', file: settingsPath, reason: 'local_write_failed', error })
+    return { path: settingsPath, status: 'migration_skipped', error: `settings.local.json write failed: ${error}` }
+  }
+
+  // Local now holds the entries → strip them from the versioned settings.json.
+  const keptDirs = dirs.filter((d) => !isAbsoluteEntry(d))
+  const nextSettings: SettingsShape = {
+    ...settings,
+    permissions: { ...settings.permissions, additionalDirectories: keptDirs },
+  }
+  try {
+    writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + '\n', 'utf8')
+  } catch (err) {
+    // Entries are safe in local; settings.json still has them. A re-run retries
+    // the strip (dedup prevents local duplicates). Report as skipped.
+    const error = err instanceof Error ? err.message : String(err)
+    audit({ event: 'sanitize.migration_skipped', file: settingsPath, reason: 'source_write_failed', error })
+    return { path: settingsPath, status: 'migration_skipped', error: `settings.json write failed: ${error}` }
+  }
+  audit({ event: 'sanitize.migrated', file: settingsPath, migrated: absolute, to: localPath, count: absolute.length })
+  return { path: settingsPath, status: 'migrated', stripped: absolute }
+}
+
 export function sanitize(
   projectRoot: string,
   options: SanitizeOptions = {},
@@ -96,6 +194,10 @@ export function sanitize(
   const audit =
     options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now))
   const result: SanitizeResult = { projectRoot, files: [] }
+  // Trilha 2: migrate machine-absolute dirs out of the versioned settings.json
+  // FIRST — the poison-pill loop below then re-reads the (migrated) file.
+  const migration = migrateAbsoluteDirs(projectRoot, audit)
+  if (migration) result.files.push(migration)
   for (const name of SETTINGS_FILES) {
     const path = join(projectRoot, '.claude', name)
     if (!existsSync(path)) {
@@ -221,6 +323,16 @@ export function main(options: MainOptions): number {
     } else if (file.status === 'malformed') {
       options.stderr(
         `[rsct-sanitize] could not process ${file.path}: ${file.error ?? 'unknown error'}`,
+      )
+    } else if (file.status === 'migrated') {
+      const count = file.stripped?.length ?? 0
+      const label = count === 1 ? 'path' : 'paths'
+      options.stderr(
+        `[rsct-sanitize] migrated ${count} machine-absolute ${label} from ${file.path} to settings.local.json (keep machine paths out of the versioned file)`,
+      )
+    } else if (file.status === 'migration_skipped') {
+      options.stderr(
+        `[rsct-sanitize] skipped migrating absolute paths from ${file.path}: ${file.error ?? 'unknown error'} (settings.json left untouched)`,
       )
     }
   }
