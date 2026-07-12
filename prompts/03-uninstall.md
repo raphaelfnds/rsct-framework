@@ -278,7 +278,9 @@ For each Category B item, the dev will choose:
 | Item | Default | Always-on-uninstall | Dev opt-in to override default |
 |---|---|---|---|
 | `hooks.SessionStart[]` entries in `.claude/settings.json` matching the sanitizer marker | **remove** | yes (closes the §C-gated ceiling cleanly) | dev may choose to keep for staged uninstall |
+| `hooks.PreToolUse[]` entries matching the `edit-scope-guard.js` marker | **remove** | yes (4.V.a1) | dev may choose to keep for staged uninstall |
 | `.rsct/scripts/sanitize-permissions.js` | **remove** | yes | none — pure framework code |
+| `.rsct/scripts/edit-scope-guard.js` | **remove** | yes (with `.rsct/scripts/`) | none — pure framework code |
 | `.rsct/audit.log` | **keep** | no | dev may choose to delete for full clean removal |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
 | `.rsct/phase-state.json` | **remove** | yes (silent — no question raised) | none — M3 phase-machine state with no post-uninstall value |
@@ -654,6 +656,71 @@ fi
 
 The script exits 0 unconditionally (mirrors the install side's never-block
 principle). Re-running scrub on an already-scrubbed file is a no-op.
+
+**4.V.a1 — Scrub the PreToolUse edit-scope guard hook (plan-lifecycle-v2)**
+
+Symmetric with 4.V.a but for the `hooks.PreToolUse[]` entry installed by
+01-setup.md Phase 4.V.d — removes ONLY entries whose `command` contains the
+marker substring `.rsct/scripts/edit-scope-guard.js` (the guard SCRIPT itself
+is removed with the rest of `.rsct/scripts/`). Preserves every other hook.
+
+```bash
+echo "  CHECKPOINT: Phase 4.V.a1 executing canonical structured-merge PreToolUse guard scrub"
+# EXCEPTION: structured merge required (same justification as 4.V.a — the entry
+# nests in hooks.PreToolUse[].hooks[]).
+SETTINGS_PATH="$(pwd)/.claude/settings.json"
+if [ -f "$SETTINGS_PATH" ]; then
+  node -e '
+    const fs = require("fs");
+    const target = process.argv[1];
+    const MARKER = ".rsct/scripts/edit-scope-guard.js";
+    let settings;
+    try {
+      settings = JSON.parse(fs.readFileSync(target, "utf8"));
+    } catch (e) {
+      console.error("WARN: " + target + " is malformed JSON — PreToolUse guard scrub skipped. Fix manually.");
+      process.exit(0);
+    }
+    if (!settings.hooks || !Array.isArray(settings.hooks.PreToolUse)) {
+      console.log("No PreToolUse hooks present — nothing to scrub.");
+      process.exit(0);
+    }
+    let removed = 0;
+    const remainingGroups = [];
+    for (const group of settings.hooks.PreToolUse) {
+      if (!group || !Array.isArray(group.hooks)) {
+        remainingGroups.push(group);
+        continue;
+      }
+      const keptHooks = group.hooks.filter(h => {
+        if (h && typeof h.command === "string" && h.command.indexOf(MARKER) !== -1) {
+          removed++;
+          return false;
+        }
+        return true;
+      });
+      if (keptHooks.length > 0) {
+        remainingGroups.push({ ...group, hooks: keptHooks });
+      }
+    }
+    if (remainingGroups.length === 0) {
+      delete settings.hooks.PreToolUse;
+    } else {
+      settings.hooks.PreToolUse = remainingGroups;
+    }
+    if (Object.keys(settings.hooks).length === 0) {
+      delete settings.hooks;
+    }
+    if (Object.keys(settings).length === 0) {
+      fs.unlinkSync(target);
+      console.log("Removed " + target + " (it held only the RSCT PreToolUse guard hook).");
+    } else {
+      fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
+      console.log("Scrubbed " + removed + " RSCT PreToolUse guard hook entr" + (removed === 1 ? "y" : "ies") + " from " + target);
+    }
+  ' "$SETTINGS_PATH"
+fi
+```
 
 **4.V.a2 — Scrub project-scope MCP registration from `.mcp.json` (CAP-48)**
 

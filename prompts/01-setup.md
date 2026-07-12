@@ -3079,6 +3079,94 @@ if [ -n "$SANITIZER_SRC" ]; then
 fi
 ```
 
+**4.V.d — Install the PreToolUse edit-scope guard (plan-lifecycle-v2)**
+
+The `edit-scope-guard.js` script ships in the SAME `rsct-mcp`
+`dist/scripts/` directory as the sanitizer. Registered as a **PreToolUse**
+hook matched on the four editor tools, it BLOCKS an `Edit`/`Write`/
+`MultiEdit`/`NotebookEdit` (exit code 2) when the RSCT context is stale (a
+plan closed) or the target is out of the active spec scope — the mechanical
+half of the re-bootstrap gate (item 5). It fails **open** on any infra fault
+(missing/corrupt state, unmanaged project) so a broken guard never bricks
+editing. Gate the whole phase on `[ -n "$SANITIZER_SRC" ]` (rsct-mcp
+available, from 4.V.a) — the guard ships in the same package.
+
+```bash
+echo "  CHECKPOINT: Phase 4.V.d executing canonical edit-scope guard install"
+if [ -n "$SANITIZER_SRC" ]; then
+  # The guard sits beside the sanitizer (same dist/scripts/ dir).
+  GUARD_SRC="$(dirname "$SANITIZER_SRC")/edit-scope-guard.js"
+  if [ ! -f "$GUARD_SRC" ]; then
+    echo "  ⚠ edit-scope-guard.js not found beside the sanitizer (older rsct-mcp?) — PreToolUse guard skipped; rebuild/upgrade rsct-mcp and re-run /rsct-setup." >&2
+  else
+    mkdir -p ".rsct/scripts" || { echo "  ⚠ ERROR: cannot create .rsct/scripts" >&2; exit 1; }
+    GUARD_TARGET="$(pwd)/.rsct/scripts/edit-scope-guard.js"
+    # Version-stamped, content-diff-gated write (mirror 4.V.b): shebang line 1,
+    # deterministic stamp line 2, source body from line 2. `tr -d '\r'` makes the
+    # compare content-only so a CRLF-normalized on-disk copy is not rewritten
+    # (anti-pattern #4). No per-run timestamp (drift keys off `v=`).
+    GUARD_DESIRED=$(
+      echo "#!/usr/bin/env node"
+      echo "// rsct-mcp v=$RSCT_MCP_VERSION — installed by /rsct-setup"
+      tail -n +2 "$GUARD_SRC"
+    )
+    if [ -f "$GUARD_TARGET" ] && [ "$(tr -d '\r' < "$GUARD_TARGET")" = "$(printf '%s' "$GUARD_DESIRED" | tr -d '\r')" ]; then
+      echo "  edit-scope guard already current (rsct-mcp v$RSCT_MCP_VERSION) — no rewrite needed"
+    else
+      printf '%s\n' "$GUARD_DESIRED" > "$GUARD_TARGET" \
+        || { echo "  ⚠ ERROR: write failed for .rsct/scripts/edit-scope-guard.js" >&2; exit 1; }
+      [ -f "$GUARD_TARGET" ] || { echo "  ⚠ ERROR: edit-scope-guard.js not created — aborting" >&2; exit 1; }
+      echo "  installed edit-scope guard (rsct-mcp v$RSCT_MCP_VERSION)"
+    fi
+
+    # Register the PreToolUse hook (idempotent structured merge — same sanctioned
+    # JSON.parse/stringify exception as 4.V.c: the entry nests into
+    # hooks.PreToolUse[].hooks[] with a `matcher`, so a text splice cannot
+    # guarantee correct shape). The command reads $CLAUDE_PROJECT_DIR / cwd, so
+    # Windows path-mangling of the literal does not break it.
+    SETTINGS_PATH="$(pwd)/.claude/settings.json"
+    mkdir -p ".claude" || { echo "  ⚠ ERROR: cannot create .claude" >&2; exit 1; }
+    node -e '
+      const fs = require("fs");
+      const target = process.argv[1];
+      const HOOK_CMD = "node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js";
+      const MARKER = ".rsct/scripts/edit-scope-guard.js";
+      const MATCHER = "^(Edit|Write|MultiEdit|NotebookEdit)$";
+      let settings = {};
+      if (fs.existsSync(target)) {
+        try {
+          settings = JSON.parse(fs.readFileSync(target, "utf8"));
+        } catch (e) {
+          console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
+          process.exit(1);
+        }
+      }
+      settings.hooks = settings.hooks || {};
+      settings.hooks.PreToolUse = settings.hooks.PreToolUse || [];
+      const already = settings.hooks.PreToolUse.some(group =>
+        Array.isArray(group && group.hooks) && group.hooks.some(h =>
+          h && typeof h.command === "string" && h.command.indexOf(MARKER) !== -1
+        )
+      );
+      if (already) {
+        console.log("RSCT PreToolUse edit-scope guard hook already present — no change.");
+      } else {
+        settings.hooks.PreToolUse.push({
+          matcher: MATCHER,
+          hooks: [{ type: "command", command: HOOK_CMD }]
+        });
+        fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
+        console.log("Installed RSCT PreToolUse edit-scope guard hook in " + target);
+      }
+    ' "$SETTINGS_PATH"
+  fi
+fi
+```
+
+Re-running `/rsct-setup` refreshes the copied guard and is idempotent on
+the hook entry (keyed off the `.rsct/scripts/edit-scope-guard.js`
+substring). Devs should NOT hand-edit `.rsct/scripts/`.
+
 **4.V.c2 — Register project-scope MCP (committable `.mcp.json`) (CAP-48)**
 
 When the dev chose **[2] Project scope** at install time, `scripts/install.sh`
