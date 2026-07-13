@@ -10,6 +10,85 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.2.0] - 2026-07-13
+
+The **plan-lifecycle-v2** track — reshapes the commit→integrate→re-plan lifecycle
+around five dev demands: make routine commits low-friction while moving the rigid
+gate to the *definitive* integration boundary, mechanize plan-completion at that
+boundary, and stop long-session context loss. Backward-compatible; the marker
+**schema id stays `v=1.0.0`** (frozen). **37 → 39 tools** (+`rsct_request_rebase`,
++`rsct_plan_dispose`).
+
+> **Honest boundary (stated up front).** The new re-bootstrap guard and the
+> free-commit anti-rollback ceiling are **soft ceilings**, not tamper-proof locks:
+> the guard covers the four editor tools only, and the ungated Bash tool — or
+> deleting `.rsct.json` / `.rsct/phase-state.json` — defeats them. No purely-local
+> anchor is tamper-proof against a same-user agent with a shell; these raise the
+> attack cost (a silent one-file delete becomes a truncate-and-forge) and fail
+> **closed** (drop to strict per-action §C), but they do not claim impossibility.
+
+### Added
+
+- **Dialog-free free-commit lane (demand 1).** For `trivial`/`small` tasks,
+  `rsct_request_commit` no longer needs a per-commit OS dialog — it commits freely
+  within a mechanical, audit-log-anchored ceiling (default ~5 commits per plan,
+  plus cumulative file/line caps). The ceiling is derived from the **append-only
+  `.rsct/audit.log`** so deleting `phase-state.json` cannot silently reset it
+  (fail-closed). Branch protection (INV-5) and the secret scan (INV-6) still apply
+  — the free path carries no overrides. `standard`/`complex` keep the one-approval
+  batch token. New `lib/health.ts` (`evaluateMcpHealth`, fail-closed) and
+  `lib/free-commit.ts`.
+- **`rsct_request_rebase` (§C-gated).** The history-rewriting integration paths,
+  always per-action: `mode:'rebase'` runs `git rebase <ref>`; `mode:'squash'` runs
+  `git merge --squash` (stages, does not commit). Requires a `pre_merge_ack`; runs
+  INV-5 on the current branch (rewriting a protected branch needs
+  `override_protected_branch`). Never token/free-covered.
+- **`rsct_plan_dispose`.** Records a plan's keep|delete disposition (once, slug-
+  guarded) and prints an **advisory** artifact-cleanup report. Flow-independent —
+  covers the GitHub PR merge/squash/rebase terminal that runs neither
+  `rsct_request_merge` nor `_push`.
+- **Re-bootstrap gate (demand 5).** Closing a plan's terminal phase arms a
+  `context_stale` flag; a new **PreToolUse hook** (`.rsct/scripts/edit-scope-guard.js`,
+  matcher `Edit|Write|MultiEdit|NotebookEdit`) then **blocks edits** until
+  `rsct_load_context` re-reads plan/decisions/knowledge and clears it (a cheap
+  `rsct_status` does **not** clear it). `rsct_check_edit_scope` gained a
+  `stale_context` status. Fail-open on infra faults; installed at 4.V.d, scrubbed
+  at 4.V.a1.
+- **`plan_file_retention` toggle (`.rsct.json`).** `ephemeral` (default — today's
+  behavior: `spec_`/`plan_`/`progress_` gitignored, cleaned at integration) vs
+  `documented` (`spec_<slug>.md` tracked at the project root as durable design
+  docs, excluded from the `.gitignore` block; `progress_` stays branch-local).
+
+### Changed
+
+- **Integration gate hardening (demand 3).** `pre_merge_ack.plan_complete` is now
+  **mechanically cross-checked** against open `- [ ]` items in
+  `progress_<slug>.md` (resolved by the plan whose `Branch` matches the branch
+  being integrated, not the mtime-winner) — a `plan_complete:true` attestation
+  that contradicts visible open items is **rejected before the OS dialog**.
+  Post-integration artifact cleanup is **advisory-only** (never auto-deletes;
+  `rsct_plan_dispose` records the decision). `rsct_load_context` adds a retroactive
+  reconciliation hint when a left-behind branch looks merged.
+- **Plan-token TTL → sliding window.** A batch token now **re-arms** its expiry on
+  each successful commit (default ~8h) under an immutable **absolute cap** (~24h),
+  so an actively-worked plan never expires mid-flight while a stale grant still
+  self-expires. New `approval_modes` fields `plan_token_ttl_slide_minutes` /
+  `_abs_minutes`.
+- **settings.json hygiene (demand 2).** The SessionStart sanitizer now migrates
+  **machine-absolute `additionalDirectories`** out of the versioned
+  `.claude/settings.json` into the per-user, auto-gitignored `settings.local.json`
+  (local-write-first — never loses entries on a failed migration).
+- **Unified `/rsct-universe` (demand 4).** One idempotent command replaces
+  `/rsct-init-universe` and `/rsct-canonical-source` (removed on upgrade): it
+  detects state and creates/adjusts the org universe and/or links the project. The
+  engine prompts (`02`/`04`) stay in the repo, reused by the new
+  `prompts/06-universe.md` dispatcher.
+- **`approval_modes` schema relaxed `.strict()` → `.strip()`.** An unknown/typo'd
+  key now drops to its safe default (fail-closed) instead of nulling the whole
+  config; per-field bounds keep the HIGH-4 dangerous-value defense. Forward-compat
+  for downgrades. (Release note: downgrading below 2.2.0 still requires stripping
+  the new `approval_modes` keys first.)
+
 ## [2.1.1] - 2026-07-05
 
 Patch: surface a version drift that was previously silent.

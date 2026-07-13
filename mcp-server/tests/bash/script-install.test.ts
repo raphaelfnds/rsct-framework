@@ -18,7 +18,10 @@ const INSTALL = resolve(ROOT, 'scripts', 'install.sh')
 const UNINSTALL = resolve(ROOT, 'scripts', 'uninstall-framework.sh')
 
 const RUNTIME_DIRS = ['prompts', 'rules', 'doc-templates', 'memory-templates', 'universe-templates']
-const COMMANDS = ['rsct-setup', 'rsct-canonical-source', 'rsct-uninstall', 'rsct-init-universe', 'rsct-clean-code']
+const COMMANDS = ['rsct-setup', 'rsct-universe', 'rsct-uninstall', 'rsct-clean-code']
+// plan-lifecycle-v2 Trilha 4: the unified /rsct-universe replaces these; install
+// must actively remove any leftover stubs so they no longer appear to the dev.
+const LEGACY_COMMANDS = ['rsct-init-universe', 'rsct-canonical-source']
 
 const sandboxes: string[] = []
 function newSandbox(): string {
@@ -72,6 +75,10 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
     expect(existsSync(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
     for (const c of COMMANDS) {
       expect(existsSync(join(commandsDir(home), `${c}.md`)), `missing command ${c}.md`).toBe(true)
+    }
+    // Trilha 4: the legacy universe command stubs must NOT be generated.
+    for (const c of LEGACY_COMMANDS) {
+      expect(existsSync(join(commandsDir(home), `${c}.md`)), `legacy ${c}.md should be absent`).toBe(false)
     }
     // SKIP_MCP must keep it framework-only (no companion install attempted).
     expect(r.out).toMatch(/Skipping rsct-mcp companion/)

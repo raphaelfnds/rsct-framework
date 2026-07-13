@@ -27,13 +27,17 @@ and request fresh OK. Do not infer authorization from prior actions in the
 same session.
 
 When `rsct-mcp` is installed, prefer the §C-gated MCP tools over plain
-`Bash(git ...)` for the three mutating ops — they enforce the rule
+`Bash(git ...)` for the four mutating ops — they enforce the rule
 mechanically (single-use `dev_approval` payload + cross-platform OS
 dialog + audit log entry per call):
 
-- `mcp__rsct__rsct_request_commit` for commits
+- `mcp__rsct__rsct_request_commit` for commits (for `trivial`/`small` tasks the
+  dialog-free free-commit lane applies — bounded, audit-log-anchored ceiling;
+  branch-protection + secret-scan still enforced)
 - `mcp__rsct__rsct_request_push` for pushes
 - `mcp__rsct__rsct_request_merge` for merges
+- `mcp__rsct__rsct_request_rebase` for rebases / `--squash` merges
+  (history-rewriting; always per-action)
 
 The MCP layer + SessionStart sanitizer hook close the "trust-forever"
 bypass surface that pure prose cannot. Without `rsct-mcp` installed,

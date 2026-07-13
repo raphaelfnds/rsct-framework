@@ -24,7 +24,10 @@ In order, with NO other tool call in between:
 2. **`mcp__rsct__rsct_load_context`** — reads the active plan,
    decisions snapshot, knowledge index, and `active_phase` (if a
    phase from a prior session is still open). `next_action_hints`
-   is mandatory reading; act on every hint.
+   is mandatory reading; act on every hint. It is also the ONLY call that
+   clears the `context_stale` re-bootstrap flag (plan-lifecycle-v2 item 5) —
+   so after a plan closes mid-session, re-run THIS (not just `rsct_status`)
+   before editing again.
 
 If either call returns `rsct_installed: false`, the rsct-mcp is not
 configured for this project — proceed with the §A–§H prose only, and
@@ -135,9 +138,13 @@ Before any `Edit` / `Write` to executable behavior files
   `override_verification_skip: true` — the override is audit-logged.
 - Before each `Edit` call:
   `mcp__rsct__rsct_check_edit_scope({ file_path })` — returns
-  `in_scope` / `out_of_scope` / `unknown`. If `out_of_scope`, STOP
-  and ask the dev to expand `scope_globs` (requires re-opening spec)
-  or to defer the change.
+  `in_scope` / `out_of_scope` / `unknown` / `stale_context`. If
+  `out_of_scope`, STOP and ask the dev to expand `scope_globs` (requires
+  re-opening spec) or to defer the change. If **`stale_context`** (or a
+  PreToolUse guard blocks an edit): a plan closed in this session and the
+  context is stale — STOP and re-run `mcp__rsct__rsct_load_context` to
+  re-read plan/decisions/knowledge before editing (plan-lifecycle-v2 item 5;
+  a bare `rsct_status` does **not** clear it).
 - After all edits land → `mcp__rsct__rsct_phase_code_complete`
   (§C gate). Next: the REVIEW phase when `include_review:true` was set at
   spec_complete (see above), otherwise the test phase.

@@ -53,13 +53,19 @@ a process problem, not a framework limitation.
 **Mechanical enforcement (when `rsct-mcp` is installed):**
 
 §C above is the conversational/social contract. The `rsct-mcp` companion
-provides the mechanical layer that backs it — three §C-gated MCP tools
+provides the mechanical layer that backs it — **four** §C-gated MCP tools
 that require a single-use `dev_approval` payload AND pop a cross-platform
-OS dialog before the mutation lands:
+OS dialog before the mutation lands (with the free-commit-lane exception
+noted under "Plan execution modes" below):
 
 - `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`
 - `mcp__rsct__rsct_request_push` — replaces `Bash(git push ...)`
 - `mcp__rsct__rsct_request_merge` — replaces `Bash(git merge ...)`
+- `mcp__rsct__rsct_request_rebase` — replaces `Bash(git rebase ...)` /
+  `Bash(git merge --squash ...)` (history-rewriting integration: `mode:'rebase'`
+  runs `git rebase <ref>`, `mode:'squash'` runs `git merge --squash`; ALWAYS
+  per-action, requires a `pre_merge_ack`, runs INV-5 on the current branch, and
+  is never covered by a batch/free lane)
 
 Each call consumes a single approval (INV-2 anti-reuse store at
 `.rsct/approvals-seen.json`) so the same payload cannot authorize two
@@ -69,7 +75,7 @@ mutations. A SessionStart sanitizer hook strips poison-pill entries
 cannot persist. Every invocation, override, or rejection is appended
 to `.rsct/audit.log` for forensic review.
 
-**CAP-33 — bootstrap visibility on mutating tools (v0.7.11+):** all three
+**CAP-33 — bootstrap visibility on mutating tools (v0.7.11+):** all the
 request tools (and `rsct_phase_code_start` from CAP-31) read
 `bootstrap_at` from `.rsct/phase-state.json` on every successful
 mutation. When `bootstrap_at` is missing or older than 4 hours, a
@@ -78,9 +84,9 @@ is written to the audit log. **Soft signal — never rejects the
 mutation.** Run `rsct_status` + `rsct_load_context` at session start
 (per CLAUDE.md §0) to keep the marker fresh and the warnings silent.
 
-Use these tools by default for commit/push/merge. If `rsct-mcp` is not
-installed, the §C prose contract above is the only enforcement —
-follow it strictly.
+Use these tools by default for commit / push / merge / rebase / squash. If
+`rsct-mcp` is not installed, the §C prose contract above is the only
+enforcement — follow it strictly.
 
 **Pre-integration hygiene — `pre_merge_ack` (PH-5):** `rsct_request_merge`
 (always) and `rsct_request_push` (**only when pushing to a protected
@@ -89,16 +95,21 @@ branch**) require a `pre_merge_ack` checklist ALONGSIDE the
 incomplete ack rejects **in chat with no new popup**. Be honest about what
 it is:
 
-- **Presence is a forcing function, not a substantive lock.** It makes you
-  stop and assemble the checklist at the integration point (the MCP
-  re-surfaces the hygiene the prose forgets in a long session). It does
-  **not** machine-verify that the work is actually done.
-- The three items — `plan_complete`, `adr_confirmed`, `issues_resolved` —
-  are **agent self-attestations** you confirm with the dev, not
-  machine-checked facts. Set each true only after actually confirming it.
-  When `adr_confirmed` or `issues_resolved` is true, `note` must state WHAT
-  (e.g. "ADR-012 recorded; issue #7 closed") so the attestation leaves an
-  auditable written claim.
+- **Presence is a forcing function.** It makes you stop and assemble the
+  checklist at the integration point (the MCP re-surfaces the hygiene the prose
+  forgets in a long session). Only `plan_complete` is machine-cross-checked
+  (below); `adr_confirmed` / `issues_resolved` are not.
+- **`plan_complete` now has a mechanical cross-check (plan-lifecycle-v2):** a
+  `plan_complete:true` that contradicts open `- [ ]` items in
+  `progress_<slug>.md` (resolved by the plan whose `Branch` matches the branch
+  being integrated) is **rejected before the OS dialog**. So it is no longer a
+  pure self-attestation — you cannot stamp "done" while the plan's progress
+  still shows open items.
+- The other two items — `adr_confirmed`, `issues_resolved` — remain **agent
+  self-attestations** you confirm with the dev, not machine-checked facts. Set
+  each true only after actually confirming it. When either is true, `note` must
+  state WHAT (e.g. "ADR-012 recorded; issue #7 closed") so the attestation
+  leaves an auditable written claim.
 - **The one behavioral lock is honoring `false`:** if you mark any item
   `false`, you declared "not ready" and the merge/push is rejected. Every
   ack (pass or reject) is recorded in `.rsct/audit.log`. Like batch mode,
@@ -109,11 +120,20 @@ A push to a **non-protected** feature/WIP branch (e.g. to trigger CI on an
 open PR) does **not** require the ack — forcing an attestation there would
 only train dishonest "all true" stamps.
 
-**Plan execution modes — one-at-a-time (default) vs batch (T3):**
+**Plan execution modes — free lane (trivial/small) · one-at-a-time · batch (T3):**
 
-By default, execution is **one-at-a-time**: every commit needs its own fresh
-`dev_approval` (the anti-reuse rule above). This is the safe default and what
-you should assume unless the dev opts in to batch mode.
+**Free-commit lane (`trivial`/`small` tasks, plan-lifecycle-v2).** For a task the
+classifier tiered `trivial` or `small`, `rsct_request_commit` commits **without a
+per-commit OS dialog**, within a mechanical, audit-log-anchored ceiling (default
+~5 commits per plan, plus cumulative file/line caps). The ceiling is re-derived
+from the append-only `.rsct/audit.log`, so deleting `phase-state.json` cannot
+silently reset it (fail-closed). Branch protection (INV-5) and the secret scan
+(INV-6) still apply — the free path carries no overrides. When the ceiling trips,
+the lane locks and the next commit falls back to a per-action `dev_approval`.
+
+For `standard`/`complex` tasks, execution is **one-at-a-time**: every commit needs
+its own fresh `dev_approval` (the anti-reuse rule above), unless the dev opts in
+to batch mode.
 
 For longer plan runs, the dev may grant a **plan-scoped batch token** so you
 don't have to stop for an OK on every single commit:
@@ -121,8 +141,11 @@ don't have to stop for an OK on every single commit:
 - `mcp__rsct__rsct_plan_authorize` — the dev approves **once** (full §C gate +
   OS dialog). That single approval then covers up to a bounded number of
   **commits** (default 20), within the **active plan** and the **current branch**,
-  until it expires (default 120 min). After that, `rsct_request_commit` no
-  longer needs a per-commit `dev_approval`.
+  until it expires. The expiry is a **sliding window** (plan-lifecycle-v2) — it
+  re-arms on each successful commit (default ~8h) under an immutable absolute cap
+  (~24h), so an actively-worked plan never expires mid-flight while a stale grant
+  still self-expires. After minting, `rsct_request_commit` no longer needs a
+  per-commit `dev_approval`.
 - `mcp__rsct__rsct_plan_revoke` — ends the batch token early (no approval needed
   — revoking only tightens). The token also **auto-revokes** when you switch
   branches, when the plan is marked complete or its `plan_`/`spec_` file is
@@ -144,7 +167,8 @@ approve a **multi-phase** plan (§B marks it Recommended for multi-phase runs).
 "Reset per new planning" needs no extra mechanism — it is already mechanical: a
 new plan normally means a new branch (`1 plan = 1 branch`) which auto-revokes the
 token via `branch_mismatch`, and marking the prior plan complete revokes it too;
-the TTL (default 120 min) bounds any stale grant and the budget caps the commits.
+the sliding-window TTL (re-arms ~8h per commit, ~24h absolute cap) bounds any
+stale grant and the budget caps the commits.
 Note the token is **disk-persisted** in `.rsct/phase-state.json`, so it does **not**
 clear just because the session restarts — end it explicitly with `rsct_plan_revoke`
 (or let it expire) if you want it gone sooner. Don't offer it for a single-phase

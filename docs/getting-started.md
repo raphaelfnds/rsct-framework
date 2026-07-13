@@ -25,7 +25,7 @@ cd ~/dev/rsct-framework
 bash scripts/install.sh
 ```
 
-The installer copies the runtime to `~/.rsct/`, registers the five `rsct-*`
+The installer copies the runtime to `~/.rsct/`, registers the four `rsct-*`
 slash commands, and asks where to register the `rsct-mcp` companion (User scope
 is the simplest for a solo dev). For unattended/CI installs and the registration
 scopes, see the [root README](../README.md#installation).
@@ -84,10 +84,13 @@ misbehaves, that's a bug worth filing.
 3. **Run `/rsct-setup`.** Expect a few discovery questions, then a plan to
    approve, then the files above written under your OK.
 4. **Ask Claude to commit something.** With `rsct-mcp` installed, Claude proposes
-   `rsct_request_commit`, which pops a native OS dialog for you to confirm
-   out-of-band before the commit lands (the audit trail goes to `.rsct/audit.log`).
-   Without the companion, a plain `git commit` is refused or triggers a
-   reauthorization request per the `CLAUDE.md` rules.
+   `rsct_request_commit`. For a `standard`/`complex` task this pops a native OS
+   dialog for you to confirm out-of-band before the commit lands; for a
+   `trivial`/`small` task it goes through the **dialog-free free-commit lane**
+   (bounded by an audit-log-anchored ceiling, with branch-protection and the
+   secret-scan still enforced). Either way the audit trail goes to
+   `.rsct/audit.log`. Without the companion, a plain `git commit` is refused or
+   triggers a reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
    the framework from the machine.

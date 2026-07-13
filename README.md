@@ -51,7 +51,7 @@ The end-user guides live in [`docs/`](docs/):
 - **[Getting started](docs/getting-started.md)** — prerequisites, install,
   restart, `/rsct-setup`, and a 5-minute first-project walkthrough (the
   single-repo happy path).
-- **[Command reference](docs/commands.md)** — a per-command manual for all five
+- **[Command reference](docs/commands.md)** — a per-command manual for all four
   slash commands.
 - **[Multi-repo & contracts](docs/multi-repo.md)** — the T2 layer: topology
   modes, the org universe, contracts & surfaces, producer-vs-consumer, and a
@@ -92,7 +92,7 @@ bash scripts/install.sh
 > `/rsct-setup` and see *"No matching commands"*, that's the symptom —
 > restart fixes it.
 
-After install (and restart), five slash commands are available in **any**
+After install (and restart), four slash commands are available in **any**
 project on this machine — no path needed.
 
 ### Unattended / non-interactive install (CI, provisioning)
@@ -345,8 +345,7 @@ If you prefer not to install — useful for one-off use or testing — you can
 invoke each prompt by its path in the cloned framework:
 ```
 @/path/to/rsct-framework/prompts/01-setup.md
-@/path/to/rsct-framework/prompts/04-init-universe.md
-@/path/to/rsct-framework/prompts/02-canonical-source.md
+@/path/to/rsct-framework/prompts/06-universe.md
 @/path/to/rsct-framework/prompts/03-uninstall.md
 @/path/to/rsct-framework/prompts/05-clean-code.md
 ```
@@ -377,9 +376,11 @@ step doesn't behave as described, that's a bug worth filing.
    - Plain `Bash(git commit ...)` will be refused or surface a §C
      reauthorization request (per the rules in `CLAUDE.md`).
    - With `rsct-mcp` installed: Claude proposes
-     `mcp__rsct__rsct_request_commit` instead, which pops a native OS
-     dialog asking you to confirm out-of-band before the commit lands.
-     Audit trail goes to `.rsct/audit.log`.
+     `mcp__rsct__rsct_request_commit` instead. A `standard`/`complex` task
+     pops a native OS dialog to confirm out-of-band before the commit lands;
+     a `trivial`/`small` task uses the dialog-free free-commit lane (bounded
+     by an audit-log-anchored ceiling, branch-protection + secret-scan still
+     enforced). Audit trail goes to `.rsct/audit.log`.
 5. **Reverse it.** `/rsct-uninstall` cleanly removes everything the
    framework added to *this project* (markers + SHA256 detect any
    developer edits and protect them). Then
@@ -417,10 +418,11 @@ rsct-framework/                    # dev/source — version controlled in git
 │   └── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level)
 ├── prompts/
 │   ├── 01-setup.md                # main: setup or update project
-│   ├── 02-canonical-source.md     # universe canonical source section
+│   ├── 02-canonical-source.md     # internal engine (link project), invoked by 06-universe.md
 │   ├── 03-uninstall.md            # reverse setup in a project (full or selective)
-│   ├── 04-init-universe.md        # bootstrap a new universe repository
-│   └── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
+│   ├── 04-init-universe.md        # internal engine (create/adjust universe), invoked by 06-universe.md
+│   ├── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
+│   └── 06-universe.md             # unified /rsct-universe dispatcher (routes to 02 + 04)
 ├── rules/                         # individual rule files (inserted into CLAUDE.md)
 │   ├── A-bug-mode.md
 │   ├── B-architect-plan.md

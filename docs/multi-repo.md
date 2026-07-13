@@ -16,14 +16,14 @@ see [`rsct_get_topology`](../mcp-server/README.md#rsct_get_topology) and
 |---|---|---|
 | **App repo** | Your application + its `CLAUDE.md`, `documentation/`, `.rsct.json`. | The app's developers, in the app session. |
 | **Org universe** | One repo per organization: governance docs, the `applications/` registry, and `contracts.json`. Marked by a `.universe.json` file. | The org owner, **by hand**, committed from the universe's own session. |
-| **The link** | Each app repo points at the universe as its *canonical architectural source* (added by [`/rsct-canonical-source`](commands.md#rsct-canonical-source)). | Written into the app repo. |
+| **The link** | Each app repo points at the universe as its *canonical architectural source* (added by [`/rsct-universe`](commands.md#rsct-universe)). | Written into the app repo. |
 
 ## Which session edits which repo
 
 A recurring point of confusion: **the app session and the universe live in
 different repos, and RSCT never commits to the universe for you.**
 
-- Running `/rsct-setup` / `/rsct-canonical-source` in an **app repo** edits *that
+- Running `/rsct-setup` / `/rsct-universe` in an **app repo** edits *that
   app repo* (its `CLAUDE.md`, `.rsct.json`).
 - Registering the app or declaring a contract writes **working files into the
   universe repo** — but RSCT does **not** run git there. You open the universe
@@ -166,10 +166,10 @@ graph payload, the override field), see
 ## Multi-repo setup — step by step
 
 1. **Create the universe** (org owner, once): in the directory where the universe
-   should live, run [`/rsct-init-universe`](commands.md#rsct-init-universe). Commit
+   should live, run [`/rsct-universe`](commands.md#rsct-universe). Commit
    the skeleton.
 2. **In each app repo**, run [`/rsct-setup`](commands.md#rsct-setup), then
-   [`/rsct-canonical-source`](commands.md#rsct-canonical-source) to link it to the
+   [`/rsct-universe`](commands.md#rsct-universe) to link it to the
    universe. Confirm the topology as `multi-repo` when asked.
 3. **Register the apps**: re-running `/rsct-setup` in a linked app offers
    (consent-gated) to register it into the universe's `applications/`. Review and
