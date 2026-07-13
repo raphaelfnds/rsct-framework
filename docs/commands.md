@@ -1,15 +1,14 @@
 # Command reference
 
-RSCT installs five slash commands. Each is documented below with the same
+RSCT installs four slash commands. Each is documented below with the same
 structure: **purpose · when to use · preconditions · what it does · outputs ·
 consent gates · re-run behavior · recovery.**
 
-All five become available in *any* project on the machine after install +
+All four become available in *any* project on the machine after install +
 an IDE restart. None of them push or commit to git on your behalf.
 
 - [`/rsct-setup`](#rsct-setup) — set up or update project governance (the front door)
-- [`/rsct-init-universe`](#rsct-init-universe) — bootstrap an org-level universe skeleton
-- [`/rsct-canonical-source`](#rsct-canonical-source) — link a project to its universe
+- [`/rsct-universe`](#rsct-universe) — create/adjust the org universe and/or link this project (unified)
 - [`/rsct-uninstall`](#rsct-uninstall) — reverse RSCT in a project
 - [`/rsct-clean-code`](#rsct-clean-code) — sweep for duplication/scalability/dependency hygiene
 
@@ -26,7 +25,7 @@ universe, or offer to create one when it detects same-org sibling repos).
 re-run to pick up framework updates. **Do not run it inside a universe repo** —
 a universe is governance infrastructure, not an app. `/rsct-setup` detects a
 `.universe.json` in the repo and stops with that guidance (edit the universe's
-files and commit them yourself; see [`/rsct-init-universe`](#rsct-init-universe)).
+files and commit them yourself; see [`/rsct-universe`](#rsct-universe)).
 
 **Preconditions.** RSCT installed + IDE restarted. Git is recommended but not
 required to start. If the project is linked to a universe, the universe is read
@@ -66,78 +65,56 @@ SHA256-protecting any file you edited by hand.
 
 ---
 
-## `/rsct-init-universe`
+## `/rsct-universe`
 
-**Purpose.** Bootstrap a new **org-level universe** repository — the skeleton
-that holds organization-wide governance: naming standards, the canonical-sources
-map, the `applications/` registry, and the `contracts.json` graph.
+**Purpose.** One idempotent command for the whole universe lifecycle: create or
+adjust the **org-level universe** repository (the skeleton that holds
+organization-wide governance — naming standards, the canonical-sources map, the
+`applications/` registry, and the `contracts.json` graph) **and/or** link **this**
+project to it (declaring the universe as the *canonical architectural source* the
+agent treats as authoritative over local guesses). It **replaces** the former
+`/rsct-init-universe` and `/rsct-canonical-source`, which are removed on upgrade
+(their engine prompts live on internally — this command reuses them).
 
-**When to use it.** Once per organization, when no universe exists yet. Run it in
-the directory where the universe repo should live (it creates the skeleton there).
-`/rsct-setup` and `/rsct-canonical-source` will offer to invoke it for you when
-they detect you need a universe but don't have one.
+**When to use it.** In an app repo to link it to (or create) the org universe;
+inside a universe repo to refresh the skeleton. `/rsct-setup` offers to invoke it
+when it detects you need a universe.
 
 **Preconditions.** RSCT installed + IDE restarted.
 
-**What it does.** Creates a skeleton universe: `.universe.json` (the marker that
-defines a repo as a universe — carries the org, the universe name, and an
-initially empty `registered_apps[]` index), `docs/governance/` (naming
-standards, retention, etc.), `docs/diagrams/` placeholders, an empty
-`applications/` registry, `hosts/`, and an empty **`contracts.json`** template.
-Everything is a skeleton with TODO placeholders — you fill the content as the
-organization grows.
+**What it does.** Runs ONE discovery probe (org slug from the git remote or
+`app.org`, universe name, a superset path search, inside-universe + already-linked
+detection), then routes by the detected state:
 
-**Outputs.** A new universe repository (folders + template files). It is a
-*skeleton*: no app is registered and no contract is declared yet. You own the
-content and the commits.
+- **No universe found** → bootstraps a skeleton universe repo: `.universe.json`
+  (the marker — org, universe name, empty `registered_apps[]`), `docs/governance/`,
+  `docs/diagrams/` placeholders, an empty `applications/` registry, `hosts/`, and
+  an empty `contracts.json`. TODO placeholders you fill as the org grows.
+- **Universe exists, project not linked** → adds the `## Canonical architectural
+  source` section to this repo's `CLAUDE.md` + the `.rsct.json` `universe` block.
+- **Inside the universe repo** → adjusts/refreshes the skeleton (adds only what's
+  missing; never overwrites hand-edited governance).
+- **Already linked** → refreshes the link in place (marker-guarded, no duplication).
 
-**Consent gates.** It only creates files in the target universe directory. It
-never touches an app repo and never runs git.
+**Outputs.** In an app repo: the `CLAUDE.md` canonical-source section + the
+`.rsct.json` universe link (it never writes to the universe repo when linking).
+When creating: a new universe repository (folders + template files, a skeleton you
+own and commit).
 
-**Re-run behavior.** Existing files are left untouched (skip-if-exists); absent
-skeleton files are recreated. It does not overwrite hand-edited governance.
+**Consent gates.** Creating a universe repo is confirmed first. It never runs git
+in the universe. Linking edits only this repo's `CLAUDE.md` + `.rsct.json`.
 
-**Recovery.** The universe is an ordinary git repo you own — revert with git.
-
----
-
-## `/rsct-canonical-source`
-
-**Purpose.** Link **this** project to its organization's universe — declaring the
-universe as the *canonical architectural source* (the org's source of truth for
-architecture and standards, which the agent treats as authoritative over local
-guesses).
-
-**When to use it.** In an app repo, after a universe exists, to connect the two.
-After linking, `/rsct-setup` can register the app and the runtime tools surface
-the universe.
-
-**Preconditions.** RSCT installed + IDE restarted. A universe should exist; if
-none is found locally or remotely, this command offers to create one
-(invoking [`/rsct-init-universe`](#rsct-init-universe)), let you provide a path,
-or record a remote-only reference.
-
-**What it does.** Adds a `## Canonical architectural source` section to this
-repo's `CLAUDE.md` pointing at the universe, and records the link in `.rsct.json`
-(the `universe` block + `canonical_source_added`).
-
-**Outputs (in this app repo).** The `CLAUDE.md` section + the `.rsct.json`
-universe link. It does not write to the universe repo.
-
-**Consent gates.** Edits only this repo's `CLAUDE.md` + `.rsct.json`. If it needs
-to create a universe, that is a separate explicit choice.
-
-**Re-run behavior.** Idempotent — recognizes the marker it wrote and updates in
-place rather than duplicating the section.
+**Re-run behavior.** Idempotent — every state is safe to re-run.
 
 **Recovery.** [`/rsct-uninstall`](#rsct-uninstall) removes the canonical-source
-section and the link.
+section and the link from a project; a universe repo is an ordinary git repo you
+revert with git.
 
 ---
 
 ## `/rsct-uninstall`
 
-**Purpose.** Reverse what `/rsct-setup` (and `/rsct-canonical-source`) created or
+**Purpose.** Reverse what `/rsct-setup` (and `/rsct-universe`) created or
 modified in **this** project — cleanly, without clobbering your own edits.
 
 **When to use it.** To remove RSCT from a project, in full or selectively.

@@ -1,7 +1,11 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/scripts/sanitize-permissions.ts'],
+  entry: [
+    'src/index.ts',
+    'src/scripts/sanitize-permissions.ts',
+    'src/scripts/edit-scope-guard.ts',
+  ],
   format: ['esm'],
   target: 'node20',
   outDir: 'dist',

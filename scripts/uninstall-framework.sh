@@ -68,7 +68,10 @@ CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 PRESENT_RSCT_HOME=""
 PRESENT_COMMANDS=()
 [ -d "$RSCT_HOME" ] && PRESENT_RSCT_HOME="yes"
-for cmd in rsct-setup rsct-init-universe rsct-canonical-source rsct-uninstall rsct-clean-code; do
+# plan-lifecycle-v2 Trilha 4: rsct-universe is the unified command; rsct-init-
+# universe / rsct-canonical-source are the removed legacy commands (kept in this
+# list so a machine that still has the old stubs gets them cleaned on uninstall).
+for cmd in rsct-setup rsct-universe rsct-init-universe rsct-canonical-source rsct-uninstall rsct-clean-code; do
   [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ] && PRESENT_COMMANDS+=("$cmd")
 done
 

@@ -86,11 +86,22 @@ export const PRE_MERGE_ACK_ITEMS = [
  */
 export function evaluatePreMergeAck(
   ack: PreMergeAck | undefined,
+  /**
+   * plan-lifecycle-v2 (Bloco 2.2, D2 — LIGHT mechanical check): whether the
+   * plan's `progress_<slug>.md` still has open `- [ ]` items. The caller
+   * computes it (keeping this function PURE); when it is `true` AND the agent
+   * attests `plan_complete`, that mechanical contradiction rejects the ack.
+   * `undefined` ⇒ pre-v2 behavior (no cross-check).
+   */
+  progressHasOpenItems?: boolean,
 ): PreMergeAckDecision {
   if (ack === undefined) return { ok: false, kind: 'pre_merge_ack_missing' }
 
   const failing: string[] = []
   if (ack.plan_complete !== true) failing.push('plan_complete')
+  else if (progressHasOpenItems === true) {
+    failing.push('plan_complete (progress_<slug>.md still has open `- [ ]` items)')
+  }
   if (ack.adr_confirmed !== true) failing.push('adr_confirmed')
   if (ack.issues_resolved !== true) failing.push('issues_resolved')
 

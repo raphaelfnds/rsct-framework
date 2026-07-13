@@ -51,7 +51,7 @@ The end-user guides live in [`docs/`](docs/):
 - **[Getting started](docs/getting-started.md)** — prerequisites, install,
   restart, `/rsct-setup`, and a 5-minute first-project walkthrough (the
   single-repo happy path).
-- **[Command reference](docs/commands.md)** — a per-command manual for all five
+- **[Command reference](docs/commands.md)** — a per-command manual for all four
   slash commands.
 - **[Multi-repo & contracts](docs/multi-repo.md)** — the T2 layer: topology
   modes, the org universe, contracts & surfaces, producer-vs-consumer, and a
@@ -92,7 +92,7 @@ bash scripts/install.sh
 > `/rsct-setup` and see *"No matching commands"*, that's the symptom —
 > restart fixes it.
 
-After install (and restart), five slash commands are available in **any**
+After install (and restart), four slash commands are available in **any**
 project on this machine — no path needed.
 
 ### Unattended / non-interactive install (CI, provisioning)
@@ -278,32 +278,29 @@ Creates CLAUDE.md, documentation/ structure and memory entries from scratch.
 ```
 Same command — detects what exists and only adds what is missing.
 
-### Bootstrap a new universe (if your organization doesn't have one yet)
+### Create/adjust the org universe and/or link this project — `/rsct-universe`
 ```
-/rsct-init-universe
+/rsct-universe
 ```
-Creates a skeleton universe repository at `~/projects/<org>-universe/` with:
-- `CLAUDE.md` (operational protocol §0)
-- `docs/governance/` (LGPD matrix, DNS survey, naming standards, retention)
-- `docs/diagrams/` (placeholders for C4, deployment, DFD .drawio files)
-- `applications/` (one folder per app, registered over time)
-- `hosts/` (one folder per production host)
+One idempotent command that detects the current state and does the right thing:
 
-Templates have TODO placeholders. You fill the content as the organization
-grows — no upfront commitment to fill everything.
+- **No universe yet** → bootstraps a skeleton universe repository at
+  `~/projects/<org>-universe/` (`CLAUDE.md` §0, `docs/governance/` — LGPD/DNS/
+  naming/retention, `docs/diagrams/` `.drawio` placeholders, `applications/`,
+  `hosts/`). Templates carry TODO placeholders you fill as the org grows.
+- **Universe exists but this project isn't linked** → adds the
+  `## Canonical architectural source` section to `CLAUDE.md`, pointing at it.
+- **Inside the universe repo** → adjusts/refreshes the skeleton (adds only
+  what's missing).
+- **Already linked** → refreshes the link.
 
-### Add canonical universe source to a project
-```
-/rsct-canonical-source
-```
-Adds the `## Canonical architectural source` section to CLAUDE.md,
-pointing to the universe repository of your organization. If no universe
-is found locally or remotely, this command offers to invoke
-`/rsct-init-universe` first.
+> Replaces the older `/rsct-init-universe` and `/rsct-canonical-source`
+> commands, which are **removed on upgrade** (their engine prompts live on
+> internally). Only `/rsct-universe` appears to you.
 
 ### Universe app registration
 
-Once a project is linked to a universe (via `/rsct-canonical-source`), re-running
+Once a project is linked to a universe (via `/rsct-universe`), re-running
 `/rsct-setup` offers to **register this app in the universe** (consent-gated): it
 renders an app README into `applications/<app>/` and appends the app to the
 universe's `registered_apps[]` index. It writes only to the universe repo and never
@@ -323,7 +320,7 @@ reference.
 ```
 /rsct-uninstall
 ```
-Reverses everything `/rsct-setup` and `/rsct-canonical-source` created or
+Reverses everything `/rsct-setup` and `/rsct-universe` created or
 modified. Detects developer edits via SHA256 and protects them from accidental
 deletion. Supports full uninstall and selective scopes (memory-only, specific
 rules, docs-only, etc.).
@@ -348,8 +345,7 @@ If you prefer not to install — useful for one-off use or testing — you can
 invoke each prompt by its path in the cloned framework:
 ```
 @/path/to/rsct-framework/prompts/01-setup.md
-@/path/to/rsct-framework/prompts/04-init-universe.md
-@/path/to/rsct-framework/prompts/02-canonical-source.md
+@/path/to/rsct-framework/prompts/06-universe.md
 @/path/to/rsct-framework/prompts/03-uninstall.md
 @/path/to/rsct-framework/prompts/05-clean-code.md
 ```
@@ -380,9 +376,11 @@ step doesn't behave as described, that's a bug worth filing.
    - Plain `Bash(git commit ...)` will be refused or surface a §C
      reauthorization request (per the rules in `CLAUDE.md`).
    - With `rsct-mcp` installed: Claude proposes
-     `mcp__rsct__rsct_request_commit` instead, which pops a native OS
-     dialog asking you to confirm out-of-band before the commit lands.
-     Audit trail goes to `.rsct/audit.log`.
+     `mcp__rsct__rsct_request_commit` instead. A `standard`/`complex` task
+     pops a native OS dialog to confirm out-of-band before the commit lands;
+     a `trivial`/`small` task uses the dialog-free free-commit lane (bounded
+     by an audit-log-anchored ceiling, branch-protection + secret-scan still
+     enforced). Audit trail goes to `.rsct/audit.log`.
 5. **Reverse it.** `/rsct-uninstall` cleanly removes everything the
    framework added to *this project* (markers + SHA256 detect any
    developer edits and protect them). Then
@@ -420,10 +418,11 @@ rsct-framework/                    # dev/source — version controlled in git
 │   └── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level)
 ├── prompts/
 │   ├── 01-setup.md                # main: setup or update project
-│   ├── 02-canonical-source.md     # universe canonical source section
+│   ├── 02-canonical-source.md     # internal engine (link project), invoked by 06-universe.md
 │   ├── 03-uninstall.md            # reverse setup in a project (full or selective)
-│   ├── 04-init-universe.md        # bootstrap a new universe repository
-│   └── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
+│   ├── 04-init-universe.md        # internal engine (create/adjust universe), invoked by 06-universe.md
+│   ├── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
+│   └── 06-universe.md             # unified /rsct-universe dispatcher (routes to 02 + 04)
 ├── rules/                         # individual rule files (inserted into CLAUDE.md)
 │   ├── A-bug-mode.md
 │   ├── B-architect-plan.md
@@ -475,8 +474,7 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 
 ~/.claude/commands/                # Claude Code slash command pointers
 ├── rsct-setup.md                  # @~/.rsct/prompts/01-setup.md
-├── rsct-init-universe.md          # @~/.rsct/prompts/04-init-universe.md
-├── rsct-canonical-source.md       # @~/.rsct/prompts/02-canonical-source.md
+├── rsct-universe.md               # @~/.rsct/prompts/06-universe.md
 ├── rsct-uninstall.md              # @~/.rsct/prompts/03-uninstall.md
 └── rsct-clean-code.md             # @~/.rsct/prompts/05-clean-code.md
 ```
@@ -575,7 +573,7 @@ work safely.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` companion MCP server** (in [`mcp-server/`](mcp-server/README.md)) —
-  the mechanical recall + enforcement layer: **37 tools + 5 resources** spanning
+  the mechanical recall + enforcement layer: **39 tools + 5 resources** spanning
   Recall (M1), Enforcement (M2: §C-gated commit/push/merge + the SessionStart
   sanitizer hook + the append-only `.rsct/audit.log`), the
   **R→S→V→C→REVIEW→T** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
@@ -616,15 +614,17 @@ sequence.
 The validation guides in [`mcp-server/README.md`](mcp-server/README.md)
 walk the surface end-to-end:
 - **M1 — Recall:** 7 read-only tools + 5 resources.
-- **M2 — Enforcement:** 6 tools — 3 pure-query checks + 3 §C-gated mutating ops
-  + SessionStart sanitizer + cross-platform OS dialog + audit log.
+- **M2 — Enforcement:** 7 tools — 3 pure-query checks + 4 §C-gated mutating ops
+  (commit / push / merge + `rsct_request_rebase`) + SessionStart sanitizer +
+  the PreToolUse edit-scope guard + cross-platform OS dialog + audit log.
 - **M3 — Phase machine + V phase + personas + Tutor + issue capture:**
   17 tools across the RSCT cycle.
-- **Post-M3 — multi-repo, onboarding & REVIEW (T1c/T2/T3 + DX):** 7 more —
-  `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
-  `rsct_plan_authorize`/`_revoke`, and `rsct_phase_review_start`/`_complete`.
+- **Post-M3 — multi-repo, onboarding, REVIEW & plan-lifecycle-v2 (T1c/T2/T3 + DX):**
+  8 more — `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
+  `rsct_plan_authorize`/`_revoke`, `rsct_phase_review_start`/`_complete`, and
+  `rsct_plan_dispose` (keep|delete disposition for a plan's artifacts).
 
-That's **7 + 6 + 17 + 7 = 37 tools**. Smoke: ask Claude to call
+That's **7 + 7 + 17 + 8 = 39 tools**. Smoke: ask Claude to call
 `rsct_classify_task` with any task description and confirm the returned tier +
 `recommended_phases[]` is sensible.
 

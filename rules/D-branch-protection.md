@@ -28,8 +28,13 @@ ANY of them, **and once the task's plan/progress/spec work is done**, proactivel
 **suggest** (optional, the dev's OK, never automatic): delete the **working
 branch** (local + remote — `git branch -d` / `git push origin --delete`, GitHub's
 "Delete branch", or `gh pr merge --delete-branch`) and the
-`plan_/progress_/spec_<slug>.md` tracking files. The squash/rebase paths run via
-`gh` / the web UI (not `rsct_request_merge`), so raising the suggestion is on you.
+`plan_/progress_/spec_<slug>.md` tracking files. When `rsct-mcp` is installed,
+record the keep|delete decision with `rsct_plan_dispose` (plan-lifecycle-v2) —
+it prints an **advisory** cleanup report and **never auto-deletes**, and it works
+for the GitHub-PR-merge terminal too (where neither `rsct_request_merge` nor
+`_push` runs). A PR-level squash/rebase runs via `gh` / the web UI, so raising the
+suggestion is on you. (In `plan_file_retention: documented` mode, `spec_<slug>.md`
+is kept — tracked as durable design docs.)
 
 **Pre-integration hygiene checklist (before any outward integration):**
 
@@ -42,14 +47,16 @@ checklist and confirm it with the dev:
    surfaced this session are written — this is not a new proposal round.)
 3. Are the associated **issues resolved**?
 
-When `rsct-mcp` is installed, `rsct_request_merge` (always) and
-`rsct_request_push` (when the branch is protected) enforce this mechanically
-via `pre_merge_ack` (§C) — the ack is a self-attestation, so answer it
-honestly; marking any item false is honored as a stop. **Rebase and PR
-merges run via `git`/`gh`, which have no MCP tool** — there the checklist is
-**yours to run as prose** before the outward-facing action. A push to a
-non-protected feature/WIP branch is not an integration and does not need the
-checklist.
+When `rsct-mcp` is installed, `rsct_request_merge` (always), `rsct_request_push`
+(when the branch is protected), and `rsct_request_rebase` (local rebase/squash,
+plan-lifecycle-v2) enforce this mechanically via `pre_merge_ack` (§C) — the ack
+is a self-attestation (except `plan_complete`, now cross-checked against open
+`- [ ]` items in the plan's progress), so answer it honestly; marking any item
+false is honored as a stop. **A local rebase/squash now has a §C-gated tool**
+(`rsct_request_rebase`, which requires its own `pre_merge_ack`); **only PR merges
+via `gh`/the web UI still have no MCP tool** — there the checklist is **yours to
+run as prose** before the outward-facing action. A push to a non-protected
+feature/WIP branch is not an integration and does not need the checklist.
 
 Even if the user authorized a push on a protected branch in the same session,
 the next push on that branch requires an updated OK (§C — authorization does

@@ -33,10 +33,70 @@ function isPoisonPill(entry) {
   if (typeof entry !== "string") return false;
   return POISON_PILL_PATTERNS.some((re) => re.test(entry));
 }
+function isAbsoluteEntry(v) {
+  return typeof v === "string" && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v));
+}
+function migrateAbsoluteDirs(projectRoot, audit) {
+  const settingsPath = join(projectRoot, ".claude", "settings.json");
+  if (!existsSync(settingsPath)) return null;
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  } catch {
+    return null;
+  }
+  const dirs = settings.permissions?.additionalDirectories;
+  if (!Array.isArray(dirs) || dirs.length === 0) return null;
+  const absolute = dirs.filter(isAbsoluteEntry);
+  if (absolute.length === 0) return null;
+  const localPath = join(projectRoot, ".claude", "settings.local.json");
+  let local = {};
+  if (existsSync(localPath)) {
+    try {
+      local = JSON.parse(readFileSync(localPath, "utf8"));
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_malformed", error });
+      return { path: settingsPath, status: "migration_skipped", error: `settings.local.json malformed: ${error}` };
+    }
+  }
+  const localPerms = local.permissions && typeof local.permissions === "object" ? { ...local.permissions } : {};
+  const localDirs = Array.isArray(localPerms.additionalDirectories) ? localPerms.additionalDirectories : [];
+  const localSet = new Set(localDirs.filter((x) => typeof x === "string"));
+  const toAdd = absolute.filter((a) => !localSet.has(a));
+  const nextLocal = {
+    ...local,
+    permissions: { ...localPerms, additionalDirectories: [...localDirs, ...toAdd] }
+  };
+  try {
+    mkdirSync(dirname(localPath), { recursive: true });
+    writeFileSync(localPath, JSON.stringify(nextLocal, null, 2) + "\n", "utf8");
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_write_failed", error });
+    return { path: settingsPath, status: "migration_skipped", error: `settings.local.json write failed: ${error}` };
+  }
+  const keptDirs = dirs.filter((d) => !isAbsoluteEntry(d));
+  const nextSettings = {
+    ...settings,
+    permissions: { ...settings.permissions, additionalDirectories: keptDirs }
+  };
+  try {
+    writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + "\n", "utf8");
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "source_write_failed", error });
+    return { path: settingsPath, status: "migration_skipped", error: `settings.json write failed: ${error}` };
+  }
+  audit({ event: "sanitize.migrated", file: settingsPath, migrated: absolute, to: localPath, count: absolute.length });
+  return { path: settingsPath, status: "migrated", stripped: absolute };
+}
 function sanitize(projectRoot, options = {}) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const audit = options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now));
   const result = { projectRoot, files: [] };
+  const migration = migrateAbsoluteDirs(projectRoot, audit);
+  if (migration) result.files.push(migration);
   for (const name of SETTINGS_FILES) {
     const path = join(projectRoot, ".claude", name);
     if (!existsSync(path)) {
@@ -142,6 +202,16 @@ function main(options) {
       options.stderr(
         `[rsct-sanitize] could not process ${file.path}: ${file.error ?? "unknown error"}`
       );
+    } else if (file.status === "migrated") {
+      const count = file.stripped?.length ?? 0;
+      const label = count === 1 ? "path" : "paths";
+      options.stderr(
+        `[rsct-sanitize] migrated ${count} machine-absolute ${label} from ${file.path} to settings.local.json (keep machine paths out of the versioned file)`
+      );
+    } else if (file.status === "migration_skipped") {
+      options.stderr(
+        `[rsct-sanitize] skipped migrating absolute paths from ${file.path}: ${file.error ?? "unknown error"} (settings.json left untouched)`
+      );
     }
   }
   return 0;
@@ -164,6 +234,6 @@ if (isCliEntry()) {
   process.exit(exitCode);
 }
 
-export { isPoisonPill, main, resolveProjectRootFromArgs, sanitize };
+export { isAbsoluteEntry, isPoisonPill, main, resolveProjectRootFromArgs, sanitize };
 //# sourceMappingURL=sanitize-permissions.js.map
 //# sourceMappingURL=sanitize-permissions.js.map

@@ -43,6 +43,11 @@ export type FabricationSignal =
   | 'approvals_store_corrupt'
   | 'scope_mismatch'
   | 'burst_pattern'
+  // plan-lifecycle-v2 (Bloco 1.3): the declared task tier is trivial/small but
+  // the real staged volume of a free commit exceeds the free-lane caps. Emitted
+  // by the commit handler (NOT the gate — the free/token paths never call
+  // validateDevApproval), and it locks the free budget rather than rejecting.
+  | 'tier_volume_divergence'
 
 export type ValidateResult =
   | {

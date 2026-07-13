@@ -13,4 +13,4 @@
  * also updates via `npm version`. CAP-15 (v0.7.0) caught these drifted (0.6.7 vs
  * 0.2.1) → `npm install -g` reported "up to date" against a stale package.
  */
-export const RSCT_MCP_VERSION = '2.1.1'
+export const RSCT_MCP_VERSION = '2.2.0'

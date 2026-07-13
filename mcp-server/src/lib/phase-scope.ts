@@ -169,6 +169,37 @@ export interface PlanAuthorizationBlock {
   approval_ref: { action_scope: string; timestamp: string }
   /** Diagnostic only — the session that minted the token. Not used for validation. */
   session_id?: string
+  /**
+   * plan-lifecycle-v2 (Bloco 1.4): sliding-window TTL. `expires_at` is
+   * re-armed to `min(now + slide_minutes, absolute_expires_at)` on each
+   * SUCCESSFUL commit under the token (so an actively-worked plan never
+   * expires mid-flight), but `absolute_expires_at` is stamped ONCE at mint
+   * and is the hard ceiling the sliding window can never exceed.
+   * `slide_minutes` is stamped immutable at mint (deriving it from
+   * `expires_at − authorized_at` would grow the window every re-arm). Both
+   * optional so pre-v2 tokens keep pure fixed-`expires_at` semantics.
+   */
+  absolute_expires_at?: string
+  slide_minutes?: number
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 1.2): per-plan budget for the dialog-free
+ * free-commit lane, keyed by `plan_slug`. This is the STATE-side anchor of
+ * the two-anchor ceiling; the AUDIT-side anchor (`deriveAuditCeiling` over
+ * the append-only audit log) is what makes a state-file wipe fail-CLOSED
+ * rather than reset the ceiling to zero. Survives the generic phase-complete
+ * (which deletes only phase/scope_globs/started_at); wiped by phase_abandon.
+ */
+export interface FreeCommitBudget {
+  plan_slug: string
+  /** Deduped UNION of new-side paths touched across this plan's free commits. */
+  files_touched_paths: string[]
+  commits_used: number
+  /** Monotonic sum of (insertions + deletions) across this plan's free commits. */
+  lines_changed: number
+  locked: boolean
+  locked_reason?: 'commit_cap' | 'volume_cap' | 'tier_divergence'
 }
 
 /**
@@ -191,6 +222,32 @@ export interface PhaseReviewBlock {
   completed_at?: string
 }
 
+/**
+ * plan-lifecycle-v2 (Bloco 2.1): the keep|delete decision for a plan's
+ * branch-local `plan_`/`progress_`/`spec_` artifacts at integration time,
+ * keyed by `plan_slug`. Recorded ONCE (ask-once, mirroring PhaseReviewBlock)
+ * so a merge followed by a push of the merged result does NOT re-prompt.
+ * Survives the generic phase-complete; wiped by phase_abandon.
+ */
+export interface PlanDispositionBlock {
+  plan_slug: string
+  decision: 'keep' | 'delete'
+  decided_at: string
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 3.1): the "re-bootstrap needed" flag. A POSITIVE
+ * marker set when a plan closes (or on a declared pivot) — NOT an overload of
+ * the decaying `bootstrap_at` timestamp. While set, the edit-scope guard treats
+ * managed edits as blocked (`stale_context`) until `rsct_load_context` actually
+ * re-reads plan/decisions/knowledge and clears it (D4: only load_context
+ * clears; a cheap rsct_status must not discharge the re-load obligation).
+ */
+export interface ContextStaleBlock {
+  since: string
+  reason: 'plan_closed' | 'pivot'
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
@@ -203,6 +260,12 @@ export interface PhaseState {
   last_classify?: LastClassifyBlock
   /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */
   plan_authorization?: PlanAuthorizationBlock
+  /** plan-lifecycle-v2: per-plan free-commit budget/ceiling (see FreeCommitBudget). */
+  free_commit_budget?: FreeCommitBudget
+  /** plan-lifecycle-v2: the keep|delete disposition for a plan's artifacts (see PlanDispositionBlock). */
+  disposition?: PlanDispositionBlock
+  /** plan-lifecycle-v2: the re-bootstrap-needed flag (see ContextStaleBlock). */
+  context_stale?: ContextStaleBlock
   /**
    * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
    * call. Mutating tools (phase_code_start, request_*) surface a warning
@@ -466,15 +529,47 @@ export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
  */
 export function stampBootstrapMarker(
   projectRoot: string,
-  now: Date = new Date(),
+  opts: { now?: Date; clearStale?: boolean } = {},
 ): WritePhaseStateResult {
+  const now = opts.now ?? new Date()
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
   const newState: PhaseState = {
     ...baseState,
     bootstrap_at: now.toISOString(),
   }
+  // plan-lifecycle-v2 (D4): clear the re-bootstrap flag ONLY when the caller
+  // actually re-loaded context. rsct_load_context passes clearStale:true;
+  // rsct_status stamps bootstrap_at but must NOT discharge the re-load
+  // obligation (a cheap diagnostic call is not a real re-load).
+  if (opts.clearStale) delete newState.context_stale
   return writePhaseState(projectRoot, newState)
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 3.2): set the `context_stale` flag. Called when a
+ * plan reaches its terminal phase or a declared pivot happens. Best-effort,
+ * additive read-modify-write (preserves every other field). Cleared only via
+ * {@link stampBootstrapMarker} with `clearStale:true` (i.e. rsct_load_context).
+ */
+export function stampContextStale(
+  projectRoot: string,
+  reason: ContextStaleBlock['reason'],
+  now: Date = new Date(),
+): WritePhaseStateResult {
+  const existing = readPhaseState(projectRoot)
+  const baseState: PhaseState = existing.state ?? {}
+  return writePhaseState(projectRoot, {
+    ...baseState,
+    context_stale: { since: now.toISOString(), reason },
+  })
+}
+
+/** Read the context_stale flag (null when absent). */
+export function readContextStale(
+  state: PhaseState | null | undefined,
+): ContextStaleBlock | null {
+  return state?.context_stale ?? null
 }
 
 /**
@@ -608,4 +703,38 @@ export function stampReviewDecision(
   if (patch.decided_at !== undefined) merged.decided_at = patch.decided_at
   if (patch.completed_at !== undefined) merged.completed_at = patch.completed_at
   return writePhaseState(projectRoot, { ...baseState, review: merged })
+}
+
+/**
+ * plan-lifecycle-v2 (Bloco 2.1): record the keep|delete disposition for a
+ * plan's artifacts, keyed by `plan_slug`. Recorded ONCE — the block is
+ * replaced wholesale each call (a single decision, not accumulated), so a
+ * prior decision for a DIFFERENT plan never carries over. Read it back with
+ * {@link readPlanDisposition} (which enforces the slug match).
+ */
+export function stampPlanDisposition(
+  projectRoot: string,
+  patch: { plan_slug: string; decision: 'keep' | 'delete'; decided_at: string },
+): WritePhaseStateResult {
+  const existing = readPhaseState(projectRoot)
+  const baseState: PhaseState = existing.state ?? {}
+  const merged: PlanDispositionBlock = {
+    plan_slug: patch.plan_slug,
+    decision: patch.decision,
+    decided_at: patch.decided_at,
+  }
+  return writePhaseState(projectRoot, { ...baseState, disposition: merged })
+}
+
+/**
+ * Read a plan's disposition, enforcing the READ-side slug guard (Cluster A
+ * F4): the block is returned ONLY when `disposition.plan_slug === slug`, so a
+ * stale `delete` recorded for plan A can never be applied to plan B's files.
+ */
+export function readPlanDisposition(
+  state: PhaseState | null | undefined,
+  slug: string,
+): PlanDispositionBlock | null {
+  const d = state?.disposition
+  return d && d.plan_slug === slug ? d : null
 }

@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
-import { findActivePlan, isPlanComplete } from '../lib/plan.js'
+import {
+  findActivePlan,
+  findPlanByBranch,
+  progressHasOpenItems,
+} from '../lib/plan.js'
+import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
   gitPush,
@@ -166,7 +171,13 @@ export async function requestPushHandler(
   // Checked BEFORE gateRequest so a missing ack rejects in chat WITHOUT popping
   // the §C OS dialog (V-P1·PH-5); the dev_approval is never validated/consumed here.
   if (branchProtected) {
-    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack)
+    // plan-lifecycle-v2 (Bloco 2.2, HOLE A): feed the LIGHT plan_complete
+    // cross-check the boolean for the plan on the branch being pushed.
+    const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null
+    const progressOpen = pushingPlan
+      ? progressHasOpenItems(projectRoot, pushingPlan.slug)
+      : undefined
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen)
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision)
       const audit = appendAudit(
@@ -404,11 +415,18 @@ export async function requestPushHandler(
   // auto-perform) cleaning up the branch-local plan_/progress_/spec_ files
   // before they can reach a protected branch (they must never be tracked on
   // main/test). The dev decides.
-  const activePlan = findActivePlan(projectRoot)
-  if (activePlan && isPlanComplete(activePlan.status)) {
-    hints.push(
-      `ℹ Plan '${activePlan.slug}' is marked complete. Optional, with your OK (not automated): delete plan_/progress_/spec_${activePlan.slug}.md so they never land on a protected branch.`,
-    )
+  // plan-lifecycle-v2 (Bloco 2.3, Fork 2/A — advisory-only): only a PROTECTED
+  // push carries the plan_complete ack (a non-protected WIP push never attests
+  // completion), so surface the artifact-cleanup advisory ONLY there. Resolve
+  // the plan by branch (HOLE A), falling back to the active plan.
+  if (branchProtected) {
+    const donePlan = (branch ? findPlanByBranch(projectRoot, branch) : null) ?? findActivePlan(projectRoot)
+    if (donePlan) {
+      const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)
+      hints.push(
+        `ℹ Pushed to protected '${branchLabel}'. ${report.hint} Record keep|delete with rsct_plan_dispose, or remove the loose files yourself.`,
+      )
+    }
   }
 
   return {

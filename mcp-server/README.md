@@ -79,8 +79,9 @@ never trips the gate.
 | i18n pt-BR + EN vocabulary expansion (post-M3 polish from runtime testing) | ✅ shipped 2026-06-07; merged to `main` (tag `v0.6.2-i18n-pt-br-en`) |
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 | flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
+| plan-lifecycle-v2 — dialog-free free-commit lane (audit-anchored anti-rollback ceiling + sliding token) · integration gate (mechanical `plan_complete` cross-check + advisory-only cleanup + `rsct_plan_dispose` + retroactive reconciliation) · `rsct_request_rebase` (rebase/squash) · re-bootstrap `context_stale` flag + PreToolUse edit-scope guard · settings.json machine-path hygiene · unified idempotent `/rsct-universe` · `plan_file_retention` toggle | ✅ shipped to `main`; ships in **v2.2.0** (brings the catalog 37 → **39 tools**) |
 
-**37 tools · 5 resources · tsc strict · ESM ~250 KB
+**39 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
 macOS / Linux)**
 
@@ -119,8 +120,9 @@ Expect on stderr (single JSON line, then clean exit 0):
           "rsct_check_premise","rsct_check_branch",
           "rsct_check_secrets","rsct_check_edit_scope",
           "rsct_request_commit","rsct_request_push",
-          "rsct_request_merge","rsct_plan_authorize",
-          "rsct_plan_revoke","rsct_classify_task",
+          "rsct_request_merge","rsct_request_rebase",
+          "rsct_plan_authorize","rsct_plan_revoke",
+          "rsct_plan_dispose","rsct_classify_task",
           "rsct_phase_status","rsct_phase_research_start",
           "rsct_phase_research_complete","rsct_phase_spec_start",
           "rsct_phase_spec_complete","rsct_phase_verification_start",
@@ -260,8 +262,8 @@ Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, k
 ### The `universe` block
 
 Both `rsct_status` and `rsct_load_context` surface the org-level **universe**
-(the layer linked by `/rsct-canonical-source` and bootstrapped by
-`/rsct-init-universe`). They compute it from a single shared source, so the two
+(the layer created/adjusted and linked by the unified `/rsct-universe`
+command). They compute it from a single shared source, so the two
 outputs never drift, and it is **fail-graceful**: any error degrades to an empty
 block and never throws into the bootstrap path. A project with no universe behaves
 exactly as before this feature existed (`available: false`, no hint).
@@ -799,7 +801,7 @@ companion install (`npm run build && npm install -g .`) and after
 
 - [ ] M1 validation gate signed off (per progress_rsct-mcp-v1.md).
 - [ ] `rsct-mcp` on PATH and `node dist/index.js < /dev/null` prints the
-      ready log including all 13 M1+M2 tool names (the full catalog is 37 now).
+      ready log including all 13 M1+M2 tool names (the full catalog is 39 now).
 - [ ] `/rsct-setup` re-run in the test project; Phase 4.V reports either
       "Installed RSCT SessionStart sanitizer hook" (fresh) or "already
       present — no change" (idempotent).

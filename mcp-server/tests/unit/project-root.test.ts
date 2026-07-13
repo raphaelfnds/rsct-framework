@@ -199,14 +199,31 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
     expect(errs.some((e) => e.path.includes('audit'))).toBe(true)
   })
 
-  it('rejects unknown fields inside the strict approval_modes sub-object', () => {
+  // plan-lifecycle-v2 Fork 3/A: approval_modes RELAXED .strict() → .strip().
+  // An unknown/typo'd key is now dropped to its safe default (fail-CLOSED for
+  // forward-compat) INSTEAD of nulling the whole config. The per-field bounds
+  // (below) keep the HIGH-4 dangerous-value defense intact.
+  it('STRIPS unknown fields inside approval_modes (forward-compat) — config stays valid', () => {
     writeConfig({
       ...VALID_MIN,
       approval_modes: { trust_allowed_for: [], magic_bypass: true },
     })
     const r = resolveProjectRoot()
+    expect(r.rsct_installed).toBe(true)
+    expect(r.config?.approval_modes?.trust_allowed_for).toEqual([])
+    // the unknown key did not survive onto the parsed config
+    expect((r.config?.approval_modes as Record<string, unknown>)?.magic_bypass).toBeUndefined()
+  })
+
+  it('still NULLS the config on an OUT-OF-BOUNDS known approval_modes field (HIGH-4 preserved)', () => {
+    writeConfig({
+      ...VALID_MIN,
+      approval_modes: { free_commit_max: 9999 }, // bound is 1–50
+    })
+    const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(false)
-    expect(readAuditEntries()).toHaveLength(1)
+    const errs = readAuditEntries()[0]!.validation_errors as Array<{ path: string }>
+    expect(errs.some((e) => e.path.includes('free_commit_max'))).toBe(true)
   })
 
   it('reports multiple violations in a single audit entry', () => {

@@ -8912,7 +8912,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join20 } = __require("path");
+    var { join: join22 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8955,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join20(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join22(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9358,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join20, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join22, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9421,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9439,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join20(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,7 +9461,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join20(__dirname$1, "..", "file.js");
+          return join22(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10451,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join20 = ",";
+            let join22 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10465,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join20 = `,
+                join22 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10473,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join20;
+                res += join22;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10500,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join20 = `,
+              join22 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10514,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join20;
+                separator = join22;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join20;
+              separator = join22;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10561,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join20 = ",";
+            let join22 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10574,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join20 = `,
+                join22 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10582,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join20;
+                res += join22;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join20}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10601,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join20 = `,
+              join22 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10610,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join20;
+                separator = join22;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10668,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join21 = `,
+              const join23 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join21;
+                res2 += join23;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join21}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10697,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join20 = `,
+            const join22 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join20, maximumBreadth);
+              res += stringifyTypedArray(value, join22, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join20;
+              separator = join22;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10717,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join20;
+                separator = join22;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join20;
+              separator = join22;
             }
             if (separator !== "") {
               res = `
@@ -22618,8 +22618,18 @@ var RsctApprovalModesSchema = external_exports.object({
   // rejects the whole config (rsct_installed=false) rather than silently
   // granting an over-wide batch window.
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
-  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional()
-}).strict();
+  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
+  // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
+  // still nulls the whole config, so a config-side attempt to grant an
+  // over-wide free-commit window is rejected loudly.
+  free_commit_max: external_exports.number().int().min(1).max(50).optional(),
+  free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
+  free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
+  plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
+  // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
+  // enforced at the re-arm use-site via min(now+slide, abs).
+  plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
+}).strip();
 var RsctAuditConfigSchema = external_exports.object({
   // `false` is the documented bypass vector — schema literal blocks it.
   // Absent or `true` are equivalent (audit defaults on).
@@ -22652,6 +22662,9 @@ var RsctConfigSchema = external_exports.object({
   // branches, it should uninstall `.rsct.json`.
   protected_branches: external_exports.array(external_exports.string().min(1)).min(1).optional(),
   test_framework: external_exports.string().optional(),
+  // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
+  // tolerant of its presence). Absent ⇒ 'ephemeral'.
+  plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -22799,6 +22812,50 @@ function getStagedPaths(projectRoot) {
   if (raw === null) return null;
   return raw.split("\0").map((p) => p.replace(/\\/g, "/")).filter((p) => p.length > 0);
 }
+function getStagedStats(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--numstat", "-z"]);
+  if (raw === null) return null;
+  return parseNumstatZ(raw);
+}
+function parseNumstatZ(raw) {
+  const tokens = raw.split("\0");
+  const paths = [];
+  let insertions = 0;
+  let deletions = 0;
+  let i = 0;
+  while (i < tokens.length) {
+    const tok = tokens[i];
+    if (tok === "") {
+      i += 1;
+      continue;
+    }
+    const firstTab = tok.indexOf("	");
+    const secondTab = firstTab >= 0 ? tok.indexOf("	", firstTab + 1) : -1;
+    if (firstTab < 0 || secondTab < 0) {
+      i += 1;
+      continue;
+    }
+    const addedRaw = tok.slice(0, firstTab);
+    const deletedRaw = tok.slice(firstTab + 1, secondTab);
+    const rest = tok.slice(secondTab + 1);
+    const added = addedRaw === "-" ? 0 : Number.parseInt(addedRaw, 10);
+    const deleted = deletedRaw === "-" ? 0 : Number.parseInt(deletedRaw, 10);
+    insertions += Number.isFinite(added) ? added : 0;
+    deletions += Number.isFinite(deleted) ? deleted : 0;
+    if (rest !== "") {
+      paths.push(rest.replace(/\\/g, "/"));
+      i += 1;
+    } else {
+      const newPath = tokens[i + 2];
+      if (newPath !== void 0 && newPath !== "") {
+        paths.push(newPath.replace(/\\/g, "/"));
+      }
+      i += 3;
+    }
+  }
+  return { files: paths.length, insertions, deletions, paths };
+}
 function getUnstagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
   return safeGitRaw(projectRoot, ["diff", "--no-color", "-U0"]);
@@ -22806,6 +22863,17 @@ function getUnstagedDiff(projectRoot) {
 function isGitRepo(projectRoot) {
   const out = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
   return out === "true";
+}
+function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
+  if (r.ok) return true;
+  if (r.exitCode === 1) return false;
+  return true;
+}
+function gitBranchMerged(projectRoot, branch, target, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["branch", "--merged", target]);
+  if (!r.ok) return false;
+  return r.stdout.split("\n").map((l) => l.replace(/^[*+]?\s*/, "").trim()).includes(branch);
 }
 function readWorktreeInfo(projectRoot) {
   if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
@@ -22910,6 +22978,32 @@ function gitMerge(projectRoot, sourceBranch, options, executor = defaultGitExecu
   args.push(sourceBranch);
   const sha_before = getHeadSha(projectRoot, executor);
   const exec = executor(projectRoot, args);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitRebase(projectRoot, upstream, executor = defaultGitExecutor) {
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["rebase", upstream]);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["merge", "--squash", sourceBranch]);
   if (!exec.ok) {
     const result = { ok: false, sha_before, sha_after: null };
     if (exec.stderr) result.stderr = exec.stderr.trim();
@@ -23114,13 +23208,15 @@ function tierRank(tier) {
   return TIER_RANK[tier] ?? 0;
 }
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
-function stampBootstrapMarker(projectRoot, now = /* @__PURE__ */ new Date()) {
+function stampBootstrapMarker(projectRoot, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
   const newState = {
     ...baseState,
     bootstrap_at: now.toISOString()
   };
+  if (opts.clearStale) delete newState.context_stale;
   return writePhaseState(projectRoot, newState);
 }
 function evaluateBootstrapMarker(args) {
@@ -23195,10 +23291,24 @@ function stampReviewDecision(projectRoot, patch) {
   if (patch.completed_at !== void 0) merged.completed_at = patch.completed_at;
   return writePhaseState(projectRoot, { ...baseState, review: merged });
 }
+function stampPlanDisposition(projectRoot, patch) {
+  const existing = readPhaseState(projectRoot);
+  const baseState = existing.state ?? {};
+  const merged = {
+    plan_slug: patch.plan_slug,
+    decision: patch.decision,
+    decided_at: patch.decided_at
+  };
+  return writePhaseState(projectRoot, { ...baseState, disposition: merged });
+}
+function readPlanDisposition(state, slug) {
+  const d = state?.disposition;
+  return d && d.plan_slug === slug ? d : null;
+}
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.1.1";
+var RSCT_MCP_VERSION = "2.2.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23760,6 +23870,62 @@ function isPlanComplete(status) {
   if (!status) return false;
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status);
 }
+function findPlanByBranch(projectRoot, branch) {
+  let entries;
+  try {
+    entries = readdirSync(projectRoot);
+  } catch {
+    return null;
+  }
+  const winner = entries.filter((name) => /^(?:plan|spec)_.+\.md$/.test(name)).map((name) => {
+    const path2 = join(projectRoot, name);
+    return {
+      slug: name.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, ""),
+      mtime: safeMtime(path2),
+      branch: extractPlanMetadata(path2).branch
+    };
+  }).filter((e) => e.mtime !== null).filter((e) => e.branch !== null && e.branch === branch).sort((a, b) => b.mtime - a.mtime)[0];
+  return winner ? findPlanBySlug(projectRoot, winner.slug) : null;
+}
+function scanProgressCheckboxes(body) {
+  const norm = body.replace(/\r\n?/g, "\n");
+  let inFence = false;
+  let open = 0;
+  let closed = 0;
+  for (const line of norm.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^[ \t]*[-*+] \[ \]/.test(line)) open += 1;
+    else if (/^[ \t]*[-*+] \[[xX]\]/.test(line)) closed += 1;
+  }
+  return { open, closed };
+}
+function progressHasOpenItems(projectRoot, slug) {
+  const path2 = join(projectRoot, `progress_${slug}.md`);
+  let body;
+  try {
+    body = readFileSync(path2, "utf8");
+  } catch {
+    return false;
+  }
+  return scanProgressCheckboxes(body).open > 0;
+}
+function progressCompletionState(projectRoot, slug) {
+  const path2 = join(projectRoot, `progress_${slug}.md`);
+  let body;
+  try {
+    body = readFileSync(path2, "utf8");
+  } catch {
+    return "no_file";
+  }
+  const { open, closed } = scanProgressCheckboxes(body);
+  if (open > 0) return "has_open";
+  if (closed === 0) return "no_checkboxes";
+  return "all_closed";
+}
 function safeMtime(path2) {
   try {
     return statSync(path2).mtimeMs;
@@ -24019,7 +24185,7 @@ async function loadContextHandler(rawInput) {
   const decisionsSnapshot = readDecisions(resolution.root);
   const knowledge = readKnowledgeIndex(resolution.root);
   if (resolution.rsct_installed) {
-    stampBootstrapMarker(resolution.root);
+    stampBootstrapMarker(resolution.root, { clearStale: true });
   }
   const excerptCount = input.decisions_excerpt_count;
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse();
@@ -24029,6 +24195,20 @@ async function loadContextHandler(rawInput) {
   const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
+  if (resolution.rsct_installed && active_plan?.branch && git.branch !== active_plan.branch) {
+    const disposition = readPlanDisposition(
+      readPhaseState(resolution.root).state,
+      active_plan.slug
+    );
+    if (!disposition) {
+      const mainline = resolution.config?.protected_branches?.[0] ?? "main";
+      if (active_plan.branch !== mainline && gitBranchMerged(resolution.root, active_plan.branch, mainline)) {
+        next_action_hints.push(
+          `\u2139 Plan '${active_plan.slug}' (branch '${active_plan.branch}') appears merged into '${mainline}' with no recorded disposition \u2014 run rsct_plan_dispose({ plan_slug: '${active_plan.slug}', decision: 'keep'|'delete' }) to confirm and get the cleanup advisory.`
+        );
+      }
+    }
+  }
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION2);
     if (drift.hint) next_action_hints.push(drift.hint);
@@ -26119,7 +26299,10 @@ var phaseStateOverrideSchema = external_exports.object({
   spec_slug: external_exports.string().optional(),
   phase: external_exports.string().optional(),
   scope_globs: external_exports.array(external_exports.string()).optional(),
-  started_at: external_exports.string().optional()
+  started_at: external_exports.string().optional(),
+  // plan-lifecycle-v2 (Bloco 3.3, F9): the override must be able to carry the
+  // re-bootstrap flag so tests / the guard can simulate a stale context.
+  context_stale: external_exports.object({ since: external_exports.string(), reason: external_exports.enum(["plan_closed", "pivot"]) }).strict().optional()
 }).strict();
 var checkEditScopeInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
@@ -26149,7 +26332,15 @@ var checkEditScopeTool = {
           spec_slug: { type: "string" },
           phase: { type: "string" },
           scope_globs: { type: "array", items: { type: "string" } },
-          started_at: { type: "string" }
+          started_at: { type: "string" },
+          context_stale: {
+            type: "object",
+            properties: {
+              since: { type: "string" },
+              reason: { type: "string", enum: ["plan_closed", "pivot"] }
+            },
+            additionalProperties: false
+          }
         },
         additionalProperties: false
       }
@@ -26172,6 +26363,7 @@ async function checkEditScopeHandler(rawInput) {
     if (override.phase !== void 0) rebuilt.phase = override.phase;
     if (override.scope_globs !== void 0) rebuilt.scope_globs = override.scope_globs;
     if (override.started_at !== void 0) rebuilt.started_at = override.started_at;
+    if (override.context_stale !== void 0) rebuilt.context_stale = override.context_stale;
     state = rebuilt;
   } else {
     const read = readPhaseState(resolution.root);
@@ -26182,7 +26374,9 @@ async function checkEditScopeHandler(rawInput) {
   const scope_globs = state?.scope_globs ?? [];
   let status;
   let matched_glob = null;
-  if (!phase_state_exists || state === null || scope_globs.length === 0) {
+  if (state?.context_stale) {
+    status = "stale_context";
+  } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = "unknown";
   } else {
     const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root);
@@ -26216,6 +26410,12 @@ function buildHints8(input) {
   if (!input.rsct_installed) {
     hints.push("No .rsct.json \u2014 running scope check with no project context.");
   }
+  if (input.status === "stale_context") {
+    hints.push(
+      "\u26D4 Context is STALE \u2014 a plan closed (or a pivot was declared). Run rsct_status + rsct_load_context to re-read plan / universe / decisions before editing. This edit is blocked until context is reloaded."
+    );
+    return hints;
+  }
   if (!input.phase_state_exists) {
     hints.push(
       "No .rsct/phase-state.json yet \u2014 the phase machine ships in M3. Until then, this tool always returns status=unknown for live queries; pass `phase_state_override` for what-if checks."
@@ -26248,6 +26448,243 @@ function buildHints8(input) {
 
 // src/tools/request-commit.ts
 init_esm_shims();
+
+// src/lib/free-commit.ts
+init_esm_shims();
+
+// src/lib/health.ts
+init_esm_shims();
+var LOCK_STALE_MS2 = 3e4;
+function evaluateMcpHealth(projectRoot, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const reasons = [];
+  const configPath = join(projectRoot, ".rsct.json");
+  if (!existsSync(configPath)) {
+    reasons.push("config_absent");
+  } else {
+    try {
+      JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {
+      reasons.push("config_unparseable");
+    }
+  }
+  if (readPhaseState(projectRoot).parse_error) {
+    reasons.push("phase_state_corrupt");
+  }
+  const lockPath = join(projectRoot, ".rsct", "phase-state.lock");
+  if (existsSync(lockPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
+      const lockedAtMs = parsed.locked_at ? new Date(parsed.locked_at).getTime() : NaN;
+      const ageMs = now.getTime() - lockedAtMs;
+      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS2) {
+        reasons.push("phase_state_lock_stale");
+      }
+    } catch {
+      reasons.push("phase_state_lock_stale");
+    }
+  }
+  const auditPath = resolveAuditPath(projectRoot, opts.config?.audit);
+  let historyOk = false;
+  try {
+    if (existsSync(auditPath)) {
+      const stat = statSync(auditPath);
+      historyOk = stat.isFile() && stat.size > 0;
+    }
+  } catch {
+    historyOk = false;
+  }
+  if (!historyOk) {
+    reasons.push("audit_history_absent");
+  }
+  return { healthy: reasons.length === 0, reasons };
+}
+
+// src/lib/free-commit.ts
+var FREE_COMMIT_MAX_DEFAULT = 5;
+var FREE_COMMIT_MAX_MIN = 1;
+var FREE_COMMIT_MAX_MAX = 50;
+var FREE_COMMIT_MAX_FILES_DEFAULT = 20;
+var FREE_COMMIT_MAX_FILES_MIN = 1;
+var FREE_COMMIT_MAX_FILES_MAX = 500;
+var FREE_COMMIT_MAX_LINES_DEFAULT = 600;
+var FREE_COMMIT_MAX_LINES_MIN = 1;
+var FREE_COMMIT_MAX_LINES_MAX = 1e5;
+function isFreeTier(tier) {
+  return tier === "trivial" || tier === "small";
+}
+function higherTier(a, b) {
+  const av = a ?? void 0;
+  const bv = b ?? void 0;
+  if (av === void 0) return bv;
+  if (bv === void 0) return av;
+  return tierRank(av) >= tierRank(bv) ? av : bv;
+}
+function clampInt(v, def, min, max) {
+  if (v === void 0 || !Number.isFinite(v)) return def;
+  return Math.min(max, Math.max(min, Math.trunc(v)));
+}
+function resolveFreeBudgetLimits(config2) {
+  const m = config2?.approval_modes;
+  return {
+    maxCommits: clampInt(m?.free_commit_max, FREE_COMMIT_MAX_DEFAULT, FREE_COMMIT_MAX_MIN, FREE_COMMIT_MAX_MAX),
+    maxFiles: clampInt(
+      m?.free_commit_max_files,
+      FREE_COMMIT_MAX_FILES_DEFAULT,
+      FREE_COMMIT_MAX_FILES_MIN,
+      FREE_COMMIT_MAX_FILES_MAX
+    ),
+    maxLines: clampInt(
+      m?.free_commit_max_lines,
+      FREE_COMMIT_MAX_LINES_DEFAULT,
+      FREE_COMMIT_MAX_LINES_MIN,
+      FREE_COMMIT_MAX_LINES_MAX
+    )
+  };
+}
+function deriveAuditCeiling(projectRoot, config2, planSlug) {
+  const failClosed = {
+    classifyEvidencePresent: false,
+    auditTierMax: null,
+    freeCommitsUsed: 0,
+    auditLocked: false,
+    readable: false
+  };
+  const auditPath = resolveAuditPath(projectRoot, config2?.audit);
+  let raw;
+  try {
+    if (!existsSync(auditPath)) return failClosed;
+    raw = readFileSync(auditPath, "utf8");
+  } catch {
+    return failClosed;
+  }
+  let classifyEvidencePresent = false;
+  let maxRank = -1;
+  let auditTierMax = null;
+  let freeCommitsUsed = 0;
+  let auditLocked = false;
+  for (const line of raw.split("\n")) {
+    const clean = line.replace(/\r/g, "").trim();
+    if (!clean) continue;
+    let entry;
+    try {
+      const parsed = JSON.parse(clean);
+      if (!parsed || typeof parsed !== "object") continue;
+      entry = parsed;
+    } catch {
+      continue;
+    }
+    const event = entry.event;
+    if (event === "classify.verdict" && typeof entry.tier === "string") {
+      classifyEvidencePresent = true;
+      const r = tierRank(entry.tier);
+      if (r > maxRank) {
+        maxRank = r;
+        auditTierMax = entry.tier;
+      }
+    } else if (event === "free_commit.committed" && entry.plan_slug === planSlug) {
+      freeCommitsUsed += 1;
+    } else if (event === "free_commit.locked" && entry.plan_slug === planSlug) {
+      auditLocked = true;
+    }
+  }
+  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true };
+}
+function reserveFreeBudget(args) {
+  const prev = args.prev && args.prev.plan_slug === args.planSlug ? args.prev : void 0;
+  const wasLocked = prev?.locked ?? false;
+  const unionPaths = Array.from(
+    /* @__PURE__ */ new Set([...prev?.files_touched_paths ?? [], ...args.stats.paths])
+  );
+  const commitsUsed = (prev?.commits_used ?? 0) + 1;
+  const thisCommitLines = args.stats.insertions + args.stats.deletions;
+  const linesChanged = (prev?.lines_changed ?? 0) + thisCommitLines;
+  const signals = [];
+  let lockedReason;
+  if (args.stats.files > args.limits.maxFiles || thisCommitLines > args.limits.maxLines) {
+    signals.push("tier_volume_divergence");
+    lockedReason = "tier_divergence";
+  }
+  if (lockedReason === void 0) {
+    if (commitsUsed >= args.limits.maxCommits) {
+      lockedReason = "commit_cap";
+    } else if (unionPaths.length > args.limits.maxFiles || linesChanged > args.limits.maxLines) {
+      lockedReason = "volume_cap";
+    }
+  }
+  const locked = wasLocked || lockedReason !== void 0;
+  const nextBudget = {
+    plan_slug: args.planSlug,
+    files_touched_paths: unionPaths,
+    commits_used: commitsUsed,
+    lines_changed: linesChanged,
+    locked
+  };
+  const effectiveReason = lockedReason ?? prev?.locked_reason;
+  if (locked && effectiveReason !== void 0) nextBudget.locked_reason = effectiveReason;
+  return { nextBudget, newlyLocked: locked && !wasLocked, signals };
+}
+function evaluateFreeEligibility(args) {
+  const health = args.healthOverride ?? evaluateMcpHealth(args.projectRoot, { now: args.now, config: args.config });
+  if (!health.healthy) {
+    return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(", ")}` };
+  }
+  if (!args.activePlanSlug) {
+    return { eligible: false, reason: "no active plan" };
+  }
+  const planSlug = args.activePlanSlug;
+  const stateTierMax = args.state?.last_classify?.tier_max;
+  if (stateTierMax !== void 0 && !isFreeTier(stateTierMax)) {
+    return {
+      eligible: false,
+      reason: `tier_max '${stateTierMax}' is not in {trivial, small}`,
+      planSlug,
+      tierMax: stateTierMax
+    };
+  }
+  const ceiling = deriveAuditCeiling(args.projectRoot, args.config, planSlug);
+  if (!ceiling.readable) {
+    return { eligible: false, reason: "audit ceiling unreadable" };
+  }
+  if (!ceiling.classifyEvidencePresent) {
+    return { eligible: false, reason: "no classify evidence in audit history" };
+  }
+  const effTierMax = higherTier(stateTierMax, ceiling.auditTierMax);
+  if (effTierMax === void 0) {
+    return { eligible: false, reason: "no tier_max" };
+  }
+  if (!isFreeTier(effTierMax)) {
+    return {
+      eligible: false,
+      reason: `tier_max '${effTierMax}' is not in {trivial, small}`,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  const stateBudget = args.state?.free_commit_budget && args.state.free_commit_budget.plan_slug === planSlug ? args.state.free_commit_budget : void 0;
+  const locked = (stateBudget?.locked ?? false) || ceiling.auditLocked;
+  if (locked) {
+    return {
+      eligible: false,
+      reason: "free budget locked for this plan",
+      lockedHint: true,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  const effUsed = Math.max(stateBudget?.commits_used ?? 0, ceiling.freeCommitsUsed);
+  const limits = resolveFreeBudgetLimits(args.config);
+  if (effUsed >= limits.maxCommits) {
+    return {
+      eligible: false,
+      reason: "free commit budget exhausted",
+      lockedHint: true,
+      planSlug,
+      tierMax: effTierMax
+    };
+  }
+  return { eligible: true, planSlug, tierMax: effTierMax };
+}
 
 // src/lib/dev-approval.ts
 init_esm_shims();
@@ -26653,8 +27090,21 @@ var PLAN_TOKEN_TTL_MAX = 480;
 var PLAN_TOKEN_MAX_ACTIONS_DEFAULT = 20;
 var PLAN_TOKEN_MAX_ACTIONS_MIN = 1;
 var PLAN_TOKEN_MAX_ACTIONS_MAX = 100;
+var PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN = 480;
+var PLAN_TOKEN_TTL_SLIDE_MIN = 5;
+var PLAN_TOKEN_TTL_SLIDE_MAX = 1440;
+var PLAN_TOKEN_TTL_ABS_DEFAULT_MIN = 1440;
+var PLAN_TOKEN_TTL_ABS_MIN = 5;
+var PLAN_TOKEN_TTL_ABS_MAX = 10080;
 function emitToken(args) {
-  const expiresMs = args.now.getTime() + args.ttlMinutes * 6e4;
+  const nowMs = args.now.getTime();
+  const windowMin = args.slideMinutes ?? args.ttlMinutes;
+  let expiresMs = nowMs + windowMin * 6e4;
+  let absMs = null;
+  if (args.absTtlMinutes !== void 0) {
+    absMs = nowMs + args.absTtlMinutes * 6e4;
+    if (expiresMs > absMs) expiresMs = absMs;
+  }
   const block = {
     plan_slug: args.planSlug,
     branch: args.branch,
@@ -26666,7 +27116,22 @@ function emitToken(args) {
     approval_ref: args.approvalRef
   };
   if (args.sessionId !== void 0) block.session_id = args.sessionId;
+  if (args.slideMinutes !== void 0) block.slide_minutes = args.slideMinutes;
+  if (absMs !== null) block.absolute_expires_at = new Date(absMs).toISOString();
   return block;
+}
+function rearmToken(token, now) {
+  if (token.slide_minutes === void 0 || !Number.isFinite(token.slide_minutes)) {
+    return token;
+  }
+  let nextMs = now.getTime() + token.slide_minutes * 6e4;
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime();
+    if (Number.isFinite(absMs)) nextMs = Math.min(nextMs, absMs);
+  }
+  const currentMs = new Date(token.expires_at).getTime();
+  if (Number.isFinite(currentMs) && nextMs <= currentMs) return token;
+  return { ...token, expires_at: new Date(nextMs).toISOString() };
 }
 function validateToken(token, ctx) {
   if (!token) return { valid: false, reason: "absent" };
@@ -26676,6 +27141,12 @@ function validateToken(token, ctx) {
   const expiresMs = new Date(token.expires_at).getTime();
   if (Number.isNaN(expiresMs) || ctx.now.getTime() >= expiresMs) {
     return { valid: false, reason: "expired" };
+  }
+  if (token.absolute_expires_at) {
+    const absMs = new Date(token.absolute_expires_at).getTime();
+    if (!Number.isNaN(absMs) && ctx.now.getTime() >= absMs) {
+      return { valid: false, reason: "expired" };
+    }
   }
   if (ctx.branch !== token.branch) return { valid: false, reason: "branch_mismatch" };
   if (!ctx.tokenPlan) return { valid: false, reason: "plan_gone" };
@@ -26706,6 +27177,16 @@ function resolveMaxActions(input, configDefault) {
     PLAN_TOKEN_MAX_ACTIONS_MAX,
     Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v)
   );
+}
+function resolveSlideMinutes(input, configDefault) {
+  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
+  return Math.min(PLAN_TOKEN_TTL_SLIDE_MAX, Math.max(PLAN_TOKEN_TTL_SLIDE_MIN, v));
+}
+function resolveAbsTtlMinutes(input, configDefault) {
+  const v = configDefault ?? PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
+  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
+  return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v));
 }
 
 // src/tools/request-commit.ts
@@ -26774,6 +27255,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
   let approval = null;
   let fabricationSignals = [];
   let tokenCtx = null;
+  let freeCtx = null;
   if (input.dev_approval !== void 0) {
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
@@ -26827,50 +27309,67 @@ message: ${input.message}`
     fabricationSignals = gate.fabrication_signals;
   } else {
     const existing = readPhaseState(projectRoot);
-    const token = readToken(existing.state);
-    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
-    const verdict = validateToken(token, {
+    const activePlan2 = findActivePlan(projectRoot);
+    const elig = evaluateFreeEligibility({
+      projectRoot,
+      config: config2 ?? null,
       now,
-      branch: gitState.branch,
-      tokenPlan,
-      action: "commit"
+      state: existing.state,
+      activePlanSlug: activePlan2?.slug ?? null
     });
-    if (!verdict.valid) {
-      const reason = planTokenRejectReason(verdict.reason);
-      const audit2 = appendAudit(
-        projectRoot,
-        {
-          event: "request_commit.rejected",
-          tool: "rsct_request_commit",
-          reject_kind: "plan_token_invalid",
-          token_reason: verdict.reason,
-          reason,
-          branch: gitState.branch
-        },
-        config2?.audit
-      );
-      return {
-        status: "rejected",
+    if (elig.eligible && elig.planSlug !== void 0) {
+      channel = "free_commit";
+      authorizedVia = "free_commit";
+      freeCtx = { planSlug: elig.planSlug, baseState: existing.state ?? {} };
+    } else {
+      const token = readToken(existing.state);
+      const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
+      const verdict = validateToken(token, {
+        now,
         branch: gitState.branch,
-        channel: null,
-        authorized_via: null,
-        reject_kind: "plan_token_invalid",
-        reason,
-        fabrication_signals: [],
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: false, override_used: false },
-        secrets_check: { findings_count: 0, findings: [], override_used: false },
-        plan_token: null,
-        ...auditFields(audit2),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: [`Approval rejected (plan_token_invalid): ${reason}`]
-      };
+        tokenPlan,
+        action: "commit"
+      });
+      if (!verdict.valid) {
+        let reason = planTokenRejectReason(verdict.reason);
+        if (verdict.reason === "absent" && elig.lockedHint) {
+          reason = `free-commit budget is locked for this plan (${elig.reason}) \u2014 re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`;
+        }
+        const audit2 = appendAudit(
+          projectRoot,
+          {
+            event: "request_commit.rejected",
+            tool: "rsct_request_commit",
+            reject_kind: "plan_token_invalid",
+            token_reason: verdict.reason,
+            reason,
+            branch: gitState.branch
+          },
+          config2?.audit
+        );
+        return {
+          status: "rejected",
+          branch: gitState.branch,
+          channel: null,
+          authorized_via: null,
+          reject_kind: "plan_token_invalid",
+          reason,
+          fabrication_signals: [],
+          sha_before: gitState.head_sha,
+          sha_after: null,
+          branch_check: { protected: false, override_used: false },
+          secrets_check: { findings_count: 0, findings: [], override_used: false },
+          plan_token: null,
+          ...auditFields(audit2),
+          anti_replay_persisted: null,
+          anti_replay_error: null,
+          hints: [`Approval rejected (plan_token_invalid): ${reason}`]
+        };
+      }
+      channel = "plan_token";
+      authorizedVia = "plan_token";
+      tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
     }
-    channel = "plan_token";
-    authorizedVia = "plan_token";
-    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
   }
   const overrideBranch = approval?.override_protected_branch;
   const overrideSecrets = approval?.override_secrets_check;
@@ -27061,6 +27560,8 @@ message: ${input.message}`
     }
   }
   let reservedToken = null;
+  let reservedFreeBudget = null;
+  let freeNewlyLocked = false;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
     const reserve = writePhaseState(projectRoot, {
@@ -27107,6 +27608,67 @@ message: ${input.message}`
         hints: [reason]
       };
     }
+  } else if (freeCtx) {
+    const rejectFreeReserve = (reason) => {
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
+          reject_kind: "free_budget_reserve_failed",
+          reason,
+          branch: gitState.branch,
+          channel
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: "free_budget_reserve_failed",
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: false },
+        plan_token: null,
+        free_commit: null,
+        contract_check: contractResult,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: [reason]
+      };
+    };
+    const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot);
+    if (stats === null) {
+      return rejectFreeReserve(
+        "could not measure the staged diff (git unavailable) \u2014 commit with a per-action dev_approval"
+      );
+    }
+    const limits = resolveFreeBudgetLimits(config2 ?? null);
+    const reserve = reserveFreeBudget({
+      planSlug: freeCtx.planSlug,
+      prev: freeCtx.baseState.free_commit_budget,
+      stats,
+      limits
+    });
+    reservedFreeBudget = reserve.nextBudget;
+    freeNewlyLocked = reserve.newlyLocked;
+    fabricationSignals = [...fabricationSignals, ...reserve.signals];
+    const write = writePhaseState(projectRoot, {
+      ...freeCtx.baseState,
+      free_commit_budget: reserve.nextBudget
+    });
+    if (!write.ok) {
+      const detail = write.reason === "locked" ? `phase-state.json is being edited by another session (locked ${write.lock_age_ms}ms ago)` : write.error;
+      return rejectFreeReserve(
+        `could not reserve the free-commit budget (${detail}) \u2014 retry, or commit with a per-action dev_approval`
+      );
+    }
   }
   const commit = gitCommit(projectRoot, input.message, gitExecutor);
   if (!commit.ok) {
@@ -27118,6 +27680,13 @@ message: ${input.message}`
         plan_authorization: tokenCtx.token
       });
       refundNote = refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
+    } else if (freeCtx) {
+      const prevBudget = freeCtx.baseState.free_commit_budget;
+      const restored = { ...freeCtx.baseState };
+      if (prevBudget) restored.free_commit_budget = prevBudget;
+      else delete restored.free_commit_budget;
+      const refund = writePhaseState(projectRoot, restored);
+      refundNote = refund.ok ? " The reserved free-commit budget was refunded." : " \u26A0 the reserved free-commit budget could NOT be refunded (phase-state write failed) \u2014 the spend stays (fail-safe).";
     }
     const audit2 = appendAudit(
       projectRoot,
@@ -27148,18 +27717,20 @@ message: ${input.message}`
         override_used: findings.length > 0
       },
       plan_token: null,
+      free_commit: null,
       contract_check: contractResult,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+        authorizedVia === "plan_token" || authorizedVia === "free_commit" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
       ]
     };
   }
   let antiReplayPersisted;
   let antiReplayError = null;
   let tokenSummary = null;
+  let freeSummary = null;
   const bookkeepingHints = [];
   if (approval) {
     const record2 = recordApproval(approval, { projectRoot, now });
@@ -27170,7 +27741,7 @@ message: ${input.message}`
         `\u26A0 commit landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
       );
     }
-  } else {
+  } else if (tokenCtx) {
     antiReplayPersisted = true;
     tokenSummary = {
       plan_slug: reservedToken.plan_slug,
@@ -27178,6 +27749,60 @@ message: ${input.message}`
       max_actions: reservedToken.max_actions,
       expires_at: reservedToken.expires_at
     };
+    const rearmed = rearmToken(reservedToken, now);
+    if (rearmed !== reservedToken) {
+      const w = writePhaseState(projectRoot, {
+        ...tokenCtx.baseState,
+        plan_authorization: rearmed
+      });
+      if (w.ok) {
+        tokenSummary.expires_at = rearmed.expires_at;
+      } else {
+        bookkeepingHints.push(
+          "\u26A0 token sliding-window re-arm did not persist \u2014 the token keeps its current expiry (fail-safe)."
+        );
+      }
+    }
+  } else {
+    antiReplayPersisted = true;
+    freeSummary = {
+      plan_slug: reservedFreeBudget.plan_slug,
+      commits_used: reservedFreeBudget.commits_used,
+      files_touched: reservedFreeBudget.files_touched_paths.length,
+      lines_changed: reservedFreeBudget.lines_changed,
+      locked: reservedFreeBudget.locked,
+      ...reservedFreeBudget.locked_reason !== void 0 && {
+        locked_reason: reservedFreeBudget.locked_reason
+      }
+    };
+    const ledger = appendAudit(
+      projectRoot,
+      {
+        event: "free_commit.committed",
+        tool: "rsct_request_commit",
+        channel: "free_commit",
+        plan_slug: reservedFreeBudget.plan_slug,
+        sha_after: commit.sha_after
+      },
+      config2?.audit
+    );
+    if (!ledger.ok && ledger.reason !== "disabled") {
+      bookkeepingHints.push(
+        `\u26A0 the durable free_commit.committed ledger event did not persist (${ledger.error ?? "write failed"}) \u2014 if phase-state is later wiped, the free-commit count could under-count by one.`
+      );
+    }
+    if (freeNewlyLocked) {
+      appendAudit(
+        projectRoot,
+        {
+          event: "free_commit.locked",
+          tool: "rsct_request_commit",
+          plan_slug: reservedFreeBudget.plan_slug,
+          reason: reservedFreeBudget.locked_reason ?? "commit_cap"
+        },
+        config2?.audit
+      );
+    }
   }
   const audit = appendAudit(
     projectRoot,
@@ -27210,6 +27835,13 @@ message: ${input.message}`
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used;
     hints.push(
       `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`
+    );
+  }
+  if (freeSummary) {
+    const limit = resolveFreeBudgetLimits(config2 ?? null).maxCommits;
+    const remaining = Math.max(0, limit - freeSummary.commits_used);
+    hints.push(
+      freeSummary.locked ? `Free commit on '${freeSummary.plan_slug}' \u2014 budget is now LOCKED (${freeSummary.locked_reason}). Further commits need a per-action dev_approval or a batch token (rsct_plan_authorize).` : `Free (dialog-free) commit on '${freeSummary.plan_slug}' \u2014 ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`
     );
   }
   hints.push(...bookkeepingHints);
@@ -27259,6 +27891,7 @@ message: ${input.message}`
       override_used: findings.length > 0
     },
     plan_token: tokenSummary,
+    free_commit: freeSummary,
     contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,
@@ -27278,6 +27911,49 @@ function auditFields(r) {
 
 // src/tools/request-push.ts
 init_esm_shims();
+
+// src/lib/plan-cleanup.ts
+init_esm_shims();
+function retentionMode(config2) {
+  return config2?.plan_file_retention === "documented" ? "documented" : "ephemeral";
+}
+function planCleanupReport(projectRoot, slug, config2, executor = defaultGitExecutor) {
+  const documented = retentionMode(config2) === "documented";
+  const names = [`plan_${slug}.md`, `progress_${slug}.md`, `spec_${slug}.md`];
+  const artifacts = [];
+  for (const name of names) {
+    if (documented && name.startsWith("spec_")) continue;
+    if (existsSync(join(projectRoot, name))) {
+      artifacts.push({ name, tracked: gitIsTracked(projectRoot, name, executor) });
+    }
+  }
+  const completion = progressCompletionState(projectRoot, slug);
+  const can_suggest_delete = completion === "all_closed";
+  let hint;
+  if (artifacts.length === 0) {
+    hint = `No branch-local plan artifacts found for '${slug}'.`;
+  } else {
+    const loose = artifacts.filter((a) => !a.tracked).map((a) => a.name);
+    const tracked = artifacts.filter((a) => a.tracked).map((a) => a.name);
+    const parts = [];
+    parts.push(
+      can_suggest_delete ? `Plan '${slug}' looks complete (progress all-closed).` : `Plan '${slug}' progress is '${completion}' \u2014 NOT confirmed complete; keep the artifacts unless you are sure.`
+    );
+    if (loose.length > 0) {
+      parts.push(
+        can_suggest_delete ? `Loose (gitignored) artifacts you can remove: ${loose.join(", ")}.` : `Loose artifacts (keep for now): ${loose.join(", ")}.`
+      );
+    }
+    if (tracked.length > 0) {
+      parts.push(
+        `\u26A0 TRACKED artifacts \u2014 remove deliberately with \`git rm\` only if intended: ${tracked.join(", ")}.`
+      );
+    }
+    parts.push("(RSCT never auto-deletes plan artifacts \u2014 you remove them.)");
+    hint = parts.join(" ");
+  }
+  return { slug, artifacts, completion, can_suggest_delete, hint };
+}
 
 // src/lib/pre-merge-ack.ts
 init_esm_shims();
@@ -27303,10 +27979,13 @@ var PRE_MERGE_ACK_ITEMS = [
   "adr_confirmed",
   "issues_resolved"
 ];
-function evaluatePreMergeAck(ack) {
+function evaluatePreMergeAck(ack, progressHasOpenItems2) {
   if (ack === void 0) return { ok: false, kind: "pre_merge_ack_missing" };
   const failing = [];
   if (ack.plan_complete !== true) failing.push("plan_complete");
+  else if (progressHasOpenItems2 === true) {
+    failing.push("plan_complete (progress_<slug>.md still has open `- [ ]` items)");
+  }
   if (ack.adr_confirmed !== true) failing.push("adr_confirmed");
   if (ack.issues_resolved !== true) failing.push("issues_resolved");
   const attestedPositive = ack.adr_confirmed === true || ack.issues_resolved === true;
@@ -27374,7 +28053,9 @@ async function requestPushHandler(rawInput, internal = {}) {
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(branch, protectedList);
   if (branchProtected) {
-    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+    const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null;
+    const progressOpen = pushingPlan ? progressHasOpenItems(projectRoot, pushingPlan.slug) : void 0;
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision);
       const audit2 = appendAudit(
@@ -27596,11 +28277,14 @@ async function requestPushHandler(rawInput, internal = {}) {
       config2?.audit
     );
   }
-  const activePlan = findActivePlan(projectRoot);
-  if (activePlan && isPlanComplete(activePlan.status)) {
-    hints.push(
-      `\u2139 Plan '${activePlan.slug}' is marked complete. Optional, with your OK (not automated): delete plan_/progress_/spec_${activePlan.slug}.md so they never land on a protected branch.`
-    );
+  if (branchProtected) {
+    const donePlan = (branch ? findPlanByBranch(projectRoot, branch) : null) ?? findActivePlan(projectRoot);
+    if (donePlan) {
+      const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
+      hints.push(
+        `\u2139 Pushed to protected '${branchLabel}'. ${report.hint} Record keep|delete with rsct_plan_dispose, or remove the loose files yourself.`
+      );
+    }
   }
   return {
     status: "pushed",
@@ -27690,7 +28374,9 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack);
+  const integratingPlan = findPlanByBranch(projectRoot, input.source_branch);
+  const progressOpen = integratingPlan ? progressHasOpenItems(projectRoot, integratingPlan.slug) : void 0;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision);
     const audit2 = appendAudit(
@@ -28001,10 +28687,11 @@ async function requestMergeHandler(rawInput, internal = {}) {
       config2?.audit
     );
   }
-  const activePlan = findActivePlan(projectRoot);
-  if (activePlan && isPlanComplete(activePlan.status)) {
+  const donePlan = integratingPlan ?? findActivePlan(projectRoot);
+  if (donePlan) {
+    const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
     hints.push(
-      `\u2139 Plan '${activePlan.slug}' is marked complete. Optional, with your OK (never automated): (1) delete the merged working branch '${input.source_branch}' (local + remote), and (2) delete plan_/progress_/spec_${activePlan.slug}.md so they never reach a protected branch. The same cleanup applies after a GitHub PR merge \u2014 merge commit, squash, or rebase.`
+      `\u2139 Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself \u2014 RSCT never auto-deletes.`
     );
   }
   return {
@@ -28197,6 +28884,14 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
     input.max_actions,
     config2?.approval_modes?.plan_token_max_actions
   );
+  const slideMinutes = resolveSlideMinutes(
+    input.ttl_minutes,
+    config2?.approval_modes?.plan_token_ttl_slide_minutes
+  );
+  const absTtlMinutes = resolveAbsTtlMinutes(
+    void 0,
+    config2?.approval_modes?.plan_token_ttl_abs_minutes
+  );
   const token = emitToken({
     planSlug: activePlan.slug,
     branch,
@@ -28206,7 +28901,9 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       action_scope: gate.approval.action_scope,
       timestamp: gate.approval.timestamp
     },
-    now
+    now,
+    slideMinutes,
+    absTtlMinutes
   });
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
@@ -28385,6 +29082,331 @@ async function planRevokeHandler(rawInput, internal = {}) {
       `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`
     ]
   };
+}
+
+// src/tools/plan-dispose.ts
+init_esm_shims();
+var planDisposeInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  plan_slug: external_exports.string().min(1).describe("The plan slug (as in plan_<slug>.md) whose artifacts to dispose."),
+  decision: external_exports.enum(["keep", "delete"]).describe("'keep' retains the plan artifacts; 'delete' advises removing the loose ones.")
+}).strict();
+var planDisposeTool = {
+  name: "rsct_plan_dispose",
+  description: 'plan-lifecycle-v2: record the keep|delete disposition for a plan slug and surface the ADVISORY artifact-cleanup report. Flow-INDEPENDENT \u2014 use it after ANY integration terminal, INCLUDING a GitHub PR merge/squash/rebase that never ran rsct_request_merge/_push (the blind spot those tools cannot see). ADVISORY-ONLY (Fork 2/A): decision:"delete" NEVER auto-deletes \u2014 it lists the loose gitignored plan_/progress_/spec_ files for YOU to remove, and flags any TRACKED ones for a deliberate `git rm`. The decision is recorded once (keyed by plan_slug, with a read-side slug guard) so a later action does not re-prompt. NOT \xA7C-gated \u2014 it records intent and prints advice; it performs no git or filesystem mutation.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      },
+      plan_slug: {
+        type: "string",
+        description: "The plan slug (as in plan_<slug>.md) whose artifacts to dispose."
+      },
+      decision: {
+        type: "string",
+        enum: ["keep", "delete"],
+        description: "'keep' retains the artifacts; 'delete' advises removing the loose ones."
+      }
+    },
+    required: ["plan_slug", "decision"],
+    additionalProperties: false
+  }
+};
+function auditFields6(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return { audit_path: audit.path ?? null, audit_error: audit.error ?? "write_failed" };
+}
+async function planDisposeHandler(rawInput, internal = {}) {
+  const input = planDisposeInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const write = stampPlanDisposition(projectRoot, {
+    plan_slug: input.plan_slug,
+    decision: input.decision,
+    decided_at: now.toISOString()
+  });
+  const report = planCleanupReport(projectRoot, input.plan_slug, config2 ?? null);
+  if (!write.ok) {
+    const reason = write.reason === "locked" ? `another session is editing phase-state.json (locked ${write.lock_age_ms}ms ago) \u2014 wait and retry` : `phase-state.json write failed: ${write.error}`;
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_dispose.state_write_failed",
+        tool: "rsct_plan_dispose",
+        plan_slug: input.plan_slug,
+        decision: input.decision,
+        reason
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      plan_slug: input.plan_slug,
+      decision: input.decision,
+      artifacts: report.artifacts,
+      can_suggest_delete: report.can_suggest_delete,
+      ...auditFields6(audit2),
+      hints: [`\u26A0 disposition NOT recorded \u2014 ${reason}. ${report.hint}`]
+    };
+  }
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "plan_dispose.recorded",
+      tool: "rsct_plan_dispose",
+      plan_slug: input.plan_slug,
+      decision: input.decision,
+      decided_at: now.toISOString()
+    },
+    config2?.audit
+  );
+  const hints = [];
+  if (input.decision === "delete") {
+    hints.push(
+      report.can_suggest_delete ? `Disposition 'delete' recorded for '${input.plan_slug}'. ${report.hint}` : `Disposition 'delete' recorded, but the plan is NOT confirmed complete (progress='${report.completion}') \u2014 double-check before removing anything. ${report.hint}`
+    );
+  } else {
+    hints.push(`Disposition 'keep' recorded for '${input.plan_slug}' \u2014 artifacts retained. ${report.hint}`);
+  }
+  return {
+    status: "recorded",
+    plan_slug: input.plan_slug,
+    decision: input.decision,
+    artifacts: report.artifacts,
+    can_suggest_delete: report.can_suggest_delete,
+    ...auditFields6(audit),
+    hints
+  };
+}
+
+// src/tools/request-rebase.ts
+init_esm_shims();
+var requestRebaseInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  mode: external_exports.enum(["rebase", "squash"]).optional().describe("'rebase' = git rebase current onto ref; 'squash' = git merge --squash ref into current (default 'rebase')."),
+  ref: external_exports.string().min(1, "ref required").describe("For mode='rebase': the upstream to rebase onto. For mode='squash': the branch to squash-merge into the current HEAD."),
+  dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
+  pre_merge_ack: preMergeAckSchema.optional().describe("PH-5 pre-integration hygiene checklist (self-attested). REQUIRED \u2014 absence \u21D2 rejected in chat (no OS dialog).")
+}).strict();
+var requestRebaseTool = {
+  name: "rsct_request_rebase",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token or the free-commit lane). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: { type: "string", description: "Optional absolute path to override project root detection." },
+      mode: { type: "string", enum: ["rebase", "squash"], description: "'rebase' or 'squash' (default 'rebase')." },
+      ref: { type: "string", description: "Upstream to rebase onto, or branch to squash-merge." },
+      dev_approval: { type: "object", description: "dev_approval payload." },
+      pre_merge_ack: preMergeAckJsonSchema
+    },
+    required: ["ref", "dev_approval"],
+    additionalProperties: false
+  }
+};
+function auditFields7(r) {
+  if (r.ok) return { audit_path: r.path, audit_error: null };
+  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
+  return { audit_path: r.path ?? null, audit_error: r.error ?? "write_failed" };
+}
+async function requestRebaseHandler(rawInput, internal = {}) {
+  const input = requestRebaseInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config ?? void 0;
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const gitExecutor = internal.gitExecutor ?? defaultGitExecutor;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const gitState = internal.gitStateOverride ?? readGitState(projectRoot);
+  const currentBranch = gitState.branch;
+  const currentLabel = currentBranch ?? "<no-branch>";
+  const mode = input.mode ?? "rebase";
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const base = (over) => ({
+    status: "rejected",
+    mode,
+    ref: input.ref,
+    current_branch: currentBranch,
+    channel: null,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: [],
+    sha_before: gitState.head_sha,
+    sha_after: null,
+    branch_check: { protected: false, override_used: false },
+    audit_path: null,
+    audit_error: null,
+    anti_replay_persisted: null,
+    anti_replay_error: null,
+    hints: [],
+    ...over
+  });
+  const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null;
+  const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : void 0;
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
+  if (!ackDecision.ok) {
+    const hint = preMergeAckHint(ackDecision);
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_rebase.rejected",
+        tool: "rsct_request_rebase",
+        reject_kind: ackDecision.kind,
+        reason: hint,
+        mode,
+        ref: input.ref,
+        pre_merge_ack: input.pre_merge_ack ?? null,
+        pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        ...ackDecision.kind === "pre_merge_ack_incomplete" && { failing: ackDecision.failing }
+      },
+      config2?.audit
+    );
+    return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields7(audit2), hints: [hint] });
+  }
+  const gate = await gateRequest({
+    toolName: "rsct_request_rebase",
+    approval: input.dev_approval,
+    dialog: {
+      title: "RSCT \u2014 rebase approval",
+      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)`
+    },
+    projectRoot,
+    ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_rebase.rejected",
+        tool: "rsct_request_rebase",
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        mode,
+        ref: input.ref,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    return base({
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      ...auditFields7(audit2),
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+    });
+  }
+  const approval = gate.approval;
+  const overrideBranch = approval.override_protected_branch;
+  if (currentBranch === null) {
+    const reason = "cannot rebase/squash on a detached HEAD \u2014 checkout a branch first";
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "detached_head", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "detached_head", reason, fabrication_signals: gate.fabrication_signals, sha_before: null, ...auditFields7(audit2), hints: [reason] });
+  }
+  if (input.ref === currentBranch) {
+    const reason = `cannot ${mode} '${currentBranch}' against itself`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "same_ref", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "same_ref", reason, fabrication_signals: gate.fabrication_signals, ...auditFields7(audit2), hints: [reason] });
+  }
+  const { list: protectedList } = effectiveProtectedList(config2);
+  const currentProtected = isProtectedBranch(currentBranch, protectedList);
+  if (currentProtected && !overrideBranch) {
+    const reason = `branch '${currentLabel}' is protected \u2014 ${mode} rewrites its history; pass dev_approval.override_protected_branch: { reason } to proceed`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "protected_branch", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({ channel: gate.channel, reject_kind: "protected_branch", reason, fabrication_signals: gate.fabrication_signals, branch_check: { protected: true, override_used: false }, ...auditFields7(audit2), hints: [reason] });
+  }
+  if (currentProtected && overrideBranch) {
+    appendAudit(
+      projectRoot,
+      { event: "request_rebase.override_invoked", tool: "rsct_request_rebase", override_kind: "protected_branch", override_reason: overrideBranch.reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+  }
+  const result = mode === "rebase" ? gitRebase(projectRoot, input.ref, gitExecutor) : gitSquash(projectRoot, input.ref, gitExecutor);
+  if (!result.ok) {
+    const reason = result.error ?? result.stderr ?? `git ${mode} failed`;
+    const audit2 = appendAudit(
+      projectRoot,
+      { event: "request_rebase.mutation_failed", tool: "rsct_request_rebase", reason, mode, ref: input.ref, channel: gate.channel },
+      config2?.audit
+    );
+    return base({
+      status: "mutation_failed",
+      channel: gate.channel,
+      reason,
+      fabrication_signals: gate.fabrication_signals,
+      sha_before: result.sha_before,
+      branch_check: { protected: currentProtected, override_used: currentProtected },
+      ...auditFields7(audit2),
+      hints: [
+        `git ${mode} failed \u2014 ${mode === "rebase" ? "resolve conflicts (git rebase --continue) or abort (git rebase --abort)" : "resolve conflicts, then commit via rsct_request_commit"}. Approval NOT consumed; retry with a fresh dev_approval.`
+      ]
+    });
+  }
+  const record2 = recordApproval(approval, { projectRoot, now });
+  const audit = appendAudit(
+    projectRoot,
+    {
+      event: "request_rebase.done",
+      tool: "rsct_request_rebase",
+      mode,
+      ref: input.ref,
+      current_branch: currentBranch,
+      channel: gate.channel,
+      sha_before: result.sha_before,
+      sha_after: result.sha_after,
+      fabrication_signals: gate.fabrication_signals
+    },
+    config2?.audit
+  );
+  const hints = [
+    mode === "rebase" ? `Rebased '${currentLabel}' onto '${input.ref}' (${result.sha_before ?? "?"} \u2192 ${result.sha_after ?? "?"}).` : `Squash-staged '${input.ref}' into '${currentLabel}' \u2014 NOT committed. Commit the squashed change via rsct_request_commit.`
+  ];
+  const bootstrap = evaluateBootstrapMarker({ projectRoot, now });
+  if (bootstrap.status !== "fresh" && bootstrap.hint) hints.push(bootstrap.hint);
+  if (!record2.ok) {
+    hints.push(`\u26A0 ${mode} landed but the approval could not be recorded as used: ${record2.error}.`);
+  }
+  const donePlan = currentPlan ?? findActivePlan(projectRoot);
+  if (donePlan) {
+    const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
+    hints.push(`${report.hint} Record keep|delete with rsct_plan_dispose.`);
+  }
+  return base({
+    status: mode === "rebase" ? "rebased" : "squashed",
+    channel: gate.channel,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    sha_before: result.sha_before,
+    sha_after: result.sha_after,
+    branch_check: { protected: currentProtected, override_used: currentProtected },
+    bootstrap_marker: bootstrap,
+    ...auditFields7(audit),
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error,
+    hints
+  });
 }
 
 // src/tools/phase-verification-start.ts
@@ -28881,7 +29903,7 @@ var phaseVerificationStartTool = {
     additionalProperties: false
   }
 };
-function auditFields6(audit) {
+function auditFields8(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -28924,7 +29946,7 @@ async function phaseVerificationStartHandler(rawInput) {
       },
       config2?.audit
     );
-    const fields2 = auditFields6(skipAudit);
+    const fields2 = auditFields8(skipAudit);
     return {
       status: "skipped_tier",
       rsct_installed: resolution.rsct_installed,
@@ -28997,7 +30019,7 @@ async function phaseVerificationStartHandler(rawInput) {
       config2?.audit
     );
   }
-  const fields = auditFields6(startAudit);
+  const fields = auditFields8(startAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29102,7 +30124,7 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function auditFields7(audit) {
+function auditFields9(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29166,7 +30188,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29198,7 +30220,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29247,7 +30269,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       },
       config2?.audit
     );
-    const fields2 = auditFields7(audit);
+    const fields2 = auditFields9(audit);
     return {
       status: "rejected",
       channel: null,
@@ -29312,7 +30334,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     config2?.audit
   );
   const record2 = recordApproval(gate.approval, { projectRoot, now });
-  const fields = auditFields7(completeAudit);
+  const fields = auditFields9(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29782,6 +30804,11 @@ async function classifyTaskHandler(rawInput) {
       tier,
       signalsSummary: signals.join(" | ")
     });
+    appendAuditEntry(
+      resolution.root,
+      { event: "classify.verdict", tool: "rsct_classify_task", tier },
+      resolution.config?.audit
+    );
   }
   let activePlan = null;
   if (input.use_active_plan_slug) {
@@ -29850,7 +30877,7 @@ function nextPhase(current) {
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
   return PHASE_ORDER[idx + 1];
 }
-function auditFields8(audit) {
+function auditFields10(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -29876,7 +30903,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit2);
+    const fields2 = auditFields10(audit2);
     return {
       status: "phase_already_active",
       phase: input.phase,
@@ -29916,7 +30943,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields8(audit);
+  const fields = auditFields10(audit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -29984,7 +31011,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30016,7 +31043,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30063,7 +31090,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(audit);
+    const fields2 = auditFields10(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -30085,6 +31112,9 @@ async function gatePhaseComplete(input, config2, internal = {}) {
   delete newState.phase;
   delete newState.scope_globs;
   delete newState.started_at;
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
+  }
   const writeResult = writePhaseState(input.projectRoot, newState);
   const record2 = recordApproval(gate.approval, {
     projectRoot: input.projectRoot,
@@ -30106,7 +31136,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields8(completeAudit);
+  const fields = auditFields10(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     if (recommended) {
@@ -30536,7 +31566,7 @@ var phaseCodeStartTool = {
     additionalProperties: false
   }
 };
-function auditFields9(audit) {
+function auditFields11(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -30788,7 +31818,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields11(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -30847,7 +31877,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields11(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -30907,7 +31937,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields9(audit);
+    const fields = auditFields11(audit);
     return {
       status: "verification_gate_rejected",
       reject_kind: rejectKind,
@@ -31145,7 +32175,7 @@ var phaseTestStartTool = {
     additionalProperties: false
   }
 };
-function auditFields10(audit) {
+function auditFields12(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31252,7 +32282,7 @@ async function phaseTestStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields10(audit);
+    const fields = auditFields12(audit);
     return {
       status: "review_gate_rejected",
       reject_kind: rejectKind,
@@ -31372,7 +32402,7 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields11(audit) {
+function auditFields13(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31446,7 +32476,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields11(audit);
+    const fields2 = auditFields13(audit);
     return {
       status: "rejected",
       channel: null,
@@ -31482,7 +32512,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields11(abandonedAudit);
+  const fields = auditFields13(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -31625,7 +32655,7 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields12(audit) {
+function auditFields14(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -31699,7 +32729,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -31752,7 +32782,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -31804,7 +32834,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -31845,7 +32875,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields12(audit);
+    const fields2 = auditFields14(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -31882,7 +32912,7 @@ GH CLI will run in '${projectRoot}'.`
     },
     config2?.audit
   );
-  const fields = auditFields12(createdAudit);
+  const fields = auditFields14(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
   if (!record2.ok) {
     hints.push(
@@ -32724,7 +33754,7 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields13(audit) {
+function auditFields15(audit) {
   if (audit.ok) return { audit_path: audit.path, audit_error: null };
   if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
   return {
@@ -32785,7 +33815,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields13(audit);
+  const fields = auditFields15(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,
@@ -32928,8 +33958,10 @@ var TOOLS = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  requestRebaseTool,
   planAuthorizeTool,
   planRevokeTool,
+  planDisposeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -32967,8 +33999,10 @@ var HANDLERS = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_request_rebase: requestRebaseHandler,
   rsct_plan_authorize: planAuthorizeHandler,
   rsct_plan_revoke: planRevokeHandler,
+  rsct_plan_dispose: planDisposeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,

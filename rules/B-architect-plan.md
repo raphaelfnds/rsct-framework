@@ -85,8 +85,13 @@ NEVER edit code without first presenting the user a plan containing:
    collide with it.
 
    These files are **gitignored by default** (see `.gitignore` patterns
-   `plan_*.md`, `progress_*.md`, and `spec_*.md` added by `/rsct-setup`).
-   To track them on the current feature branch, the developer uses:
+   `plan_*.md`, `progress_*.md`, and `spec_*.md` added by `/rsct-setup`) under
+   the default `plan_file_retention: ephemeral`. Setting
+   `plan_file_retention: documented` in `.rsct.json` (plan-lifecycle-v2) keeps
+   `spec_<slug>.md` **tracked at the project root** — excluded from the RSCT
+   `.gitignore` block, versioned as durable design docs; `progress_` stays
+   branch-local either way. To track a still-gitignored file on the current
+   feature branch, the developer uses:
    ```
    git add --force plan_<slug>.md progress_<slug>.md
    ```

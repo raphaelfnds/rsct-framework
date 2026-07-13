@@ -252,13 +252,19 @@ description: Apply or update RSCT governance protocol in this project
 @$RSCT_HOME_FOR_CLAUDE/prompts/01-setup.md
 EOF
 
-cat > "$CLAUDE_COMMANDS_DIR/rsct-canonical-source.md" <<EOF
+# plan-lifecycle-v2 Trilha 4: the unified /rsct-universe command REPLACES the
+# old /rsct-init-universe and /rsct-canonical-source. Generate the new stub and
+# actively remove the two old stubs so ONLY /rsct-universe appears to the dev
+# (the engine prompts 02/04 stay in the repo — 06-universe.md reuses them).
+cat > "$CLAUDE_COMMANDS_DIR/rsct-universe.md" <<EOF
 ---
-description: Add canonical architectural source section to CLAUDE.md (universe link)
+description: Create/adjust the org universe and/or link this project to it (unified)
 ---
 
-@$RSCT_HOME_FOR_CLAUDE/prompts/02-canonical-source.md
+@$RSCT_HOME_FOR_CLAUDE/prompts/06-universe.md
 EOF
+rm -f "$CLAUDE_COMMANDS_DIR/rsct-init-universe.md" \
+      "$CLAUDE_COMMANDS_DIR/rsct-canonical-source.md"
 
 cat > "$CLAUDE_COMMANDS_DIR/rsct-uninstall.md" <<EOF
 ---
@@ -266,14 +272,6 @@ description: Reverse RSCT setup in this project (SHA256-protected, granular)
 ---
 
 @$RSCT_HOME_FOR_CLAUDE/prompts/03-uninstall.md
-EOF
-
-cat > "$CLAUDE_COMMANDS_DIR/rsct-init-universe.md" <<EOF
----
-description: Bootstrap a new universe repository for an organization (skeleton)
----
-
-@$RSCT_HOME_FOR_CLAUDE/prompts/04-init-universe.md
 EOF
 
 cat > "$CLAUDE_COMMANDS_DIR/rsct-clean-code.md" <<EOF
@@ -292,8 +290,7 @@ echo "════════════════════════�
 echo ""
 echo "Slash commands now available in Claude Code:"
 echo "  /rsct-setup              — setup or update a project"
-echo "  /rsct-init-universe      — bootstrap a new universe repository"
-echo "  /rsct-canonical-source   — add universe canonical source section"
+echo "  /rsct-universe           — create/adjust the org universe and/or link this project"
 echo "  /rsct-uninstall          — reverse setup in a project"
 echo "  /rsct-clean-code         — sweep for duplication/scalability/dep updates"
 echo ""

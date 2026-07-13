@@ -33,7 +33,11 @@ dev's OK, never automatic, and only once the plan/progress/spec work is done):
    `git branch -d <branch>` + `git push origin --delete <branch>`, or GitHub's
    "Delete branch" button, or `gh pr merge --delete-branch`.
 2. Delete the branch-local `plan_/progress_/spec_<slug>.md` files (they must
-   never be tracked on a protected branch anyway).
+   never be tracked on a protected branch anyway). When `rsct-mcp` is installed,
+   record the keep|delete decision with `rsct_plan_dispose` (plan-lifecycle-v2)
+   — it prints an **advisory** cleanup report and **never auto-deletes**, and it
+   covers the GitHub-PR-merge terminal too. (In `plan_file_retention: documented`
+   mode, `spec_<slug>.md` is kept — versioned as durable design docs.)
 
 This applies to **every** merge strategy — "merge" in this framework means any
 of GitHub's three PR methods, and the cleanup is identical for all:

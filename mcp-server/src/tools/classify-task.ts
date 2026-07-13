@@ -5,6 +5,7 @@ import { resolveProjectRoot } from '../lib/project-root.js'
 import { findActivePlan } from '../lib/plan.js'
 import { type RsctPhase } from '../lib/phase-machine.js'
 import { stampClassifyVerdict } from '../lib/phase-scope.js'
+import { appendAuditEntry } from '../lib/audit-log.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -532,6 +533,17 @@ export async function classifyTaskHandler(
       tier,
       signalsSummary: signals.join(' | '),
     })
+    // plan-lifecycle-v2 (Bloco 1.2): emit a durable classify verdict into the
+    // append-only audit log. deriveAuditCeiling reconstructs the tier ratchet
+    // from these events, so the free-commit ceiling survives a phase-state
+    // wipe (the AUDIT-side anchor). PRESENCE of ≥1 such event is REQUIRED for
+    // free eligibility, so this is the positive-evidence signal, not just a
+    // diagnostic. Best-effort (classify never fails on a metadata write).
+    appendAuditEntry(
+      resolution.root,
+      { event: 'classify.verdict', tool: 'rsct_classify_task', tier },
+      resolution.config?.audit,
+    )
   }
 
   let activePlan: ClassifyTaskOutput['active_plan'] = null

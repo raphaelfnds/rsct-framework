@@ -59,6 +59,14 @@ import {
   planRevokeHandler,
 } from './tools/plan-revoke.js'
 import {
+  planDisposeTool,
+  planDisposeHandler,
+} from './tools/plan-dispose.js'
+import {
+  requestRebaseTool,
+  requestRebaseHandler,
+} from './tools/request-rebase.js'
+import {
   phaseVerificationStartTool,
   phaseVerificationStartHandler,
 } from './tools/phase-verification-start.js'
@@ -162,8 +170,10 @@ const TOOLS: Tool[] = [
   requestCommitTool,
   requestPushTool,
   requestMergeTool,
+  requestRebaseTool,
   planAuthorizeTool,
   planRevokeTool,
+  planDisposeTool,
   classifyTaskTool,
   phaseStatusTool,
   phaseResearchStartTool,
@@ -202,8 +212,10 @@ const HANDLERS: Record<string, ToolHandler> = {
   rsct_request_commit: requestCommitHandler,
   rsct_request_push: requestPushHandler,
   rsct_request_merge: requestMergeHandler,
+  rsct_request_rebase: requestRebaseHandler,
   rsct_plan_authorize: planAuthorizeHandler,
   rsct_plan_revoke: planRevokeHandler,
+  rsct_plan_dispose: planDisposeHandler,
   rsct_classify_task: classifyTaskHandler,
   rsct_phase_status: phaseStatusHandler,
   rsct_phase_research_start: phaseResearchStartHandler,

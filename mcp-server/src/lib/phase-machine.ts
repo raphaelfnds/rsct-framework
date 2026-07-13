@@ -412,6 +412,14 @@ export async function gatePhaseComplete(
   delete newState.phase
   delete newState.scope_globs
   delete newState.started_at
+  // plan-lifecycle-v2 (Bloco 3.2): closing the TERMINAL phase of the cycle arms
+  // the re-bootstrap flag, so the next task in the same session cannot reach an
+  // Edit until rsct_load_context re-reads context. Robust terminal test
+  // (nextPhase === null) rather than hardcoding 'test', so a trivial/small cycle
+  // that ends earlier still arms it.
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: 'plan_closed' }
+  }
 
   const writeResult = writePhaseState(input.projectRoot, newState)
   const record = recordApproval(gate.approval, {

@@ -13,6 +13,12 @@ const phaseStateOverrideSchema = z
     phase: z.string().optional(),
     scope_globs: z.array(z.string()).optional(),
     started_at: z.string().optional(),
+    // plan-lifecycle-v2 (Bloco 3.3, F9): the override must be able to carry the
+    // re-bootstrap flag so tests / the guard can simulate a stale context.
+    context_stale: z
+      .object({ since: z.string(), reason: z.enum(['plan_closed', 'pivot']) })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -36,7 +42,7 @@ export const checkEditScopeInputSchema = z
 
 export type CheckEditScopeInput = z.infer<typeof checkEditScopeInputSchema>
 
-export type ScopeStatus = 'in_scope' | 'out_of_scope' | 'unknown'
+export type ScopeStatus = 'in_scope' | 'out_of_scope' | 'unknown' | 'stale_context'
 
 export interface CheckEditScopeOutput {
   rsct_installed: boolean
@@ -75,6 +81,14 @@ export const checkEditScopeTool: Tool = {
           phase: { type: 'string' },
           scope_globs: { type: 'array', items: { type: 'string' } },
           started_at: { type: 'string' },
+          context_stale: {
+            type: 'object',
+            properties: {
+              since: { type: 'string' },
+              reason: { type: 'string', enum: ['plan_closed', 'pivot'] },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },
@@ -102,6 +116,7 @@ export async function checkEditScopeHandler(
     if (override.phase !== undefined) rebuilt.phase = override.phase
     if (override.scope_globs !== undefined) rebuilt.scope_globs = override.scope_globs
     if (override.started_at !== undefined) rebuilt.started_at = override.started_at
+    if (override.context_stale !== undefined) rebuilt.context_stale = override.context_stale
     state = rebuilt
   } else {
     const read = readPhaseState(resolution.root)
@@ -114,7 +129,14 @@ export async function checkEditScopeHandler(
   let status: ScopeStatus
   let matched_glob: string | null = null
 
-  if (!phase_state_exists || state === null || scope_globs.length === 0) {
+  // plan-lifecycle-v2 (Bloco 3.3): the re-bootstrap gate is evaluated BEFORE the
+  // empty-scope short-circuit — a just-closed plan has scope_globs wiped, which
+  // would otherwise read as 'unknown' and let the edit through. While
+  // context_stale is set, a managed edit is blocked until rsct_load_context
+  // clears it.
+  if (state?.context_stale) {
+    status = 'stale_context'
+  } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = 'unknown'
   } else {
     const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root)
@@ -159,6 +181,12 @@ function buildHints(input: HintInputs): string[] {
   const hints: string[] = []
   if (!input.rsct_installed) {
     hints.push('No .rsct.json — running scope check with no project context.')
+  }
+  if (input.status === 'stale_context') {
+    hints.push(
+      '⛔ Context is STALE — a plan closed (or a pivot was declared). Run rsct_status + rsct_load_context to re-read plan / universe / decisions before editing. This edit is blocked until context is reloaded.',
+    )
+    return hints
   }
   if (!input.phase_state_exists) {
     hints.push(
