@@ -1648,7 +1648,11 @@ Plan tracking files (`plan_<slug>.md` and `progress_<slug>.md`) are
 **branch-local** by §B item 6 — they must never reach `main`/`test`.
 `spec_<slug>.md` is treated as an **accepted alias of `plan_<slug>.md`**
 (a dev may name the artefact "spec" instead of "plan"; same gitignore
-rule, same NEVER-on-protected guarantee). The block also ignores the
+rule, same NEVER-on-protected guarantee) — **unless** the
+`plan_file_retention` toggle in `.rsct.json` is `documented`, in which case
+`spec_<slug>.md` is **tracked at the project root** (versioned as durable
+design docs) and is therefore excluded from / removed out of the ignore
+block; `progress_<slug>.md` stays branch-local either way. The block also ignores the
 RSCT runtime-state files and, root-anchored, the framework source clone
 (`/rsct-framework/`) in case it is cloned INTO the project — a
 team-safety rule so the clone never travels with the project repo.
@@ -1691,6 +1695,21 @@ $END_MARKER
 EOF
 )
 
+# plan-lifecycle-v2 toggle — read plan_file_retention from .rsct.json (written
+# in Phase 4.4). 'documented' TRACKS spec_<slug>.md at the project root, so it
+# must NOT be in the ignore block; absent / 'ephemeral' = default (spec_ ignored
+# — today's behavior). ERE only + tr -d CR + ${:-default}; NEVER grep -iF
+# (anti-pattern #7 — SIGABRT on Git Bash).
+PLAN_FILE_RETENTION="$(grep -E '"plan_file_retention"' "$(pwd)/.rsct.json" 2>/dev/null \
+  | sed -E 's/.*"plan_file_retention"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+  | tr -d '\r' | head -1)"
+PLAN_FILE_RETENTION="${PLAN_FILE_RETENTION:-ephemeral}"
+# In documented mode, drop the spec_*.md IGNORE line from the FRESH block (exact
+# match; PATTERN_BLOCK is in-memory LF, so no CRLF handling needed here).
+if [ "$PLAN_FILE_RETENTION" = "documented" ]; then
+  PATTERN_BLOCK="$(printf '%s\n' "$PATTERN_BLOCK" | awk '$0!="spec_*.md"')"
+fi
+
 HAS_NEW_BLOCK="no"
 HAS_LEGACY_BLOCK="no"
 if [ -f "$GITIGNORE" ]; then
@@ -1711,7 +1730,7 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
   # set up before the new line shipped. The backfill below scans
   # individual pattern lines and inserts the ones missing, keeping
   # marker idempotency intact (BEGIN/END are not rewritten).
-  if ! grep -qF "spec_*.md" "$GITIGNORE"; then
+  if [ "$PLAN_FILE_RETENTION" != "documented" ] && ! grep -qF "spec_*.md" "$GITIGNORE"; then
     # POSIX awk: append spec_*.md right after the first progress_*.md line.
     # Tempfile + mv keeps the operation atomic in case awk fails mid-stream.
     #
@@ -1733,6 +1752,28 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  CAP-16 backfill: added spec_*.md alias to existing RSCT .gitignore block"
     else
       echo "  ⚠ CAP-16 backfill: spec_*.md insertion did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # plan-lifecycle-v2 (documented mode): if the block still carries the spec_*.md
+  # IGNORE line (an ephemeral→documented switch on an existing install), REMOVE it
+  # so spec_<slug>.md becomes trackable at the project root. Scoped strictly
+  # BETWEEN the BEGIN/END markers via exact-string awk ($0=="spec_*.md") so a
+  # dev's own spec_*.md line OUTSIDE the RSCT block is never touched. CRLF-safe.
+  # The reverse switch (documented→ephemeral) self-heals via the CAP-16 backfill.
+  if [ "$PLAN_FILE_RETENTION" = "documented" ] \
+     && tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+          '$0==b{inblk=1} inblk && $0=="spec_*.md"{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+          '$0==b{inblk=1} $0==e{inblk=0} !(inblk && $0=="spec_*.md"){print}' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+    # Block-scoped sanity: confirm spec_*.md is absent INSIDE the block (a dev
+    # line OUTSIDE must not trigger a false error).
+    if tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+         '$0==b{inblk=1} inblk && $0=="spec_*.md"{f=1} $0==e{inblk=0} END{exit f?1:0}'; then
+      echo "  plan_file_retention=documented: removed spec_*.md from the RSCT .gitignore block (spec_ now trackable)"
+    else
+      echo "  ⚠ documented mode: spec_*.md removal did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
   # CAP-25 backfill: pre-v0.7.7 RSCT blocks did not list .rsct/phase-state.json,
