@@ -4,7 +4,7 @@ import {
   writePhaseState,
   type PhaseState,
 } from './phase-scope.js'
-import { appendAuditEntry, type AuditAppendResult } from './audit-log.js'
+import { appendAuditEntry, auditFields } from './audit-log.js'
 import {
   gateRequest,
   type GateChannel,
@@ -70,18 +70,6 @@ export function nextPhase(current: RsctPhase): RsctPhase | null {
   const idx = PHASE_ORDER.indexOf(current)
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null
   return PHASE_ORDER[idx + 1]!
-}
-
-export function auditFields(audit: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null }
-  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? 'write_failed',
-  }
 }
 
 export interface StartPhaseInput {

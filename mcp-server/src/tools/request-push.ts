@@ -22,7 +22,11 @@ import {
   recordConsumedApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import {
+  appendAuditEntry,
+  auditFields,
+  type AuditAppendResult,
+} from '../lib/audit-log.js'
 import {
   promptYesNo,
   type DialogOptions,
@@ -450,14 +454,3 @@ export async function requestPushHandler(
  * Project an `AuditAppendResult` to the `(audit_path, audit_error)` pair
  * surfaced in `RequestPushOutput`. See `request-commit.ts` for full notes.
  */
-function auditFields(r: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (r.ok) return { audit_path: r.path, audit_error: null }
-  if (r.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? 'write_failed',
-  }
-}

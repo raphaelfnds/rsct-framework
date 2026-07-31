@@ -13,7 +13,7 @@ import {
   evaluateBootstrapMarker,
   type BootstrapMarker,
 } from '../lib/phase-scope.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { findPlanBySlug, phaseSpecExists } from '../lib/plan.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
@@ -202,18 +202,6 @@ export const phaseCodeStartTool: Tool = {
     },
     additionalProperties: false,
   },
-}
-
-function auditFields(audit: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null }
-  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? 'write_failed',
-  }
 }
 
 /**

@@ -15,6 +15,26 @@ export type AuditAppendResult =
 const DEFAULT_RELATIVE_PATH = '.rsct/audit.log'
 
 /**
+ * Project an `AuditAppendResult` into the `{audit_path, audit_error}` pair that
+ * every tool returns to the caller. A disabled audit is not an error, so it maps
+ * to `{null, null}` — only a genuine write failure surfaces `audit_error`.
+ *
+ * Lives here (beside `AuditAppendResult`) because 15 tools had each declared an
+ * identical private copy; see issue #10.
+ */
+export function auditFields(audit: AuditAppendResult): {
+  audit_path: string | null
+  audit_error: string | null
+} {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null }
+  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
+  return {
+    audit_path: audit.path ?? null,
+    audit_error: audit.error ?? 'write_failed',
+  }
+}
+
+/**
  * Resolve the audit log path for a project. Honors `audit.path` from
  * `.rsct.json` (relative paths anchored at project root); defaults to
  * `<root>/.rsct/audit.log`.

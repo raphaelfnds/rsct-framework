@@ -17,7 +17,7 @@ import {
 } from '../lib/git.js'
 import { effectiveProtectedList, isProtectedBranch } from '../lib/branch-protection.js'
 import { recordConsumedApproval, type FabricationSignal } from '../lib/dev-approval.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { promptYesNo, type DialogOptions, type DialogResult } from '../lib/os-dialog.js'
 import { gateRequest, type GateChannel, type GateRejectKind } from '../lib/request-gate.js'
 import { evaluateBootstrapMarker, type BootstrapMarker } from '../lib/phase-scope.js'
@@ -105,12 +105,6 @@ export const requestRebaseTool: Tool = {
     required: ['ref', 'dev_approval'],
     additionalProperties: false,
   },
-}
-
-function auditFields(r: AuditAppendResult): { audit_path: string | null; audit_error: string | null } {
-  if (r.ok) return { audit_path: r.path, audit_error: null }
-  if (r.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return { audit_path: r.path ?? null, audit_error: r.error ?? 'write_failed' }
 }
 
 export async function requestRebaseHandler(

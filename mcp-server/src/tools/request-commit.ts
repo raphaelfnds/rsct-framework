@@ -32,7 +32,11 @@ import {
   type DevApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import {
+  appendAuditEntry,
+  auditFields,
+  type AuditAppendResult,
+} from '../lib/audit-log.js'
 import {
   promptYesNo,
   type DialogOptions,
@@ -1069,14 +1073,3 @@ export async function requestCommitHandler(
  * surfaced in `RequestCommitOutput`. `audit.enabled: false` is NOT
  * treated as an error — only real write failures populate `audit_error`.
  */
-function auditFields(r: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (r.ok) return { audit_path: r.path, audit_error: null }
-  if (r.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? 'write_failed',
-  }
-}

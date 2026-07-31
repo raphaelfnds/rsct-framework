@@ -16,7 +16,7 @@ import {
   recordConsumedApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   readPhaseState,
   writePhaseState,
@@ -155,17 +155,6 @@ export const phaseVerificationCompleteTool: Tool = {
     },
     additionalProperties: false,
   },
-}
-
-function auditFields(
-  audit: AuditAppendResult,
-): { audit_path: string | null; audit_error: string | null } {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null }
-  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? 'write_failed',
-  }
 }
 
 function emptySummary(): ActionsSummary {
