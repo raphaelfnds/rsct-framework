@@ -22679,10 +22679,12 @@ var RsctConfigSchema = external_exports.object({
   // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
   // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
-  // Deliberately UNBOUNDED here: the HIGH-4 posture nulls the whole config on
-  // an out-of-bounds bounded field, which is far too sharp for a cosmetic cap.
-  // Out-of-range values are clamped at the point of use instead.
-  commit_message_max_lines: external_exports.number().optional(),
+  // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
+  // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
+  // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
+  // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
+  // "unset"; the resolver clamps the range at the point of use.
+  commit_message_max_lines: external_exports.number().optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -27004,7 +27006,7 @@ var COMMIT_MESSAGE_MAX_LINES_DEFAULT = 15;
 var MIN_LIMIT = 1;
 var MAX_LIMIT = 500;
 function countNonEmptyLines(message) {
-  return message.replace(/\r/g, "").split("\n").filter((l) => l.trim().length > 0).length;
+  return message.replace(/\r\n?/g, "\n").split("\n").filter((l) => l.trim().length > 0).length;
 }
 function resolveCommitMessageMaxLines(config2) {
   const v = config2?.commit_message_max_lines;
@@ -27370,7 +27372,7 @@ var requestCommitTool = {
       },
       message: {
         type: "string",
-        description: "Commit message."
+        description: "Commit message. Keep it to 15 non-empty lines at most (blank lines are not counted): what changed and why, not a file-by-file narration of the diff. Over that, the call is rejected with `message_too_long` before any approval is requested. A project can raise the cap with `commit_message_max_lines` in .rsct.json."
       },
       dev_approval: {
         type: "object",
@@ -30484,7 +30486,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
-      cleared_phase: true,
+      cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok
     },
@@ -31077,19 +31079,6 @@ function startPhaseGeneric(input, config2, internal = {}) {
       ]
     };
   }
-  if (staleVerificationLabel && existingPhase !== input.phase) {
-    appendAudit(
-      input.projectRoot,
-      {
-        event: "phase.stale_label_cleared",
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        previous_phase: existingPhase,
-        verification_completed_at: baseState.verification?.completed_at ?? null
-      },
-      config2?.audit
-    );
-  }
   const newState = {
     ...baseState,
     phase: input.phase,
@@ -31098,6 +31087,22 @@ function startPhaseGeneric(input, config2, internal = {}) {
   };
   if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
   const writeResult = writePhaseState(input.projectRoot, newState);
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
   const audit = appendAudit(
     input.projectRoot,
     {
@@ -32738,11 +32743,11 @@ function createIssue(input) {
       error: "gh CLI not found in PATH. Install from https://cli.github.com/ or use mode=draft to get the issue body for manual creation."
     };
   }
-  const args = ["issue", "create", "--title", input.title, "--body", input.body];
+  const baseArgs = ["issue", "create", "--title", input.title, "--body", input.body];
   for (const label of input.labels ?? []) {
-    args.push("--label", label);
+    baseArgs.push("--label", label);
   }
-  if (input.type) args.push("--type", input.type);
+  const args = input.type ? [...baseArgs, "--type", input.type] : baseArgs;
   try {
     const stdout = execFileSync("gh", args, {
       encoding: "utf8",
@@ -32755,6 +32760,10 @@ function createIssue(input) {
     const errObj = err;
     const stderr = errObj?.stderr ? String(errObj.stderr) : "";
     const errorText = errObj?.message ?? "gh issue create failed";
+    if (input.type && /unknown flag: --type/i.test(stderr)) {
+      const { type: _dropped, ...withoutType } = input;
+      return createIssue(withoutType);
+    }
     if (stderr.toLowerCase().includes("authentication") || stderr.toLowerCase().includes("not logged in") || stderr.toLowerCase().includes("gh auth login")) {
       return {
         ok: false,
@@ -32930,13 +32939,9 @@ async function captureIssueHandler(rawInput, internal = {}) {
   const ghCreate = internal.ghCreate ?? createIssue;
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable;
   const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary;
-  const vocabulary = input.mode === "create" ? ghVocabulary(projectRoot) : { labels: [], types: [], discovered: false };
-  const resolved = resolveLabels({
-    requested: input.labels,
-    severity: input.severity,
-    vocabulary
-  });
-  const labels = resolved.labels;
+  const noVocabulary = { labels: [], types: [], discovered: false };
+  const resolveVocabulary = () => ghAvailableFn() ? ghVocabulary(projectRoot) : noVocabulary;
+  const requestedLabels = input.labels ?? [];
   const formattedBody = formatBody({
     body: input.body,
     severity: input.severity,
@@ -32945,7 +32950,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
     },
     now
   });
-  const ghCmd = suggestedGhCommand(input.title, labels);
+  const preAuthGhCmd = suggestedGhCommand(input.title, requestedLabels);
   if (input.mode === "draft") {
     const audit = appendAudit(
       projectRoot,
@@ -32955,7 +32960,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
         title: input.title,
         severity: input.severity,
         affected_paths_count: input.affected_paths?.length ?? 0,
-        labels
+        labels: requestedLabels
       },
       config2?.audit
     );
@@ -32968,7 +32973,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: null,
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields2.audit_path,
@@ -32989,7 +32994,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: 'mode="create" requires dev_approval',
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: null,
@@ -33021,7 +33026,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: "gh CLI not found in PATH",
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields2.audit_path,
@@ -33033,6 +33038,13 @@ async function captureIssueHandler(rawInput, internal = {}) {
       ]
     };
   }
+  const resolved = resolveLabels({
+    requested: input.labels,
+    severity: input.severity,
+    vocabulary: resolveVocabulary()
+  });
+  const labels = resolved.labels;
+  const ghCmd = suggestedGhCommand(input.title, labels);
   const gate = await gateRequest({
     toolName: "rsct_capture_issue",
     approval: input.dev_approval,
@@ -33040,7 +33052,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       title: "RSCT \u2014 create GitHub issue",
       message: `Create issue '${input.title}' (severity=${input.severity})?
 
-Labels: ${labels.join(", ")}
+Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching label in this repository)"}
 GH CLI will run in '${projectRoot}'.`
     },
     projectRoot,

@@ -17,13 +17,14 @@ const MAX_LIMIT = 500
 
 /**
  * Non-empty lines in a message. Blank lines are NOT counted, so paragraph
- * spacing is never penalized — the limit is about content, not layout. `\r` is
- * stripped first so a CRLF message counts the same on every OS (CLAUDE.md
- * anti-pattern #4).
+ * spacing is never penalized — the limit is about content, not layout. Line
+ * endings are NORMALIZED, not stripped, so a message counts the same on every
+ * OS (CLAUDE.md anti-pattern #4): deleting every `\r` instead would collapse
+ * CR-separated text into a single line and let it slip under the cap.
  */
 export function countNonEmptyLines(message: string): number {
   return message
-    .replace(/\r/g, '')
+    .replace(/\r\n?/g, '\n')
     .split('\n')
     .filter((l) => l.trim().length > 0).length
 }

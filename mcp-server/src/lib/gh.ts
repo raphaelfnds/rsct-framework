@@ -106,11 +106,11 @@ export function createIssue(input: GhCreateIssueInput): GhCreateIssueResult {
     }
   }
 
-  const args = ['issue', 'create', '--title', input.title, '--body', input.body]
+  const baseArgs = ['issue', 'create', '--title', input.title, '--body', input.body]
   for (const label of input.labels ?? []) {
-    args.push('--label', label)
+    baseArgs.push('--label', label)
   }
-  if (input.type) args.push('--type', input.type)
+  const args = input.type ? [...baseArgs, '--type', input.type] : baseArgs
 
   try {
     const stdout = execFileSync('gh', args, {
@@ -128,6 +128,14 @@ export function createIssue(input: GhCreateIssueInput): GhCreateIssueResult {
     const errObj = err as { message?: string; stderr?: Buffer | string }
     const stderr = errObj?.stderr ? String(errObj.stderr) : ''
     const errorText = errObj?.message ?? 'gh issue create failed'
+
+    // `--type` needs gh ≳2.60, while the API endpoint that discovers types works
+    // on every version — so a repo WITH issue types plus an older gh would fail
+    // every create. Retry once without it: the type is a nicety, the issue is not.
+    if (input.type && /unknown flag: --type/i.test(stderr)) {
+      const { type: _dropped, ...withoutType } = input
+      return createIssue(withoutType)
+    }
 
     if (
       stderr.toLowerCase().includes('authentication') ||

@@ -3375,7 +3375,7 @@ session boot.
      grep -IinE "$LEAK_RE" "$f" /dev/null
    done < <(git ls-files --others --exclude-standard 2>/dev/null)
    ```
-5. Suggest commit message (< 100 chars):
+5. Suggest commit message (subject line only, aim for < 72 chars — this is a subject-length rule; the commit BODY is separately capped at 15 non-empty lines by `rsct_request_commit`):
    ```
    chore: apply RSCT v1.0.0 [migrated: §X §Y] [added: §Z] + docs
    ```

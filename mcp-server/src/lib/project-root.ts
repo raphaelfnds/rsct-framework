@@ -191,10 +191,12 @@ const RsctConfigSchema = z
     // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
     // tolerant of its presence). Absent ⇒ 'ephemeral'.
     plan_file_retention: z.enum(['ephemeral', 'documented']).optional(),
-    // Deliberately UNBOUNDED here: the HIGH-4 posture nulls the whole config on
-    // an out-of-bounds bounded field, which is far too sharp for a cosmetic cap.
-    // Out-of-range values are clamped at the point of use instead.
-    commit_message_max_lines: z.number().optional(),
+    // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
+    // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
+    // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
+    // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
+    // "unset"; the resolver clamps the range at the point of use.
+    commit_message_max_lines: z.number().optional().catch(undefined),
     install: z
       .object({
         applied_at: z.string().optional(),

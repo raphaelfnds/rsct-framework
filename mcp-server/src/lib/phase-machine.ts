@@ -168,22 +168,6 @@ export function startPhaseGeneric(
     }
   }
 
-  // Overwriting a completed label is a state transition worth a forensic record,
-  // so it is audited separately from the `<phase>.start` event that follows.
-  if (staleVerificationLabel && existingPhase !== input.phase) {
-    appendAudit(
-      input.projectRoot,
-      {
-        event: 'phase.stale_label_cleared',
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        previous_phase: existingPhase,
-        verification_completed_at: baseState.verification?.completed_at ?? null,
-      },
-      config?.audit,
-    )
-  }
-
   const newState: PhaseState = {
     ...baseState,
     phase: input.phase,
@@ -193,6 +177,29 @@ export function startPhaseGeneric(
   if (input.scopeGlobs !== undefined) newState.scope_globs = input.scopeGlobs
 
   const writeResult = writePhaseState(input.projectRoot, newState)
+
+  // Overwriting a completed label is a state transition worth its own forensic
+  // record, separate from the `<phase>.start` event below. Emitted AFTER the
+  // write so it reports what actually happened: a `locked` or failed write must
+  // not leave the log asserting a transition that never landed. Carries the
+  // PREVIOUS spec context too, so a reader can tell "cleared my own V" from
+  // "stepped over another spec's V".
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: 'phase.stale_label_cleared',
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok,
+      },
+      config?.audit,
+    )
+  }
 
   const audit = appendAudit(
     input.projectRoot,

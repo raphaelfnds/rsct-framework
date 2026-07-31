@@ -379,7 +379,7 @@ export async function phaseVerificationCompleteHandler(
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
-      cleared_phase: true,
+      cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok,
     },

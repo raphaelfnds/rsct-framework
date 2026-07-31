@@ -246,7 +246,8 @@ export const requestCommitTool: Tool = {
       },
       message: {
         type: 'string',
-        description: 'Commit message.',
+        description:
+          'Commit message. Keep it to 15 non-empty lines at most (blank lines are not counted): what changed and why, not a file-by-file narration of the diff. Over that, the call is rejected with `message_too_long` before any approval is requested. A project can raise the cap with `commit_message_max_lines` in .rsct.json.',
       },
       dev_approval: {
         type: 'object',
@@ -295,7 +296,7 @@ export async function requestCommitHandler(
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
   // Advisory channel. Checks that must be *reported* rather than *gated* push
-  // here, and every return path — success, the seven rejects and mutation_failed
+  // here, and every return path — success, the eight rejects and mutation_failed
   // — drains it via `withAdvisories`. Populated before the commit runs, so an
   // advisory derived from the staged diff still has an index to read, and so a
   // rejected commit does not swallow the warning.

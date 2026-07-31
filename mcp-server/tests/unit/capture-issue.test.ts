@@ -20,6 +20,13 @@ import type {
 } from '../../src/lib/gh.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
+/**
+ * Host-repo discovery must never reach the real `gh` from a unit test: it would
+ * make the suite depend on the machine's GitHub auth and network, which showed
+ * up as intermittent 5s timeouts. Every create-mode test stubs it.
+ */
+const STUB_VOCAB: GhRepoVocabulary = { labels: ['bug', 'enhancement'], types: [], discovered: true }
+
 let tmpRoot: string
 
 beforeEach(() => {
@@ -181,6 +188,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: dialog({ response: 'no', channel: 'windows' }),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghOk('http://github.com/org/repo/issues/1'),
       },
     )) as CaptureIssueOutput
@@ -200,6 +208,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghFail('not_authenticated', 'gh auth login required'),
       },
     )) as CaptureIssueOutput
@@ -219,6 +228,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghFail('no_remote', 'no git remote configured'),
       },
     )) as CaptureIssueOutput
@@ -239,6 +249,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghOk(expectedUrl),
       },
     )) as CaptureIssueOutput
@@ -400,5 +411,65 @@ describe('resolveLabels — fit the host repo, never impose (#18)', () => {
       resolveLabels({ requested: undefined, severity: 'critical', vocabulary: vocab(DEFAULTS) })
         .type,
     ).toBeNull()
+  })
+})
+
+describe('rsct_capture_issue — discovery is gated by §C, not just by mode (#18)', () => {
+  function spyVocab(): { calls: number; fn: () => GhRepoVocabulary } {
+    const state = { calls: 0, fn: () => ({ labels: [], types: [], discovered: false }) }
+    state.fn = () => {
+      state.calls++
+      return { labels: ['bug'], types: [], discovered: true }
+    }
+    return state
+  }
+
+  it('does not touch gh in draft mode', async () => {
+    const spy = spyVocab()
+    await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'draft' },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => true },
+    )
+    expect(spy.calls).toBe(0)
+  })
+
+  it('does not touch gh when dev_approval is missing', async () => {
+    // Discovery shells out — including two authenticated GitHub API reads. No
+    // §C-gated tool may produce an external effect before its gate, and the
+    // repo's label vocabulary must not come back to an unapproved caller.
+    const spy = spyVocab()
+    const r = (await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create' },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => true },
+    )) as CaptureIssueOutput
+    expect(r.status).toBe('missing_dev_approval')
+    expect(spy.calls).toBe(0)
+    expect(r.suggested_gh_command).not.toContain('--label')
+  })
+
+  it('does not touch gh when the CLI is unavailable', async () => {
+    const spy = spyVocab()
+    await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create', dev_approval: approval() },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => false, promptFn: alwaysYes() },
+    )
+    expect(spy.calls).toBe(0)
+  })
+
+  it('discovers exactly once on an approved create', async () => {
+    const spy = spyVocab()
+    const r = (await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create', dev_approval: approval() },
+      {
+        now: FIXED_NOW,
+        ghVocabulary: spy.fn,
+        ghAvailable: () => true,
+        promptFn: alwaysYes(),
+        ghCreate: () => ({ ok: true, url: 'https://x/1', raw_stdout: 'https://x/1' }),
+      },
+    )) as CaptureIssueOutput
+    expect(r.status).toBe('created')
+    expect(spy.calls).toBe(1)
+    expect(r.hints.some((h) => h.includes("'bug' matched"))).toBe(true)
   })
 })

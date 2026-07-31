@@ -308,20 +308,21 @@ export async function captureIssueHandler(
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable
   const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary
 
-  // Draft mode must not shell out: it is documented as "no external mutation",
-  // and a `gh label list` on every draft would be a surprising cost. The draft's
-  // suggested command therefore carries whatever the caller asked for, nothing
-  // invented.
-  const vocabulary: GhRepoVocabulary =
-    input.mode === 'create'
-      ? ghVocabulary(projectRoot)
-      : { labels: [], types: [], discovered: false }
-  const resolved = resolveLabels({
-    requested: input.labels,
-    severity: input.severity,
-    vocabulary,
-  })
-  const labels = resolved.labels
+  // Host-repo discovery is deferred until the call is BOTH create-mode and
+  // carrying a dev_approval — see `resolveVocabulary` below. It shells out to
+  // `gh` (including two authenticated GitHub API reads), and no §C-gated tool
+  // may produce an external effect before its gate: an unapproved call would
+  // otherwise trigger real network reads and hand back the repository's label
+  // vocabulary in `suggested_gh_command`. Draft mode never discovers at all —
+  // it is documented as "no external mutation", and a `gh label list` per draft
+  // would be a surprising cost.
+  const noVocabulary: GhRepoVocabulary = { labels: [], types: [], discovered: false }
+  const resolveVocabulary = (): GhRepoVocabulary =>
+    ghAvailableFn() ? ghVocabulary(projectRoot) : noVocabulary
+
+  // Pre-authorization paths (draft, missing approval, gh unavailable) describe
+  // only what the caller asked for — nothing discovered, nothing invented.
+  const requestedLabels = input.labels ?? []
   const formattedBody = formatBody({
     body: input.body,
     severity: input.severity,
@@ -330,7 +331,7 @@ export async function captureIssueHandler(
     }),
     now,
   })
-  const ghCmd = suggestedGhCommand(input.title, labels)
+  const preAuthGhCmd = suggestedGhCommand(input.title, requestedLabels)
 
   if (input.mode === 'draft') {
     const audit = appendAudit(
@@ -341,7 +342,7 @@ export async function captureIssueHandler(
         title: input.title,
         severity: input.severity,
         affected_paths_count: input.affected_paths?.length ?? 0,
-        labels,
+        labels: requestedLabels,
       },
       config?.audit,
     )
@@ -354,7 +355,7 @@ export async function captureIssueHandler(
       reason: null,
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields.audit_path,
@@ -376,7 +377,7 @@ export async function captureIssueHandler(
       reason: 'mode="create" requires dev_approval',
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: null,
@@ -409,7 +410,7 @@ export async function captureIssueHandler(
       reason: 'gh CLI not found in PATH',
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields.audit_path,
@@ -422,12 +423,23 @@ export async function captureIssueHandler(
     }
   }
 
+  // Past both guards: the call is create-mode, carries an approval payload and
+  // gh is present. Only now is it legitimate to read the host repo, so the §C
+  // dialog can name the labels the issue will actually get.
+  const resolved = resolveLabels({
+    requested: input.labels,
+    severity: input.severity,
+    vocabulary: resolveVocabulary(),
+  })
+  const labels = resolved.labels
+  const ghCmd = suggestedGhCommand(input.title, labels)
+
   const gate = await gateRequest({
     toolName: 'rsct_capture_issue',
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — create GitHub issue',
-      message: `Create issue '${input.title}' (severity=${input.severity})?\n\nLabels: ${labels.join(', ')}\nGH CLI will run in '${projectRoot}'.`,
+      message: `Create issue '${input.title}' (severity=${input.severity})?\n\nLabels: ${labels.length > 0 ? labels.join(', ') : '(none — no matching label in this repository)'}\nGH CLI will run in '${projectRoot}'.`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {
