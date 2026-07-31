@@ -108,6 +108,27 @@ describe('rsct_status', () => {
     }
   })
 
+  it('escalates to a SECURITY hint when the enforcement scripts are absent', async () => {
+    // Versions agree, so the version axis is silent — but a project whose
+    // `.rsct/scripts/` never landed is running with no sanitizer and no
+    // edit-scope guard, which the component axis must surface on its own.
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-drift-sec-'))
+    try {
+      writeFileSync(
+        join(dir, '.rsct.json'),
+        JSON.stringify({ rsct_version: RSCT_MCP_VERSION, app: { name: 'a', org: 'o' } }),
+      )
+      const out = (await statusHandler({ project_root: dir })) as StatusOutput
+      expect(out.hints.some((h) => DRIFT.test(h))).toBe(false)
+      const sec = out.hints.find((h) => h.includes('SECURITY'))
+      expect(sec).toBeDefined()
+      expect(sec).toContain('sanitize-permissions.js is not installed')
+      expect(sec).toContain('edit-scope-guard.js is not installed')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('does NOT surface an install-drift hint when the project version is newer than the binary', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rsct-drift-new-'))
     try {

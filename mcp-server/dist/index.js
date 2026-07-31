@@ -8918,7 +8918,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join22 } = __require("path");
+    var { join: join23 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8961,7 +8961,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join22(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join23(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9364,7 +9364,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join22, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join23, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9427,7 +9427,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join23(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9445,7 +9445,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join23(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9467,7 +9467,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join22(__dirname$1, "..", "file.js");
+          return join23(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10457,7 +10457,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join22 = ",";
+            let join23 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10471,7 +10471,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join22 = `,
+                join23 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10479,13 +10479,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join22;
+                res += join23;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10506,7 +10506,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join22 = `,
+              join23 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10520,13 +10520,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join22;
+              separator = join23;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10567,7 +10567,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join22 = ",";
+            let join23 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10580,7 +10580,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join22 = `,
+                join23 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10588,13 +10588,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join22;
+                res += join23;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10607,7 +10607,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join22 = `,
+              join23 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10616,7 +10616,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10674,20 +10674,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join23 = `,
+              const join24 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join23;
+                res2 += join24;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10703,16 +10703,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join22 = `,
+            const join23 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join22, maximumBreadth);
+              res += stringifyTypedArray(value, join23, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join22;
+              separator = join23;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10723,13 +10723,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join22;
+              separator = join23;
             }
             if (separator !== "") {
               res = `
@@ -23727,12 +23727,93 @@ function getUpdateNotice(opts = {}) {
 
 // src/lib/version-drift.ts
 init_esm_shims();
-function getInstallDriftNotice(projectVersion, mcpVersion) {
-  if (!projectVersion) return { hint: null };
-  if (!isNewer(mcpVersion, projectVersion)) return { hint: null };
-  const p = projectVersion.replace(/^v/, "");
+var SECURITY_RELEVANT = /* @__PURE__ */ new Set([
+  "sanitize-permissions.js",
+  "edit-scope-guard.js"
+]);
+var STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/;
+function shippedScriptsDir() {
+  try {
+    return join(fileURLToPath(new URL(".", import.meta.url)), "scripts");
+  } catch {
+    return null;
+  }
+}
+function readNormalized(path2) {
+  try {
+    return readFileSync(path2, "utf8").replace(/\r/g, "");
+  } catch {
+    return null;
+  }
+}
+function installedBody(text) {
+  return text.split("\n").slice(2).join("\n");
+}
+function shippedBody(text) {
+  return text.split("\n").slice(1).join("\n");
+}
+function stampOf(text) {
+  const line2 = text.split("\n")[1] ?? "";
+  const m = STAMP_RE.exec(line2);
+  return m ? m[1] ?? null : null;
+}
+function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
+  const installedDir = join(projectRoot, ".rsct", "scripts");
+  let entries = [];
+  try {
+    entries = readdirSync(installedDir).filter((f) => f.endsWith(".js"));
+  } catch {
+    entries = [];
+  }
+  const names = [.../* @__PURE__ */ new Set([...entries, ...SECURITY_RELEVANT])].sort();
+  const evidence = [];
+  for (const name of names) {
+    const security_relevant = SECURITY_RELEVANT.has(name);
+    if (!entries.includes(name)) {
+      evidence.push({ name, state: "absent", security_relevant, stamp_version: null });
+      continue;
+    }
+    const installed = readNormalized(join(installedDir, name));
+    if (installed === null) {
+      evidence.push({ name, state: "unreadable", security_relevant, stamp_version: null });
+      continue;
+    }
+    const stamp_version = stampOf(installed);
+    const shipped = shippedDir === null ? null : readNormalized(join(shippedDir, name));
+    if (shipped === null) {
+      evidence.push({ name, state: "unreadable", security_relevant, stamp_version });
+      continue;
+    }
+    const state = installedBody(installed) === shippedBody(shipped) ? "current" : "stale";
+    evidence.push({ name, state, security_relevant, stamp_version });
+  }
+  return evidence;
+}
+function describe(c) {
+  if (c.state === "absent") return `${c.name} is not installed`;
+  const at = c.stamp_version ? ` (installed at v${c.stamp_version})` : "";
+  return `${c.name} is outdated${at}`;
+}
+function getInstallDriftNotice(args) {
+  const { projectRoot, projectVersion, mcpVersion } = args;
+  const evidence = args.evidence ?? readScriptEvidence(projectRoot);
+  const stale_components = evidence.filter((e) => e.security_relevant && (e.state === "stale" || e.state === "absent")).map((e) => ({ name: e.name, state: e.state, stamp_version: e.stamp_version }));
   const m = mcpVersion.replace(/^v/, "");
+  if (stale_components.length > 0) {
+    const p2 = projectVersion ? projectVersion.replace(/^v/, "") : "unknown";
+    return {
+      severity: "security",
+      stale_components,
+      hint: `\u26A0 SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} \u2014 ${stale_components.map(describe).join("; ")}. Fixes shipped in those scripts are NOT active here (project installed at v${p2}). Re-run /rsct-setup to apply them. (suggestion only)`
+    };
+  }
+  if (!projectVersion) return { hint: null, severity: "normal", stale_components: [] };
+  if (!isNewer(mcpVersion, projectVersion))
+    return { hint: null, severity: "normal", stale_components: [] };
+  const p = projectVersion.replace(/^v/, "");
   return {
+    severity: "normal",
+    stale_components: [],
     hint: `This project was set up with RSCT v${p}; the installed rsct-mcp is v${m}. Re-run /rsct-setup to apply the current version's rules/prompts to this project. (suggestion only)`
   };
 }
@@ -23777,7 +23858,11 @@ async function statusHandler(rawInput) {
   const update = getUpdateNotice();
   if (update.hint) hints.push(update.hint);
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION);
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION
+    });
     if (drift.hint) hints.push(drift.hint);
   }
   return {
@@ -24224,8 +24309,26 @@ async function loadContextHandler(rawInput) {
     }
   }
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION2);
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION2
+    });
     if (drift.hint) next_action_hints.push(drift.hint);
+    if (drift.severity === "security") {
+      appendAuditEntry(
+        resolution.root,
+        {
+          event: "install.drift_detected",
+          tool: "rsct_load_context",
+          project_version: resolution.config?.rsct_version ?? null,
+          mcp_version: MCP_VERSION2,
+          severity: drift.severity,
+          stale_components: drift.stale_components
+        },
+        resolution.config?.audit
+      );
+    }
   }
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION2 },
@@ -27266,6 +27369,28 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const advisories = [];
   const withAdvisories = (hints2) => [...advisories, ...hints2];
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice({
+      projectRoot,
+      projectVersion: config2?.rsct_version ?? null,
+      mcpVersion: RSCT_MCP_VERSION
+    });
+    if (drift.severity === "security" && drift.hint) {
+      advisories.unshift(drift.hint);
+      appendAudit(
+        projectRoot,
+        {
+          event: "install.drift_detected",
+          tool: "rsct_request_commit",
+          project_version: config2?.rsct_version ?? null,
+          mcp_version: RSCT_MCP_VERSION,
+          severity: drift.severity,
+          stale_components: drift.stale_components
+        },
+        config2?.audit
+      );
+    }
+  }
   let channel;
   let authorizedVia;
   let approval = null;

@@ -37,6 +37,8 @@ import {
   auditFields,
   type AuditAppendResult,
 } from '../lib/audit-log.js'
+import { RSCT_MCP_VERSION } from '../lib/version.js'
+import { getInstallDriftNotice } from '../lib/version-drift.js'
 import {
   promptYesNo,
   type DialogOptions,
@@ -298,6 +300,34 @@ export async function requestCommitHandler(
   // rejected commit does not swallow the warning.
   const advisories: string[] = []
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
+
+  // Install drift, security tier only: an enforcement script under
+  // `.rsct/scripts/` is absent or differs from the copy this binary ships, so
+  // fixes to it are not running here. Reported at the commit gate — the moment
+  // the unprotected diff actually leaves the working tree — and prepended,
+  // because it outranks the routine hint tail. Never blocks.
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice({
+      projectRoot,
+      projectVersion: config?.rsct_version ?? null,
+      mcpVersion: RSCT_MCP_VERSION,
+    })
+    if (drift.severity === 'security' && drift.hint) {
+      advisories.unshift(drift.hint)
+      appendAudit(
+        projectRoot,
+        {
+          event: 'install.drift_detected',
+          tool: 'rsct_request_commit',
+          project_version: config?.rsct_version ?? null,
+          mcp_version: RSCT_MCP_VERSION,
+          severity: drift.severity,
+          stale_components: drift.stale_components,
+        },
+        config?.audit,
+      )
+    }
+  }
 
   // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
   let channel: CommitChannel
