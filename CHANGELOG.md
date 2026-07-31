@@ -10,6 +10,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+Repairs from the first extended field test. Backward-compatible; the marker
+**schema id stays `v=1.0.0`** (frozen). Tool count unchanged at **39**.
+
+### Added
+
+- **Install drift is now ranked, and the ranking is evidence-based** (#16).
+  Drift was detected but delivered as one unranked suggestion, so "your prompts
+  lag a version" and "the permission sanitizer here predates a leak fix" read
+  identically — and a security-relevant fix stayed unapplied while every surface
+  reported healthy. `getInstallDriftNotice` now returns a `severity`, raised when
+  a script under `.rsct/scripts/` is **absent** or its body **differs from the
+  copy the running binary ships**.
+  The comparison is deliberately on content, not versions: the line-2 stamp and
+  `.rsct.json` `rsct_version` both carry the *release* version, so a version rule
+  would flag every release as a security event. Content evidence needs no
+  per-release maintenance — a release that did not touch a script produces
+  identical bodies. Surfaced in `rsct_status` / `rsct_load_context`, prepended in
+  `rsct_request_commit`, and recorded as `install.drift_detected` in the audit
+  log. Always suggestion-only; never blocks. Fail-safe throughout: an unreadable
+  file, an unresolvable reference or a `v=unknown` stamp never escalate.
+- `docs/troubleshooting.md` documents both drift messages — the feature had no
+  user-facing documentation at all.
+
+### Changed
+
+- `rsct_request_commit` gained an internal **advisory channel**. Hints were
+  previously assembled only on the success path, after the commit ran; each of
+  the seven reject envelopes built its own. Advisories are now drained through
+  every return path, so a report is not swallowed by a rejected commit.
+- CI runs `npm run typecheck`. `vitest` transpiles without type checking, so a
+  signature change previously had no compile-time net in CI.
+- The line-2 version stamp written by `/rsct-setup` (Phases 4.V.b / 4.V.d) is now
+  a documented format contract with `mcp-server/src/lib/version-drift.ts`, pinned
+  by `block-smoke` anchors on both blocks.
+
+### Fixed
+
+- `auditFields` had been redeclared identically in **15** files, and the one
+  exported from `lib/phase-machine` had no importers. Collapsed into
+  `lib/audit-log` beside the type it projects (partially addresses #10).
+
 ## [2.2.0] - 2026-07-13
 
 The **plan-lifecycle-v2** track — reshapes the commit→integrate→re-plan lifecycle

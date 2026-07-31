@@ -27,6 +27,44 @@ The companion server isn't registered or connected.
 If the tools were there before and vanished, the global binary may be pointing at
 a clone without its dependencies built — re-install/re-link the global `rsct-mcp`.
 
+## "This project was set up with RSCT vX; the installed rsct-mcp is vY"
+
+An **install-drift** notice: the framework in this project is older than the
+`rsct-mcp` binary running against it, so newer rules, prompts and markers are not
+applied here yet. It is a suggestion, never a block.
+
+Fix: re-run `/rsct-setup` in the project. Nothing is lost — setup is idempotent
+and preserves your answers.
+
+## "⚠ SECURITY: this project's enforcement scripts do not match rsct-mcp vX"
+
+Stronger than the notice above, and worth acting on today. The scripts under
+`.rsct/scripts/` are the mechanical enforcement surface — `sanitize-permissions.js`
+strips permission entries that would let the agent bypass the commit gate, and
+`edit-scope-guard.js` blocks edits outside the active phase scope. This message
+means one of them is either **not installed** or **differs from the copy the
+running binary ships**, so fixes shipped in it are not running in this project.
+
+RSCT compares the installed file's body against the one bundled in the binary, so
+this is a statement about the actual code, not about version numbers — a release
+that did not touch those scripts never produces it.
+
+Fix: re-run `/rsct-setup`. It rewrites the scripts and re-registers their hooks.
+Then confirm the message is gone from `rsct_status`.
+
+If it persists after a setup run:
+
+1. Check the scripts exist: `ls .rsct/scripts/` should list
+   `sanitize-permissions.js`, `edit-scope-guard.js` and a small `package.json`.
+2. If they are missing, `/rsct-setup` skipped that phase because the `rsct-mcp`
+   companion was not found at the time. Confirm it is installed (see "The `rsct_*`
+   MCP tools don't appear" above) and re-run.
+3. Confirm the hooks are registered in `.claude/settings.json` under
+   `hooks.SessionStart` and `hooks.PreToolUse` — the scripts only run if they are.
+
+Each detection is recorded in `.rsct/audit.log` as `install.drift_detected`, so
+the exposure window stays reconstructable after the fact.
+
 ## Windows: `LF will be replaced by CRLF` warnings
 
 Harmless. RSCT strips `\r` before every SHA it computes, so a CRLF round-trip

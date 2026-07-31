@@ -26,6 +26,11 @@ jobs:
           cache: npm
           cache-dependency-path: mcp-server/package-lock.json
       - run: npm ci
+      # vitest transpiles without type-checking, so `npm test` alone gives a
+      # signature change no compile-time net: a missed call site runs happily and
+      # silently returns the wrong shape. Runs before the build so a type error
+      # fails fast.
+      - run: npm run typecheck
       - run: npm run build
       - run: npm test
         # T0.a: the bash lint's `bash -n` gate must FAIL (not silently skip) if a
