@@ -10,7 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.3.0] - 2026-07-31
 
 Repairs from the first extended field test. Backward-compatible; the marker
 **schema id stays `v=1.0.0`** (frozen). Tool count unchanged at **39**.
