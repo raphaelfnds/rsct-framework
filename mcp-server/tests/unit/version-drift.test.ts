@@ -106,19 +106,23 @@ describe('getInstallDriftNotice — component axis', () => {
     ...NO_DRIFT.slice(1),
   ]
 
-  it('escalates a stale enforcement script even when versions match', () => {
+  it('reports a differing enforcement script even when versions match — but does NOT call it security', () => {
     // The case the version axis structurally cannot see: `.rsct.json` and the
     // stamp both read the release version, so they agree while the body differs.
+    // It is reported and the component is named — but a byte difference cannot
+    // prove a fix is missing: these scripts are bundles, so an unrelated config
+    // key changes them. Ranking it `security` would fire on every release for
+    // every project, which is the failure this module exists to remove.
     const { severity, hint, stale_components } = notice('2.3.0', '2.3.0', stale)
-    expect(severity).toBe('security')
-    expect(hint).toContain('SECURITY')
-    expect(hint).toContain('sanitize-permissions.js is outdated (installed at v2.1.1)')
+    expect(severity).toBe('normal')
+    expect(hint).not.toContain('SECURITY')
+    expect(hint).toContain("sanitize-permissions.js differs from this binary's copy")
     expect(stale_components).toEqual([
       { name: 'sanitize-permissions.js', state: 'stale', stamp_version: '2.1.1' },
     ])
   })
 
-  it('escalates an absent enforcement script — worse than a stale one', () => {
+  it('escalates an absent enforcement script — the only provable claim', () => {
     const absent: ScriptEvidence[] = [
       {
         name: 'edit-scope-guard.js',
@@ -155,10 +159,27 @@ describe('getInstallDriftNotice — component axis', () => {
     expect(notice('2.3.0', '2.3.0', other).severity).toBe('normal')
   })
 
-  it('security outranks the version axis when both fire', () => {
+  it('a differing script outranks the plain version notice, at normal severity', () => {
     const { severity, hint } = notice('2.1.1', '2.3.0', stale)
+    expect(severity).toBe('normal')
+    // Names the component instead of the generic "your version is behind" —
+    // that specificity IS the ranking improvement at this tier.
+    expect(hint).toContain('sanitize-permissions.js')
+    expect(hint).not.toContain('was set up with RSCT')
+  })
+
+  it('an absent script outranks a merely differing one', () => {
+    const mixed: ScriptEvidence[] = [
+      { name: 'sanitize-permissions.js', state: 'stale', security_relevant: true, stamp_version: '2.1.1' },
+      { name: 'edit-scope-guard.js', state: 'absent', security_relevant: true, stamp_version: null },
+    ]
+    const { severity, hint, stale_components } = notice('2.3.0', '2.3.0', mixed)
     expect(severity).toBe('security')
-    expect(hint).toContain('project installed at v2.1.1')
+    expect(hint).toContain('edit-scope-guard.js is not installed')
+    // The security message speaks only about what is provably missing...
+    expect(hint).not.toContain('sanitize-permissions.js')
+    // ...but both components stay in the structured payload for the audit trail.
+    expect(stale_components).toHaveLength(2)
   })
 })
 

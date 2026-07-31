@@ -14,21 +14,34 @@ import { isNewer } from './update-check.js'
  * strictly newer, the project's installed rules/prompts/markers are behind the
  * framework and a `/rsct-setup` re-run applies the current version.
  *
- * **Component axis (`security`).** Is a security-relevant script under
- * `.rsct/scripts/` absent, or different from the copy this binary ships? Those
- * scripts ARE the mechanical enforcement surface — a stale or missing
- * `sanitize-permissions.js` means §E leak fixes are simply not running in that
- * project, which is categorically worse than lagging prose.
+ * **Component axis.** What is the state of the enforcement scripts under
+ * `.rsct/scripts/` — the mechanical surface that strips poison-pill permission
+ * entries and gates out-of-scope edits?
  *
- * The two axes are deliberately independent, and the component axis compares
- * CONTENT rather than versions. Ranking by version cannot work here: the line-2
- * stamp `/rsct-setup` writes is the *release* version, and `.rsct.json`
- * `rsct_version` is stamped from that same release axis — so "project behind"
- * would always imply "stamp behind", and every release would read as a security
- * event. Comparing the installed body against the shipped body is positive
- * evidence and needs no per-release maintenance: a release that did not touch a
- * script produces identical bodies. It is also what `/rsct-setup` itself already
- * does (Phase 4.V.b) to decide whether to rewrite.
+ * Only ABSENCE escalates to `security`, and the distinction is deliberate:
+ *
+ *  - **absent** — the script is not there, so that enforcement is simply not
+ *    running. Unambiguous, locally provable, and rare. This is the state worth
+ *    shouting about.
+ *  - **stale** (body differs from the copy this binary ships) — real and worth
+ *    reporting, but it CANNOT be read as "a fix is missing". The scripts are
+ *    bundles: `edit-scope-guard.js` embeds the whole config layer, so adding one
+ *    unrelated `.rsct.json` key changes its bytes. Ranking that as a security
+ *    event would fire for every installed project on almost every release, and a
+ *    signal that is always on is a signal nobody reads — the exact failure this
+ *    module exists to remove, merely inverted. So `stale` rides the `normal`
+ *    tier, with a hint that names the components rather than a generic
+ *    "your version is behind".
+ *
+ * Nothing available locally can tell whether a byte difference matters; content
+ * comparison answers "is it the same build", not "is a fix missing". This module
+ * says only what it can prove.
+ *
+ * Content comparison is still the right primitive for "is it the same build" —
+ * the line-2 stamp cannot do even that, since it carries the *release* version
+ * and `.rsct.json` `rsct_version` comes from the same axis, so "project behind"
+ * would always imply "stamp behind". It is also what `/rsct-setup` itself does
+ * (Phase 4.V.b) to decide whether to rewrite.
  *
  * This is a LOCAL comparison — no network, no consent, no cache. It is
  * deliberately separate from `update-check.ts` (which checks the binary against
@@ -232,8 +245,11 @@ export function readScriptEvidence(
 
 function describe(c: StaleComponent): string {
   if (c.state === 'absent') return `${c.name} is not installed`
+  // "differs from", never "outdated": `.rsct/scripts/` is committed, so a
+  // teammate on an older binary can legitimately hold a NEWER script, and this
+  // comparison has no direction.
   const at = c.stamp_version ? ` (installed at v${c.stamp_version})` : ''
-  return `${c.name} is outdated${at}`
+  return `${c.name} differs from this binary's copy${at}`
 }
 
 export function getInstallDriftNotice(args: {
@@ -246,27 +262,44 @@ export function getInstallDriftNotice(args: {
   const { projectRoot, projectVersion, mcpVersion } = args
   const evidence = args.evidence ?? readScriptEvidence(projectRoot)
 
-  const stale_components: StaleComponent[] = evidence
-    .filter((e) => e.security_relevant && (e.state === 'stale' || e.state === 'absent'))
-    .map((e) => ({ name: e.name, state: e.state, stamp_version: e.stamp_version }))
+  const affected = evidence.filter(
+    (e) => e.security_relevant && (e.state === 'stale' || e.state === 'absent'),
+  )
+  const stale_components: StaleComponent[] = affected.map((e) => ({
+    name: e.name,
+    state: e.state,
+    stamp_version: e.stamp_version,
+  }))
+  const absent = stale_components.filter((c) => c.state === 'absent')
 
   // Strip a hand-edited leading `v` in the DISPLAY text (the compare in isNewer
   // already normalizes it). `.rsct.json` `rsct_version` is schema-typed as a
   // free string, so `"v2.0.0"` is possible — avoid rendering "vv2.0.0".
   const m = mcpVersion.replace(/^v/, '')
 
-  if (stale_components.length > 0) {
-    const at = projectVersion
-      ? `v${projectVersion.replace(/^v/, '')}`
-      : 'an unrecorded version'
+  // Only absence is a security claim — see the module docstring for why "differs"
+  // cannot be one. The message asserts exactly what was observed: this script is
+  // not here, therefore what it enforces is not running.
+  if (absent.length > 0) {
     return {
       severity: 'security',
       stale_components,
       hint:
-        `⚠ SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} — ` +
+        `⚠ SECURITY: an RSCT enforcement script is missing from this project — ` +
+        `${absent.map(describe).join('; ')}. ` +
+        `What it enforces is not running here. Run /rsct-setup to install it, then restart the IDE. ` +
+        `See docs/troubleshooting.md. (never blocks)`,
+    }
+  }
+
+  if (stale_components.length > 0) {
+    return {
+      severity: 'normal',
+      stale_components,
+      hint:
+        `This project's RSCT enforcement scripts are not the ones rsct-mcp v${m} ships — ` +
         `${stale_components.map(describe).join('; ')}. ` +
-        `Fixes shipped in those scripts are NOT active here (project installed at ${at}). ` +
-        `Re-run /rsct-setup to apply them. (suggestion only)`,
+        `That usually just means the project has not been re-synced since an update; re-run /rsct-setup. (suggestion only)`,
     }
   }
 

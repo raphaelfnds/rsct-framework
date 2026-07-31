@@ -36,34 +36,76 @@ applied here yet. It is a suggestion, never a block.
 Fix: re-run `/rsct-setup` in the project. Nothing is lost — setup is idempotent
 and preserves your answers.
 
-## "⚠ SECURITY: this project's enforcement scripts do not match rsct-mcp vX"
+## "⚠ SECURITY: an RSCT enforcement script is missing from this project"
 
-Stronger than the notice above, and worth acting on today. The scripts under
-`.rsct/scripts/` are the mechanical enforcement surface — `sanitize-permissions.js`
-strips permission entries that would let the agent bypass the commit gate, and
-`edit-scope-guard.js` blocks edits outside the active phase scope. This message
-means one of them is either **not installed** or **differs from the copy the
-running binary ships**, so fixes shipped in it are not running in this project.
+The scripts under `.rsct/scripts/` are what actually enforce things:
+`sanitize-permissions.js` strips permission entries that would let the agent
+commit without asking you, and `edit-scope-guard.js` blocks edits outside the
+current task's scope. This message means one of them **is not installed**, so
+what it enforces is not running here. It never blocks anything.
 
-RSCT compares the installed file's body against the one bundled in the binary, so
-this is a statement about the actual code, not about version numbers — a release
-that did not touch those scripts never produces it.
+Most common cause: the project was set up before that script existed, or before
+the `rsct-mcp` companion was installed.
 
-Fix: re-run `/rsct-setup`. It rewrites the scripts and re-registers their hooks.
-Then confirm the message is gone from `rsct_status`.
+Fix:
 
-If it persists after a setup run:
+1. Run `/rsct-setup` — it installs the scripts and registers their hooks.
+2. **Fully restart the IDE.** The running server compares against the copy it
+   ships; until it restarts you may still see the old message.
+3. Confirm with `rsct_status` that the message is gone.
 
-1. Check the scripts exist: `ls .rsct/scripts/` should list
-   `sanitize-permissions.js`, `edit-scope-guard.js` and a small `package.json`.
-2. If they are missing, `/rsct-setup` skipped that phase because the `rsct-mcp`
-   companion was not found at the time. Confirm it is installed (see "The `rsct_*`
-   MCP tools don't appear" above) and re-run.
-3. Confirm the hooks are registered in `.claude/settings.json` under
-   `hooks.SessionStart` and `hooks.PreToolUse` — the scripts only run if they are.
+If it survives that:
 
-Each detection is recorded in `.rsct/audit.log` as `install.drift_detected`, so
-the exposure window stays reconstructable after the fact.
+- `ls .rsct/scripts/` should list `sanitize-permissions.js`,
+  `edit-scope-guard.js` and a small `package.json`. If they are missing,
+  `/rsct-setup` could not find the `rsct-mcp` package to copy them from — it
+  looks in `npm root -g`, so a server registered by absolute path or via `npx`
+  will not be found. Install it globally (`cd mcp-server && npm install -g .`)
+  and re-run.
+- The scripts only run if their hooks are registered. Check `.claude/settings.json`
+  for `hooks.SessionStart` and `hooks.PreToolUse` entries pointing at
+  `.rsct/scripts/`.
+
+## "This project's RSCT enforcement scripts are not the ones rsct-mcp vX ships"
+
+Lower-key than the message above, and usually harmless: the scripts are present,
+they just are not byte-identical to the copies the running server carries. Almost
+always it means the project has not been re-synced since a framework update.
+
+It does **not** mean a fix is missing. Those scripts are bundles — they embed
+config and helper code — so an unrelated change elsewhere in the framework
+changes their bytes. RSCT only reports that they differ, because that is all it
+can prove locally.
+
+Fix: run `/rsct-setup`, then restart the IDE.
+
+Two cases where the message is expected and fine:
+
+- `.rsct/scripts/` is committed to the repo, so a teammate whose global
+  `rsct-mcp` is older than the committed scripts will see it until they update
+  the binary. Update `rsct-mcp` — do not re-run setup to "fix" it, that would
+  push the scripts backwards.
+- You updated the binary and ran `/rsct-setup` but have not restarted the IDE
+  yet.
+
+## "commit message has N non-empty lines; the limit is 15"
+
+`rsct_request_commit` rejected the commit before asking you to approve anything —
+nothing was committed and no approval was spent. Rewrite the message shorter and
+call it again.
+
+The rule: say what changed and why. The diff already shows the file-by-file
+detail, and a long body encodes a session narrative that ages badly and makes
+`git log` unscannable. Blank lines are not counted, so paragraph spacing is free.
+
+If your project genuinely wants longer messages, set a number in `.rsct.json`:
+
+```json
+{ "commit_message_max_lines": 30 }
+```
+
+Note the value is a **number**, not a string — `"30"` in quotes is rejected by
+the config schema.
 
 ## Windows: `LF will be replaced by CRLF` warnings
 

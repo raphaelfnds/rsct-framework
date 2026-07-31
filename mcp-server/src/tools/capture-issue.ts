@@ -439,7 +439,14 @@ export async function captureIssueHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — create GitHub issue',
-      message: `Create issue '${input.title}' (severity=${input.severity})?\n\nLabels: ${labels.length > 0 ? labels.join(', ') : '(none — no matching label in this repository)'}\nGH CLI will run in '${projectRoot}'.`,
+      message:
+        `Create issue '${input.title}' (severity=${input.severity})?\n\n` +
+        `Labels: ${labels.length > 0 ? labels.join(', ') : '(none — no matching label in this repository)'}\n` +
+        // A label gh is about to reject belongs in the dialog, not only in the
+        // hints afterwards: approving a call already known to fail spends the
+        // dev's single-use approval on nothing.
+        (resolved.warnings.length > 0 ? `\n⚠ ${resolved.warnings.join('\n⚠ ')}\n` : '') +
+        `GH CLI will run in '${projectRoot}'.`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {

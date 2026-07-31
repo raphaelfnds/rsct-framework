@@ -1005,8 +1005,9 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
 describe('rsct_request_commit — install-drift advisory (#16)', () => {
   // tmpRoot has a .rsct.json but no .rsct/scripts, so both enforcement scripts
   // read as absent → severity 'security'. That is the realistic shape of a
-  // project set up before the MCP companion existed.
-  const SECURITY = /SECURITY: this project's enforcement scripts/
+  // project set up before the MCP companion existed, and absence is the only
+  // state the check will call a security matter.
+  const SECURITY = /SECURITY: an RSCT enforcement script is missing/
 
   function driftInternal(branch: string): RequestCommitInternal {
     return {

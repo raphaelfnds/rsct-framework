@@ -19,21 +19,29 @@ Repairs from the first extended field test. Backward-compatible; the marker
 
 - **Install drift is now ranked, and the ranking is evidence-based** (#16).
   Drift was detected but delivered as one unranked suggestion, so "your prompts
-  lag a version" and "the permission sanitizer here predates a leak fix" read
-  identically — and a security-relevant fix stayed unapplied while every surface
-  reported healthy. `getInstallDriftNotice` now returns a `severity`, raised when
-  a script under `.rsct/scripts/` is **absent** or its body **differs from the
-  copy the running binary ships**.
-  The comparison is deliberately on content, not versions: the line-2 stamp and
-  `.rsct.json` `rsct_version` both carry the *release* version, so a version rule
-  would flag every release as a security event. Content evidence needs no
-  per-release maintenance — a release that did not touch a script produces
-  identical bodies. Surfaced in `rsct_status` / `rsct_load_context`, prepended in
-  `rsct_request_commit`, and recorded as `install.drift_detected` in the audit
-  log. Always suggestion-only; never blocks. Fail-safe throughout: an unreadable
-  file, an unresolvable reference or a `v=unknown` stamp never escalate.
-- `docs/troubleshooting.md` documents both drift messages — the feature had no
-  user-facing documentation at all.
+  lag a version" and "an enforcement script is not installed here" read
+  identically — and a project could run for weeks with no permission sanitizer
+  while every surface reported healthy. `getInstallDriftNotice` now returns a
+  `severity` and names the components involved.
+  Two tiers, split by what can actually be proven locally. **`security`** fires
+  only when a script under `.rsct/scripts/` is **absent** — unambiguous, and it
+  means that enforcement is simply not running. A script whose body merely
+  **differs** from the one the binary ships is reported at the normal tier
+  instead: those scripts are bundles that embed the config layer, so an
+  unrelated `.rsct.json` key changes their bytes, and ranking that as a security
+  event would fire for every project on nearly every release — a signal that is
+  always on is a signal nobody reads. RSCT reports that they differ, which is
+  what it can prove, and does not claim a fix is missing.
+  Comparison is by content, not version: the line-2 stamp carries the *release*
+  version and `.rsct.json` `rsct_version` comes from the same axis, so a version
+  rule could not tell the two tiers apart at all. Surfaced in `rsct_status` /
+  `rsct_load_context`, prepended in `rsct_request_commit`, and recorded as
+  `install.drift_detected`. Always suggestion-only; never blocks. Fail-safe
+  throughout: an unreadable file, an unresolvable reference, a directory that
+  cannot be listed, or a `v=unknown` stamp never escalate.
+- `docs/troubleshooting.md` documents both drift messages and the new commit
+  rejection, with the IDE-restart step the update flow depends on. Install drift
+  had no user-facing documentation at all.
 - **Commit messages are capped at 15 non-empty lines** (#20). Everything else
   about a commit was gated — authorization, branch protection, secrets, contract
   surface — except its message, so bodies grew to re-narrate the diff file by

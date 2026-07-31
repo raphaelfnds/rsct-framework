@@ -23813,19 +23813,33 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
 function describe(c) {
   if (c.state === "absent") return `${c.name} is not installed`;
   const at = c.stamp_version ? ` (installed at v${c.stamp_version})` : "";
-  return `${c.name} is outdated${at}`;
+  return `${c.name} differs from this binary's copy${at}`;
 }
 function getInstallDriftNotice(args) {
   const { projectRoot, projectVersion, mcpVersion } = args;
   const evidence = args.evidence ?? readScriptEvidence(projectRoot);
-  const stale_components = evidence.filter((e) => e.security_relevant && (e.state === "stale" || e.state === "absent")).map((e) => ({ name: e.name, state: e.state, stamp_version: e.stamp_version }));
+  const affected = evidence.filter(
+    (e) => e.security_relevant && (e.state === "stale" || e.state === "absent")
+  );
+  const stale_components = affected.map((e) => ({
+    name: e.name,
+    state: e.state,
+    stamp_version: e.stamp_version
+  }));
+  const absent = stale_components.filter((c) => c.state === "absent");
   const m = mcpVersion.replace(/^v/, "");
-  if (stale_components.length > 0) {
-    const at = projectVersion ? `v${projectVersion.replace(/^v/, "")}` : "an unrecorded version";
+  if (absent.length > 0) {
     return {
       severity: "security",
       stale_components,
-      hint: `\u26A0 SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} \u2014 ${stale_components.map(describe).join("; ")}. Fixes shipped in those scripts are NOT active here (project installed at ${at}). Re-run /rsct-setup to apply them. (suggestion only)`
+      hint: `\u26A0 SECURITY: an RSCT enforcement script is missing from this project \u2014 ${absent.map(describe).join("; ")}. What it enforces is not running here. Run /rsct-setup to install it, then restart the IDE. See docs/troubleshooting.md. (never blocks)`
+    };
+  }
+  if (stale_components.length > 0) {
+    return {
+      severity: "normal",
+      stale_components,
+      hint: `This project's RSCT enforcement scripts are not the ones rsct-mcp v${m} ships \u2014 ${stale_components.map(describe).join("; ")}. That usually just means the project has not been re-synced since an update; re-run /rsct-setup. (suggestion only)`
     };
   }
   if (!projectVersion) return { hint: null, severity: "normal", stale_components: [] };
@@ -33053,7 +33067,12 @@ async function captureIssueHandler(rawInput, internal = {}) {
       message: `Create issue '${input.title}' (severity=${input.severity})?
 
 Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching label in this repository)"}
-GH CLI will run in '${projectRoot}'.`
+` + // A label gh is about to reject belongs in the dialog, not only in the
+      // hints afterwards: approving a call already known to fail spends the
+      // dev's single-use approval on nothing.
+      (resolved.warnings.length > 0 ? `
+\u26A0 ${resolved.warnings.join("\n\u26A0 ")}
+` : "") + `GH CLI will run in '${projectRoot}'.`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
