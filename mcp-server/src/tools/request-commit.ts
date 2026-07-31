@@ -291,6 +291,14 @@ export async function requestCommitHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
+  // Advisory channel. Checks that must be *reported* rather than *gated* push
+  // here, and every return path — success, the seven rejects and mutation_failed
+  // — drains it via `withAdvisories`. Populated before the commit runs, so an
+  // advisory derived from the staged diff still has an index to read, and so a
+  // rejected commit does not swallow the warning.
+  const advisories: string[] = []
+  const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
+
   // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
   let channel: CommitChannel
   let authorizedVia: CommitAuthVia
@@ -342,7 +350,9 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+        hints: withAdvisories([
+          `Approval rejected (${gate.reject_kind}): ${gate.reason}`,
+        ]),
       }
     }
 
@@ -416,7 +426,9 @@ export async function requestCommitHandler(
           ...auditFields(audit),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [`Approval rejected (plan_token_invalid): ${reason}`],
+          hints: withAdvisories([
+            `Approval rejected (plan_token_invalid): ${reason}`,
+          ]),
         }
       }
 
@@ -469,7 +481,7 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -532,7 +544,7 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -632,7 +644,7 @@ export async function requestCommitHandler(
           ...auditFields(audit),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [reason],
+          hints: withAdvisories([reason]),
         }
       }
       // Override invoked — audit the waiver (parallel to the secrets override).
@@ -709,7 +721,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason],
+        hints: withAdvisories([reason]),
       }
     }
   } else if (freeCtx) {
@@ -750,7 +762,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason],
+        hints: withAdvisories([reason]),
       }
     }
 
@@ -850,11 +862,11 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [
+      hints: withAdvisories([
         authorizedVia === 'plan_token' || authorizedVia === 'free_commit'
           ? `git commit failed — fix the underlying error and retry.${refundNote}`
           : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
-      ],
+      ]),
     }
   }
 
@@ -1064,7 +1076,7 @@ export async function requestCommitHandler(
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
     anti_replay_error: antiReplayError,
-    hints,
+    hints: withAdvisories(hints),
   }
 }
 

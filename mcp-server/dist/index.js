@@ -27264,6 +27264,8 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const branchLabel = gitState.branch ?? "<no-branch>";
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
   let channel;
   let authorizedVia;
   let approval = null;
@@ -27314,7 +27316,9 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+        hints: withAdvisories([
+          `Approval rejected (${gate.reject_kind}): ${gate.reason}`
+        ])
       };
     }
     approval = gate.approval;
@@ -27377,7 +27381,9 @@ message: ${input.message}`
           ...auditFields(audit2),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [`Approval rejected (plan_token_invalid): ${reason}`]
+          hints: withAdvisories([
+            `Approval rejected (plan_token_invalid): ${reason}`
+          ])
         };
       }
       channel = "plan_token";
@@ -27420,7 +27426,7 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (branchProtected && overrideBranch) {
@@ -27472,7 +27478,7 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (findings.length > 0 && overrideSecrets) {
@@ -27554,7 +27560,7 @@ message: ${input.message}`
           ...auditFields(audit2),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [reason]
+          hints: withAdvisories([reason])
         };
       }
       appendAudit(
@@ -27619,7 +27625,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason]
+        hints: withAdvisories([reason])
       };
     }
   } else if (freeCtx) {
@@ -27654,7 +27660,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason]
+        hints: withAdvisories([reason])
       };
     };
     const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot);
@@ -27736,9 +27742,9 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [
+      hints: withAdvisories([
         authorizedVia === "plan_token" || authorizedVia === "free_commit" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
-      ]
+      ])
     };
   }
   let antiReplayPersisted;
@@ -27911,7 +27917,7 @@ message: ${input.message}`
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
     anti_replay_error: antiReplayError,
-    hints
+    hints: withAdvisories(hints)
   };
 }
 
