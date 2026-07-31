@@ -20,7 +20,9 @@ import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   createIssue as ghCreateIssue,
   isGhAvailable,
+  readRepoVocabulary,
   type GhCreateIssueResult,
+  type GhRepoVocabulary,
 } from '../lib/gh.js'
 
 const SEVERITY_VALUES = ['critical', 'high', 'medium', 'low'] as const
@@ -58,7 +60,7 @@ export const captureIssueInputSchema = z
       .array(z.string())
       .optional()
       .describe(
-        'GitHub labels to attach (mode=create only). Repo must have the labels created beforehand or gh issue create errors. Defaults: ["auto-captured", "rsct"] when omitted in create mode.',
+        'GitHub labels to attach (mode=create only). OMIT to let RSCT pick from the labels the host repository actually has (matched by severity); an issue is created unlabeled rather than failing when nothing matches. Supplied labels are honored verbatim; one that does not exist is warned about, and gh will reject it.',
       ),
     mode: z
       .enum(MODE_VALUES)
@@ -120,11 +122,109 @@ export interface CaptureIssueInternal {
     title: string
     body: string
     labels?: string[]
+    type?: string
   }) => GhCreateIssueResult
   ghAvailable?: () => boolean
+  /** Test seam: substitute host-repo discovery. */
+  ghVocabulary?: (cwd: string) => GhRepoVocabulary
 }
 
-const DEFAULT_LABELS = ['auto-captured', 'rsct']
+/**
+ * Preference order per severity, matched case-insensitively against whatever the
+ * host repo actually offers. High-severity findings are defects; low-severity
+ * ones are usually hardening. Whichever preference matches first wins, and if
+ * NONE matches the issue is created unlabeled — which always succeeds. The
+ * framework never creates a label or a type in someone else's repo.
+ */
+const LABEL_PREFERENCE: Record<Severity, string[]> = {
+  critical: ['bug', 'enhancement'],
+  high: ['bug', 'enhancement'],
+  medium: ['enhancement', 'bug'],
+  low: ['enhancement', 'bug'],
+}
+
+const TYPE_PREFERENCE: Record<Severity, string[]> = {
+  critical: ['bug', 'task'],
+  high: ['bug', 'task'],
+  medium: ['task', 'feature'],
+  low: ['task', 'feature'],
+}
+
+export interface LabelResolution {
+  labels: string[]
+  type: string | null
+  /** Why these were chosen — surfaced so the mapping is visible, not inferred. */
+  decision: string
+  warnings: string[]
+}
+
+/** Case-insensitive lookup that returns the repo's own spelling. */
+function matchFirst(preferences: string[], available: string[]): string | null {
+  const byLower = new Map(available.map((a) => [a.toLowerCase(), a]))
+  for (const p of preferences) {
+    const hit = byLower.get(p.toLowerCase())
+    if (hit) return hit
+  }
+  return null
+}
+
+export function resolveLabels(args: {
+  requested: string[] | undefined
+  severity: Severity
+  vocabulary: GhRepoVocabulary
+}): LabelResolution {
+  const { requested, severity, vocabulary } = args
+  const warnings: string[] = []
+
+  const type = matchFirst(TYPE_PREFERENCE[severity], vocabulary.types)
+
+  // An explicit request is honored verbatim — the dev may know about a label
+  // discovery could not see. An unknown one is WARNED, never silently dropped:
+  // dropping it would hide a typo, and `gh` will report the real error.
+  if (requested !== undefined) {
+    if (vocabulary.discovered) {
+      const known = new Set(vocabulary.labels.map((l) => l.toLowerCase()))
+      for (const l of requested) {
+        if (!known.has(l.toLowerCase())) {
+          warnings.push(
+            `label '${l}' does not exist in this repository — gh will reject it. Create it first, or omit labels to let RSCT pick from what the repo offers.`,
+          )
+        }
+      }
+    }
+    return {
+      labels: requested,
+      type,
+      decision: `labels supplied by the caller (${requested.length === 0 ? 'none' : requested.join(', ')})`,
+      warnings,
+    }
+  }
+
+  if (!vocabulary.discovered) {
+    return {
+      labels: [],
+      type,
+      decision: 'unlabeled — the host repository\'s labels could not be read',
+      warnings,
+    }
+  }
+
+  const picked = matchFirst(LABEL_PREFERENCE[severity], vocabulary.labels)
+  if (picked === null) {
+    return {
+      labels: [],
+      type,
+      decision: `unlabeled — none of the preferred labels for severity=${severity} (${LABEL_PREFERENCE[severity].join(', ')}) exist in this repository`,
+      warnings,
+    }
+  }
+  return {
+    labels: [picked],
+    type,
+    decision: `'${picked}' matched from the repository's labels for severity=${severity}`,
+    warnings,
+  }
+}
 
 export const captureIssueTool: Tool = {
   name: 'rsct_capture_issue',
@@ -206,8 +306,22 @@ export async function captureIssueHandler(
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
   const ghCreate = internal.ghCreate ?? ghCreateIssue
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable
+  const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary
 
-  const labels = input.labels ?? DEFAULT_LABELS
+  // Draft mode must not shell out: it is documented as "no external mutation",
+  // and a `gh label list` on every draft would be a surprising cost. The draft's
+  // suggested command therefore carries whatever the caller asked for, nothing
+  // invented.
+  const vocabulary: GhRepoVocabulary =
+    input.mode === 'create'
+      ? ghVocabulary(projectRoot)
+      : { labels: [], types: [], discovered: false }
+  const resolved = resolveLabels({
+    requested: input.labels,
+    severity: input.severity,
+    vocabulary,
+  })
+  const labels = resolved.labels
   const formattedBody = formatBody({
     body: input.body,
     severity: input.severity,
@@ -362,6 +476,7 @@ export async function captureIssueHandler(
     title: input.title,
     body: formattedBody,
     labels,
+    ...(resolved.type !== null && { type: resolved.type }),
   })
 
   if (!ghResult.ok) {
@@ -398,6 +513,10 @@ export async function captureIssueHandler(
       anti_replay_error: null,
       hints: [
         `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
+        // A caller-supplied label that does not exist is the most likely cause
+        // of a `failed` here, so RSCT names it rather than leaving gh's raw
+        // error as the only clue.
+        ...resolved.warnings,
       ],
     }
   }
@@ -413,6 +532,8 @@ export async function captureIssueHandler(
       severity: input.severity,
       affected_paths_count: input.affected_paths?.length ?? 0,
       labels,
+      issue_type: resolved.type,
+      label_decision: resolved.decision,
       issue_url: ghResult.url,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
@@ -422,6 +543,11 @@ export async function captureIssueHandler(
   const fields = auditFields(createdAudit)
 
   const hints: string[] = [`Issue created: ${ghResult.url}`]
+  // State the mapping rather than leaving the dev to infer it from the issue.
+  hints.push(
+    `Labels: ${resolved.decision}${resolved.type ? `; issue type '${resolved.type}' matched` : ''}.`,
+  )
+  hints.push(...resolved.warnings)
   if (!record.ok) {
     hints.push(
       `⚠ I could not record this approval as used: ${record.error}. The dev_approval could be accepted again by mistake for a short time — use a fresh one next time, or repair .rsct/approvals-seen.json.`,

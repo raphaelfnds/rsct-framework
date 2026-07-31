@@ -11,10 +11,12 @@ import { tmpdir } from 'node:os'
 
 import {
   captureIssueHandler,
+  resolveLabels,
   type CaptureIssueOutput,
 } from '../../src/tools/capture-issue.js'
 import type {
   GhCreateIssueResult,
+  GhRepoVocabulary,
 } from '../../src/lib/gh.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
@@ -296,5 +298,107 @@ describe('rsct_capture_issue — input validation', () => {
         bogus: 'x',
       }),
     ).rejects.toThrow()
+  })
+})
+
+describe('resolveLabels — fit the host repo, never impose (#18)', () => {
+  const vocab = (labels: string[], types: string[] = []): GhRepoVocabulary => ({
+    labels,
+    types,
+    discovered: true,
+  })
+  const DEFAULTS = [
+    'bug',
+    'documentation',
+    'duplicate',
+    'enhancement',
+    'good first issue',
+    'help wanted',
+    'invalid',
+    'question',
+    'wontfix',
+  ]
+
+  it('maps a high-severity finding to the repo\'s bug label', () => {
+    const r = resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(DEFAULTS) })
+    expect(r.labels).toEqual(['bug'])
+    expect(r.decision).toContain('severity=high')
+  })
+
+  it('maps a low-severity finding to enhancement', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'low', vocabulary: vocab(DEFAULTS) }).labels,
+    ).toEqual(['enhancement'])
+  })
+
+  it('falls back to the second preference when the first is absent', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(['enhancement']) })
+        .labels,
+    ).toEqual(['enhancement'])
+  })
+
+  it('returns the repo\'s own spelling, matched case-insensitively', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(['Bug']) }).labels,
+    ).toEqual(['Bug'])
+  })
+
+  it('creates UNLABELED rather than failing when nothing matches', () => {
+    // The whole defect: a hardcoded default made `gh issue create` error on any
+    // repo that had not been pre-seeded by hand.
+    const r = resolveLabels({
+      requested: undefined,
+      severity: 'high',
+      vocabulary: vocab(['triage', 'p1']),
+    })
+    expect(r.labels).toEqual([])
+    expect(r.decision).toContain('none of the preferred labels')
+  })
+
+  it('creates unlabeled when discovery could not run at all', () => {
+    const r = resolveLabels({
+      requested: undefined,
+      severity: 'high',
+      vocabulary: { labels: [], types: [], discovered: false },
+    })
+    expect(r.labels).toEqual([])
+    expect(r.decision).toContain('could not be read')
+  })
+
+  it('honors caller labels verbatim, warning — never dropping — an unknown one', () => {
+    const r = resolveLabels({
+      requested: ['bug', 'typoo'],
+      severity: 'high',
+      vocabulary: vocab(DEFAULTS),
+    })
+    expect(r.labels).toEqual(['bug', 'typoo'])
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain("'typoo'")
+  })
+
+  it('does not warn about caller labels when discovery failed — it cannot know', () => {
+    const r = resolveLabels({
+      requested: ['anything'],
+      severity: 'high',
+      vocabulary: { labels: [], types: [], discovered: false },
+    })
+    expect(r.labels).toEqual(['anything'])
+    expect(r.warnings).toEqual([])
+  })
+
+  it('picks an issue type when the repo exposes them, and omits it otherwise', () => {
+    expect(
+      resolveLabels({
+        requested: undefined,
+        severity: 'critical',
+        vocabulary: vocab(DEFAULTS, ['Bug', 'Feature', 'Task']),
+      }).type,
+    ).toBe('Bug')
+    // Personal repos have no issue types — the flag must simply not be passed.
+    expect(
+      resolveLabels({ requested: undefined, severity: 'critical', vocabulary: vocab(DEFAULTS) })
+        .type,
+    ).toBeNull()
   })
 })

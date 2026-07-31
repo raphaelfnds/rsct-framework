@@ -32709,6 +32709,27 @@ function isGhAvailable() {
     return false;
   }
 }
+function ghJson(cwd2, args) {
+  try {
+    const stdout = execFileSync("gh", args, { encoding: "utf8", cwd: cwd2, stdio: "pipe" });
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+function readRepoVocabulary(cwd2) {
+  if (!isGhAvailable()) return { labels: [], types: [], discovered: false };
+  const rawLabels = ghJson(cwd2, ["label", "list", "--limit", "200", "--json", "name"]);
+  const labels = Array.isArray(rawLabels) ? rawLabels.map((l) => l?.name).filter((n) => typeof n === "string" && n.length > 0) : [];
+  const rawTypes = ghJson(cwd2, [
+    "api",
+    "repos/{owner}/{repo}/issues/types",
+    "--jq",
+    "[.[].name]"
+  ]);
+  const types = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === "string" && t.length > 0) : [];
+  return { labels, types, discovered: rawLabels !== null };
+}
 function createIssue(input) {
   if (!isGhAvailable()) {
     return {
@@ -32721,6 +32742,7 @@ function createIssue(input) {
   for (const label of input.labels ?? []) {
     args.push("--label", label);
   }
+  if (input.type) args.push("--type", input.type);
   try {
     const stdout = execFileSync("gh", args, {
       encoding: "utf8",
@@ -32763,7 +32785,7 @@ var captureIssueInputSchema = external_exports.object({
     'Project-relative paths the finding touches. Rendered as a bullet list under "Affected paths".'
   ),
   labels: external_exports.array(external_exports.string()).optional().describe(
-    'GitHub labels to attach (mode=create only). Repo must have the labels created beforehand or gh issue create errors. Defaults: ["auto-captured", "rsct"] when omitted in create mode.'
+    "GitHub labels to attach (mode=create only). OMIT to let RSCT pick from the labels the host repository actually has (matched by severity); an issue is created unlabeled rather than failing when nothing matches. Supplied labels are honored verbatim; one that does not exist is warned about, and gh will reject it."
   ),
   mode: external_exports.enum(MODE_VALUES).default("draft").describe(
     '"draft" returns the formatted body for manual creation via web (no \xA7C, no external mutation). "create" invokes gh issue create with \xA7C-gate.'
@@ -32772,7 +32794,72 @@ var captureIssueInputSchema = external_exports.object({
     'Required when mode="create". action_scope SHOULD start with "capture_issue:" (INV-2.2).'
   )
 }).strict();
-var DEFAULT_LABELS = ["auto-captured", "rsct"];
+var LABEL_PREFERENCE = {
+  critical: ["bug", "enhancement"],
+  high: ["bug", "enhancement"],
+  medium: ["enhancement", "bug"],
+  low: ["enhancement", "bug"]
+};
+var TYPE_PREFERENCE = {
+  critical: ["bug", "task"],
+  high: ["bug", "task"],
+  medium: ["task", "feature"],
+  low: ["task", "feature"]
+};
+function matchFirst(preferences, available) {
+  const byLower = new Map(available.map((a) => [a.toLowerCase(), a]));
+  for (const p of preferences) {
+    const hit = byLower.get(p.toLowerCase());
+    if (hit) return hit;
+  }
+  return null;
+}
+function resolveLabels(args) {
+  const { requested, severity, vocabulary } = args;
+  const warnings = [];
+  const type = matchFirst(TYPE_PREFERENCE[severity], vocabulary.types);
+  if (requested !== void 0) {
+    if (vocabulary.discovered) {
+      const known = new Set(vocabulary.labels.map((l) => l.toLowerCase()));
+      for (const l of requested) {
+        if (!known.has(l.toLowerCase())) {
+          warnings.push(
+            `label '${l}' does not exist in this repository \u2014 gh will reject it. Create it first, or omit labels to let RSCT pick from what the repo offers.`
+          );
+        }
+      }
+    }
+    return {
+      labels: requested,
+      type,
+      decision: `labels supplied by the caller (${requested.length === 0 ? "none" : requested.join(", ")})`,
+      warnings
+    };
+  }
+  if (!vocabulary.discovered) {
+    return {
+      labels: [],
+      type,
+      decision: "unlabeled \u2014 the host repository's labels could not be read",
+      warnings
+    };
+  }
+  const picked = matchFirst(LABEL_PREFERENCE[severity], vocabulary.labels);
+  if (picked === null) {
+    return {
+      labels: [],
+      type,
+      decision: `unlabeled \u2014 none of the preferred labels for severity=${severity} (${LABEL_PREFERENCE[severity].join(", ")}) exist in this repository`,
+      warnings
+    };
+  }
+  return {
+    labels: [picked],
+    type,
+    decision: `'${picked}' matched from the repository's labels for severity=${severity}`,
+    warnings
+  };
+}
 var captureIssueTool = {
   name: "rsct_capture_issue",
   description: 'Capture a non-blocking finding as a GitHub issue. mode="draft" (default) returns a formatted markdown body for manual creation via web \u2014 no external mutation, no \xA7C-gate. mode="create" requires dev_approval (action_scope starting with "capture_issue:") and invokes `gh issue create` via Bash with \xA7C-gate. Use during verification sweeps, scan analyses, and post-task reviews to log "we should fix this later" items without scope-creeping the current task.',
@@ -32842,7 +32929,14 @@ async function captureIssueHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const ghCreate = internal.ghCreate ?? createIssue;
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable;
-  const labels = input.labels ?? DEFAULT_LABELS;
+  const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary;
+  const vocabulary = input.mode === "create" ? ghVocabulary(projectRoot) : { labels: [], types: [], discovered: false };
+  const resolved = resolveLabels({
+    requested: input.labels,
+    severity: input.severity,
+    vocabulary
+  });
+  const labels = resolved.labels;
   const formattedBody = formatBody({
     body: input.body,
     severity: input.severity,
@@ -32993,7 +33087,8 @@ GH CLI will run in '${projectRoot}'.`
     cwd: projectRoot,
     title: input.title,
     body: formattedBody,
-    labels
+    labels,
+    ...resolved.type !== null && { type: resolved.type }
   });
   if (!ghResult.ok) {
     const mapped = mapGhReason(ghResult);
@@ -33028,7 +33123,11 @@ GH CLI will run in '${projectRoot}'.`
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `gh issue create failed (${ghResult.reason}). ${ghResult.error}`
+        `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
+        // A caller-supplied label that does not exist is the most likely cause
+        // of a `failed` here, so RSCT names it rather than leaving gh's raw
+        // error as the only clue.
+        ...resolved.warnings
       ]
     };
   }
@@ -33042,6 +33141,8 @@ GH CLI will run in '${projectRoot}'.`
       severity: input.severity,
       affected_paths_count: input.affected_paths?.length ?? 0,
       labels,
+      issue_type: resolved.type,
+      label_decision: resolved.decision,
       issue_url: ghResult.url,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals
@@ -33050,6 +33151,10 @@ GH CLI will run in '${projectRoot}'.`
   );
   const fields = auditFields(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
+  hints.push(
+    `Labels: ${resolved.decision}${resolved.type ? `; issue type '${resolved.type}' matched` : ""}.`
+  );
+  hints.push(...resolved.warnings);
   if (!record2.ok) {
     hints.push(
       `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`

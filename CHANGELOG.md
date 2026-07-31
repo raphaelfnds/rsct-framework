@@ -67,6 +67,19 @@ Repairs from the first extended field test. Backward-compatible; the marker
   a documented format contract with `mcp-server/src/lib/version-drift.ts`, pinned
   by `block-smoke` anchors on both blocks.
 
+- **`rsct_capture_issue` fits the host repository's vocabulary** (#18). It
+  defaulted to the labels `auto-captured` / `rsct`, which exist in no repository
+  unless someone created them by hand — and `gh issue create` errors on an
+  unknown label, so the create path failed by default in exactly the situation
+  the tool was built for. It now reads the repo's own labels (and its issue
+  types, where the organization has them), picks by severity from what is
+  actually there, and creates the issue **unlabeled** rather than failing when
+  nothing matches. Caller-supplied labels are still honored verbatim; one that
+  does not exist produces a warning rather than a silent drop. Discovery failure
+  (no `gh`, unauthenticated, no remote) degrades to unlabeled. The framework
+  never creates a label or an issue type in someone else's repository, and
+  `mode="draft"` still shells out to nothing.
+
 ### Deprecated
 
 - **`clear_phase` on `rsct_phase_verification_complete` is ignored** (#15).
