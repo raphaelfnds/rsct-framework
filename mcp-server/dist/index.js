@@ -23732,6 +23732,7 @@ var SECURITY_RELEVANT = /* @__PURE__ */ new Set([
   "edit-scope-guard.js"
 ]);
 var STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/;
+var STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/;
 function shippedScriptsDir() {
   try {
     return join(fileURLToPath(new URL(".", import.meta.url)), "scripts");
@@ -23746,11 +23747,16 @@ function readNormalized(path2) {
     return null;
   }
 }
+function trimTrailingNewlines(text) {
+  return text.replace(/\n+$/, "");
+}
 function installedBody(text) {
-  return text.split("\n").slice(2).join("\n");
+  const lines = text.split("\n");
+  const from = STAMP_LINE_RE.test(lines[1] ?? "") ? 2 : 1;
+  return trimTrailingNewlines(lines.slice(from).join("\n"));
 }
 function shippedBody(text) {
-  return text.split("\n").slice(1).join("\n");
+  return trimTrailingNewlines(text.split("\n").slice(1).join("\n"));
 }
 function stampOf(text) {
   const line2 = text.split("\n")[1] ?? "";
@@ -23758,19 +23764,26 @@ function stampOf(text) {
   return m ? m[1] ?? null : null;
 }
 function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) return [];
   const installedDir = join(projectRoot, ".rsct", "scripts");
   let entries = [];
+  let listed = true;
   try {
     entries = readdirSync(installedDir).filter((f) => f.endsWith(".js"));
-  } catch {
-    entries = [];
+  } catch (err) {
+    listed = err?.code === "ENOENT";
   }
   const names = [.../* @__PURE__ */ new Set([...entries, ...SECURITY_RELEVANT])].sort();
   const evidence = [];
   for (const name of names) {
     const security_relevant = SECURITY_RELEVANT.has(name);
     if (!entries.includes(name)) {
-      evidence.push({ name, state: "absent", security_relevant, stamp_version: null });
+      evidence.push({
+        name,
+        state: listed ? "absent" : "unreadable",
+        security_relevant,
+        stamp_version: null
+      });
       continue;
     }
     const installed = readNormalized(join(installedDir, name));
@@ -23784,7 +23797,9 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
       evidence.push({ name, state: "unreadable", security_relevant, stamp_version });
       continue;
     }
-    const state = installedBody(installed) === shippedBody(shipped) ? "current" : "stale";
+    const a = installedBody(installed);
+    const b = shippedBody(shipped);
+    const state = a.length === 0 || b.length === 0 ? "stale" : a === b ? "current" : "stale";
     evidence.push({ name, state, security_relevant, stamp_version });
   }
   return evidence;
@@ -23800,11 +23815,11 @@ function getInstallDriftNotice(args) {
   const stale_components = evidence.filter((e) => e.security_relevant && (e.state === "stale" || e.state === "absent")).map((e) => ({ name: e.name, state: e.state, stamp_version: e.stamp_version }));
   const m = mcpVersion.replace(/^v/, "");
   if (stale_components.length > 0) {
-    const p2 = projectVersion ? projectVersion.replace(/^v/, "") : "unknown";
+    const at = projectVersion ? `v${projectVersion.replace(/^v/, "")}` : "an unrecorded version";
     return {
       severity: "security",
       stale_components,
-      hint: `\u26A0 SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} \u2014 ${stale_components.map(describe).join("; ")}. Fixes shipped in those scripts are NOT active here (project installed at v${p2}). Re-run /rsct-setup to apply them. (suggestion only)`
+      hint: `\u26A0 SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} \u2014 ${stale_components.map(describe).join("; ")}. Fixes shipped in those scripts are NOT active here (project installed at ${at}). Re-run /rsct-setup to apply them. (suggestion only)`
     };
   }
   if (!projectVersion) return { hint: null, severity: "normal", stale_components: [] };

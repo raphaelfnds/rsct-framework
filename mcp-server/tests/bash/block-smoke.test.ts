@@ -11,6 +11,7 @@ import {
   hasIn,
   type RunBlockResult,
 } from './lib/block-harness.js'
+import { STAMP_RE } from '../../src/lib/version-drift.js'
 
 // T0.c — curated smoke for 3 self-contained, high-risk prompt mutation blocks
 // (gitignore backfill, .rsct.json secrets merge, .mcp.json scrub). Each block is
@@ -931,7 +932,9 @@ describe.skipIf(!BASH)('block: script version stamp (01-setup 4.V.b)', () => {
       preamble: stampPreamble('2.3.0'),
       seedFiles: { 'fake-dist/sanitize-permissions.js': SRC_FILE },
     })
-    const m = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/.exec(lineOf(r, TARGET, 1))
+    // The REAL pattern, imported — a local copy would stay green if the reader's
+    // pattern changed, which is exactly what this test exists to prevent.
+    const m = STAMP_RE.exec(lineOf(r, TARGET, 1))
     expect(m?.[1]).toBe('2.3.0')
   }, 60_000)
 

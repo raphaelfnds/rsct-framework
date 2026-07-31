@@ -1,6 +1,6 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   getInstallDriftNotice,
@@ -219,14 +219,53 @@ describe('readScriptEvidence', () => {
   })
 
   it('compares the body, so an unstamped legacy copy with identical code is current', () => {
-    // Pre-MED-11 installs have no line-2 stamp. Line 2 is dropped either way, so
-    // an unstamped copy whose code matches must not be reported as stale.
+    // Pre-stamp installs carry the source body from line 2, so line 2 must only
+    // be dropped when it actually is a stamp. Both files hold the SAME body here
+    // — a rigged shorter fixture would make this pass without testing anything.
     const { root, installed, shipped } = sandbox()
     writeFileSync(join(installed, 'sanitize-permissions.js'), `#!/usr/bin/env node\n${BODY}`)
-    writeFileSync(join(shipped, 'sanitize-permissions.js'), ship(`const a = 1\n`))
+    writeFileSync(join(shipped, 'sanitize-permissions.js'), ship())
     const e = evidenceFor('sanitize-permissions.js', readScriptEvidence(root, shipped))
     expect(e.stamp_version).toBeNull()
     expect(e.state).toBe('current')
+  })
+
+  it('ignores a trailing-newline difference — the installer adds one, the bundler does not', () => {
+    // The shipped bundle ends at its sourceMappingURL with no terminating
+    // newline; setup builds the file in `$( … )` (which strips them) and writes
+    // it with `printf '%s\n'`. Comparing raw would call every healthy install
+    // stale. This is the exact one-byte divergence the real artifacts have.
+    const { root, installed, shipped } = sandbox()
+    writeFileSync(join(installed, 'sanitize-permissions.js'), install('2.3.0', 'const a = 1\n'))
+    writeFileSync(join(shipped, 'sanitize-permissions.js'), '#!/usr/bin/env node\nconst a = 1')
+    expect(evidenceFor('sanitize-permissions.js', readScriptEvidence(root, shipped)).state).toBe(
+      'current',
+    )
+  })
+
+  it('reports stale when a body is empty on either side — never fail open', () => {
+    const { root, installed, shipped } = sandbox()
+    writeFileSync(join(installed, 'sanitize-permissions.js'), '')
+    writeFileSync(join(shipped, 'sanitize-permissions.js'), ship())
+    expect(evidenceFor('sanitize-permissions.js', readScriptEvidence(root, shipped)).state).toBe(
+      'stale',
+    )
+  })
+
+  it('reports unreadable — not absent — when the scripts dir cannot be listed', () => {
+    // ENOTDIR here; EACCES and a stalled UNC share take the same path. "Could not
+    // look" must never be reported as "is not installed", which would escalate.
+    const root = mkdtempSync(join(tmpdir(), 'rsct-drift-'))
+    dirs.push(root)
+    mkdirSync(join(root, '.rsct'), { recursive: true })
+    writeFileSync(join(root, '.rsct', 'scripts'), 'not a directory\n')
+    const ev = readScriptEvidence(root, null)
+    expect(ev.every((e) => e.state === 'unreadable')).toBe(true)
+  })
+
+  it('returns [] for a non-string project root rather than throwing', () => {
+    expect(readScriptEvidence(undefined as unknown as string)).toEqual([])
+    expect(readScriptEvidence('')).toEqual([])
   })
 
   it('reads v=unknown as no stamp without affecting the verdict', () => {
@@ -298,5 +337,65 @@ describe('readScriptEvidence', () => {
       /* chmod is a no-op on some Windows setups — the assertion below still holds */
     }
     expect(() => readScriptEvidence(root, shipped)).not.toThrow()
+  })
+})
+
+/**
+ * The regression guard for the defect the synthetic fixtures could not see: the
+ * comparison must hold against the ACTUAL shipped artifacts, installed the way
+ * `/rsct-setup` Phase 4.V.b installs them. The whole feature is wrong if this
+ * fails — every healthy project would report a security escalation.
+ */
+describe('readScriptEvidence — against the real dist/scripts artifacts', () => {
+  const DIST = resolve(__dirname, '..', '..', 'dist', 'scripts')
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+
+  it('reports current for a faithful reproduction of the installer output', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rsct-drift-real-'))
+    dirs.push(root)
+    const installed = join(root, '.rsct', 'scripts')
+    mkdirSync(installed, { recursive: true })
+
+    for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
+      const shippedText = readFileSync(join(DIST, name), 'utf8')
+      // Phase 4.V.b: shebang, stamp, then `tail -n +2` of the source — built in
+      // `$( … )` (strips trailing newlines) and written with `printf '%s\n'`.
+      const body = shippedText.split('\n').slice(1).join('\n').replace(/\n+$/, '')
+      writeFileSync(
+        join(installed, name),
+        `#!/usr/bin/env node\n// rsct-mcp v=9.9.9 — installed by /rsct-setup\n${body}\n`,
+      )
+    }
+
+    const ev = readScriptEvidence(root, DIST)
+    for (const e of ev) {
+      expect(`${e.name}=${e.state}`).toBe(`${e.name}=current`)
+    }
+    expect(
+      getInstallDriftNotice({
+        projectRoot: root,
+        projectVersion: '9.9.9',
+        mcpVersion: '9.9.9',
+        evidence: ev,
+      }).severity,
+    ).toBe('normal')
+  })
+
+  it('detects a real tampered install', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rsct-drift-real-'))
+    dirs.push(root)
+    const installed = join(root, '.rsct', 'scripts')
+    mkdirSync(installed, { recursive: true })
+    const shippedText = readFileSync(join(DIST, 'sanitize-permissions.js'), 'utf8')
+    const body = shippedText.split('\n').slice(1).join('\n').replace(/\n+$/, '')
+    writeFileSync(
+      join(installed, 'sanitize-permissions.js'),
+      `#!/usr/bin/env node\n// rsct-mcp v=9.9.9 — installed by /rsct-setup\n${body}\n// tampered\n`,
+    )
+    const ev = readScriptEvidence(root, DIST)
+    expect(ev.find((e) => e.name === 'sanitize-permissions.js')?.state).toBe('stale')
   })
 })

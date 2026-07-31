@@ -1001,3 +1001,89 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
     expect(out.reject_kind).toBe('protected_branch') // INV-5 runs before the INV-7 gate
   })
 })
+
+describe('rsct_request_commit — install-drift advisory (#16)', () => {
+  // tmpRoot has a .rsct.json but no .rsct/scripts, so both enforcement scripts
+  // read as absent → severity 'security'. That is the realistic shape of a
+  // project set up before the MCP companion existed.
+  const SECURITY = /SECURITY: this project's enforcement scripts/
+
+  function driftInternal(branch: string): RequestCommitInternal {
+    return {
+      gitStateOverride: gitState(branch),
+      gitExecutor: gitExecutorMock(
+        {
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'commit -m feat: x': COMMIT_OK,
+        },
+        { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+      ),
+      promptFn: alwaysYes(),
+      now: FIXED_NOW,
+    }
+  }
+
+  it('prepends the advisory on a successful commit and audits the detection', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      driftInternal('feat/drift'),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    // Prepended: it must outrank the routine hint tail, not trail behind it.
+    expect(out.hints[0]).toMatch(SECURITY)
+    const log = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+    const entry = log
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'install.drift_detected')
+    expect(entry).toBeDefined()
+    expect(entry?.severity).toBe('security')
+    expect(entry?.tool).toBe('rsct_request_commit')
+    expect((entry?.stale_components as unknown[]).length).toBe(2)
+  })
+
+  it('still carries the advisory when the commit is REJECTED', async () => {
+    // The whole point of the advisory drain: a rejected commit must not swallow
+    // a warning about the enforcement surface being degraded.
+    writeConfig(tmpRoot, rsctConfig({ protected_branches: ['main'] }))
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      driftInternal('main'),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+    expect(out.hints.some((h) => SECURITY.test(h))).toBe(true)
+  })
+
+  it('is silent when the project is not an RSCT install', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'rsct-rc-plain-'))
+    try {
+      const out = (await callCommit(
+        {
+          project_root: plain,
+          message: 'feat: x',
+          dev_approval: approval(),
+          staged_diff_override: cleanDiff(),
+        },
+        driftInternal('feat/none'),
+      )) as RequestCommitOutput
+      expect(out.hints.some((h) => SECURITY.test(h))).toBe(false)
+    } finally {
+      rmSync(plain, { recursive: true, force: true })
+    }
+  })
+})

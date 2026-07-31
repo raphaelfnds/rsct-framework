@@ -25,7 +25,6 @@ import {
 import {
   appendAuditEntry,
   auditFields,
-  type AuditAppendResult,
 } from '../lib/audit-log.js'
 import {
   promptYesNo,
@@ -570,7 +569,3 @@ export async function requestMergeHandler(
   }
 }
 
-/**
- * Project an `AuditAppendResult` to the `(audit_path, audit_error)` pair
- * surfaced in `RequestMergeOutput`. See `request-commit.ts` for full notes.
- */

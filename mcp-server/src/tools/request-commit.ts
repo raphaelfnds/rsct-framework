@@ -35,7 +35,6 @@ import {
 import {
   appendAuditEntry,
   auditFields,
-  type AuditAppendResult,
 } from '../lib/audit-log.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
@@ -303,9 +302,11 @@ export async function requestCommitHandler(
 
   // Install drift, security tier only: an enforcement script under
   // `.rsct/scripts/` is absent or differs from the copy this binary ships, so
-  // fixes to it are not running here. Reported at the commit gate — the moment
-  // the unprotected diff actually leaves the working tree — and prepended,
-  // because it outranks the routine hint tail. Never blocks.
+  // fixes to it are not running here. Evaluated before authorization, so the
+  // advisory reaches the dev on rejected attempts too, and prepended because it
+  // outranks the routine hint tail. The audit entry follows the same rule — it
+  // records that a commit was ATTEMPTED under a degraded enforcement surface,
+  // which is the fact worth reconstructing later. Never blocks.
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice({
       projectRoot,
@@ -1110,8 +1111,3 @@ export async function requestCommitHandler(
   }
 }
 
-/**
- * Project an `AuditAppendResult` to the `(audit_path, audit_error)` pair
- * surfaced in `RequestCommitOutput`. `audit.enabled: false` is NOT
- * treated as an error — only real write failures populate `audit_error`.
- */

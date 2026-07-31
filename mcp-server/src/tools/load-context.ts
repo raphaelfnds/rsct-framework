@@ -197,10 +197,10 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
     })
     if (drift.hint) next_action_hints.push(drift.hint)
     if (drift.severity === 'security') {
-      // Once per session, at §0 — the commit gate cannot be relied on here: an
-      // escalated state means the sanitizer failed to strip a `Bash(git commit)`
-      // allow-entry, in which case commits bypass rsct_request_commit entirely
-      // and the exposure window would leave no trail at all.
+      // Recorded at every §0 bootstrap, not only at the commit gate: an escalated
+      // state means the sanitizer failed to strip a `Bash(git commit)` allow-entry,
+      // in which case commits bypass rsct_request_commit entirely and the exposure
+      // window would leave no trail at all. One entry per load_context call.
       appendAuditEntry(
         resolution.root,
         {

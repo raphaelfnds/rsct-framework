@@ -53,11 +53,24 @@ const SECURITY_RELEVANT: ReadonlySet<string> = new Set([
  * Line 2 as written by `/rsct-setup` Phase 4.V.b / 4.V.d:
  * `// rsct-mcp v=X.Y.Z — installed by /rsct-setup`. Anchored at the start of the
  * line so an unrelated bundler line containing `v=1` can never be read as a
- * stamp. Display only — the verdict comes from the body comparison. A prefix
- * match with no capture is the `v=unknown` fallback that setup writes when the
- * package version cannot be resolved.
+ * stamp. Display only — the verdict comes from the body comparison. The version
+ * group requires a leading digit, so setup's `v=unknown` fallback does not match
+ * at all and yields no stamp, which is the intended outcome.
+ *
+ * Exported so `tests/bash/block-smoke.test.ts` asserts the bash writer against
+ * THIS pattern rather than a copy of it — a copy would stay green if the pattern
+ * changed, pinning nothing.
  */
-const STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/
+export const STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/
+
+/**
+ * Whether line 2 IS a stamp, independent of whether its version parses. Setup
+ * writes `v=unknown` when it cannot resolve the package version — that line is
+ * still a stamp and must still be excluded from the body, even though it yields
+ * no version. Keeping the two questions separate is the difference between
+ * "no version to display" and "this line is source code".
+ */
+const STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/
 
 export type DriftSeverity = 'normal' | 'security'
 
@@ -112,16 +125,31 @@ function readNormalized(path: string): string | null {
 }
 
 /**
- * Body of an installed copy: drop the shebang (line 1) and the version stamp
- * (line 2) that `/rsct-setup` prepends, leaving what came from the shipped file.
+ * Trailing newlines carry no meaning here and DO differ by construction: setup
+ * builds the file inside `$( … )`, which strips them, then writes it back with
+ * `printf '%s\n'` — while the shipped bundle ends at its sourceMappingURL with
+ * no terminating newline. Comparing them raw reports every healthy install as
+ * stale. Setup's own idempotency check normalizes the same way.
+ */
+function trimTrailingNewlines(text: string): string {
+  return text.replace(/\n+$/, '')
+}
+
+/**
+ * Body of an installed copy: drop the shebang (line 1), and the version stamp
+ * (line 2) only when line 2 actually IS a stamp. A pre-stamp install carries the
+ * source body from line 2, so dropping it unconditionally would corrupt the
+ * comparison and report a byte-identical legacy copy as stale.
  */
 function installedBody(text: string): string {
-  return text.split('\n').slice(2).join('\n')
+  const lines = text.split('\n')
+  const from = STAMP_LINE_RE.test(lines[1] ?? '') ? 2 : 1
+  return trimTrailingNewlines(lines.slice(from).join('\n'))
 }
 
 /** Body of a shipped copy: drop only the tsup shebang banner (line 1). */
 function shippedBody(text: string): string {
-  return text.split('\n').slice(1).join('\n')
+  return trimTrailingNewlines(text.split('\n').slice(1).join('\n'))
 }
 
 function stampOf(text: string): string | null {
@@ -144,13 +172,20 @@ export function readScriptEvidence(
   projectRoot: string,
   shippedDir: string | null = shippedScriptsDir(),
 ): ScriptEvidence[] {
+  if (typeof projectRoot !== 'string' || projectRoot.length === 0) return []
   const installedDir = join(projectRoot, '.rsct', 'scripts')
 
+  // A directory that does not exist IS positive evidence: setup skipped Phase
+  // 4.V, or an uninstall removed it, and the scripts genuinely are not there.
+  // Any OTHER failure (ENOTDIR, EACCES, a stalled UNC share) means we could not
+  // look — reporting that as `absent` would raise a phantom security alarm, so
+  // it degrades to `unreadable` instead.
   let entries: string[] = []
+  let listed = true
   try {
     entries = readdirSync(installedDir).filter((f) => f.endsWith('.js'))
-  } catch {
-    entries = []
+  } catch (err) {
+    listed = (err as NodeJS.ErrnoException)?.code === 'ENOENT'
   }
 
   const names = [...new Set([...entries, ...SECURITY_RELEVANT])].sort()
@@ -160,7 +195,12 @@ export function readScriptEvidence(
     const security_relevant = SECURITY_RELEVANT.has(name)
 
     if (!entries.includes(name)) {
-      evidence.push({ name, state: 'absent', security_relevant, stamp_version: null })
+      evidence.push({
+        name,
+        state: listed ? 'absent' : 'unreadable',
+        security_relevant,
+        stamp_version: null,
+      })
       continue
     }
 
@@ -178,8 +218,12 @@ export function readScriptEvidence(
       continue
     }
 
-    const state: ScriptState =
-      installedBody(installed) === shippedBody(shipped) ? 'current' : 'stale'
+    const a = installedBody(installed)
+    const b = shippedBody(shipped)
+    // An empty body on either side means the file was truncated or wiped. Two
+    // empty bodies would compare equal and read as `current` — a fail-OPEN in
+    // exactly the case the check exists to catch, so require a real body.
+    const state: ScriptState = a.length === 0 || b.length === 0 ? 'stale' : a === b ? 'current' : 'stale'
     evidence.push({ name, state, security_relevant, stamp_version })
   }
 
@@ -212,14 +256,16 @@ export function getInstallDriftNotice(args: {
   const m = mcpVersion.replace(/^v/, '')
 
   if (stale_components.length > 0) {
-    const p = projectVersion ? projectVersion.replace(/^v/, '') : 'unknown'
+    const at = projectVersion
+      ? `v${projectVersion.replace(/^v/, '')}`
+      : 'an unrecorded version'
     return {
       severity: 'security',
       stale_components,
       hint:
         `⚠ SECURITY: this project's enforcement scripts do not match rsct-mcp v${m} — ` +
         `${stale_components.map(describe).join('; ')}. ` +
-        `Fixes shipped in those scripts are NOT active here (project installed at v${p}). ` +
+        `Fixes shipped in those scripts are NOT active here (project installed at ${at}). ` +
         `Re-run /rsct-setup to apply them. (suggestion only)`,
     }
   }
