@@ -291,3 +291,110 @@ describe('phase-machine — gatePhaseComplete', () => {
     expect(r.next_recommended_phase).toBeNull()
   })
 })
+
+/**
+ * Issue #15 — the stale-label exception. The positive case is one line; the
+ * value of this block is the NEGATIVES. A looser reading of "stale" would turn
+ * the repair into a general escape hatch from `phase_already_active`, which is
+ * the behavior the mechanical layer exists to block. Each rejected widening
+ * named in the issue gets its own test.
+ */
+describe('startPhaseGeneric — stale verification label (#15)', () => {
+  function writeState(state: Record<string, unknown>): void {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(join(tmpRoot, '.rsct', 'phase-state.json'), JSON.stringify(state))
+  }
+
+  const start = (phase: 'code' | 'research' | 'test'): StartPhaseResult =>
+    startPhaseGeneric({ projectRoot: tmpRoot, phase, specRef: 'feat-foo' }, null)
+
+  function auditEvents(): string[] {
+    const p = join(tmpRoot, '.rsct', 'audit.log')
+    if (!existsSync(p)) return []
+    return readFileSync(p, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => (JSON.parse(l) as { event: string }).event)
+  }
+
+  it('lets Code start over a completed verification label, and audits it', () => {
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: { spec_ref: 'feat-foo', completed_at: '2026-07-31T12:00:00.000Z' },
+    })
+    const out = start('code')
+    expect(out.status).toBe('started')
+    expect(auditEvents()).toContain('phase.stale_label_cleared')
+
+    const state = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct', 'phase-state.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(state.phase).toBe('code')
+    // The V record survives — it is what the code_start gate reads.
+    expect(state.verification).toBeDefined()
+  })
+
+  it('NEGATIVE — a verification block without completed_at still rejects', () => {
+    // `verification != null` alone must never satisfy the exception: this is the
+    // in-flight V that `rejected_incomplete` exists to catch.
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: { spec_ref: 'feat-foo', started_at: '2026-07-31T11:00:00.000Z' },
+    })
+    const out = start('code')
+    expect(out.status).toBe('phase_already_active')
+    expect(out.existing_phase).toBe('verification')
+    expect(auditEvents()).not.toContain('phase.stale_label_cleared')
+  })
+
+  it('NEGATIVE — a verification label with NO verification block rejects', () => {
+    writeState({ phase: 'verification', spec_slug: 'feat-foo' })
+    expect(start('code').status).toBe('phase_already_active')
+  })
+
+  it('NEGATIVE — completed_at explicitly null rejects', () => {
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: { spec_ref: 'feat-foo', completed_at: null },
+    })
+    expect(start('code').status).toBe('phase_already_active')
+  })
+
+  it('NEGATIVE — the exception does not extend to other phase labels', () => {
+    // A stale `code` label carries no completion evidence, so it is a different
+    // situation with no claim on this exception — even with a completed V block.
+    writeState({
+      phase: 'code',
+      spec_slug: 'feat-foo',
+      verification: { spec_ref: 'feat-foo', completed_at: '2026-07-31T12:00:00.000Z' },
+    })
+    expect(start('research').status).toBe('phase_already_active')
+  })
+
+  it('NEGATIVE — an old started_at does not make a label stale (no clock heuristic)', () => {
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      started_at: '2020-01-01T00:00:00.000Z',
+      verification: { spec_ref: 'feat-foo', started_at: '2020-01-01T00:00:00.000Z' },
+    })
+    expect(start('code').status).toBe('phase_already_active')
+  })
+
+  it('restarting the SAME phase is unchanged — no stale-label event', () => {
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: { spec_ref: 'feat-foo', completed_at: '2026-07-31T12:00:00.000Z' },
+    })
+    const out = startPhaseGeneric(
+      { projectRoot: tmpRoot, phase: 'verification', specRef: 'feat-foo' },
+      null,
+    )
+    expect(out.status).toBe('started')
+    expect(auditEvents()).not.toContain('phase.stale_label_cleared')
+  })
+})

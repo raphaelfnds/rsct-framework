@@ -47,8 +47,33 @@ Repairs from the first extended field test. Backward-compatible; the marker
   a documented format contract with `mcp-server/src/lib/version-drift.ts`, pinned
   by `block-smoke` anchors on both blocks.
 
+### Deprecated
+
+- **`clear_phase` on `rsct_phase_verification_complete` is ignored** (#15).
+  Completing V now always clears the active phase label. The parameter stays in
+  the schema so an older client passing it is not rejected, and passing `false`
+  returns a hint saying it was ignored; it will be removed in the next major.
+  Its documented contract ("when false, only the verification sub-block is
+  cleared") stopped being true at CAP-28, when the sub-block became the evidence
+  `rsct_phase_code_start` reads and was deliberately preserved.
+
 ### Fixed
 
+- **A completed V phase could strand an unresolvable `verification` label** (#15).
+  With `clear_phase: false` the label survived, `rsct_phase_code_start` then
+  rejected with `phase_already_active`, and every documented way out —
+  `rsct_phase_abandon`, or the "wipe `.rsct/phase-state.json`" the reject hint
+  itself suggested — also destroyed the V record that the same gate requires.
+  A closed loop whose only exit was hand-editing the enforcement file.
+  `startPhaseGeneric` now accepts a phase start over a `verification` label whose
+  block carries `completed_at`, emitting `phase.stale_label_cleared` to the audit
+  log. The condition is exactly that; a phase without completion evidence still
+  rejects, and the test suite pins each rejected widening.
+- Reject hints no longer advise wiping `.rsct/phase-state.json` — the framework
+  must not recommend editing its own enforcement state. They now point at the
+  phase's `_complete` or at `rsct_phase_abandon`, which records a reason.
+- The V-completion success hint claimed "verification block cleared" while CAP-28
+  had made that false for two releases.
 - `auditFields` had been redeclared identically in **15** files, and the one
   exported from `lib/phase-machine` had no importers. Collapsed into
   `lib/audit-log` beside the type it projects (partially addresses #10).

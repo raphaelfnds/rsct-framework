@@ -30179,11 +30179,13 @@ var phaseVerificationCompleteInputSchema = external_exports.object({
   spec_ref: external_exports.string().min(1, "spec_ref required").describe("Must match the spec_ref recorded by the open V phase in .rsct/phase-state.json."),
   findings_actions: external_exports.array(findingActionSchema).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.'),
   dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
-  clear_phase: external_exports.boolean().default(true).describe("When true, also clears the active phase block (phase/scope_globs/started_at). When false, only the verification sub-block is cleared.")
+  clear_phase: external_exports.boolean().default(true).describe(
+    "DEPRECATED \u2014 ignored. Completing V always clears the active phase block. Kept so an older client passing it is not rejected by the strict schema; remove in the next major."
+  )
 }).strict();
 var phaseVerificationCompleteTool = {
   name: "rsct_phase_verification_complete",
-  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event and clears the verification block (and optionally the active phase). Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the \xA7C dialog.',
+  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) \u2014 it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the \xA7C dialog.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -30220,7 +30222,7 @@ var phaseVerificationCompleteTool = {
       clear_phase: {
         type: "boolean",
         default: true,
-        description: "When true, clears the active phase block in addition to verification."
+        description: "DEPRECATED \u2014 ignored. Completing V always clears the active phase block."
       }
     },
     additionalProperties: false
@@ -30406,11 +30408,9 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   if (prevV?.started_at !== void 0) completedV.started_at = prevV.started_at;
   if (prevV?.persona !== void 0) completedV.persona = prevV.persona;
   newState.verification = completedV;
-  if (input.clear_phase) {
-    delete newState.phase;
-    delete newState.scope_globs;
-    delete newState.started_at;
-  }
+  delete newState.phase;
+  delete newState.scope_globs;
+  delete newState.started_at;
   const writeResult = writePhaseState(projectRoot, newState);
   const completeAudit = appendAudit(
     projectRoot,
@@ -30421,7 +30421,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
-      cleared_phase: input.clear_phase,
+      cleared_phase: true,
       completed_at: completedAt,
       phase_state_written: writeResult.ok
     },
@@ -30432,8 +30432,13 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   const hints = [];
   if (writeResult.ok) {
     hints.push(
-      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; verification block cleared${input.clear_phase ? " and active phase reset" : ""}.`
+      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) \u2014 it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`
     );
+    if (input.clear_phase === false) {
+      hints.push(
+        "Note: `clear_phase` is deprecated and was ignored. Completing V always clears the active phase label; leaving it set only produced a state no tool could resolve without discarding the V record."
+      );
+    }
   } else if (writeResult.reason === "locked") {
     hints.push(
       `\u26A0 V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`
@@ -30459,7 +30464,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     fabrication_signals: gate.fabrication_signals,
     spec_ref: input.spec_ref,
     cleared_verification: writeResult.ok,
-    cleared_phase: writeResult.ok && input.clear_phase,
+    cleared_phase: writeResult.ok,
     actions_summary: summary,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
@@ -30977,7 +30982,8 @@ function startPhaseGeneric(input, config2, internal = {}) {
   const existing = readPhaseState(input.projectRoot);
   const baseState = existing.state ?? {};
   const existingPhase = baseState.phase;
-  if (existingPhase && existingPhase !== input.phase) {
+  const staleVerificationLabel = existingPhase === "verification" && baseState.verification?.completed_at != null;
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
     const audit2 = appendAudit(
       input.projectRoot,
       {
@@ -31004,9 +31010,22 @@ function startPhaseGeneric(input, config2, internal = {}) {
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       hints: [
-        `Phase '${existingPhase}' is already active. Call rsct_phase_${existingPhase}_complete first, or wipe .rsct/phase-state.json, before starting a different phase.`
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
       ]
     };
+  }
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        verification_completed_at: baseState.verification?.completed_at ?? null
+      },
+      config2?.audit
+    );
   }
   const newState = {
     ...baseState,
@@ -31113,7 +31132,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or wipe the state.`
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
       ]
     };
   }

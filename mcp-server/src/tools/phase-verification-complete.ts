@@ -59,7 +59,9 @@ export const phaseVerificationCompleteInputSchema = z
     clear_phase: z
       .boolean()
       .default(true)
-      .describe('When true, also clears the active phase block (phase/scope_globs/started_at). When false, only the verification sub-block is cleared.'),
+      .describe(
+        'DEPRECATED — ignored. Completing V always clears the active phase block. Kept so an older client passing it is not rejected by the strict schema; remove in the next major.',
+      ),
   })
   .strict()
 
@@ -113,7 +115,7 @@ export interface PhaseVerificationCompleteInternal {
 export const phaseVerificationCompleteTool: Tool = {
   name: 'rsct_phase_verification_complete',
   description:
-    '§C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event and clears the verification block (and optionally the active phase). Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the §C dialog.',
+    '§C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) — it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the §C dialog.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -150,7 +152,8 @@ export const phaseVerificationCompleteTool: Tool = {
       clear_phase: {
         type: 'boolean',
         default: true,
-        description: 'When true, clears the active phase block in addition to verification.',
+        description:
+          'DEPRECATED — ignored. Completing V always clears the active phase block.',
       },
     },
     additionalProperties: false,
@@ -356,11 +359,15 @@ export async function phaseVerificationCompleteHandler(
   // findings + discovered_importers + declared_paths intentionally dropped
   // (their content already lives in the audit log as per-finding entries).
   newState.verification = completedV
-  if (input.clear_phase) {
-    delete newState.phase
-    delete newState.scope_globs
-    delete newState.started_at
-  }
+  // The active-phase label is ALWAYS cleared once `completed_at` is stamped: the
+  // phase is over, so a surviving label has no meaning. It used to be optional
+  // via `clear_phase`, whose contract ("when false, only the verification
+  // sub-block is cleared") stopped being true at CAP-28 — the sub-block is now
+  // deliberately preserved, so `false` did nothing except strand a `verification`
+  // label that no tool could clear without also destroying the V record.
+  delete newState.phase
+  delete newState.scope_globs
+  delete newState.started_at
   const writeResult = writePhaseState(projectRoot, newState)
 
   const completeAudit = appendAudit(
@@ -372,7 +379,7 @@ export async function phaseVerificationCompleteHandler(
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
-      cleared_phase: input.clear_phase,
+      cleared_phase: true,
       completed_at: completedAt,
       phase_state_written: writeResult.ok,
     },
@@ -385,8 +392,13 @@ export async function phaseVerificationCompleteHandler(
   const hints: string[] = []
   if (writeResult.ok) {
     hints.push(
-      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; verification block cleared${input.clear_phase ? ' and active phase reset' : ''}.`,
+      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) — it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`,
     )
+    if (input.clear_phase === false) {
+      hints.push(
+        'Note: `clear_phase` is deprecated and was ignored. Completing V always clears the active phase label; leaving it set only produced a state no tool could resolve without discarding the V record.',
+      )
+    }
   } else if (writeResult.reason === 'locked') {
     hints.push(
       `⚠ V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? 'unknown'}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`,
@@ -413,7 +425,7 @@ export async function phaseVerificationCompleteHandler(
     fabrication_signals: gate.fabrication_signals,
     spec_ref: input.spec_ref,
     cleared_verification: writeResult.ok,
-    cleared_phase: writeResult.ok && input.clear_phase,
+    cleared_phase: writeResult.ok,
     actions_summary: summary,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,

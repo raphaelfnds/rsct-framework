@@ -119,7 +119,24 @@ export function startPhaseGeneric(
   const baseState: PhaseState = existing.state ?? {}
   const existingPhase = baseState.phase
 
-  if (existingPhase && existingPhase !== input.phase) {
+  // Stale-label exception (issue #15). A `verification` label whose block already
+  // carries `completed_at` describes finished work: builds predating the fix
+  // could strand it via `clear_phase: false`, and every documented way out
+  // (abandon, wiping the state) also destroyed the V record that
+  // rsct_phase_code_start requires — a closed loop whose only exit was editing
+  // the enforcement file by hand.
+  //
+  // The condition is EXACTLY `phase === 'verification' && completed_at != null`
+  // and must not be widened. Not `verification != null` alone (a V that started
+  // and never completed is what `rejected_incomplete` exists to catch), not other
+  // phase labels (no completion evidence behind them), and not a time-based
+  // heuristic (staleness by clock is not staleness by completion). Anything
+  // looser turns this repair into a general escape hatch from
+  // `phase_already_active` — the behavior the mechanical layer exists to block.
+  const staleVerificationLabel =
+    existingPhase === 'verification' && baseState.verification?.completed_at != null
+
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
     const audit = appendAudit(
       input.projectRoot,
       {
@@ -146,9 +163,25 @@ export function startPhaseGeneric(
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       hints: [
-        `Phase '${existingPhase}' is already active. Call rsct_phase_${existingPhase}_complete first, or wipe .rsct/phase-state.json, before starting a different phase.`,
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`,
       ],
     }
+  }
+
+  // Overwriting a completed label is a state transition worth a forensic record,
+  // so it is audited separately from the `<phase>.start` event that follows.
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: 'phase.stale_label_cleared',
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+      },
+      config?.audit,
+    )
   }
 
   const newState: PhaseState = {
@@ -311,7 +344,7 @@ export async function gatePhaseComplete(
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or wipe the state.`,
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`,
       ],
     }
   }
