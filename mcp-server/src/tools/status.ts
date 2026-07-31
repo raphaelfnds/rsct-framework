@@ -102,11 +102,16 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
   const update = getUpdateNotice()
   if (update.hint) hints.push(update.hint)
 
-  // Install-drift: local compare of this project's stamped rsct_version vs the
-  // running binary (no network / no consent). Distinct axis from the T4 update
-  // check above. Only meaningful when a project config exists.
+  // Install-drift: local compare of this project's stamped rsct_version and of
+  // its installed enforcement scripts vs the running binary (no network / no
+  // consent). Distinct axis from the T4 update check above. Only meaningful when
+  // a project config exists.
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION)
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION,
+    })
     if (drift.hint) hints.push(drift.hint)
   }
 

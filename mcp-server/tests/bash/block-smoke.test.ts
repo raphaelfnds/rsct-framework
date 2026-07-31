@@ -11,6 +11,7 @@ import {
   hasIn,
   type RunBlockResult,
 } from './lib/block-harness.js'
+import { STAMP_RE } from '../../src/lib/version-drift.js'
 
 // T0.c — curated smoke for 3 self-contained, high-risk prompt mutation blocks
 // (gitignore backfill, .rsct.json secrets merge, .mcp.json scrub). Each block is
@@ -887,5 +888,80 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
     // The WARN goes to stderr (success exit 0); the load-bearing guarantee is that the
     // malformed file is left byte-for-byte untouched (no corruption / partial splice).
     expect(readIn(r, 'contracts.json')).toBe(broken)
+  }, 60_000)
+})
+
+// ---------------------------------------------------------------------------
+// Phase 4.V.b / 4.V.d — the version stamp written onto line 2 of every script
+// installed under `.rsct/scripts/`. That line is a FORMAT CONTRACT: bash writes
+// it here, and `lib/version-drift.ts` reads it (issue #16). Nothing else pins
+// it, so an edit to either `echo` would break the reader with no failing test.
+// Both blocks are wrapped in `if [ -n "$SANITIZER_SRC" ]` and read
+// `$RSCT_MCP_VERSION` from block 4.V.a, so the preamble must supply both or the
+// block silently no-ops and the assertions prove nothing.
+const SANITIZER_ANCHOR = 'CHECKPOINT: Phase 4.V.b executing canonical sanitizer script copy'
+const GUARD_ANCHOR = 'CHECKPOINT: Phase 4.V.d executing canonical edit-scope guard install'
+
+const SRC_BODY = "import { readFileSync } from 'node:fs'\nconst marker = 'body-line'\n"
+const SRC_FILE = `#!/usr/bin/env node\n${SRC_BODY}`
+const stampPreamble = (version: string): string =>
+  `SANITIZER_SRC="$(pwd)/fake-dist/sanitize-permissions.js"\nRSCT_MCP_VERSION=${version}`
+
+const lineOf = (r: RunBlockResult, rel: string, n: number): string =>
+  readIn(r, rel).split(/\r?\n/)[n] ?? ''
+
+describe.skipIf(!BASH)('block: script version stamp (01-setup 4.V.b)', () => {
+  const TARGET = '.rsct/scripts/sanitize-permissions.js'
+
+  it('writes the exact stamp format that lib/version-drift.ts parses', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SANITIZER_ANCHOR,
+      preamble: stampPreamble('9.9.9'),
+      seedFiles: { 'fake-dist/sanitize-permissions.js': SRC_FILE },
+    })
+    expect(lineOf(r, TARGET, 0)).toBe('#!/usr/bin/env node')
+    expect(lineOf(r, TARGET, 1)).toBe('// rsct-mcp v=9.9.9 — installed by /rsct-setup')
+    // The reader drops lines 1-2 and compares the rest against the shipped body,
+    // so the source body must survive verbatim from line 3 on.
+    expect(lineOf(r, TARGET, 2)).toBe("import { readFileSync } from 'node:fs'")
+  }, 60_000)
+
+  it('the stamp line matches the regex version-drift.ts uses', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SANITIZER_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { 'fake-dist/sanitize-permissions.js': SRC_FILE },
+    })
+    // The REAL pattern, imported — a local copy would stay green if the reader's
+    // pattern changed, which is exactly what this test exists to prevent.
+    const m = STAMP_RE.exec(lineOf(r, TARGET, 1))
+    expect(m?.[1]).toBe('2.3.0')
+  }, 60_000)
+
+  it('is idempotent — a second run reports no rewrite needed', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SANITIZER_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { 'fake-dist/sanitize-permissions.js': SRC_FILE },
+      runs: 2,
+    })
+    expect(r.out).toContain('no rewrite needed')
+  }, 60_000)
+})
+
+describe.skipIf(!BASH || !NODE)('block: guard version stamp (01-setup 4.V.d)', () => {
+  it('stamps the edit-scope guard with the same format as the sanitizer', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: GUARD_ANCHOR,
+      preamble: stampPreamble('9.9.9'),
+      seedFiles: {
+        'fake-dist/sanitize-permissions.js': SRC_FILE,
+        'fake-dist/edit-scope-guard.js': SRC_FILE,
+        '.claude/settings.json': '{}\n',
+      },
+    })
+    expect(lineOf(r, '.rsct/scripts/edit-scope-guard.js', 1)).toBe(
+      '// rsct-mcp v=9.9.9 — installed by /rsct-setup',
+    )
   }, 60_000)
 })

@@ -29,6 +29,8 @@ export interface GhCreateIssueInput {
   title: string
   body: string
   labels?: string[]
+  /** GitHub issue type, when the host repo exposes any. Omitted otherwise. */
+  type?: string
 }
 
 export function isGhAvailable(): boolean {
@@ -38,6 +40,60 @@ export function isGhAvailable(): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Labels and issue types the HOST repository actually offers.
+ *
+ * The framework must fit the repo's triage vocabulary, never impose its own:
+ * `gh issue create` errors on an unknown `--label`, so a hardcoded default made
+ * the create path fail on any repo that had not been pre-seeded by hand — the
+ * exact friction the tool exists to remove.
+ *
+ * Both lists degrade to empty on ANY failure (gh missing, unauthenticated, no
+ * remote, an older gh without `--json`, a personal repo where issue types are
+ * not a feature). Empty means "attach nothing", which always succeeds — never a
+ * hardcoded fallback that is known to error.
+ */
+export interface GhRepoVocabulary {
+  labels: string[]
+  types: string[]
+  /** False when discovery could not run at all (gh absent / repo unreachable). */
+  discovered: boolean
+}
+
+function ghJson(cwd: string, args: string[]): unknown {
+  try {
+    const stdout = execFileSync('gh', args, { encoding: 'utf8', cwd, stdio: 'pipe' })
+    return JSON.parse(stdout) as unknown
+  } catch {
+    return null
+  }
+}
+
+export function readRepoVocabulary(cwd: string): GhRepoVocabulary {
+  if (!isGhAvailable()) return { labels: [], types: [], discovered: false }
+
+  const rawLabels = ghJson(cwd, ['label', 'list', '--limit', '200', '--json', 'name'])
+  const labels = Array.isArray(rawLabels)
+    ? rawLabels
+        .map((l) => (l as { name?: unknown })?.name)
+        .filter((n): n is string => typeof n === 'string' && n.length > 0)
+    : []
+
+  // Issue types are an organization-level feature; a personal repo simply has
+  // none, and the endpoint 404s. Absence is normal, not an error.
+  const rawTypes = ghJson(cwd, [
+    'api',
+    'repos/{owner}/{repo}/issues/types',
+    '--jq',
+    '[.[].name]',
+  ])
+  const types = Array.isArray(rawTypes)
+    ? rawTypes.filter((t): t is string => typeof t === 'string' && t.length > 0)
+    : []
+
+  return { labels, types, discovered: rawLabels !== null }
 }
 
 export function createIssue(input: GhCreateIssueInput): GhCreateIssueResult {
@@ -50,10 +106,11 @@ export function createIssue(input: GhCreateIssueInput): GhCreateIssueResult {
     }
   }
 
-  const args = ['issue', 'create', '--title', input.title, '--body', input.body]
+  const baseArgs = ['issue', 'create', '--title', input.title, '--body', input.body]
   for (const label of input.labels ?? []) {
-    args.push('--label', label)
+    baseArgs.push('--label', label)
   }
+  const args = input.type ? [...baseArgs, '--type', input.type] : baseArgs
 
   try {
     const stdout = execFileSync('gh', args, {
@@ -71,6 +128,14 @@ export function createIssue(input: GhCreateIssueInput): GhCreateIssueResult {
     const errObj = err as { message?: string; stderr?: Buffer | string }
     const stderr = errObj?.stderr ? String(errObj.stderr) : ''
     const errorText = errObj?.message ?? 'gh issue create failed'
+
+    // `--type` needs gh ≳2.60, while the API endpoint that discovers types works
+    // on every version — so a repo WITH issue types plus an older gh would fail
+    // every create. Retry once without it: the type is a nicety, the issue is not.
+    if (input.type && /unknown flag: --type/i.test(stderr)) {
+      const { type: _dropped, ...withoutType } = input
+      return createIssue(withoutType)
+    }
 
     if (
       stderr.toLowerCase().includes('authentication') ||

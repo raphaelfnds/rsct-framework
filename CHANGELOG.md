@@ -10,6 +10,119 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.3.0] - 2026-07-31
+
+Repairs from the first extended field test. Backward-compatible; the marker
+**schema id stays `v=1.0.0`** (frozen). Tool count unchanged at **39**.
+
+### Added
+
+- **Install drift is now ranked, and the ranking is evidence-based** (#16).
+  Drift was detected but delivered as one unranked suggestion, so "your prompts
+  lag a version" and "an enforcement script is not installed here" read
+  identically — and a project could run for weeks with no permission sanitizer
+  while every surface reported healthy. `getInstallDriftNotice` now returns a
+  `severity` and names the components involved.
+  Two tiers, split by what can actually be proven locally. **`security`** fires
+  only when a script under `.rsct/scripts/` is **absent** — unambiguous, and it
+  means that enforcement is simply not running. A script whose body merely
+  **differs** from the one the binary ships is reported at the normal tier
+  instead: those scripts are bundles that embed the config layer, so an
+  unrelated `.rsct.json` key changes their bytes, and ranking that as a security
+  event would fire for every project on nearly every release — a signal that is
+  always on is a signal nobody reads. RSCT reports that they differ, which is
+  what it can prove, and does not claim a fix is missing.
+  Comparison is by content, not version: the line-2 stamp carries the *release*
+  version and `.rsct.json` `rsct_version` comes from the same axis, so a version
+  rule could not tell the two tiers apart at all. Surfaced in `rsct_status` /
+  `rsct_load_context`, prepended in `rsct_request_commit`, and recorded as
+  `install.drift_detected`. Always suggestion-only; never blocks. Fail-safe
+  throughout: an unreadable file, an unresolvable reference, a directory that
+  cannot be listed, or a `v=unknown` stamp never escalate.
+- `docs/troubleshooting.md` documents both drift messages and the new commit
+  rejection, with the IDE-restart step the update flow depends on. Install drift
+  had no user-facing documentation at all.
+- **Commit messages are capped at 15 non-empty lines** (#20). Everything else
+  about a commit was gated — authorization, branch protection, secrets, contract
+  surface — except its message, so bodies grew to re-narrate the diff file by
+  file and `git log` stopped being scannable. `rsct_request_commit` now rejects
+  with `message_too_long` **before** the §C dialog, so nothing is approved, and
+  no plan-token action or free-commit slot is spent, on a commit already destined
+  to be rejected. Blank lines are not counted; `commit_message_max_lines` in
+  `.rsct.json` (top level) raises the cap and is clamped rather than validated,
+  since nulling the whole config over a cosmetic limit would be disproportionate.
+  Length only — no opinion on Conventional Commits or subject grammar.
+  The reject hint states the count, the limit and the config key, because the
+  `rules/` prose explaining it never reaches an already-installed project.
+
+### Changed
+
+- `rsct_request_commit` gained an internal **advisory channel**. Hints were
+  previously assembled only on the success path, after the commit ran; each of
+  the seven reject envelopes built its own. Advisories are now drained through
+  every return path, so a report is not swallowed by a rejected commit.
+- CI runs `npm run typecheck`. `vitest` transpiles without type checking, so a
+  signature change previously had no compile-time net in CI.
+- A compile-time parity guard now ties the `RsctConfig` interface to the Zod
+  schema that validates `.rsct.json`. They are written separately and joined by
+  an unchecked cast, so a key added to only one of them failed in the worst
+  possible way: `.strip()` dropped it at runtime while the cast told TypeScript
+  it was there, leaving the feature reading it permanently dead.
+- `mcp-server/README.md` bounds table corrected: `trust_allowed_for[]` lists 11
+  tools (not 3), and `approval_modes` has been `.strip()`, not `.strict()`, since
+  2.2.0.
+- The line-2 version stamp written by `/rsct-setup` (Phases 4.V.b / 4.V.d) is now
+  a documented format contract with `mcp-server/src/lib/version-drift.ts`, pinned
+  by `block-smoke` anchors on both blocks.
+
+
+### Deprecated
+
+- **`clear_phase` on `rsct_phase_verification_complete` is ignored** (#15).
+  Completing V now always clears the active phase label. The parameter stays in
+  the schema so an older client passing it is not rejected, and passing `false`
+  returns a hint saying it was ignored; it will be removed in the next major.
+  Its documented contract ("when false, only the verification sub-block is
+  cleared") stopped being true at CAP-28, when the sub-block became the evidence
+  `rsct_phase_code_start` reads and was deliberately preserved.
+
+### Fixed
+
+- **`rsct_capture_issue` fits the host repository's vocabulary** (#18). It
+  defaulted to the labels `auto-captured` / `rsct`, which exist in no repository
+  unless someone created them by hand — and `gh issue create` errors on an
+  unknown label, so the create path failed by default in exactly the situation
+  the tool was built for. It now reads the repo's own labels (and its issue
+  types, where the organization has them), picks by severity from what is
+  actually there, and creates the issue **unlabeled** rather than failing when
+  nothing matches. Caller-supplied labels are still honored verbatim; one that
+  does not exist produces a warning rather than a silent drop. Discovery failure
+  (no `gh`, unauthenticated, no remote) degrades to unlabeled. The framework
+  never creates a label or an issue type in someone else's repository.
+  Discovery runs only **after** the §C gate is satisfied — it shells out,
+  including two authenticated API reads, and no §C-gated tool may produce an
+  external effect before its gate; `mode="draft"` never discovers at all.
+  `--type` is retried without the flag when the installed `gh` is too old to
+  know it.
+- **A completed V phase could strand an unresolvable `verification` label** (#15).
+  With `clear_phase: false` the label survived, `rsct_phase_code_start` then
+  rejected with `phase_already_active`, and every documented way out —
+  `rsct_phase_abandon`, or the "wipe `.rsct/phase-state.json`" the reject hint
+  itself suggested — also destroyed the V record that the same gate requires.
+  A closed loop whose only exit was hand-editing the enforcement file.
+  `startPhaseGeneric` now accepts a phase start over a `verification` label whose
+  block carries `completed_at`, emitting `phase.stale_label_cleared` to the audit
+  log. The condition is exactly that; a phase without completion evidence still
+  rejects, and the test suite pins each rejected widening.
+- Reject hints no longer advise wiping `.rsct/phase-state.json` — the framework
+  must not recommend editing its own enforcement state. They now point at the
+  phase's `_complete` or at `rsct_phase_abandon`, which records a reason.
+- The V-completion success hint claimed "verification block cleared" while CAP-28
+  had made that false for two releases.
+- `auditFields` had been redeclared identically in **15** files, and the one
+  exported from `lib/phase-machine` had no importers. Collapsed into
+  `lib/audit-log` beside the type it projects (partially addresses #10).
+
 ## [2.2.0] - 2026-07-13
 
 The **plan-lifecycle-v2** track — reshapes the commit→integrate→re-plan lifecycle

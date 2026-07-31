@@ -2957,6 +2957,19 @@ The script is invoked as `node <path>` from the hook, so a `// comment`
 between the shebang and the imports is parsed away by Node without
 behavioral change.
 
+> **Line-2 stamp — authoritative format (issue #16).** The two `echo`
+> lines below (here and in Phase 4.V.d) are the sole writers of
+> `// rsct-mcp v=<version> — installed by /rsct-setup`, and
+> `mcp-server/src/lib/version-drift.ts` is the reader: it parses the
+> version for display with `/^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/`, and —
+> more load-bearing — it drops exactly **lines 1-2** of the installed file
+> to recover the shipped body for its content comparison. So the layout is
+> fixed at *shebang on line 1, stamp on line 2, source body from line 3*.
+> Changing either `echo` must be done together with that reader. Both
+> blocks are pinned by `tests/bash/block-smoke.test.ts` (anchors
+> `Phase 4.V.b` / `Phase 4.V.d`), which asserts the produced line 2
+> verbatim.
+
 ```bash
 echo "  CHECKPOINT: Phase 4.V.b executing canonical sanitizer script copy"
 if [ -n "$SANITIZER_SRC" ]; then
@@ -3362,7 +3375,7 @@ session boot.
      grep -IinE "$LEAK_RE" "$f" /dev/null
    done < <(git ls-files --others --exclude-standard 2>/dev/null)
    ```
-5. Suggest commit message (< 100 chars):
+5. Suggest commit message (subject line only, aim for < 72 chars — this is a subject-length rule; the commit BODY is separately capped at 15 non-empty lines by `rsct_request_commit`):
    ```
    chore: apply RSCT v1.0.0 [migrated: §X §Y] [added: §Z] + docs
    ```

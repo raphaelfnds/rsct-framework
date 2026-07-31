@@ -32,7 +32,13 @@ import {
   type DevApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
-import { appendAuditEntry, type AuditAppendResult } from '../lib/audit-log.js'
+import {
+  appendAuditEntry,
+  auditFields,
+} from '../lib/audit-log.js'
+import { RSCT_MCP_VERSION } from '../lib/version.js'
+import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { checkCommitMessage } from '../lib/commit-message.js'
 import {
   promptYesNo,
   type DialogOptions,
@@ -97,6 +103,7 @@ export type RequestCommitRejectKind =
   | 'contract_surface'
   | 'plan_token_invalid'
   | 'free_budget_reserve_failed'
+  | 'message_too_long'
 
 /**
  * How the commit was authorized: a per-action dev_approval, a plan token, or
@@ -239,7 +246,8 @@ export const requestCommitTool: Tool = {
       },
       message: {
         type: 'string',
-        description: 'Commit message.',
+        description:
+          'Commit message. Keep it to 15 non-empty lines at most (blank lines are not counted): what changed and why, not a file-by-file narration of the diff. Over that, the call is rejected with `message_too_long` before any approval is requested. A project can raise the cap with `commit_message_max_lines` in .rsct.json.',
       },
       dev_approval: {
         type: 'object',
@@ -286,6 +294,85 @@ export async function requestCommitHandler(
   const branchLabel = gitState.branch ?? '<no-branch>'
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
+
+  // Advisory channel. Checks that must be *reported* rather than *gated* push
+  // here, and every return path — success, the eight rejects and mutation_failed
+  // — drains it via `withAdvisories`. Populated before the commit runs, so an
+  // advisory derived from the staged diff still has an index to read, and so a
+  // rejected commit does not swallow the warning.
+  const advisories: string[] = []
+  const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
+
+  // Install drift, security tier only: an enforcement script under
+  // `.rsct/scripts/` is absent or differs from the copy this binary ships, so
+  // fixes to it are not running here. Evaluated before authorization, so the
+  // advisory reaches the dev on rejected attempts too, and prepended because it
+  // outranks the routine hint tail. The audit entry follows the same rule — it
+  // records that a commit was ATTEMPTED under a degraded enforcement surface,
+  // which is the fact worth reconstructing later. Never blocks.
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice({
+      projectRoot,
+      projectVersion: config?.rsct_version ?? null,
+      mcpVersion: RSCT_MCP_VERSION,
+    })
+    if (drift.severity === 'security' && drift.hint) {
+      advisories.unshift(drift.hint)
+      appendAudit(
+        projectRoot,
+        {
+          event: 'install.drift_detected',
+          tool: 'rsct_request_commit',
+          project_version: config?.rsct_version ?? null,
+          mcp_version: RSCT_MCP_VERSION,
+          severity: drift.severity,
+          stale_components: drift.stale_components,
+        },
+        config?.audit,
+      )
+    }
+  }
+
+  // Message shape (#20). Runs BEFORE authorization by necessity, not by taste:
+  // `gateRequest` below pops an OS dialog, and further down the token path debits
+  // an action while the free lane reserves budget. Checking any later would ask
+  // the dev to approve — or spend budget on — a commit already destined to be
+  // rejected. Nothing has been read or mutated at this point, so the envelope
+  // mirrors the other pre-authorization rejects.
+  const messageCheck = checkCommitMessage(input.message, config)
+  if (!messageCheck.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: 'message_too_long',
+        reason: messageCheck.reason,
+        branch: gitState.branch,
+        message_lines: messageCheck.lines,
+        message_limit: messageCheck.limit,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: 'message_too_long',
+      reason: messageCheck.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([messageCheck.reason ?? 'commit message too long']),
+    }
+  }
 
   // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
   let channel: CommitChannel
@@ -338,7 +425,9 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+        hints: withAdvisories([
+          `Approval rejected (${gate.reject_kind}): ${gate.reason}`,
+        ]),
       }
     }
 
@@ -412,7 +501,9 @@ export async function requestCommitHandler(
           ...auditFields(audit),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [`Approval rejected (plan_token_invalid): ${reason}`],
+          hints: withAdvisories([
+            `Approval rejected (plan_token_invalid): ${reason}`,
+          ]),
         }
       }
 
@@ -465,7 +556,7 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -528,7 +619,7 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -628,7 +719,7 @@ export async function requestCommitHandler(
           ...auditFields(audit),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [reason],
+          hints: withAdvisories([reason]),
         }
       }
       // Override invoked — audit the waiver (parallel to the secrets override).
@@ -705,7 +796,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason],
+        hints: withAdvisories([reason]),
       }
     }
   } else if (freeCtx) {
@@ -746,7 +837,7 @@ export async function requestCommitHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason],
+        hints: withAdvisories([reason]),
       }
     }
 
@@ -846,11 +937,11 @@ export async function requestCommitHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [
+      hints: withAdvisories([
         authorizedVia === 'plan_token' || authorizedVia === 'free_commit'
           ? `git commit failed — fix the underlying error and retry.${refundNote}`
           : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
-      ],
+      ]),
     }
   }
 
@@ -1060,23 +1151,7 @@ export async function requestCommitHandler(
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
     anti_replay_error: antiReplayError,
-    hints,
+    hints: withAdvisories(hints),
   }
 }
 
-/**
- * Project an `AuditAppendResult` to the `(audit_path, audit_error)` pair
- * surfaced in `RequestCommitOutput`. `audit.enabled: false` is NOT
- * treated as an error — only real write failures populate `audit_error`.
- */
-function auditFields(r: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (r.ok) return { audit_path: r.path, audit_error: null }
-  if (r.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? 'write_failed',
-  }
-}

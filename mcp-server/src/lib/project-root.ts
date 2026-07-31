@@ -58,6 +58,13 @@ export interface RsctConfig {
    * PH-1 code-start gate vocabulary and would collide.
    */
   plan_file_retention?: 'ephemeral' | 'documented'
+  /**
+   * Maximum non-empty lines in a commit message (issue #20). Absent = the
+   * built-in default. TOP-LEVEL by design, not under `approval_modes`: that
+   * sub-object only became `.strip()` in 2.2.0, so a key placed there would null
+   * the ENTIRE config on any downgrade below that version.
+   */
+  commit_message_max_lines?: number
   install?: {
     applied_at?: string
     mode?: string
@@ -184,6 +191,12 @@ const RsctConfigSchema = z
     // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
     // tolerant of its presence). Absent ⇒ 'ephemeral'.
     plan_file_retention: z.enum(['ephemeral', 'documented']).optional(),
+    // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
+    // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
+    // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
+    // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
+    // "unset"; the resolver clamps the range at the point of use.
+    commit_message_max_lines: z.number().optional().catch(undefined),
     install: z
       .object({
         applied_at: z.string().optional(),
@@ -211,6 +224,23 @@ const RsctConfigSchema = z
   // optional fields in a future version doesn't break installs running
   // older mcp-servers. Dangerous fields above are individually `.strict()`.
   .strip()
+
+/**
+ * Compile-time parity between the hand-written `RsctConfig` interface and the
+ * schema that actually validates the file. They are maintained separately and
+ * joined by an unchecked `as RsctConfig` cast in `readRsctConfig`, so a key added
+ * to only ONE of them fails silently in the worst direction: `.strip()` drops it
+ * at runtime while the cast tells TypeScript it is there, and the feature reading
+ * it is dead forever. Assignability alone does not catch this (every field is
+ * optional, so both directions pass), hence the key-set comparison.
+ */
+type ExpectNever<T extends never> = T
+type _KeysMissingFromSchema = ExpectNever<
+  Exclude<keyof RsctConfig, keyof z.infer<typeof RsctConfigSchema>>
+>
+type _KeysMissingFromInterface = ExpectNever<
+  Exclude<keyof z.infer<typeof RsctConfigSchema>, keyof RsctConfig>
+>
 
 /**
  * Locate the rsct project root.

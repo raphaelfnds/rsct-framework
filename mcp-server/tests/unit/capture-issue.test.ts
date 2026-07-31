@@ -11,12 +11,21 @@ import { tmpdir } from 'node:os'
 
 import {
   captureIssueHandler,
+  resolveLabels,
   type CaptureIssueOutput,
 } from '../../src/tools/capture-issue.js'
 import type {
   GhCreateIssueResult,
+  GhRepoVocabulary,
 } from '../../src/lib/gh.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+
+/**
+ * Host-repo discovery must never reach the real `gh` from a unit test: it would
+ * make the suite depend on the machine's GitHub auth and network, which showed
+ * up as intermittent 5s timeouts. Every create-mode test stubs it.
+ */
+const STUB_VOCAB: GhRepoVocabulary = { labels: ['bug', 'enhancement'], types: [], discovered: true }
 
 let tmpRoot: string
 
@@ -179,6 +188,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: dialog({ response: 'no', channel: 'windows' }),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghOk('http://github.com/org/repo/issues/1'),
       },
     )) as CaptureIssueOutput
@@ -198,6 +208,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghFail('not_authenticated', 'gh auth login required'),
       },
     )) as CaptureIssueOutput
@@ -217,6 +228,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghFail('no_remote', 'no git remote configured'),
       },
     )) as CaptureIssueOutput
@@ -237,6 +249,7 @@ describe('rsct_capture_issue — mode=create §C path', () => {
         now: FIXED_NOW,
         promptFn: alwaysYes(),
         ghAvailable: () => true,
+        ghVocabulary: () => STUB_VOCAB,
         ghCreate: ghOk(expectedUrl),
       },
     )) as CaptureIssueOutput
@@ -296,5 +309,167 @@ describe('rsct_capture_issue — input validation', () => {
         bogus: 'x',
       }),
     ).rejects.toThrow()
+  })
+})
+
+describe('resolveLabels — fit the host repo, never impose (#18)', () => {
+  const vocab = (labels: string[], types: string[] = []): GhRepoVocabulary => ({
+    labels,
+    types,
+    discovered: true,
+  })
+  const DEFAULTS = [
+    'bug',
+    'documentation',
+    'duplicate',
+    'enhancement',
+    'good first issue',
+    'help wanted',
+    'invalid',
+    'question',
+    'wontfix',
+  ]
+
+  it('maps a high-severity finding to the repo\'s bug label', () => {
+    const r = resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(DEFAULTS) })
+    expect(r.labels).toEqual(['bug'])
+    expect(r.decision).toContain('severity=high')
+  })
+
+  it('maps a low-severity finding to enhancement', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'low', vocabulary: vocab(DEFAULTS) }).labels,
+    ).toEqual(['enhancement'])
+  })
+
+  it('falls back to the second preference when the first is absent', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(['enhancement']) })
+        .labels,
+    ).toEqual(['enhancement'])
+  })
+
+  it('returns the repo\'s own spelling, matched case-insensitively', () => {
+    expect(
+      resolveLabels({ requested: undefined, severity: 'high', vocabulary: vocab(['Bug']) }).labels,
+    ).toEqual(['Bug'])
+  })
+
+  it('creates UNLABELED rather than failing when nothing matches', () => {
+    // The whole defect: a hardcoded default made `gh issue create` error on any
+    // repo that had not been pre-seeded by hand.
+    const r = resolveLabels({
+      requested: undefined,
+      severity: 'high',
+      vocabulary: vocab(['triage', 'p1']),
+    })
+    expect(r.labels).toEqual([])
+    expect(r.decision).toContain('none of the preferred labels')
+  })
+
+  it('creates unlabeled when discovery could not run at all', () => {
+    const r = resolveLabels({
+      requested: undefined,
+      severity: 'high',
+      vocabulary: { labels: [], types: [], discovered: false },
+    })
+    expect(r.labels).toEqual([])
+    expect(r.decision).toContain('could not be read')
+  })
+
+  it('honors caller labels verbatim, warning — never dropping — an unknown one', () => {
+    const r = resolveLabels({
+      requested: ['bug', 'typoo'],
+      severity: 'high',
+      vocabulary: vocab(DEFAULTS),
+    })
+    expect(r.labels).toEqual(['bug', 'typoo'])
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain("'typoo'")
+  })
+
+  it('does not warn about caller labels when discovery failed — it cannot know', () => {
+    const r = resolveLabels({
+      requested: ['anything'],
+      severity: 'high',
+      vocabulary: { labels: [], types: [], discovered: false },
+    })
+    expect(r.labels).toEqual(['anything'])
+    expect(r.warnings).toEqual([])
+  })
+
+  it('picks an issue type when the repo exposes them, and omits it otherwise', () => {
+    expect(
+      resolveLabels({
+        requested: undefined,
+        severity: 'critical',
+        vocabulary: vocab(DEFAULTS, ['Bug', 'Feature', 'Task']),
+      }).type,
+    ).toBe('Bug')
+    // Personal repos have no issue types — the flag must simply not be passed.
+    expect(
+      resolveLabels({ requested: undefined, severity: 'critical', vocabulary: vocab(DEFAULTS) })
+        .type,
+    ).toBeNull()
+  })
+})
+
+describe('rsct_capture_issue — discovery is gated by §C, not just by mode (#18)', () => {
+  function spyVocab(): { calls: number; fn: () => GhRepoVocabulary } {
+    const state = { calls: 0, fn: () => ({ labels: [], types: [], discovered: false }) }
+    state.fn = () => {
+      state.calls++
+      return { labels: ['bug'], types: [], discovered: true }
+    }
+    return state
+  }
+
+  it('does not touch gh in draft mode', async () => {
+    const spy = spyVocab()
+    await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'draft' },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => true },
+    )
+    expect(spy.calls).toBe(0)
+  })
+
+  it('does not touch gh when dev_approval is missing', async () => {
+    // Discovery shells out — including two authenticated GitHub API reads. No
+    // §C-gated tool may produce an external effect before its gate, and the
+    // repo's label vocabulary must not come back to an unapproved caller.
+    const spy = spyVocab()
+    const r = (await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create' },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => true },
+    )) as CaptureIssueOutput
+    expect(r.status).toBe('missing_dev_approval')
+    expect(spy.calls).toBe(0)
+    expect(r.suggested_gh_command).not.toContain('--label')
+  })
+
+  it('does not touch gh when the CLI is unavailable', async () => {
+    const spy = spyVocab()
+    await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create', dev_approval: approval() },
+      { now: FIXED_NOW, ghVocabulary: spy.fn, ghAvailable: () => false, promptFn: alwaysYes() },
+    )
+    expect(spy.calls).toBe(0)
+  })
+
+  it('discovers exactly once on an approved create', async () => {
+    const spy = spyVocab()
+    const r = (await captureIssueHandler(
+      { project_root: tmpRoot, ...SAMPLE, mode: 'create', dev_approval: approval() },
+      {
+        now: FIXED_NOW,
+        ghVocabulary: spy.fn,
+        ghAvailable: () => true,
+        promptFn: alwaysYes(),
+        ghCreate: () => ({ ok: true, url: 'https://x/1', raw_stdout: 'https://x/1' }),
+      },
+    )) as CaptureIssueOutput
+    expect(r.status).toBe('created')
+    expect(spy.calls).toBe(1)
+    expect(r.hints.some((h) => h.includes("'bug' matched"))).toBe(true)
   })
 })

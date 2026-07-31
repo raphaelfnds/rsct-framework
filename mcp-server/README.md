@@ -80,6 +80,7 @@ never trips the gate.
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 | flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
 | plan-lifecycle-v2 — dialog-free free-commit lane (audit-anchored anti-rollback ceiling + sliding token) · integration gate (mechanical `plan_complete` cross-check + advisory-only cleanup + `rsct_plan_dispose` + retroactive reconciliation) · `rsct_request_rebase` (rebase/squash) · re-bootstrap `context_stale` flag + PreToolUse edit-scope guard · settings.json machine-path hygiene · unified idempotent `/rsct-universe` · `plan_file_retention` toggle | ✅ shipped to `main`; ships in **v2.2.0** (brings the catalog 37 → **39 tools**) |
+| field-test-repairs — install-drift ranking (content evidence; `security` only when an enforcement script is **absent**) · V-phase stale-label repair + `clear_phase` deprecation · commit-message cap (`message_too_long`) · `rsct_capture_issue` adapts to the host repo's labels/types · advisory channel on every `request_commit` return path · `auditFields` collapsed 15 → 1 | ✅ shipped to `main`; ships in **v2.3.0** (39 tools, unchanged) |
 
 **39 tools · 5 resources · tsc strict · ESM ~250 KB
 (server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
@@ -510,7 +511,8 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
-- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`), `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected commits too. Today: the security-tier install-drift warning (an enforcement script under `.rsct/scripts/` is absent or differs from the copy this binary ships).
 
 Approval consumption rule: never burn the approval on pre-mutation
 rejects. Only `recordConsumedApproval` AFTER a successful commit.
@@ -662,9 +664,11 @@ Bounds:
 |---|---|---|
 | `audit.enabled` | must be `true` or absent (literal in schema) | `false` defeats INV-3 forensic trail |
 | `approval_modes.timestamp_skew_seconds` | `60 ≤ n ≤ 600` | M2 gate observed 78–155s AI roundtrip; 600s = 4× headroom while still bounding INV-2 replay window |
-| `approval_modes.trust_allowed_for[]` | enum of `rsct_request_commit`/`_push`/`_merge` | unknown entries can't smuggle a wildcard trust |
+| `approval_modes.trust_allowed_for[]` | enum of the §C-gated tool names (11 entries — see `RsctApprovalModesSchema`) | unknown entries can't smuggle a wildcard trust |
 | `protected_branches[]` | min length 1 if present | empty disables §D wholesale; if you want zero protected branches, uninstall the framework |
-| `audit` / `approval_modes` sub-objects | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
+| `audit` sub-object | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
+| `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
+| `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

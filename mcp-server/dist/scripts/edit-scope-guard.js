@@ -4153,6 +4153,12 @@ var RsctConfigSchema = external_exports.object({
   // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
   // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
+  // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
+  // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
+  // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
+  // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
+  // "unset"; the resolver clamps the range at the point of use.
+  commit_message_max_lines: external_exports.number().optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),

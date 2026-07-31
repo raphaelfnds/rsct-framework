@@ -178,3 +178,46 @@ describe('phase-verification-start — input validation', () => {
     expect(out.spec_tier).toBe('standard')
   })
 })
+
+/**
+ * Load-bearing invariant for issue #15's stale-label exception.
+ *
+ * `startPhaseGeneric` lets a phase start over a `verification` label whose block
+ * carries `completed_at`. That is safe ONLY because a fresh V-start rebuilds the
+ * verification block from scratch, so `completed_at` can never survive into a
+ * newly opened V. If a future refactor "preserved previous metadata" by
+ * spreading the old block, an agent could arm the exception at will and defeat
+ * `phase_already_active` from any phase, at no cost.
+ *
+ * Nothing else pins this. That is what this test is for.
+ */
+describe('phase-verification-start — a new V never inherits completed_at (#15)', () => {
+  it('drops a stale completed_at when re-opening V over a completed block', async () => {
+    writeRsctConfig()
+    writeFile(
+      '.rsct/phase-state.json',
+      JSON.stringify({
+        spec_slug: 'feat-foo',
+        verification: {
+          spec_ref: 'feat-foo',
+          spec_tier: 'standard',
+          started_at: '2026-01-01T00:00:00.000Z',
+          completed_at: '2026-01-01T01:00:00.000Z',
+        },
+      }),
+    )
+
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-foo',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+
+    const state = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
+    ) as { phase?: string; verification?: { completed_at?: string } }
+    expect(state.phase).toBe('verification')
+    expect(state.verification?.completed_at).toBeUndefined()
+  })
+})

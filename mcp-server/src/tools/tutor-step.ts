@@ -6,8 +6,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import {
   appendAuditEntry,
+  auditFields,
   resolveAuditPath,
-  type AuditAppendResult,
 } from '../lib/audit-log.js'
 
 const STEP_KIND_VALUES = [
@@ -84,18 +84,6 @@ export const tutorStepTool: Tool = {
     },
     additionalProperties: false,
   },
-}
-
-function auditFields(audit: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null }
-  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? 'write_failed',
-  }
 }
 
 function countPriorSteps(auditPath: string, specRef: string): number {

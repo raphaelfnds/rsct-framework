@@ -42,3 +42,11 @@ dialog + audit log entry per call):
 The MCP layer + SessionStart sanitizer hook close the "trust-forever"
 bypass surface that pure prose cannot. Without `rsct-mcp` installed,
 this rule is enforced only by Claude's own compliance.
+
+Commit message length: keep it to **15 non-empty lines at most**. Say what
+changed and why; do not narrate the diff file by file — the diff already shows
+that, and a long body encodes a session narrative that ages badly and makes
+`git log` unscannable. Blank lines are not counted, so paragraph spacing is
+free. `rsct_request_commit` enforces this mechanically and rejects before the
+§C dialog, so an over-long message costs nothing but a rewrite. A project that
+genuinely wants longer messages sets `commit_message_max_lines` in `.rsct.json`.

@@ -264,7 +264,7 @@ describe('phase-verification-complete — happy path', () => {
     ).toBe(2)
   })
 
-  it('clear_phase=false keeps phase and other top-level fields intact', async () => {
+  it('clear_phase=false is ignored — the label is cleared anyway (#15)', async () => {
     writeRsctConfig()
     writeFile(
       '.rsct/phase-state.json',
@@ -294,21 +294,28 @@ describe('phase-verification-complete — happy path', () => {
     )) as PhaseVerificationCompleteOutput
 
     expect(out.status).toBe('completed')
-    expect(out.cleared_phase).toBe(false)
+    expect(out.cleared_phase).toBe(true)
+    // The deprecation is surfaced, not silent — the caller learns the flag did
+    // nothing rather than discovering it from state that does not match.
+    expect(out.hints.some((h) => h.includes('`clear_phase` is deprecated'))).toBe(true)
 
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    // CAP-28: verification block kept as audit trail (with completed_at);
-    // arrays pruned but metadata + clear_phase=false preserves rest.
+    // CAP-28: the verification block is kept as the evidence rsct_phase_code_start
+    // reads (arrays pruned, metadata + completed_at retained). #15: the active
+    // phase label goes regardless of clear_phase, so it cannot strand.
     const stateV = state.verification as
       | { spec_ref?: string; completed_at?: string }
       | undefined
     expect(stateV).toBeDefined()
     expect(stateV?.spec_ref).toBe('feat-foo')
     expect(stateV?.completed_at).toBeDefined()
-    expect(state.phase).toBe('verification')
-    expect(state.scope_globs).toEqual(['src/**/*.ts'])
+    expect(state.phase).toBeUndefined()
+    expect(state.scope_globs).toBeUndefined()
+    expect(state.started_at).toBeUndefined()
+    // Untouched top-level fields survive.
+    expect(state.spec_slug).toBe('feat-foo')
   })
 })
 

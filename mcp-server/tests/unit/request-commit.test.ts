@@ -1001,3 +1001,216 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
     expect(out.reject_kind).toBe('protected_branch') // INV-5 runs before the INV-7 gate
   })
 })
+
+describe('rsct_request_commit — install-drift advisory (#16)', () => {
+  // tmpRoot has a .rsct.json but no .rsct/scripts, so both enforcement scripts
+  // read as absent → severity 'security'. That is the realistic shape of a
+  // project set up before the MCP companion existed, and absence is the only
+  // state the check will call a security matter.
+  const SECURITY = /SECURITY: an RSCT enforcement script is missing/
+
+  function driftInternal(branch: string): RequestCommitInternal {
+    return {
+      gitStateOverride: gitState(branch),
+      gitExecutor: gitExecutorMock(
+        {
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'commit -m feat: x': COMMIT_OK,
+        },
+        { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+      ),
+      promptFn: alwaysYes(),
+      now: FIXED_NOW,
+    }
+  }
+
+  it('prepends the advisory on a successful commit and audits the detection', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      driftInternal('feat/drift'),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    // Prepended: it must outrank the routine hint tail, not trail behind it.
+    expect(out.hints[0]).toMatch(SECURITY)
+    const log = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+    const entry = log
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'install.drift_detected')
+    expect(entry).toBeDefined()
+    expect(entry?.severity).toBe('security')
+    expect(entry?.tool).toBe('rsct_request_commit')
+    expect((entry?.stale_components as unknown[]).length).toBe(2)
+  })
+
+  it('still carries the advisory when the commit is REJECTED', async () => {
+    // The whole point of the advisory drain: a rejected commit must not swallow
+    // a warning about the enforcement surface being degraded.
+    writeConfig(tmpRoot, rsctConfig({ protected_branches: ['main'] }))
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'feat: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      driftInternal('main'),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+    expect(out.hints.some((h) => SECURITY.test(h))).toBe(true)
+  })
+
+  it('is silent when the project is not an RSCT install', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'rsct-rc-plain-'))
+    try {
+      const out = (await callCommit(
+        {
+          project_root: plain,
+          message: 'feat: x',
+          dev_approval: approval(),
+          staged_diff_override: cleanDiff(),
+        },
+        driftInternal('feat/none'),
+      )) as RequestCommitOutput
+      expect(out.hints.some((h) => SECURITY.test(h))).toBe(false)
+    } finally {
+      rmSync(plain, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('rsct_request_commit — commit message length (#20)', () => {
+  const longMessage = Array.from({ length: 16 }, (_, i) => `line ${i + 1}`).join('\n')
+
+  it('rejects before the §C dialog — no approval prompt for a doomed commit', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    let prompted = false
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: longMessage,
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      {
+        gitStateOverride: gitState('feat/long'),
+        promptFn: async () => {
+          prompted = true
+          return { ok: true, answer: 'yes' } as DialogResult
+        },
+        now: FIXED_NOW,
+      },
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('message_too_long')
+    expect(prompted).toBe(false)
+    expect(out.authorized_via).toBeNull()
+    expect(out.sha_after).toBeNull()
+  })
+
+  it('the hint states the count, the limit and the config key', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const out = (await callCommit(
+      { project_root: tmpRoot, message: longMessage, dev_approval: approval() },
+      { gitStateOverride: gitState('feat/long'), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestCommitOutput
+    const hint = out.hints.join(' ')
+    expect(hint).toContain('16 non-empty lines')
+    expect(hint).toContain('limit is 15')
+    expect(hint).toContain('commit_message_max_lines')
+  })
+
+  it('does not consume the dev_approval — the same one still works after a rewrite', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const internal: RequestCommitInternal = {
+      gitStateOverride: gitState('feat/long'),
+      gitExecutor: gitExecutorMock(
+        {
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'commit -m short: x': COMMIT_OK,
+        },
+        { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+      ),
+      promptFn: alwaysYes(),
+      now: FIXED_NOW,
+    }
+    const rejected = (await callCommit(
+      { project_root: tmpRoot, message: longMessage, dev_approval: approval() },
+      internal,
+    )) as RequestCommitOutput
+    expect(rejected.reject_kind).toBe('message_too_long')
+
+    const ok = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: 'short: x',
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      internal,
+    )) as RequestCommitOutput
+    expect(ok.status).toBe('committed')
+  })
+
+  it('accepts exactly 15 non-empty lines, blank lines uncounted', async () => {
+    writeConfig(tmpRoot, rsctConfig())
+    const msg = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join('\n\n')
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: msg,
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      {
+        gitStateOverride: gitState('feat/ok'),
+        gitExecutor: gitExecutorMock(
+          {
+            'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+            [`commit -m ${msg}`]: COMMIT_OK,
+          },
+          { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+        ),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+  })
+
+  it('honors a raised limit from .rsct.json', async () => {
+    writeConfig(tmpRoot, rsctConfig({ commit_message_max_lines: 20 }))
+    const out = (await callCommit(
+      {
+        project_root: tmpRoot,
+        message: longMessage,
+        dev_approval: approval(),
+        staged_diff_override: cleanDiff(),
+      },
+      {
+        gitStateOverride: gitState('feat/raised'),
+        gitExecutor: gitExecutorMock(
+          {
+            'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+            [`commit -m ${longMessage}`]: COMMIT_OK,
+          },
+          { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+        ),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+  })
+})

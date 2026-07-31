@@ -3800,6 +3800,7 @@ var require_fast_uri = __commonJS({
       return uriTokens.join("");
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
+    var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
     function getParseError(parsed, matches) {
       if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
@@ -3828,6 +3829,11 @@ var require_fast_uri = __commonJS({
         } else {
           uri = "//" + uri;
         }
+      }
+      const authorityMatch = uri.match(AUTHORITY_PREFIX);
+      if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
+        parsed.error = "URI authority must not contain a literal backslash.";
+        malformedAuthorityOrPort = true;
       }
       const matches = uri.match(URI_PARSE);
       if (matches) {
@@ -3872,7 +3878,7 @@ var require_fast_uri = __commonJS({
         if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
           if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
             try {
-              parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
+              parsed.host = new URL("http://" + parsed.host).hostname;
             } catch (e) {
               parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
             }
@@ -8912,7 +8918,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join22 } = __require("path");
+    var { join: join23 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8955,7 +8961,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join22(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join23(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9358,7 +9364,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join22, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join23, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9421,7 +9427,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join23(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9439,7 +9445,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join22(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join23(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9461,7 +9467,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join22(__dirname$1, "..", "file.js");
+          return join23(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10451,7 +10457,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join22 = ",";
+            let join23 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10465,7 +10471,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join22 = `,
+                join23 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10473,13 +10479,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join22;
+                res += join23;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10500,7 +10506,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join22 = `,
+              join23 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10514,13 +10520,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join22;
+              separator = join23;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10561,7 +10567,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join22 = ",";
+            let join23 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10574,7 +10580,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join22 = `,
+                join23 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10582,13 +10588,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join22;
+                res += join23;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join22}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10601,7 +10607,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join22 = `,
+              join23 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10610,7 +10616,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10668,20 +10674,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join23 = `,
+              const join24 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join23;
+                res2 += join24;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join23}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10697,16 +10703,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join22 = `,
+            const join23 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join22, maximumBreadth);
+              res += stringifyTypedArray(value, join23, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join22;
+              separator = join23;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10717,13 +10723,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join22;
+                separator = join23;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join22;
+              separator = join23;
             }
             if (separator !== "") {
               res = `
@@ -22146,16 +22152,7 @@ var Server = class extends Protocol {
     if (!methodSchema) {
       throw new Error("Schema is missing a method literal");
     }
-    let methodValue;
-    if (isZ4Schema(methodSchema)) {
-      const v4Schema = methodSchema;
-      const v4Def = v4Schema._zod?.def;
-      methodValue = v4Def?.value ?? v4Schema.value;
-    } else {
-      const v3Schema = methodSchema;
-      const legacyDef = v3Schema._def;
-      methodValue = legacyDef?.value ?? v3Schema.value;
-    }
+    const methodValue = getLiteralValue(methodSchema);
     if (typeof methodValue !== "string") {
       throw new Error("Schema method literal must be a string");
     }
@@ -22456,8 +22453,17 @@ init_esm_shims();
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 init_esm_shims();
+var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 var ReadBuffer = class {
+  constructor(options) {
+    this._maxBufferSize = options?.maxBufferSize ?? STDIO_DEFAULT_MAX_BUFFER_SIZE;
+  }
   append(chunk) {
+    const newSize = (this._buffer?.length ?? 0) + chunk.length;
+    if (newSize > this._maxBufferSize) {
+      this.clear();
+      throw new Error(`ReadBuffer exceeded maximum size of ${this._maxBufferSize} bytes`);
+    }
     this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
   }
   readMessage() {
@@ -22485,18 +22491,24 @@ function serializeMessage(message) {
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var StdioServerTransport = class {
-  constructor(_stdin = process2.stdin, _stdout = process2.stdout) {
+  constructor(_stdin = process2.stdin, _stdout = process2.stdout, options) {
     this._stdin = _stdin;
     this._stdout = _stdout;
-    this._readBuffer = new ReadBuffer();
     this._started = false;
     this._ondata = (chunk) => {
-      this._readBuffer.append(chunk);
-      this.processReadBuffer();
+      try {
+        this._readBuffer.append(chunk);
+        this.processReadBuffer();
+      } catch (error2) {
+        this.onerror?.(error2);
+        this.close().catch(() => {
+        });
+      }
     };
     this._onerror = (error2) => {
       this.onerror?.(error2);
     };
+    this._readBuffer = new ReadBuffer({ maxBufferSize: options?.maxBufferSize });
   }
   /**
    * Starts listening for messages on stdin.
@@ -22567,6 +22579,14 @@ function ensureParentDir(filePath) {
 
 // src/lib/audit-log.ts
 var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
+function auditFields(audit) {
+  if (audit.ok) return { audit_path: audit.path, audit_error: null };
+  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
+  return {
+    audit_path: audit.path ?? null,
+    audit_error: audit.error ?? "write_failed"
+  };
+}
 function resolveAuditPath(projectRoot, config2) {
   const configured = config2?.path;
   if (configured && configured.length > 0) {
@@ -22665,6 +22685,12 @@ var RsctConfigSchema = external_exports.object({
   // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
   // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
+  // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
+  // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
+  // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
+  // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
+  // "unset"; the resolver clamps the range at the point of use.
+  commit_message_max_lines: external_exports.number().optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -23308,7 +23334,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.2.0";
+var RSCT_MCP_VERSION = "2.3.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23713,12 +23739,122 @@ function getUpdateNotice(opts = {}) {
 
 // src/lib/version-drift.ts
 init_esm_shims();
-function getInstallDriftNotice(projectVersion, mcpVersion) {
-  if (!projectVersion) return { hint: null };
-  if (!isNewer(mcpVersion, projectVersion)) return { hint: null };
-  const p = projectVersion.replace(/^v/, "");
+var SECURITY_RELEVANT = /* @__PURE__ */ new Set([
+  "sanitize-permissions.js",
+  "edit-scope-guard.js"
+]);
+var STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/;
+var STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/;
+function shippedScriptsDir() {
+  try {
+    return join(fileURLToPath(new URL(".", import.meta.url)), "scripts");
+  } catch {
+    return null;
+  }
+}
+function readNormalized(path2) {
+  try {
+    return readFileSync(path2, "utf8").replace(/\r/g, "");
+  } catch {
+    return null;
+  }
+}
+function trimTrailingNewlines(text) {
+  return text.replace(/\n+$/, "");
+}
+function installedBody(text) {
+  const lines = text.split("\n");
+  const from = STAMP_LINE_RE.test(lines[1] ?? "") ? 2 : 1;
+  return trimTrailingNewlines(lines.slice(from).join("\n"));
+}
+function shippedBody(text) {
+  return trimTrailingNewlines(text.split("\n").slice(1).join("\n"));
+}
+function stampOf(text) {
+  const line2 = text.split("\n")[1] ?? "";
+  const m = STAMP_RE.exec(line2);
+  return m ? m[1] ?? null : null;
+}
+function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) return [];
+  const installedDir = join(projectRoot, ".rsct", "scripts");
+  let entries = [];
+  let listed = true;
+  try {
+    entries = readdirSync(installedDir).filter((f) => f.endsWith(".js"));
+  } catch (err) {
+    listed = err?.code === "ENOENT";
+  }
+  const names = [.../* @__PURE__ */ new Set([...entries, ...SECURITY_RELEVANT])].sort();
+  const evidence = [];
+  for (const name of names) {
+    const security_relevant = SECURITY_RELEVANT.has(name);
+    if (!entries.includes(name)) {
+      evidence.push({
+        name,
+        state: listed ? "absent" : "unreadable",
+        security_relevant,
+        stamp_version: null
+      });
+      continue;
+    }
+    const installed = readNormalized(join(installedDir, name));
+    if (installed === null) {
+      evidence.push({ name, state: "unreadable", security_relevant, stamp_version: null });
+      continue;
+    }
+    const stamp_version = stampOf(installed);
+    const shipped = shippedDir === null ? null : readNormalized(join(shippedDir, name));
+    if (shipped === null) {
+      evidence.push({ name, state: "unreadable", security_relevant, stamp_version });
+      continue;
+    }
+    const a = installedBody(installed);
+    const b = shippedBody(shipped);
+    const state = a.length === 0 || b.length === 0 ? "stale" : a === b ? "current" : "stale";
+    evidence.push({ name, state, security_relevant, stamp_version });
+  }
+  return evidence;
+}
+function describe(c) {
+  if (c.state === "absent") return `${c.name} is not installed`;
+  const at = c.stamp_version ? ` (installed at v${c.stamp_version})` : "";
+  return `${c.name} differs from this binary's copy${at}`;
+}
+function getInstallDriftNotice(args) {
+  const { projectRoot, projectVersion, mcpVersion } = args;
+  const evidence = args.evidence ?? readScriptEvidence(projectRoot);
+  const affected = evidence.filter(
+    (e) => e.security_relevant && (e.state === "stale" || e.state === "absent")
+  );
+  const stale_components = affected.map((e) => ({
+    name: e.name,
+    state: e.state,
+    stamp_version: e.stamp_version
+  }));
+  const absent = stale_components.filter((c) => c.state === "absent");
   const m = mcpVersion.replace(/^v/, "");
+  if (absent.length > 0) {
+    return {
+      severity: "security",
+      stale_components,
+      hint: `\u26A0 SECURITY: an RSCT enforcement script is missing from this project \u2014 ${absent.map(describe).join("; ")}. What it enforces is not running here. Run /rsct-setup to install it, then restart the IDE. See docs/troubleshooting.md. (never blocks)`
+    };
+  }
+  if (stale_components.length > 0) {
+    return {
+      severity: "normal",
+      stale_components,
+      hint: `This project's RSCT enforcement scripts are not the ones rsct-mcp v${m} ships \u2014 ${stale_components.map(describe).join("; ")}. That usually just means the project has not been re-synced since an update; re-run /rsct-setup. (suggestion only)`
+    };
+  }
+  if (!projectVersion) return { hint: null, severity: "normal", stale_components: [] };
+  if (!isNewer(mcpVersion, projectVersion))
+    return { hint: null, severity: "normal", stale_components: [] };
+  const p = projectVersion.replace(/^v/, "");
   return {
+    severity: "normal",
+    stale_components: [],
     hint: `This project was set up with RSCT v${p}; the installed rsct-mcp is v${m}. Re-run /rsct-setup to apply the current version's rules/prompts to this project. (suggestion only)`
   };
 }
@@ -23763,7 +23899,11 @@ async function statusHandler(rawInput) {
   const update = getUpdateNotice();
   if (update.hint) hints.push(update.hint);
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION);
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION
+    });
     if (drift.hint) hints.push(drift.hint);
   }
   return {
@@ -24210,8 +24350,26 @@ async function loadContextHandler(rawInput) {
     }
   }
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION2);
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION2
+    });
     if (drift.hint) next_action_hints.push(drift.hint);
+    if (drift.severity === "security") {
+      appendAuditEntry(
+        resolution.root,
+        {
+          event: "install.drift_detected",
+          tool: "rsct_load_context",
+          project_version: resolution.config?.rsct_version ?? null,
+          mcp_version: MCP_VERSION2,
+          severity: drift.severity,
+          stale_components: drift.stale_components
+        },
+        resolution.config?.audit
+      );
+    }
   }
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION2 },
@@ -26862,6 +27020,31 @@ function recordConsumedApproval(approval, options) {
   }
 }
 
+// src/lib/commit-message.ts
+init_esm_shims();
+var COMMIT_MESSAGE_MAX_LINES_DEFAULT = 15;
+var MIN_LIMIT = 1;
+var MAX_LIMIT = 500;
+function countNonEmptyLines(message) {
+  return message.replace(/\r\n?/g, "\n").split("\n").filter((l) => l.trim().length > 0).length;
+}
+function resolveCommitMessageMaxLines(config2) {
+  const v = config2?.commit_message_max_lines;
+  if (v === void 0 || !Number.isFinite(v)) return COMMIT_MESSAGE_MAX_LINES_DEFAULT;
+  return Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Math.trunc(v)));
+}
+function checkCommitMessage(message, config2) {
+  const limit = resolveCommitMessageMaxLines(config2);
+  const lines = countNonEmptyLines(message);
+  if (lines <= limit) return { ok: true, lines, limit, reason: null };
+  return {
+    ok: false,
+    lines,
+    limit,
+    reason: `commit message has ${lines} non-empty lines; the limit is ${limit}. Say what changed and why \u2014 the diff already shows the file-by-file detail. Blank lines are not counted. Raise the cap with "commit_message_max_lines" in .rsct.json if this project wants longer messages.`
+  };
+}
+
 // src/lib/os-dialog.ts
 init_esm_shims();
 var ENV_OVERRIDE_KEY = "RSCT_TEST_DIALOG_RESPONSE";
@@ -27209,7 +27392,7 @@ var requestCommitTool = {
       },
       message: {
         type: "string",
-        description: "Commit message."
+        description: "Commit message. Keep it to 15 non-empty lines at most (blank lines are not counted): what changed and why, not a file-by-file narration of the diff. Over that, the call is rejected with `message_too_long` before any approval is requested. A project can raise the cap with `commit_message_max_lines` in .rsct.json."
       },
       dev_approval: {
         type: "object",
@@ -27250,6 +27433,64 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const branchLabel = gitState.branch ?? "<no-branch>";
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice({
+      projectRoot,
+      projectVersion: config2?.rsct_version ?? null,
+      mcpVersion: RSCT_MCP_VERSION
+    });
+    if (drift.severity === "security" && drift.hint) {
+      advisories.unshift(drift.hint);
+      appendAudit(
+        projectRoot,
+        {
+          event: "install.drift_detected",
+          tool: "rsct_request_commit",
+          project_version: config2?.rsct_version ?? null,
+          mcp_version: RSCT_MCP_VERSION,
+          severity: drift.severity,
+          stale_components: drift.stale_components
+        },
+        config2?.audit
+      );
+    }
+  }
+  const messageCheck = checkCommitMessage(input.message, config2);
+  if (!messageCheck.ok) {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.rejected",
+        tool: "rsct_request_commit",
+        reject_kind: "message_too_long",
+        reason: messageCheck.reason,
+        branch: gitState.branch,
+        message_lines: messageCheck.lines,
+        message_limit: messageCheck.limit
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: "message_too_long",
+      reason: messageCheck.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([messageCheck.reason ?? "commit message too long"])
+    };
+  }
   let channel;
   let authorizedVia;
   let approval = null;
@@ -27300,7 +27541,9 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+        hints: withAdvisories([
+          `Approval rejected (${gate.reject_kind}): ${gate.reason}`
+        ])
       };
     }
     approval = gate.approval;
@@ -27363,7 +27606,9 @@ message: ${input.message}`
           ...auditFields(audit2),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [`Approval rejected (plan_token_invalid): ${reason}`]
+          hints: withAdvisories([
+            `Approval rejected (plan_token_invalid): ${reason}`
+          ])
         };
       }
       channel = "plan_token";
@@ -27406,7 +27651,7 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (branchProtected && overrideBranch) {
@@ -27458,7 +27703,7 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (findings.length > 0 && overrideSecrets) {
@@ -27540,7 +27785,7 @@ message: ${input.message}`
           ...auditFields(audit2),
           anti_replay_persisted: null,
           anti_replay_error: null,
-          hints: [reason]
+          hints: withAdvisories([reason])
         };
       }
       appendAudit(
@@ -27605,7 +27850,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason]
+        hints: withAdvisories([reason])
       };
     }
   } else if (freeCtx) {
@@ -27640,7 +27885,7 @@ message: ${input.message}`
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [reason]
+        hints: withAdvisories([reason])
       };
     };
     const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot);
@@ -27722,9 +27967,9 @@ message: ${input.message}`
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [
+      hints: withAdvisories([
         authorizedVia === "plan_token" || authorizedVia === "free_commit" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
-      ]
+      ])
     };
   }
   let antiReplayPersisted;
@@ -27897,15 +28142,7 @@ message: ${input.message}`
     ...afields,
     anti_replay_persisted: antiReplayPersisted,
     anti_replay_error: antiReplayError,
-    hints
-  };
-}
-function auditFields(r) {
-  if (r.ok) return { audit_path: r.path, audit_error: null };
-  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? "write_failed"
+    hints: withAdvisories(hints)
   };
 }
 
@@ -28082,7 +28319,7 @@ async function requestPushHandler(rawInput, internal = {}) {
         reason: hint,
         fabrication_signals: [],
         branch_check: { protected: true, override_used: false },
-        ...auditFields2(audit2),
+        ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
         hints: [hint]
@@ -28124,7 +28361,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       reason: gate.reason,
       fabrication_signals: gate.fabrication_signals,
       branch_check: { protected: false, override_used: false },
-      ...auditFields2(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
@@ -28156,7 +28393,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       reason,
       fabrication_signals: gate.fabrication_signals,
       branch_check: { protected: true, override_used: false },
-      ...auditFields2(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28199,7 +28436,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       reason,
       fabrication_signals: gate.fabrication_signals,
       branch_check: { protected: false, override_used: false },
-      ...auditFields2(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28229,7 +28466,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       reason,
       fabrication_signals: gate.fabrication_signals,
       branch_check: { protected: branchProtected, override_used: branchProtected },
-      ...auditFields2(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: ["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."]
@@ -28254,7 +28491,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       `\u26A0 push landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
     );
   }
-  const afields = auditFields2(audit);
+  const afields = auditFields(audit);
   if (afields.audit_error !== null) {
     hints.push(
       `\u26A0 push landed but audit log write failed: ${afields.audit_error}. Manual audit reconstruction may be needed for forensic traceability.`
@@ -28300,14 +28537,6 @@ async function requestPushHandler(rawInput, internal = {}) {
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
     hints
-  };
-}
-function auditFields2(r) {
-  if (r.ok) return { audit_path: r.path, audit_error: null };
-  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? "write_failed"
   };
 }
 
@@ -28405,7 +28634,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [hint]
@@ -28448,7 +28677,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
@@ -28481,7 +28710,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: null,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28513,7 +28742,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28545,7 +28774,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28579,7 +28808,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: true, override_used: false },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28632,7 +28861,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       sha_before: merge2.sha_before,
       sha_after: null,
       branch_check: { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories },
-      ...auditFields3(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: ["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."]
@@ -28663,7 +28892,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       `\u26A0 merge landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
     );
   }
-  const afields = auditFields3(audit);
+  const afields = auditFields(audit);
   if (afields.audit_error !== null) {
     hints.push(
       `\u26A0 merge landed but audit log write failed: ${afields.audit_error}. Manual audit reconstruction may be needed for forensic traceability.`
@@ -28712,14 +28941,6 @@ async function requestMergeHandler(rawInput, internal = {}) {
     hints
   };
 }
-function auditFields3(r) {
-  if (r.ok) return { audit_path: r.path, audit_error: null };
-  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: r.path ?? null,
-    audit_error: r.error ?? "write_failed"
-  };
-}
 
 // src/tools/plan-authorize.ts
 init_esm_shims();
@@ -28762,14 +28983,6 @@ var planAuthorizeTool = {
     additionalProperties: false
   }
 };
-function auditFields4(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 async function planAuthorizeHandler(rawInput, internal = {}) {
   const input = planAuthorizeInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -28820,7 +29033,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       expires_at: null,
       max_actions: null,
       covers: [],
-      ...auditFields4(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
@@ -28850,7 +29063,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       expires_at: null,
       max_actions: null,
       covers: [],
-      ...auditFields4(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [reason]
@@ -28934,7 +29147,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       expires_at: null,
       max_actions: maxActions,
       covers: [...PLAN_TOKEN_COVERS],
-      ...auditFields4(audit2),
+      ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [`\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`]
@@ -28956,7 +29169,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
     },
     config2?.audit
   );
-  const afields = auditFields4(audit);
+  const afields = auditFields(audit);
   const hints = [
     `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`
   ];
@@ -29010,14 +29223,6 @@ var planRevokeTool = {
     additionalProperties: false
   }
 };
-function auditFields5(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 async function planRevokeHandler(rawInput, internal = {}) {
   const input = planRevokeInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -29056,7 +29261,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
     return {
       status: "state_write_failed",
       revoked_plan_slug: token.plan_slug,
-      ...auditFields5(audit2),
+      ...auditFields(audit2),
       hints: [`\u26A0 token still active \u2014 ${reason}.`]
     };
   }
@@ -29077,7 +29282,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
   return {
     status: "revoked",
     revoked_plan_slug: token.plan_slug,
-    ...auditFields5(audit),
+    ...auditFields(audit),
     hints: [
       `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`
     ]
@@ -29115,11 +29320,6 @@ var planDisposeTool = {
     additionalProperties: false
   }
 };
-function auditFields6(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return { audit_path: audit.path ?? null, audit_error: audit.error ?? "write_failed" };
-}
 async function planDisposeHandler(rawInput, internal = {}) {
   const input = planDisposeInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -29152,7 +29352,7 @@ async function planDisposeHandler(rawInput, internal = {}) {
       decision: input.decision,
       artifacts: report.artifacts,
       can_suggest_delete: report.can_suggest_delete,
-      ...auditFields6(audit2),
+      ...auditFields(audit2),
       hints: [`\u26A0 disposition NOT recorded \u2014 ${reason}. ${report.hint}`]
     };
   }
@@ -29181,7 +29381,7 @@ async function planDisposeHandler(rawInput, internal = {}) {
     decision: input.decision,
     artifacts: report.artifacts,
     can_suggest_delete: report.can_suggest_delete,
-    ...auditFields6(audit),
+    ...auditFields(audit),
     hints
   };
 }
@@ -29211,11 +29411,6 @@ var requestRebaseTool = {
     additionalProperties: false
   }
 };
-function auditFields7(r) {
-  if (r.ok) return { audit_path: r.path, audit_error: null };
-  if (r.reason === "disabled") return { audit_path: null, audit_error: null };
-  return { audit_path: r.path ?? null, audit_error: r.error ?? "write_failed" };
-}
 async function requestRebaseHandler(rawInput, internal = {}) {
   const input = requestRebaseInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -29269,7 +29464,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields7(audit2), hints: [hint] });
+    return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields(audit2), hints: [hint] });
   }
   const gate = await gateRequest({
     toolName: "rsct_request_rebase",
@@ -29301,7 +29496,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       reject_kind: gate.reject_kind,
       reason: gate.reason,
       fabrication_signals: gate.fabrication_signals,
-      ...auditFields7(audit2),
+      ...auditFields(audit2),
       hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     });
   }
@@ -29314,7 +29509,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "detached_head", reason, mode, ref: input.ref, channel: gate.channel },
       config2?.audit
     );
-    return base({ channel: gate.channel, reject_kind: "detached_head", reason, fabrication_signals: gate.fabrication_signals, sha_before: null, ...auditFields7(audit2), hints: [reason] });
+    return base({ channel: gate.channel, reject_kind: "detached_head", reason, fabrication_signals: gate.fabrication_signals, sha_before: null, ...auditFields(audit2), hints: [reason] });
   }
   if (input.ref === currentBranch) {
     const reason = `cannot ${mode} '${currentBranch}' against itself`;
@@ -29323,7 +29518,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "same_ref", reason, mode, ref: input.ref, channel: gate.channel },
       config2?.audit
     );
-    return base({ channel: gate.channel, reject_kind: "same_ref", reason, fabrication_signals: gate.fabrication_signals, ...auditFields7(audit2), hints: [reason] });
+    return base({ channel: gate.channel, reject_kind: "same_ref", reason, fabrication_signals: gate.fabrication_signals, ...auditFields(audit2), hints: [reason] });
   }
   const { list: protectedList } = effectiveProtectedList(config2);
   const currentProtected = isProtectedBranch(currentBranch, protectedList);
@@ -29334,7 +29529,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       { event: "request_rebase.rejected", tool: "rsct_request_rebase", reject_kind: "protected_branch", reason, mode, ref: input.ref, channel: gate.channel },
       config2?.audit
     );
-    return base({ channel: gate.channel, reject_kind: "protected_branch", reason, fabrication_signals: gate.fabrication_signals, branch_check: { protected: true, override_used: false }, ...auditFields7(audit2), hints: [reason] });
+    return base({ channel: gate.channel, reject_kind: "protected_branch", reason, fabrication_signals: gate.fabrication_signals, branch_check: { protected: true, override_used: false }, ...auditFields(audit2), hints: [reason] });
   }
   if (currentProtected && overrideBranch) {
     appendAudit(
@@ -29358,7 +29553,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       fabrication_signals: gate.fabrication_signals,
       sha_before: result.sha_before,
       branch_check: { protected: currentProtected, override_used: currentProtected },
-      ...auditFields7(audit2),
+      ...auditFields(audit2),
       hints: [
         `git ${mode} failed \u2014 ${mode === "rebase" ? "resolve conflicts (git rebase --continue) or abort (git rebase --abort)" : "resolve conflicts, then commit via rsct_request_commit"}. Approval NOT consumed; retry with a fresh dev_approval.`
       ]
@@ -29402,7 +29597,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     sha_after: result.sha_after,
     branch_check: { protected: currentProtected, override_used: currentProtected },
     bootstrap_marker: bootstrap,
-    ...auditFields7(audit),
+    ...auditFields(audit),
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
     hints
@@ -29903,14 +30098,6 @@ var phaseVerificationStartTool = {
     additionalProperties: false
   }
 };
-function auditFields8(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 async function phaseVerificationStartHandler(rawInput) {
   const input = phaseVerificationStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -29946,7 +30133,7 @@ async function phaseVerificationStartHandler(rawInput) {
       },
       config2?.audit
     );
-    const fields2 = auditFields8(skipAudit);
+    const fields2 = auditFields(skipAudit);
     return {
       status: "skipped_tier",
       rsct_installed: resolution.rsct_installed,
@@ -30019,7 +30206,7 @@ async function phaseVerificationStartHandler(rawInput) {
       config2?.audit
     );
   }
-  const fields = auditFields8(startAudit);
+  const fields = auditFields(startAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -30077,11 +30264,13 @@ var phaseVerificationCompleteInputSchema = external_exports.object({
   spec_ref: external_exports.string().min(1, "spec_ref required").describe("Must match the spec_ref recorded by the open V phase in .rsct/phase-state.json."),
   findings_actions: external_exports.array(findingActionSchema).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.'),
   dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
-  clear_phase: external_exports.boolean().default(true).describe("When true, also clears the active phase block (phase/scope_globs/started_at). When false, only the verification sub-block is cleared.")
+  clear_phase: external_exports.boolean().default(true).describe(
+    "DEPRECATED \u2014 ignored. Completing V always clears the active phase block. Kept so an older client passing it is not rejected by the strict schema; remove in the next major."
+  )
 }).strict();
 var phaseVerificationCompleteTool = {
   name: "rsct_phase_verification_complete",
-  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event and clears the verification block (and optionally the active phase). Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the \xA7C dialog.',
+  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) \u2014 it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the \xA7C dialog.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -30118,20 +30307,12 @@ var phaseVerificationCompleteTool = {
       clear_phase: {
         type: "boolean",
         default: true,
-        description: "When true, clears the active phase block in addition to verification."
+        description: "DEPRECATED \u2014 ignored. Completing V always clears the active phase block."
       }
     },
     additionalProperties: false
   }
 };
-function auditFields9(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function emptySummary() {
   return {
     accept: 0,
@@ -30188,7 +30369,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       channel: null,
@@ -30220,7 +30401,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       channel: null,
@@ -30269,7 +30450,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       },
       config2?.audit
     );
-    const fields2 = auditFields9(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       channel: null,
@@ -30312,11 +30493,9 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   if (prevV?.started_at !== void 0) completedV.started_at = prevV.started_at;
   if (prevV?.persona !== void 0) completedV.persona = prevV.persona;
   newState.verification = completedV;
-  if (input.clear_phase) {
-    delete newState.phase;
-    delete newState.scope_globs;
-    delete newState.started_at;
-  }
+  delete newState.phase;
+  delete newState.scope_globs;
+  delete newState.started_at;
   const writeResult = writePhaseState(projectRoot, newState);
   const completeAudit = appendAudit(
     projectRoot,
@@ -30327,19 +30506,24 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
-      cleared_phase: input.clear_phase,
+      cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok
     },
     config2?.audit
   );
   const record2 = recordApproval(gate.approval, { projectRoot, now });
-  const fields = auditFields9(completeAudit);
+  const fields = auditFields(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
-      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; verification block cleared${input.clear_phase ? " and active phase reset" : ""}.`
+      `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) \u2014 it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`
     );
+    if (input.clear_phase === false) {
+      hints.push(
+        "Note: `clear_phase` is deprecated and was ignored. Completing V always clears the active phase label; leaving it set only produced a state no tool could resolve without discarding the V record."
+      );
+    }
   } else if (writeResult.reason === "locked") {
     hints.push(
       `\u26A0 V phase approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). State may be inconsistent; wait and retry, or manual cleanup may be needed.`
@@ -30365,7 +30549,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     fabrication_signals: gate.fabrication_signals,
     spec_ref: input.spec_ref,
     cleared_verification: writeResult.ok,
-    cleared_phase: writeResult.ok && input.clear_phase,
+    cleared_phase: writeResult.ok,
     actions_summary: summary,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
@@ -30877,21 +31061,14 @@ function nextPhase(current) {
   if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
   return PHASE_ORDER[idx + 1];
 }
-function auditFields10(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function startPhaseGeneric(input, config2, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
   const existing = readPhaseState(input.projectRoot);
   const baseState = existing.state ?? {};
   const existingPhase = baseState.phase;
-  if (existingPhase && existingPhase !== input.phase) {
+  const staleVerificationLabel = existingPhase === "verification" && baseState.verification?.completed_at != null;
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
     const audit2 = appendAudit(
       input.projectRoot,
       {
@@ -30903,7 +31080,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields10(audit2);
+    const fields2 = auditFields(audit2);
     return {
       status: "phase_already_active",
       phase: input.phase,
@@ -30918,7 +31095,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       hints: [
-        `Phase '${existingPhase}' is already active. Call rsct_phase_${existingPhase}_complete first, or wipe .rsct/phase-state.json, before starting a different phase.`
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
       ]
     };
   }
@@ -30930,6 +31107,22 @@ function startPhaseGeneric(input, config2, internal = {}) {
   };
   if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
   const writeResult = writePhaseState(input.projectRoot, newState);
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
   const audit = appendAudit(
     input.projectRoot,
     {
@@ -30943,7 +31136,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields10(audit);
+  const fields = auditFields(audit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -31011,7 +31204,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields10(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -31027,7 +31220,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or wipe the state.`
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
       ]
     };
   }
@@ -31043,7 +31236,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields10(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -31090,7 +31283,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields10(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       phase: input.phase,
@@ -31136,7 +31329,7 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     },
     config2?.audit
   );
-  const fields = auditFields10(completeAudit);
+  const fields = auditFields(completeAudit);
   const hints = [];
   if (writeResult.ok) {
     if (recommended) {
@@ -31566,14 +31759,6 @@ var phaseCodeStartTool = {
     additionalProperties: false
   }
 };
-function auditFields11(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function evaluateVerificationGate(args) {
   const { specRef, specTier, overrideVerificationSkip } = args;
   if (TIERS_BYPASSING_CEREMONY.has(specTier)) {
@@ -31818,7 +32003,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields11(audit);
+    const fields = auditFields(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31877,7 +32062,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields11(audit);
+    const fields = auditFields(audit);
     const placeholderVGate = {
       status: "bypassed_tier",
       spec_tier: input.spec_tier,
@@ -31937,7 +32122,7 @@ async function phaseCodeStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields11(audit);
+    const fields = auditFields(audit);
     return {
       status: "verification_gate_rejected",
       reject_kind: rejectKind,
@@ -32175,14 +32360,6 @@ var phaseTestStartTool = {
     additionalProperties: false
   }
 };
-function auditFields12(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function evaluateReviewGate(args) {
   const { specRef, specTier, overrideReviewSkip } = args;
   if (TIERS_BYPASSING_REVIEW_GATE.has(specTier)) {
@@ -32282,7 +32459,7 @@ async function phaseTestStartHandler(rawInput) {
       },
       resolution.config?.audit
     );
-    const fields = auditFields12(audit);
+    const fields = auditFields(audit);
     return {
       status: "review_gate_rejected",
       reject_kind: rejectKind,
@@ -32402,14 +32579,6 @@ var phaseAbandonTool = {
     additionalProperties: false
   }
 };
-function auditFields13(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 async function phaseAbandonHandler(rawInput, internal = {}) {
   const input = phaseAbandonInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -32476,7 +32645,7 @@ This discards the phase without advancing the RSCT cycle.`
       },
       config2?.audit
     );
-    const fields2 = auditFields13(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       channel: null,
@@ -32512,7 +32681,7 @@ This discards the phase without advancing the RSCT cycle.`
     },
     config2?.audit
   );
-  const fields = auditFields13(abandonedAudit);
+  const fields = auditFields(abandonedAudit);
   const hints = [];
   if (writeResult.ok) {
     hints.push(
@@ -32565,6 +32734,27 @@ function isGhAvailable() {
     return false;
   }
 }
+function ghJson(cwd2, args) {
+  try {
+    const stdout = execFileSync("gh", args, { encoding: "utf8", cwd: cwd2, stdio: "pipe" });
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+function readRepoVocabulary(cwd2) {
+  if (!isGhAvailable()) return { labels: [], types: [], discovered: false };
+  const rawLabels = ghJson(cwd2, ["label", "list", "--limit", "200", "--json", "name"]);
+  const labels = Array.isArray(rawLabels) ? rawLabels.map((l) => l?.name).filter((n) => typeof n === "string" && n.length > 0) : [];
+  const rawTypes = ghJson(cwd2, [
+    "api",
+    "repos/{owner}/{repo}/issues/types",
+    "--jq",
+    "[.[].name]"
+  ]);
+  const types = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === "string" && t.length > 0) : [];
+  return { labels, types, discovered: rawLabels !== null };
+}
 function createIssue(input) {
   if (!isGhAvailable()) {
     return {
@@ -32573,10 +32763,11 @@ function createIssue(input) {
       error: "gh CLI not found in PATH. Install from https://cli.github.com/ or use mode=draft to get the issue body for manual creation."
     };
   }
-  const args = ["issue", "create", "--title", input.title, "--body", input.body];
+  const baseArgs = ["issue", "create", "--title", input.title, "--body", input.body];
   for (const label of input.labels ?? []) {
-    args.push("--label", label);
+    baseArgs.push("--label", label);
   }
+  const args = input.type ? [...baseArgs, "--type", input.type] : baseArgs;
   try {
     const stdout = execFileSync("gh", args, {
       encoding: "utf8",
@@ -32589,6 +32780,10 @@ function createIssue(input) {
     const errObj = err;
     const stderr = errObj?.stderr ? String(errObj.stderr) : "";
     const errorText = errObj?.message ?? "gh issue create failed";
+    if (input.type && /unknown flag: --type/i.test(stderr)) {
+      const { type: _dropped, ...withoutType } = input;
+      return createIssue(withoutType);
+    }
     if (stderr.toLowerCase().includes("authentication") || stderr.toLowerCase().includes("not logged in") || stderr.toLowerCase().includes("gh auth login")) {
       return {
         ok: false,
@@ -32619,7 +32814,7 @@ var captureIssueInputSchema = external_exports.object({
     'Project-relative paths the finding touches. Rendered as a bullet list under "Affected paths".'
   ),
   labels: external_exports.array(external_exports.string()).optional().describe(
-    'GitHub labels to attach (mode=create only). Repo must have the labels created beforehand or gh issue create errors. Defaults: ["auto-captured", "rsct"] when omitted in create mode.'
+    "GitHub labels to attach (mode=create only). OMIT to let RSCT pick from the labels the host repository actually has (matched by severity); an issue is created unlabeled rather than failing when nothing matches. Supplied labels are honored verbatim; one that does not exist is warned about, and gh will reject it."
   ),
   mode: external_exports.enum(MODE_VALUES).default("draft").describe(
     '"draft" returns the formatted body for manual creation via web (no \xA7C, no external mutation). "create" invokes gh issue create with \xA7C-gate.'
@@ -32628,7 +32823,72 @@ var captureIssueInputSchema = external_exports.object({
     'Required when mode="create". action_scope SHOULD start with "capture_issue:" (INV-2.2).'
   )
 }).strict();
-var DEFAULT_LABELS = ["auto-captured", "rsct"];
+var LABEL_PREFERENCE = {
+  critical: ["bug", "enhancement"],
+  high: ["bug", "enhancement"],
+  medium: ["enhancement", "bug"],
+  low: ["enhancement", "bug"]
+};
+var TYPE_PREFERENCE = {
+  critical: ["bug", "task"],
+  high: ["bug", "task"],
+  medium: ["task", "feature"],
+  low: ["task", "feature"]
+};
+function matchFirst(preferences, available) {
+  const byLower = new Map(available.map((a) => [a.toLowerCase(), a]));
+  for (const p of preferences) {
+    const hit = byLower.get(p.toLowerCase());
+    if (hit) return hit;
+  }
+  return null;
+}
+function resolveLabels(args) {
+  const { requested, severity, vocabulary } = args;
+  const warnings = [];
+  const type = matchFirst(TYPE_PREFERENCE[severity], vocabulary.types);
+  if (requested !== void 0) {
+    if (vocabulary.discovered) {
+      const known = new Set(vocabulary.labels.map((l) => l.toLowerCase()));
+      for (const l of requested) {
+        if (!known.has(l.toLowerCase())) {
+          warnings.push(
+            `label '${l}' does not exist in this repository \u2014 gh will reject it. Create it first, or omit labels to let RSCT pick from what the repo offers.`
+          );
+        }
+      }
+    }
+    return {
+      labels: requested,
+      type,
+      decision: `labels supplied by the caller (${requested.length === 0 ? "none" : requested.join(", ")})`,
+      warnings
+    };
+  }
+  if (!vocabulary.discovered) {
+    return {
+      labels: [],
+      type,
+      decision: "unlabeled \u2014 the host repository's labels could not be read",
+      warnings
+    };
+  }
+  const picked = matchFirst(LABEL_PREFERENCE[severity], vocabulary.labels);
+  if (picked === null) {
+    return {
+      labels: [],
+      type,
+      decision: `unlabeled \u2014 none of the preferred labels for severity=${severity} (${LABEL_PREFERENCE[severity].join(", ")}) exist in this repository`,
+      warnings
+    };
+  }
+  return {
+    labels: [picked],
+    type,
+    decision: `'${picked}' matched from the repository's labels for severity=${severity}`,
+    warnings
+  };
+}
 var captureIssueTool = {
   name: "rsct_capture_issue",
   description: 'Capture a non-blocking finding as a GitHub issue. mode="draft" (default) returns a formatted markdown body for manual creation via web \u2014 no external mutation, no \xA7C-gate. mode="create" requires dev_approval (action_scope starting with "capture_issue:") and invokes `gh issue create` via Bash with \xA7C-gate. Use during verification sweeps, scan analyses, and post-task reviews to log "we should fix this later" items without scope-creeping the current task.',
@@ -32655,14 +32915,6 @@ var captureIssueTool = {
     additionalProperties: false
   }
 };
-function auditFields14(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function formatBody(input) {
   const sevBadge = `> **Severity:** \`${input.severity}\``;
   const pathsSection = input.affected_paths && input.affected_paths.length > 0 ? `
@@ -32706,7 +32958,10 @@ async function captureIssueHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const ghCreate = internal.ghCreate ?? createIssue;
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable;
-  const labels = input.labels ?? DEFAULT_LABELS;
+  const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary;
+  const noVocabulary = { labels: [], types: [], discovered: false };
+  const resolveVocabulary = () => ghAvailableFn() ? ghVocabulary(projectRoot) : noVocabulary;
+  const requestedLabels = input.labels ?? [];
   const formattedBody = formatBody({
     body: input.body,
     severity: input.severity,
@@ -32715,7 +32970,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
     },
     now
   });
-  const ghCmd = suggestedGhCommand(input.title, labels);
+  const preAuthGhCmd = suggestedGhCommand(input.title, requestedLabels);
   if (input.mode === "draft") {
     const audit = appendAudit(
       projectRoot,
@@ -32725,11 +32980,11 @@ async function captureIssueHandler(rawInput, internal = {}) {
         title: input.title,
         severity: input.severity,
         affected_paths_count: input.affected_paths?.length ?? 0,
-        labels
+        labels: requestedLabels
       },
       config2?.audit
     );
-    const fields2 = auditFields14(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "drafted",
       mode: "draft",
@@ -32738,7 +32993,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: null,
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields2.audit_path,
@@ -32759,7 +33014,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: 'mode="create" requires dev_approval',
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: null,
@@ -32782,7 +33037,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       },
       config2?.audit
     );
-    const fields2 = auditFields14(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "gh_unavailable",
       mode: "create",
@@ -32791,7 +33046,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       reason: "gh CLI not found in PATH",
       fabrication_signals: [],
       formatted_body: formattedBody,
-      suggested_gh_command: ghCmd,
+      suggested_gh_command: preAuthGhCmd,
       issue_url: null,
       raw_gh_stdout: null,
       audit_path: fields2.audit_path,
@@ -32803,6 +33058,13 @@ async function captureIssueHandler(rawInput, internal = {}) {
       ]
     };
   }
+  const resolved = resolveLabels({
+    requested: input.labels,
+    severity: input.severity,
+    vocabulary: resolveVocabulary()
+  });
+  const labels = resolved.labels;
+  const ghCmd = suggestedGhCommand(input.title, labels);
   const gate = await gateRequest({
     toolName: "rsct_capture_issue",
     approval: input.dev_approval,
@@ -32810,8 +33072,13 @@ async function captureIssueHandler(rawInput, internal = {}) {
       title: "RSCT \u2014 create GitHub issue",
       message: `Create issue '${input.title}' (severity=${input.severity})?
 
-Labels: ${labels.join(", ")}
-GH CLI will run in '${projectRoot}'.`
+Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching label in this repository)"}
+` + // A label gh is about to reject belongs in the dialog, not only in the
+      // hints afterwards: approving a call already known to fail spends the
+      // dev's single-use approval on nothing.
+      (resolved.warnings.length > 0 ? `
+\u26A0 ${resolved.warnings.join("\n\u26A0 ")}
+` : "") + `GH CLI will run in '${projectRoot}'.`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -32834,7 +33101,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields14(audit);
+    const fields2 = auditFields(audit);
     return {
       status: "rejected",
       mode: "create",
@@ -32857,7 +33124,8 @@ GH CLI will run in '${projectRoot}'.`
     cwd: projectRoot,
     title: input.title,
     body: formattedBody,
-    labels
+    labels,
+    ...resolved.type !== null && { type: resolved.type }
   });
   if (!ghResult.ok) {
     const mapped = mapGhReason(ghResult);
@@ -32875,7 +33143,7 @@ GH CLI will run in '${projectRoot}'.`
       },
       config2?.audit
     );
-    const fields2 = auditFields14(audit);
+    const fields2 = auditFields(audit);
     return {
       status: mapped.status,
       mode: "create",
@@ -32892,7 +33160,11 @@ GH CLI will run in '${projectRoot}'.`
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `gh issue create failed (${ghResult.reason}). ${ghResult.error}`
+        `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
+        // A caller-supplied label that does not exist is the most likely cause
+        // of a `failed` here, so RSCT names it rather than leaving gh's raw
+        // error as the only clue.
+        ...resolved.warnings
       ]
     };
   }
@@ -32906,14 +33178,20 @@ GH CLI will run in '${projectRoot}'.`
       severity: input.severity,
       affected_paths_count: input.affected_paths?.length ?? 0,
       labels,
+      issue_type: resolved.type,
+      label_decision: resolved.decision,
       issue_url: ghResult.url,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals
     },
     config2?.audit
   );
-  const fields = auditFields14(createdAudit);
+  const fields = auditFields(createdAudit);
   const hints = [`Issue created: ${ghResult.url}`];
+  hints.push(
+    `Labels: ${resolved.decision}${resolved.type ? `; issue type '${resolved.type}' matched` : ""}.`
+  );
+  hints.push(...resolved.warnings);
   if (!record2.ok) {
     hints.push(
       `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
@@ -33754,14 +34032,6 @@ var tutorStepTool = {
     additionalProperties: false
   }
 };
-function auditFields15(audit) {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null };
-  if (audit.reason === "disabled") return { audit_path: null, audit_error: null };
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? "write_failed"
-  };
-}
 function countPriorSteps(auditPath, specRef) {
   if (!existsSync(auditPath)) return 0;
   let raw;
@@ -33815,7 +34085,7 @@ async function tutorStepHandler(rawInput) {
     ...input.batch_commands !== void 0 ? { batch_commands: input.batch_commands } : {}
   };
   const audit = appendAuditEntry(projectRoot, baseEntry, config2?.audit);
-  const fields = auditFields15(audit);
+  const fields = auditFields(audit);
   const resume = buildResumeBlock({
     specRef: input.spec_ref,
     stepKind: input.step_kind,

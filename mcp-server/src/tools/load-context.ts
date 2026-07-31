@@ -12,6 +12,7 @@ import {
 } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { appendAuditEntry } from '../lib/audit-log.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 import { detectTopology, type TopologyBlock } from '../lib/topology.js'
 
@@ -185,11 +186,34 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
       }
     }
   }
-  // Install-drift: local compare of this project's stamped rsct_version vs the
-  // running binary (parity with rsct_status — same helper/text). Handler level.
+  // Install-drift: local compare of this project's stamped rsct_version and of
+  // its installed enforcement scripts vs the running binary (parity with
+  // rsct_status — same helper/text). Handler level.
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice(resolution.config?.rsct_version ?? null, MCP_VERSION)
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: MCP_VERSION,
+    })
     if (drift.hint) next_action_hints.push(drift.hint)
+    if (drift.severity === 'security') {
+      // Recorded at every §0 bootstrap, not only at the commit gate: an escalated
+      // state means the sanitizer failed to strip a `Bash(git commit)` allow-entry,
+      // in which case commits bypass rsct_request_commit entirely and the exposure
+      // window would leave no trail at all. One entry per load_context call.
+      appendAuditEntry(
+        resolution.root,
+        {
+          event: 'install.drift_detected',
+          tool: 'rsct_load_context',
+          project_version: resolution.config?.rsct_version ?? null,
+          mcp_version: MCP_VERSION,
+          severity: drift.severity,
+          stale_components: drift.stale_components,
+        },
+        resolution.config?.audit,
+      )
+    }
   }
 
   return {

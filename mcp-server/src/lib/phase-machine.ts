@@ -4,7 +4,7 @@ import {
   writePhaseState,
   type PhaseState,
 } from './phase-scope.js'
-import { appendAuditEntry, type AuditAppendResult } from './audit-log.js'
+import { appendAuditEntry, auditFields } from './audit-log.js'
 import {
   gateRequest,
   type GateChannel,
@@ -72,18 +72,6 @@ export function nextPhase(current: RsctPhase): RsctPhase | null {
   return PHASE_ORDER[idx + 1]!
 }
 
-export function auditFields(audit: AuditAppendResult): {
-  audit_path: string | null
-  audit_error: string | null
-} {
-  if (audit.ok) return { audit_path: audit.path, audit_error: null }
-  if (audit.reason === 'disabled') return { audit_path: null, audit_error: null }
-  return {
-    audit_path: audit.path ?? null,
-    audit_error: audit.error ?? 'write_failed',
-  }
-}
-
 export interface StartPhaseInput {
   projectRoot: string
   phase: RsctPhase
@@ -131,7 +119,24 @@ export function startPhaseGeneric(
   const baseState: PhaseState = existing.state ?? {}
   const existingPhase = baseState.phase
 
-  if (existingPhase && existingPhase !== input.phase) {
+  // Stale-label exception (issue #15). A `verification` label whose block already
+  // carries `completed_at` describes finished work: builds predating the fix
+  // could strand it via `clear_phase: false`, and every documented way out
+  // (abandon, wiping the state) also destroyed the V record that
+  // rsct_phase_code_start requires — a closed loop whose only exit was editing
+  // the enforcement file by hand.
+  //
+  // The condition is EXACTLY `phase === 'verification' && completed_at != null`
+  // and must not be widened. Not `verification != null` alone (a V that started
+  // and never completed is what `rejected_incomplete` exists to catch), not other
+  // phase labels (no completion evidence behind them), and not a time-based
+  // heuristic (staleness by clock is not staleness by completion). Anything
+  // looser turns this repair into a general escape hatch from
+  // `phase_already_active` — the behavior the mechanical layer exists to block.
+  const staleVerificationLabel =
+    existingPhase === 'verification' && baseState.verification?.completed_at != null
+
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
     const audit = appendAudit(
       input.projectRoot,
       {
@@ -158,7 +163,7 @@ export function startPhaseGeneric(
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       hints: [
-        `Phase '${existingPhase}' is already active. Call rsct_phase_${existingPhase}_complete first, or wipe .rsct/phase-state.json, before starting a different phase.`,
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`,
       ],
     }
   }
@@ -172,6 +177,29 @@ export function startPhaseGeneric(
   if (input.scopeGlobs !== undefined) newState.scope_globs = input.scopeGlobs
 
   const writeResult = writePhaseState(input.projectRoot, newState)
+
+  // Overwriting a completed label is a state transition worth its own forensic
+  // record, separate from the `<phase>.start` event below. Emitted AFTER the
+  // write so it reports what actually happened: a `locked` or failed write must
+  // not leave the log asserting a transition that never landed. Carries the
+  // PREVIOUS spec context too, so a reader can tell "cleared my own V" from
+  // "stepped over another spec's V".
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: 'phase.stale_label_cleared',
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok,
+      },
+      config?.audit,
+    )
+  }
 
   const audit = appendAudit(
     input.projectRoot,
@@ -323,7 +351,7 @@ export async function gatePhaseComplete(
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or wipe the state.`,
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`,
       ],
     }
   }
