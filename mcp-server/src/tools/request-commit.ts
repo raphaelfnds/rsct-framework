@@ -38,6 +38,7 @@ import {
 } from '../lib/audit-log.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { checkCommitMessage } from '../lib/commit-message.js'
 import {
   promptYesNo,
   type DialogOptions,
@@ -102,6 +103,7 @@ export type RequestCommitRejectKind =
   | 'contract_surface'
   | 'plan_token_invalid'
   | 'free_budget_reserve_failed'
+  | 'message_too_long'
 
 /**
  * How the commit was authorized: a per-action dev_approval, a plan token, or
@@ -327,6 +329,47 @@ export async function requestCommitHandler(
         },
         config?.audit,
       )
+    }
+  }
+
+  // Message shape (#20). Runs BEFORE authorization by necessity, not by taste:
+  // `gateRequest` below pops an OS dialog, and further down the token path debits
+  // an action while the free lane reserves budget. Checking any later would ask
+  // the dev to approve — or spend budget on — a commit already destined to be
+  // rejected. Nothing has been read or mutated at this point, so the envelope
+  // mirrors the other pre-authorization rejects.
+  const messageCheck = checkCommitMessage(input.message, config)
+  if (!messageCheck.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: 'message_too_long',
+        reason: messageCheck.reason,
+        branch: gitState.branch,
+        message_lines: messageCheck.lines,
+        message_limit: messageCheck.limit,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: 'message_too_long',
+      reason: messageCheck.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([messageCheck.reason ?? 'commit message too long']),
     }
   }
 

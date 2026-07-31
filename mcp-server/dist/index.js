@@ -22679,6 +22679,10 @@ var RsctConfigSchema = external_exports.object({
   // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
   // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
+  // Deliberately UNBOUNDED here: the HIGH-4 posture nulls the whole config on
+  // an out-of-bounds bounded field, which is far too sharp for a cosmetic cap.
+  // Out-of-range values are clamped at the point of use instead.
+  commit_message_max_lines: external_exports.number().optional(),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -26994,6 +26998,31 @@ function recordConsumedApproval(approval, options) {
   }
 }
 
+// src/lib/commit-message.ts
+init_esm_shims();
+var COMMIT_MESSAGE_MAX_LINES_DEFAULT = 15;
+var MIN_LIMIT = 1;
+var MAX_LIMIT = 500;
+function countNonEmptyLines(message) {
+  return message.replace(/\r/g, "").split("\n").filter((l) => l.trim().length > 0).length;
+}
+function resolveCommitMessageMaxLines(config2) {
+  const v = config2?.commit_message_max_lines;
+  if (v === void 0 || !Number.isFinite(v)) return COMMIT_MESSAGE_MAX_LINES_DEFAULT;
+  return Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Math.trunc(v)));
+}
+function checkCommitMessage(message, config2) {
+  const limit = resolveCommitMessageMaxLines(config2);
+  const lines = countNonEmptyLines(message);
+  if (lines <= limit) return { ok: true, lines, limit, reason: null };
+  return {
+    ok: false,
+    lines,
+    limit,
+    reason: `commit message has ${lines} non-empty lines; the limit is ${limit}. Say what changed and why \u2014 the diff already shows the file-by-file detail. Blank lines are not counted. Raise the cap with "commit_message_max_lines" in .rsct.json if this project wants longer messages.`
+  };
+}
+
 // src/lib/os-dialog.ts
 init_esm_shims();
 var ENV_OVERRIDE_KEY = "RSCT_TEST_DIALOG_RESPONSE";
@@ -27405,6 +27434,40 @@ async function requestCommitHandler(rawInput, internal = {}) {
         config2?.audit
       );
     }
+  }
+  const messageCheck = checkCommitMessage(input.message, config2);
+  if (!messageCheck.ok) {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.rejected",
+        tool: "rsct_request_commit",
+        reject_kind: "message_too_long",
+        reason: messageCheck.reason,
+        branch: gitState.branch,
+        message_lines: messageCheck.lines,
+        message_limit: messageCheck.limit
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: "message_too_long",
+      reason: messageCheck.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([messageCheck.reason ?? "commit message too long"])
+    };
   }
   let channel;
   let authorizedVia;

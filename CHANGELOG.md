@@ -34,6 +34,18 @@ Repairs from the first extended field test. Backward-compatible; the marker
   file, an unresolvable reference or a `v=unknown` stamp never escalate.
 - `docs/troubleshooting.md` documents both drift messages — the feature had no
   user-facing documentation at all.
+- **Commit messages are capped at 15 non-empty lines** (#20). Everything else
+  about a commit was gated — authorization, branch protection, secrets, contract
+  surface — except its message, so bodies grew to re-narrate the diff file by
+  file and `git log` stopped being scannable. `rsct_request_commit` now rejects
+  with `message_too_long` **before** the §C dialog, so nothing is approved, and
+  no plan-token action or free-commit slot is spent, on a commit already destined
+  to be rejected. Blank lines are not counted; `commit_message_max_lines` in
+  `.rsct.json` (top level) raises the cap and is clamped rather than validated,
+  since nulling the whole config over a cosmetic limit would be disproportionate.
+  Length only — no opinion on Conventional Commits or subject grammar.
+  The reject hint states the count, the limit and the config key, because the
+  `rules/` prose explaining it never reaches an already-installed project.
 
 ### Changed
 
@@ -43,6 +55,14 @@ Repairs from the first extended field test. Backward-compatible; the marker
   every return path, so a report is not swallowed by a rejected commit.
 - CI runs `npm run typecheck`. `vitest` transpiles without type checking, so a
   signature change previously had no compile-time net in CI.
+- A compile-time parity guard now ties the `RsctConfig` interface to the Zod
+  schema that validates `.rsct.json`. They are written separately and joined by
+  an unchecked cast, so a key added to only one of them failed in the worst
+  possible way: `.strip()` dropped it at runtime while the cast told TypeScript
+  it was there, leaving the feature reading it permanently dead.
+- `mcp-server/README.md` bounds table corrected: `trust_allowed_for[]` lists 11
+  tools (not 3), and `approval_modes` has been `.strip()`, not `.strict()`, since
+  2.2.0.
 - The line-2 version stamp written by `/rsct-setup` (Phases 4.V.b / 4.V.d) is now
   a documented format contract with `mcp-server/src/lib/version-drift.ts`, pinned
   by `block-smoke` anchors on both blocks.

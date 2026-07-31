@@ -4153,6 +4153,10 @@ var RsctConfigSchema = external_exports.object({
   // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
   // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
+  // Deliberately UNBOUNDED here: the HIGH-4 posture nulls the whole config on
+  // an out-of-bounds bounded field, which is far too sharp for a cosmetic cap.
+  // Out-of-range values are clamped at the point of use instead.
+  commit_message_max_lines: external_exports.number().optional(),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),

@@ -663,9 +663,11 @@ Bounds:
 |---|---|---|
 | `audit.enabled` | must be `true` or absent (literal in schema) | `false` defeats INV-3 forensic trail |
 | `approval_modes.timestamp_skew_seconds` | `60 ≤ n ≤ 600` | M2 gate observed 78–155s AI roundtrip; 600s = 4× headroom while still bounding INV-2 replay window |
-| `approval_modes.trust_allowed_for[]` | enum of `rsct_request_commit`/`_push`/`_merge` | unknown entries can't smuggle a wildcard trust |
+| `approval_modes.trust_allowed_for[]` | enum of the §C-gated tool names (11 entries — see `RsctApprovalModesSchema`) | unknown entries can't smuggle a wildcard trust |
 | `protected_branches[]` | min length 1 if present | empty disables §D wholesale; if you want zero protected branches, uninstall the framework |
-| `audit` / `approval_modes` sub-objects | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
+| `audit` sub-object | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
+| `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
+| `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

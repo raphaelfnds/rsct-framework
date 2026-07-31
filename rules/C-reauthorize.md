@@ -58,7 +58,11 @@ that require a single-use `dev_approval` payload AND pop a cross-platform
 OS dialog before the mutation lands (with the free-commit-lane exception
 noted under "Plan execution modes" below):
 
-- `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`
+- `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`. Rejects a
+  message longer than **15 non-empty lines** (`message_too_long`), before the §C
+  dialog so nothing is approved or spent on a commit that will be rejected. Blank
+  lines are not counted; `commit_message_max_lines` in `.rsct.json` raises the cap.
+  The rule is length only — no opinion on Conventional Commits or subject grammar.
 - `mcp__rsct__rsct_request_push` — replaces `Bash(git push ...)`
 - `mcp__rsct__rsct_request_merge` — replaces `Bash(git merge ...)`
 - `mcp__rsct__rsct_request_rebase` — replaces `Bash(git rebase ...)` /
