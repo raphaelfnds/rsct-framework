@@ -11,7 +11,7 @@ import {
   hasIn,
   type RunBlockResult,
 } from './lib/block-harness.js'
-import { STAMP_RE } from '../../src/lib/version-drift.js'
+import { STAMP_RE, readScriptRegistration } from '../../src/lib/version-drift.js'
 
 // T0.c — curated smoke for 3 self-contained, high-risk prompt mutation blocks
 // (gitignore backfill, .rsct.json secrets merge, .mcp.json scrub). Each block is
@@ -964,4 +964,141 @@ describe.skipIf(!BASH || !NODE)('block: guard version stamp (01-setup 4.V.d)', (
       '// rsct-mcp v=9.9.9 — installed by /rsct-setup',
     )
   }, 60_000)
+})
+
+// ---------------------------------------------------------------------------
+// Phase 4.V.c / 4.V.d install + 03-uninstall 4.V.a / 4.V.a1 scrub — the HOOK
+// REGISTRATION contract (issue #24). Bash writes the entry, `lib/version-drift.ts`
+// reads it back, and the two agree on four separate things: the marker substring,
+// the event name, the `hooks.<Event>[].hooks[].command` nesting, and the writer's
+// serialization. Nothing else pins any of them — the TS side would otherwise hold
+// a fourth private copy of a contract that already lives in two prompts, free to
+// desynchronize with a green suite.
+//
+// So these tests never build a settings object: they run the REAL block and hand
+// the file bash produced to the REAL predicate. Same discipline as STAMP_RE
+// above, and the reason the content axis is tested against `dist/scripts/`.
+const SESSION_HOOK_ANCHOR =
+  'CHECKPOINT: Phase 4.V.c executing canonical structured-merge SessionStart hook install'
+const SESSION_SCRUB_ANCHOR =
+  'CHECKPOINT: Phase 4.V.a executing canonical structured-merge SessionStart hook scrub'
+const GUARD_SCRUB_ANCHOR =
+  'CHECKPOINT: Phase 4.V.a1 executing canonical structured-merge PreToolUse guard scrub'
+
+const HOOK_SEED = {
+  'fake-dist/sanitize-permissions.js': SRC_FILE,
+  'fake-dist/edit-scope-guard.js': SRC_FILE,
+  '.claude/settings.json': '{}\n',
+}
+
+describe.skipIf(!BASH || !NODE)('block: hook registration round-trip (#24)', () => {
+  it('the SessionStart entry 4.V.c writes is recognized as registered', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: HOOK_SEED,
+    })
+    // The REAL reader, against the REAL file bash just wrote.
+    expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('registered')
+  }, 60_000)
+
+  it('the PreToolUse entry 4.V.d writes is recognized as registered', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: GUARD_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: HOOK_SEED,
+    })
+    expect(readScriptRegistration(r.dir, 'edit-scope-guard.js')).toBe('registered')
+  }, 60_000)
+
+  it('re-running 4.V.c does not duplicate the entry', () => {
+    // The idempotency key is the MARKER, not the command string. Change the
+    // marker in the prompt without changing HOOK_CMD and every other test here
+    // still passes — the written command is unchanged, so the reader still says
+    // `registered` — while each /rsct-setup appends another SessionStart entry.
+    // Only a second run catches that.
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: HOOK_SEED,
+      runs: 2,
+    })
+    expect(r.out).toContain('already present')
+    const settings = JSON.parse(readIn(r, '.claude/settings.json')) as {
+      hooks?: { SessionStart?: unknown[] }
+    }
+    expect(settings.hooks?.SessionStart).toHaveLength(1)
+    expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('registered')
+  }, 90_000)
+
+  it('re-running 4.V.d does not duplicate the entry', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: GUARD_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: HOOK_SEED,
+      runs: 2,
+    })
+    expect(r.out).toContain('already present')
+    const settings = JSON.parse(readIn(r, '.claude/settings.json')) as {
+      hooks?: { PreToolUse?: unknown[] }
+    }
+    expect(settings.hooks?.PreToolUse).toHaveLength(1)
+    expect(readScriptRegistration(r.dir, 'edit-scope-guard.js')).toBe('registered')
+  }, 90_000)
+
+  it('an install that never ran reads as unregistered, not as a parse accident', () => {
+    // Guards the pair above: if the predicate returned 'registered' for any
+    // parseable file, both would pass while proving nothing.
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: 'SANITIZER_SRC=""\nRSCT_MCP_VERSION=2.3.0', // block is gated on SANITIZER_SRC
+      seedFiles: HOOK_SEED,
+    })
+    expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('unregistered')
+  }, 60_000)
+
+  it('the uninstall scrub flips both hooks back to unregistered', () => {
+    // Install both, then scrub both, in ONE temp dir — the full lifecycle across
+    // all three surfaces. `runs` cannot express this (different blocks), so the
+    // dir is threaded manually via the harness's cwd semantics.
+    const installed = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: HOOK_SEED,
+    })
+    expect(readScriptRegistration(installed.dir, 'sanitize-permissions.js')).toBe('registered')
+
+    const settingsAfterInstall = readIn(installed, '.claude/settings.json')
+    const guardInstalled = run({
+      promptBasename: '01-setup.md', anchor: GUARD_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { ...HOOK_SEED, '.claude/settings.json': settingsAfterInstall },
+    })
+    expect(readScriptRegistration(guardInstalled.dir, 'edit-scope-guard.js')).toBe('registered')
+
+    const both = readIn(guardInstalled, '.claude/settings.json')
+    const scrubbed = run({
+      promptBasename: '03-uninstall.md', anchor: SESSION_SCRUB_ANCHOR,
+      seedFiles: { '.claude/settings.json': both },
+    })
+    expect(readScriptRegistration(scrubbed.dir, 'sanitize-permissions.js')).toBe('unregistered')
+    // The guard entry must SURVIVE the SessionStart scrub — the two are scrubbed
+    // by separate blocks, and a scrub that took both would be a silent overreach.
+    expect(readScriptRegistration(scrubbed.dir, 'edit-scope-guard.js')).toBe('registered')
+
+    const guardScrubbed = run({
+      promptBasename: '03-uninstall.md', anchor: GUARD_SCRUB_ANCHOR,
+      seedFiles: { '.claude/settings.json': readIn(scrubbed, '.claude/settings.json') },
+    })
+    // Scrubbing the LAST RSCT hook empties the document, so the uninstall deletes
+    // the file outright (03-uninstall.md 4.V.a, CAP-50) rather than leaving an
+    // orphaned `{}`. No settings file means no hook — evidence, not a gap — so
+    // the verdict is `unregistered`.
+    //
+    // That does NOT make a fully uninstalled project shout: 4.V.b runs
+    // `rm -rf .rsct/scripts` and 4.6 deletes `.rsct.json`, so `rsct_installed`
+    // is false and all three call sites skip the drift check entirely.
+    expect(hasIn(guardScrubbed, '.claude/settings.json')).toBe(false)
+    expect(readScriptRegistration(guardScrubbed.dir, 'edit-scope-guard.js')).toBe('unregistered')
+  }, 120_000)
 })

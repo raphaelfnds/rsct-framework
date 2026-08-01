@@ -10,6 +10,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.4.0] - 2026-08-01
+
+Closes the hole `2.3.0` left open: enforcement can be *installed* and still not
+be *running*. Backward-compatible; the marker **schema id stays `v=1.0.0`**
+(frozen). Tool count unchanged at **39**.
+
+### Added
+
+- **Install drift now checks whether the hooks are REGISTERED, not just whether
+  the scripts are current** (#24). A script under `.rsct/scripts/` only does
+  anything if a hook in `.claude/settings.json` runs it. `2.3.0` compared file
+  bytes and nothing else, so a byte-perfect `sanitize-permissions.js` whose
+  `SessionStart` entry had been lost produced a clean `rsct_status` and zero
+  enforcement — arguably worse than the state `2.3.0` was built to catch, since
+  the file sitting on disk reads as installed.
+  A present-but-unregistered enforcement script now escalates to the `security`
+  tier alongside an absent one: both mean the same thing, and the tier makes
+  exactly that claim. `stale` is untouched at the normal tier — a byte difference
+  still cannot prove a fix is missing.
+  Reachable without doing anything exotic: a `.claude/settings.json` reset, a
+  merge conflict resolved by taking one side, a fresh clone where the file was
+  never committed, or a hand-edit. In one observed field session that file gained
+  six unrelated `permissions.allow[]` entries — it is not a file that sits still.
+
+### Changed
+
+- `InstallDriftNotice.stale_components` → **`affected_components`**, and each
+  entry carries a `registration` state. The field now holds components whose own
+  `state` reads `current` (present, unwired), so the old name would have been
+  self-contradictory in a payload that is written verbatim to the audit log.
+  A `.rsct/audit.log` that spans the upgrade will carry `stale_components` on
+  `install.drift_detected` entries written before 2.4.0 and `affected_components`
+  after. Nothing in the codebase reads either key back; the log is append-only
+  and is not migrated.
+- Registration is decided on whether the evidence is **complete**, not on whether
+  any one file parsed. A settings file that is absent counts as evidence (it
+  holds no hook — this is the issue's "fresh clone that never committed
+  `.claude/`" case). A file that exists but cannot be read or parsed makes the
+  answer `unknown` and stays silent: the hook is most likely inside the file that
+  could not be read, and a message whose whole value is naming what was searched
+  must not name a file it never opened.
+- The `security` hint reads *"RSCT enforcement is not running in this project"*
+  and names **every** component that is not running — a project can have one
+  script missing and another merely unwired, and the previous message described
+  only the first.
+- Registration is read from this project's `.claude/settings.json` and
+  `.claude/settings.local.json` only. A user-level `~/.claude/settings.json` is
+  deliberately NOT consulted: it exists on nearly every machine and usually has
+  no `hooks` key, so admitting it would flag every hookless project; and since
+  detection is a path substring, a user-level entry registering a hook for a
+  *different* project would read as registered for all of them. Documented in
+  `docs/troubleshooting.md` as a known blind spot.
+
+### Fixed
+
+- `README.md`, `docs/commands.md`, `docs/getting-started.md` and
+  `mcp-server/README.md` claimed the SessionStart hook lives in
+  `.claude/settings.local.json`. `/rsct-setup` writes it to
+  `.claude/settings.json`. The `README` also promised that `rsct_status` reported
+  hook wiring, which no code backed until now, and `mcp-server/README.md` still
+  described the advisory as firing when a script "differs" — it never did.
+
+### Known limitation
+
+- A `.claude/settings.json` carrying a UTF-8 BOM reads as unparseable, so
+  registration reports `unknown` and this check stays silent. That matches every
+  other RSCT surface — `/rsct-setup`, the uninstall scrub and the sanitizer all
+  reject a BOM'd file — and making only this reader lenient would have it report
+  enforcement as live while the sanitizer refuses the same file. Tolerating a BOM
+  everywhere is tracked separately.
+
 ## [2.3.0] - 2026-07-31
 
 Repairs from the first extended field test. Backward-compatible; the marker

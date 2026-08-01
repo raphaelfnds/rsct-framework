@@ -80,11 +80,12 @@ never trips the gate.
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 | flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
 | plan-lifecycle-v2 — dialog-free free-commit lane (audit-anchored anti-rollback ceiling + sliding token) · integration gate (mechanical `plan_complete` cross-check + advisory-only cleanup + `rsct_plan_dispose` + retroactive reconciliation) · `rsct_request_rebase` (rebase/squash) · re-bootstrap `context_stale` flag + PreToolUse edit-scope guard · settings.json machine-path hygiene · unified idempotent `/rsct-universe` · `plan_file_retention` toggle | ✅ shipped to `main`; ships in **v2.2.0** (brings the catalog 37 → **39 tools**) |
+| hook-registration — install drift also checks whether the enforcement **hooks are registered** in `.claude/settings.json`, not just whether the script files are current; a present-but-unwired script now escalates alongside an absent one · `stale_components` → `affected_components` (carries a `registration` state) · four doc pages corrected on where the hooks actually live | ✅ shipped to `main`; ships in **v2.4.0** (39 tools, unchanged) |
 | field-test-repairs — install-drift ranking (content evidence; `security` only when an enforcement script is **absent**) · V-phase stale-label repair + `clear_phase` deprecation · commit-message cap (`message_too_long`) · `rsct_capture_issue` adapts to the host repo's labels/types · advisory channel on every `request_commit` return path · `auditFields` collapsed 15 → 1 | ✅ shipped to `main`; ships in **v2.3.0** (39 tools, unchanged) |
 
-**39 tools · 5 resources · tsc strict · ESM ~250 KB
-(server) + 5.7 KB (sanitize-permissions CLI) · cross-platform (Windows /
-macOS / Linux)**
+**39 tools · 5 resources · tsc strict · ESM ~1.1 MB
+(server) + ~9 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
+cross-platform (Windows / macOS / Linux)**
 
 ---
 
@@ -512,7 +513,7 @@ no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
-- `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected commits too. Today: the security-tier install-drift warning (an enforcement script under `.rsct/scripts/` is absent or differs from the copy this binary ships).
+- `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected commits too. Today: the security-tier install-drift warning (an enforcement script under `.rsct/scripts/` is absent, or is present with no hook entry in `.claude/settings.json` pointing at it — either way what it enforces is not running). A script that merely *differs* from the shipped copy stays at the normal tier and is not an advisory.
 
 Approval consumption rule: never burn the approval on pre-mutation
 rejects. Only `recordConsumedApproval` AFTER a successful commit.

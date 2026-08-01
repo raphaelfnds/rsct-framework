@@ -1007,7 +1007,7 @@ describe('rsct_request_commit — install-drift advisory (#16)', () => {
   // read as absent → severity 'security'. That is the realistic shape of a
   // project set up before the MCP companion existed, and absence is the only
   // state the check will call a security matter.
-  const SECURITY = /SECURITY: an RSCT enforcement script is missing/
+  const SECURITY = /SECURITY: RSCT enforcement is not running/
 
   function driftInternal(branch: string): RequestCommitInternal {
     return {
@@ -1048,7 +1048,7 @@ describe('rsct_request_commit — install-drift advisory (#16)', () => {
     expect(entry).toBeDefined()
     expect(entry?.severity).toBe('security')
     expect(entry?.tool).toBe('rsct_request_commit')
-    expect((entry?.stale_components as unknown[]).length).toBe(2)
+    expect((entry?.affected_components as unknown[]).length).toBe(2)
   })
 
   it('still carries the advisory when the commit is REJECTED', async () => {

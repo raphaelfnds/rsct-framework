@@ -5,26 +5,29 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   getInstallDriftNotice,
   readScriptEvidence,
+  readScriptRegistration,
   type ScriptEvidence,
 } from '../../src/lib/version-drift.js'
 
 /**
  * The version axis is pure — it takes the `evidence` seam so these stay
  * filesystem-free. The component axis gets its own tmpdir-backed block below.
+ *
+ * `ev` defaults to the HEALTHY state on every field, so each fixture states only
+ * the one thing it is about, and a new field on `ScriptEvidence` does not force
+ * an edit to every literal in this file.
  */
+const ev = (o: Partial<ScriptEvidence> & { name: string }): ScriptEvidence => ({
+  state: 'current',
+  security_relevant: true,
+  stamp_version: null,
+  registration: 'registered',
+  ...o,
+})
+
 const NO_DRIFT: ScriptEvidence[] = [
-  {
-    name: 'sanitize-permissions.js',
-    state: 'current',
-    security_relevant: true,
-    stamp_version: '2.1.0',
-  },
-  {
-    name: 'edit-scope-guard.js',
-    state: 'current',
-    security_relevant: true,
-    stamp_version: '2.1.0',
-  },
+  ev({ name: 'sanitize-permissions.js', stamp_version: '2.1.0' }),
+  ev({ name: 'edit-scope-guard.js', stamp_version: '2.1.0' }),
 ]
 
 function notice(
@@ -42,10 +45,10 @@ function notice(
 
 describe('getInstallDriftNotice — version axis', () => {
   it('fires when the binary is strictly newer than the project version', () => {
-    const { hint, severity, stale_components } = notice('2.0.0', '2.1.0')
+    const { hint, severity, affected_components } = notice('2.0.0', '2.1.0')
     expect(hint).not.toBeNull()
     expect(severity).toBe('normal')
-    expect(stale_components).toEqual([])
+    expect(affected_components).toEqual([])
     expect(hint).toContain('v2.0.0')
     expect(hint).toContain('v2.1.0')
     expect(hint).toContain('Re-run /rsct-setup')
@@ -97,12 +100,7 @@ describe('getInstallDriftNotice — version axis', () => {
 
 describe('getInstallDriftNotice — component axis', () => {
   const stale: ScriptEvidence[] = [
-    {
-      name: 'sanitize-permissions.js',
-      state: 'stale',
-      security_relevant: true,
-      stamp_version: '2.1.1',
-    },
+    ev({ name: 'sanitize-permissions.js', state: 'stale', stamp_version: '2.1.1' }),
     ...NO_DRIFT.slice(1),
   ]
 
@@ -113,23 +111,23 @@ describe('getInstallDriftNotice — component axis', () => {
     // prove a fix is missing: these scripts are bundles, so an unrelated config
     // key changes them. Ranking it `security` would fire on every release for
     // every project, which is the failure this module exists to remove.
-    const { severity, hint, stale_components } = notice('2.3.0', '2.3.0', stale)
+    const { severity, hint, affected_components } = notice('2.3.0', '2.3.0', stale)
     expect(severity).toBe('normal')
     expect(hint).not.toContain('SECURITY')
     expect(hint).toContain("sanitize-permissions.js differs from this binary's copy")
-    expect(stale_components).toEqual([
-      { name: 'sanitize-permissions.js', state: 'stale', stamp_version: '2.1.1' },
+    expect(affected_components).toEqual([
+      {
+        name: 'sanitize-permissions.js',
+        state: 'stale',
+        stamp_version: '2.1.1',
+        registration: 'registered',
+      },
     ])
   })
 
   it('escalates an absent enforcement script — the only provable claim', () => {
     const absent: ScriptEvidence[] = [
-      {
-        name: 'edit-scope-guard.js',
-        state: 'absent',
-        security_relevant: true,
-        stamp_version: null,
-      },
+      ev({ name: 'edit-scope-guard.js', state: 'absent' }),
       ...NO_DRIFT.slice(0, 1),
     ]
     const { severity, hint } = notice('2.3.0', '2.3.0', absent)
@@ -139,12 +137,7 @@ describe('getInstallDriftNotice — component axis', () => {
 
   it('does not escalate an unreadable script — absence of evidence is not evidence', () => {
     const unreadable: ScriptEvidence[] = [
-      {
-        name: 'sanitize-permissions.js',
-        state: 'unreadable',
-        security_relevant: true,
-        stamp_version: null,
-      },
+      ev({ name: 'sanitize-permissions.js', state: 'unreadable' }),
       ...NO_DRIFT.slice(1),
     ]
     expect(notice('2.3.0', '2.3.0', unreadable).severity).toBe('normal')
@@ -153,7 +146,7 @@ describe('getInstallDriftNotice — component axis', () => {
 
   it('ignores a stale script that is not security-relevant', () => {
     const other: ScriptEvidence[] = [
-      { name: 'some-helper.js', state: 'stale', security_relevant: false, stamp_version: null },
+      ev({ name: 'some-helper.js', state: 'stale', security_relevant: false }),
       ...NO_DRIFT,
     ]
     expect(notice('2.3.0', '2.3.0', other).severity).toBe('normal')
@@ -170,16 +163,129 @@ describe('getInstallDriftNotice — component axis', () => {
 
   it('an absent script outranks a merely differing one', () => {
     const mixed: ScriptEvidence[] = [
-      { name: 'sanitize-permissions.js', state: 'stale', security_relevant: true, stamp_version: '2.1.1' },
-      { name: 'edit-scope-guard.js', state: 'absent', security_relevant: true, stamp_version: null },
+      ev({ name: 'sanitize-permissions.js', state: 'stale', stamp_version: '2.1.1' }),
+      ev({ name: 'edit-scope-guard.js', state: 'absent' }),
     ]
-    const { severity, hint, stale_components } = notice('2.3.0', '2.3.0', mixed)
+    const { severity, hint, affected_components } = notice('2.3.0', '2.3.0', mixed)
     expect(severity).toBe('security')
     expect(hint).toContain('edit-scope-guard.js is not installed')
-    // The security message speaks only about what is provably missing...
+    // The security message speaks only about what is provably not running...
     expect(hint).not.toContain('sanitize-permissions.js')
     // ...but both components stay in the structured payload for the audit trail.
-    expect(stale_components).toHaveLength(2)
+    expect(affected_components).toHaveLength(2)
+  })
+})
+
+describe('getInstallDriftNotice — registration axis (#24)', () => {
+  const unregistered = (name: string, over: Partial<ScriptEvidence> = {}): ScriptEvidence[] => [
+    ev({ name, registration: 'unregistered', ...over }),
+    ...NO_DRIFT.filter((e) => e.name !== name),
+  ]
+
+  it('escalates a present, byte-current, UNREGISTERED script — the state #16 read as healthy', () => {
+    const { severity, hint, affected_components } = notice(
+      '2.3.0',
+      '2.3.0',
+      unregistered('edit-scope-guard.js'),
+    )
+    expect(severity).toBe('security')
+    // Wording distinct from "is not installed": the file IS there.
+    expect(hint).toContain('edit-scope-guard.js is installed, but no PreToolUse entry')
+    expect(hint).not.toContain('edit-scope-guard.js is not installed')
+    expect(affected_components).toEqual([
+      {
+        name: 'edit-scope-guard.js',
+        state: 'current',
+        stamp_version: null,
+        registration: 'unregistered',
+      },
+    ])
+  })
+
+  it('names the canonical event of each script, not a generic one', () => {
+    expect(notice('2.3.0', '2.3.0', unregistered('sanitize-permissions.js')).hint).toContain(
+      'sanitize-permissions.js is installed, but no SessionStart entry',
+    )
+  })
+
+  it('claims only what was searched — never that the machine has no such hook', () => {
+    const { hint } = notice('2.3.0', '2.3.0', unregistered('edit-scope-guard.js'))
+    // A user-level or enterprise hook is invisible here (lib/claude-settings.ts),
+    // so the sentence must name the files that were read.
+    expect(hint).toContain("this project's .claude/settings.json or .claude/settings.local.json")
+  })
+
+  it('does NOT escalate an unregistered script we could not read — two non-evidences are not evidence', () => {
+    // The dangerous cell: under vitest the shipped dir does not resolve, so every
+    // script reads `unreadable`. Escalating on registration alone would have made
+    // "I could not look" a security claim.
+    const { severity, hint } = notice(
+      '2.3.0',
+      '2.3.0',
+      unregistered('edit-scope-guard.js', { state: 'unreadable' }),
+    )
+    expect(severity).toBe('normal')
+    expect(hint).toBeNull()
+  })
+
+  it('stays silent when registration is unknown — no readable settings, no verdict', () => {
+    const { severity, hint } = notice('2.3.0', '2.3.0', [
+      ev({ name: 'edit-scope-guard.js', registration: 'unknown' }),
+      ...NO_DRIFT.slice(0, 1),
+    ])
+    expect(severity).toBe('normal')
+    expect(hint).toBeNull()
+  })
+
+  it('ignores an unregistered script that is not security-relevant', () => {
+    const { severity } = notice('2.3.0', '2.3.0', [
+      ev({ name: 'some-helper.js', security_relevant: false, registration: 'unregistered' }),
+      ...NO_DRIFT,
+    ])
+    expect(severity).toBe('normal')
+  })
+
+  it('reports absence and non-registration in ONE hint when both are true of a project', () => {
+    // Reachable and previously silent on half of it: the old branch filtered to
+    // absent and dropped the unwired component from the message entirely.
+    const { severity, hint } = notice('2.3.0', '2.3.0', [
+      ev({ name: 'sanitize-permissions.js', state: 'absent' }),
+      ev({ name: 'edit-scope-guard.js', registration: 'unregistered' }),
+    ])
+    expect(severity).toBe('security')
+    expect(hint).toContain('sanitize-permissions.js is not installed')
+    expect(hint).toContain('edit-scope-guard.js is installed, but no PreToolUse entry')
+  })
+
+  it('says a script is missing ONCE when it is both absent and unregistered', () => {
+    const { hint } = notice('2.3.0', '2.3.0', [
+      ev({ name: 'edit-scope-guard.js', state: 'absent', registration: 'unregistered' }),
+      ...NO_DRIFT.slice(0, 1),
+    ])
+    expect(hint).toContain('edit-scope-guard.js is not installed')
+    // Absence subsumes non-registration — one fact, one sentence.
+    expect(hint).not.toContain('edit-scope-guard.js is installed')
+  })
+
+  it('leads with non-registration for a script that is both stale and unwired', () => {
+    const { severity, hint } = notice('2.3.0', '2.3.0', [
+      ev({ name: 'edit-scope-guard.js', state: 'stale', registration: 'unregistered' }),
+      ...NO_DRIFT.slice(0, 1),
+    ])
+    expect(severity).toBe('security')
+    expect(hint).toContain('edit-scope-guard.js is installed, but no PreToolUse entry')
+    // "differs" never appears at the security tier — it cannot prove anything.
+    expect(hint).not.toContain('differs from')
+  })
+
+  it('pins the security hint text byte-for-byte', () => {
+    expect(notice('2.1.1', '2.3.0', unregistered('edit-scope-guard.js')).hint).toBe(
+      '⚠ SECURITY: RSCT enforcement is not running in this project — edit-scope-guard.js is ' +
+        'installed, but no PreToolUse entry pointing at it was found in this project\'s ' +
+        '.claude/settings.json or .claude/settings.local.json. ' +
+        'Run /rsct-setup to repair it, then restart the IDE. ' +
+        'See docs/troubleshooting.md. (never blocks)',
+    )
   })
 })
 
@@ -367,6 +473,153 @@ describe('readScriptEvidence', () => {
  * `/rsct-setup` Phase 4.V.b installs them. The whole feature is wrong if this
  * fails — every healthy project would report a security escalation.
  */
+/**
+ * Registration, read from REAL settings files on disk. Every case here writes
+ * JSON text and lets the production reader parse it: a hand-built object literal
+ * would only prove the matcher agrees with itself, and would stay green if the
+ * parsing, the BOM handling or the separator folding broke.
+ */
+describe('readScriptRegistration — file-backed (#24)', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+
+  /** Writes real files; `undefined` content means "do not create this file". */
+  function project(files: { settings?: string; local?: string }): string {
+    const root = mkdtempSync(join(tmpdir(), 'rsct-reg-'))
+    dirs.push(root)
+    mkdirSync(join(root, '.claude'), { recursive: true })
+    if (files.settings !== undefined) {
+      writeFileSync(join(root, '.claude', 'settings.json'), files.settings)
+    }
+    if (files.local !== undefined) {
+      writeFileSync(join(root, '.claude', 'settings.local.json'), files.local)
+    }
+    return root
+  }
+
+  /** The exact shape `/rsct-setup` Phase 4.V.c / 4.V.d writes. */
+  const withHook = (event: string, command: string, extra: object = {}): string =>
+    JSON.stringify({ hooks: { [event]: [{ ...extra, hooks: [{ type: 'command', command }] }] } }, null, 2) +
+    '\n'
+
+  const GUARD_CMD = 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js'
+  const SANITIZE_CMD = 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js'
+
+  it('recognizes the hook entry setup writes', () => {
+    const root = project({
+      settings: withHook('PreToolUse', GUARD_CMD, { matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$' }),
+    })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+  })
+
+  it('reports unregistered when the file parses but holds no matching entry', () => {
+    expect(readScriptRegistration(project({ settings: '{"permissions":{"allow":[]}}\n' }), 'edit-scope-guard.js')).toBe(
+      'unregistered',
+    )
+  })
+
+  it('requires the CANONICAL event — a sanitizer wired under PreToolUse does not run at boot', () => {
+    const root = project({ settings: withHook('PreToolUse', SANITIZE_CMD) })
+    expect(readScriptRegistration(root, 'sanitize-permissions.js')).toBe('unregistered')
+  })
+
+  it('does not accept an entry pointing at a DIFFERENT script', () => {
+    const root = project({ settings: withHook('PreToolUse', GUARD_CMD) })
+    expect(readScriptRegistration(root, 'sanitize-permissions.js')).toBe('unregistered')
+  })
+
+  it('accepts an entry a dev moved into settings.local.json — there it still runs', () => {
+    const root = project({ settings: '{}\n', local: withHook('SessionStart', SANITIZE_CMD) })
+    expect(readScriptRegistration(root, 'sanitize-permissions.js')).toBe('registered')
+  })
+
+  it('tolerates backslash separators — a hand-written Windows path still runs', () => {
+    // Written as JSON text with escaped backslashes, exactly as the file holds
+    // them. Without folding, this is a false SECURITY claim about a live hook.
+    const root = project({
+      settings: withHook('PreToolUse', 'node C:\\proj\\.rsct\\scripts\\edit-scope-guard.js'),
+    })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+  })
+
+  it('does NOT see through a UTF-8 BOM — no RSCT surface can read that file', () => {
+    // Tempting to strip it. But `src/scripts/sanitize-permissions.ts` and all
+    // five bash blocks parse raw, so on a BOM-prefixed file the sanitizer aborts
+    // and enforcement genuinely is not running. A lenient read here would find
+    // the hook and report healthy — the exact false-healthy #24 closes,
+    // reintroduced by its own fix. `unknown` is the wrong answer, safe direction.
+    const root = project({ settings: '\uFEFF' + withHook('PreToolUse', GUARD_CMD) })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('unknown')
+  })
+
+  it('reads a CRLF settings file identically', () => {
+    // Documentation, not coverage: JSON forbids a literal CR inside a string, so
+    // the carriage return never reaches the command value and no code here is
+    // CRLF-sensitive. Kept so nobody bolts a readNormalized onto this path.
+    const root = project({ settings: withHook('PreToolUse', GUARD_CMD).replace(/\n/g, '\r\n') })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+  })
+
+  it('reports unregistered when NO settings file exists — the fresh-clone case', () => {
+    // A file that is not there holds no hook. Issue #24 names this cause
+    // explicitly, and `.claude/settings.json` is exactly the file a project
+    // forgets to commit while `.rsct/scripts/` rides along tracked.
+    const root = mkdtempSync(join(tmpdir(), 'rsct-reg-'))
+    dirs.push(root)
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('unregistered')
+  })
+
+  it('is unknown when the settings file is malformed — a trailing comma is not a security event', () => {
+    expect(readScriptRegistration(project({ settings: '{"hooks":{},}\n' }), 'edit-scope-guard.js')).toBe('unknown')
+  })
+
+  it('still finds the hook when settings.json is malformed but the local file carries it', () => {
+    const root = project({ settings: '{ broken', local: withHook('PreToolUse', GUARD_CMD) })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+  })
+
+  it('is unknown — never unregistered — when one file is unreadable and the other lacks the hook', () => {
+    // The dangerous mirror of the case above: settings.json unparseable, the
+    // local file parses and holds nothing. Claiming "not found in settings.json
+    // or settings.local.json" would name a file that was never searched — and
+    // that is where /rsct-setup writes, so it is where the hook most likely is.
+    const root = project({ settings: '{ broken', local: '{"permissions":{"allow":[]}}\n' })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('unknown')
+  })
+
+  it('is unregistered when one file is absent and the other parses without the hook', () => {
+    // Absent is evidence; only unreadable/malformed is a gap in it.
+    const root = project({ local: '{"permissions":{"allow":[]}}\n' })
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('unregistered')
+  })
+
+  it('is unknown for a script with no canonical event — there is no question to answer', () => {
+    expect(readScriptRegistration(project({ settings: '{}\n' }), 'future-hook.js')).toBe('unknown')
+  })
+
+  it('never throws on a settings file of the wrong shape', () => {
+    for (const body of ['null', '[]', '"a string"', '{"hooks":[]}', '{"hooks":{"PreToolUse":{}}}', '{"hooks":{"PreToolUse":[null,{"hooks":"x"}]}}']) {
+      expect(readScriptRegistration(project({ settings: body }), 'edit-scope-guard.js')).toBe('unregistered')
+    }
+  })
+
+  it('flows into readScriptEvidence, so a current script can still be reported unwired', () => {
+    const root = project({ settings: '{}\n' })
+    const installed = join(root, '.rsct', 'scripts')
+    const shipped = join(root, 'shipped')
+    mkdirSync(installed, { recursive: true })
+    mkdirSync(shipped, { recursive: true })
+    const body = "const a = 1\n"
+    writeFileSync(join(installed, 'edit-scope-guard.js'), `#!/usr/bin/env node\n// rsct-mcp v=2.3.0 — installed by /rsct-setup\n${body}`)
+    writeFileSync(join(shipped, 'edit-scope-guard.js'), `#!/usr/bin/env node\n${body}`)
+    const e = readScriptEvidence(root, shipped).find((x) => x.name === 'edit-scope-guard.js')
+    expect(e?.state).toBe('current')
+    expect(e?.registration).toBe('unregistered')
+  })
+})
+
 describe('readScriptEvidence — against the real dist/scripts artifacts', () => {
   const DIST = resolve(__dirname, '..', '..', 'dist', 'scripts')
   const dirs: string[] = []
@@ -379,6 +632,31 @@ describe('readScriptEvidence — against the real dist/scripts artifacts', () =>
     dirs.push(root)
     const installed = join(root, '.rsct', 'scripts')
     mkdirSync(installed, { recursive: true })
+    // A faithful reproduction includes the hooks: Phase 4.V.c/4.V.d always write
+    // them alongside the scripts. Without this the project would be a healthy
+    // install with no wiring — a real `security` state, and this test would be
+    // asserting the wrong axis.
+    mkdirSync(join(root, '.claude'), { recursive: true })
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              { hooks: [{ type: 'command', command: 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js' }] },
+            ],
+            PreToolUse: [
+              {
+                matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$',
+                hooks: [{ type: 'command', command: 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js' }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    )
 
     for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
       const shippedText = readFileSync(join(DIST, name), 'utf8')

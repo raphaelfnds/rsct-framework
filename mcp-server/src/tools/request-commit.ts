@@ -304,8 +304,8 @@ export async function requestCommitHandler(
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
 
   // Install drift, security tier only: an enforcement script under
-  // `.rsct/scripts/` is absent or differs from the copy this binary ships, so
-  // fixes to it are not running here. Evaluated before authorization, so the
+  // `.rsct/scripts/` is absent, or is present with no hook entry pointing at it,
+  // so what it enforces is not running here. Evaluated before authorization, so the
   // advisory reaches the dev on rejected attempts too, and prepended because it
   // outranks the routine hint tail. The audit entry follows the same rule — it
   // records that a commit was ATTEMPTED under a degraded enforcement surface,
@@ -326,7 +326,7 @@ export async function requestCommitHandler(
           project_version: config?.rsct_version ?? null,
           mcp_version: RSCT_MCP_VERSION,
           severity: drift.severity,
-          stale_components: drift.stale_components,
+          affected_components: drift.affected_components,
         },
         config?.audit,
       )
