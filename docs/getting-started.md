@@ -64,7 +64,7 @@ updates what changed.
 | `documentation/` | Architecture, decisions, knowledge, and impact templates you fill over time. |
 | `.rsct.json` | Project config — protected branches, topology, the `install` block (the uninstall marker). |
 | Memory entries | Under `.claude/projects/.../memory/` — durable facts for the agent. |
-| `.claude/settings.local.json` | The SessionStart sanitizer hook (only if you opted into `rsct-mcp`). |
+| `.claude/settings.json` | The SessionStart sanitizer hook and the PreToolUse edit-scope guard (only if you opted into `rsct-mcp`). |
 
 Every artifact carries a reversibility marker, so [`/rsct-uninstall`](commands.md#rsct-uninstall)
 can remove it cleanly and SHA256-protect anything you edited by hand.

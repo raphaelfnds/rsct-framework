@@ -129,7 +129,7 @@ MCP server during the install run. Three choices:
 | Step | When |
 |---|---|
 | **Restart IDE / Claude Code** | After install, **and** after any `claude mcp add/remove`. Slash commands + MCP registrations load at IDE startup. |
-| **`/rsct-setup` inside each project** | Once per project, to write `CLAUDE.md`, `documentation/`, memory entries, and the SessionStart sanitizer hook. |
+| **`/rsct-setup` inside each project** | Once per project, to write `CLAUDE.md`, `documentation/`, memory entries, and the enforcement hooks (SessionStart sanitizer + PreToolUse edit-scope guard). |
 
 For the typical solo-dev path: `bash scripts/install.sh` → choose User
 scope → restart Claude Code → run `/rsct-setup` in each project.
@@ -370,8 +370,9 @@ step doesn't behave as described, that's a bug worth filing.
      written.
    - Created: `CLAUDE.md`, `documentation/`, memory entries under
      `.claude/projects/.../memory/`, `.rsct.json`, and
-     `.claude/settings.local.json` with the SessionStart sanitizer hook
-     wired up (if you opted in to `rsct-mcp` during setup — recommended).
+     `.claude/settings.json` with the SessionStart sanitizer hook and the
+     PreToolUse edit-scope guard wired up (if you opted in to `rsct-mcp`
+     during setup — recommended).
 4. **Ask Claude to commit** something. Expected behavior:
    - Plain `Bash(git commit ...)` will be refused or surface a §C
      reauthorization request (per the rules in `CLAUDE.md`).
@@ -602,8 +603,9 @@ whether to commit `.mcp.json`, how to verify, and how to undo.
 
 Quick smoke (once registered): in any project, ask Claude to call
 `rsct_status` — you should see `rsct_installed`, the active branch,
-the effective protected list, and whether the SessionStart hook is
-wired in `.claude/settings.local.json`. From there `rsct_load_context`
+the effective protected list, and a warning if either enforcement hook
+is missing from `.claude/settings.json` (or `settings.local.json` —
+either file counts). From there `rsct_load_context`
 gives Claude the curated read of the project at session start
 (including `active_phase` when a phase is in flight). For
 **non-trivial tasks** the canonical entry point is

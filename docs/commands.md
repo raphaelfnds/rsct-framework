@@ -47,7 +47,7 @@ required to start. If the project is linked to a universe, the universe is read
 
 **Outputs (in this app repo).** `CLAUDE.md`, `documentation/`, `.rsct.json`,
 memory entries under `.claude/projects/.../memory/`, and — if you opted into the
-MCP companion — the SessionStart hook in `.claude/settings.local.json`. When a
+MCP companion — the enforcement hooks in `.claude/settings.json`. When a
 universe is involved, registration writes into the **universe** repo's working
 tree (an `applications/<app>/` README + the `registered_apps[]` index); it never
 runs git there.

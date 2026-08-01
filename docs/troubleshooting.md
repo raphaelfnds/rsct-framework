@@ -36,18 +36,26 @@ applied here yet. It is a suggestion, never a block.
 Fix: re-run `/rsct-setup` in the project. Nothing is lost — setup is idempotent
 and preserves your answers.
 
-## "⚠ SECURITY: an RSCT enforcement script is missing from this project"
+## "⚠ SECURITY: RSCT enforcement is not running in this project"
 
 The scripts under `.rsct/scripts/` are what actually enforce things:
 `sanitize-permissions.js` strips permission entries that would let the agent
 commit without asking you, and `edit-scope-guard.js` blocks edits outside the
-current task's scope. This message means one of them **is not installed**, so
-what it enforces is not running here. It never blocks anything.
+current task's scope. This message means one of them is not doing its job. It
+never blocks anything.
 
-Most common cause: the project was set up before that script existed, or before
-the `rsct-mcp` companion was installed.
+The message says which of the two failure modes it found:
 
-Fix:
+- **"`X` is not installed"** — the file is not under `.rsct/scripts/`. Usually
+  the project was set up before that script existed, or before the `rsct-mcp`
+  companion was installed.
+- **"`X` is installed, but no `<event>` entry pointing at it was found"** — the
+  file is there, but nothing runs it. A script without its hook enforces exactly
+  nothing, which is why this ranks the same as a missing file. Usually a
+  `.claude/settings.json` that was reset, hand-edited, or resolved to one side of
+  a merge conflict after setup ran.
+
+Fix, for both:
 
 1. Run `/rsct-setup` — it installs the scripts and registers their hooks.
 2. **Fully restart the IDE.** The running server compares against the copy it
@@ -62,9 +70,18 @@ If it survives that:
   looks in `npm root -g`, so a server registered by absolute path or via `npx`
   will not be found. Install it globally (`cd mcp-server && npm install -g .`)
   and re-run.
-- The scripts only run if their hooks are registered. Check `.claude/settings.json`
-  for `hooks.SessionStart` and `hooks.PreToolUse` entries pointing at
-  `.rsct/scripts/`.
+- If the message is about registration, `.claude/settings.json` should hold a
+  `hooks.SessionStart` entry whose command contains
+  `.rsct/scripts/sanitize-permissions.js`, and a `hooks.PreToolUse` entry
+  containing `.rsct/scripts/edit-scope-guard.js`. Either one may live in
+  `.claude/settings.local.json` instead — RSCT accepts both.
+
+**One blind spot worth knowing.** RSCT only reads this project's
+`.claude/settings.json` and `.claude/settings.local.json`. A hook you registered
+in your user-level `~/.claude/settings.json` really does run, but RSCT cannot
+tell it apart from one registered for a different project, so it reports the
+hook as not found here. Moving the entry into the project is the fix; it is also
+what lets your teammates get the same enforcement.
 
 ## "This project's RSCT enforcement scripts are not the ones rsct-mcp vX ships"
 

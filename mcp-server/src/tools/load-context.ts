@@ -209,7 +209,7 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
           project_version: resolution.config?.rsct_version ?? null,
           mcp_version: MCP_VERSION,
           severity: drift.severity,
-          stale_components: drift.stale_components,
+          affected_components: drift.affected_components,
         },
         resolution.config?.audit,
       )
