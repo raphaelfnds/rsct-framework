@@ -63,9 +63,11 @@ cd mcp-server
 npm run verify:dist     # rebuilds and fails if the tracked dist/ is stale
 ```
 
-Run this before committing; CI does not (the build is not byte-reproducible
-across OSes, so `verify:dist` is a local, same-environment guard). Sourcemaps
-(`dist/**/*.map`) stay gitignored.
+Run this before committing. **CI also runs it**, on a single matrix cell
+(ubuntu-latest, node 22) — the bundle is not byte-reproducible across OSes, so
+running it on all six would fail on differences that mean nothing. Locally it is
+a same-environment guard; in CI it is the backstop that stops a stale artifact
+from shipping green. Sourcemaps (`dist/**/*.map`) stay gitignored.
 
 ---
 
