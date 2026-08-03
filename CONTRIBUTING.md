@@ -64,10 +64,17 @@ npm run verify:dist     # rebuilds and fails if the tracked dist/ is stale
 ```
 
 Run this before committing. **CI also runs it**, on a single matrix cell
-(ubuntu-latest, node 22) — the bundle is not byte-reproducible across OSes, so
-running it on all six would fail on differences that mean nothing. Locally it is
-a same-environment guard; in CI it is the backstop that stops a stale artifact
-from shipping green. Sourcemaps (`dist/**/*.map`) stay gitignored.
+(ubuntu-latest, node 22) — chosen for cost, not for correctness. The bundle *is*
+byte-reproducible across OSes: a native Linux build of this lockfile yields
+`index.js`, `sanitize-permissions.js` and `edit-scope-guard.js` byte-identical to
+the Windows-built committed copies. esbuild is a Go binary whose codegen is
+deterministic per version, `.gitattributes` pins `eol=lf` so no CRLF can reach a
+template literal, and sourcemaps (`dist/**/*.map`) stay gitignored.
+
+The `--intent-to-add` in the script is load-bearing: `git diff` ignores untracked
+files, so without it a **newly added** artifact (a new `tsup` entry, say) would
+pass the check while never being committed — CI green, users installing without
+the file.
 
 ---
 

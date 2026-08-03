@@ -37,9 +37,17 @@ jobs:
       # binary while CI stays green. `verify:dist` rebuilds and diffs against the
       # committed copy.
       #
-      # ONE cell only: the bundle is not byte-reproducible across OSes, so
-      # running this on all six would fail on differences that mean nothing.
-      # ubuntu/node 22 is the cheapest deterministic cell.
+      # ONE cell only, for COST — not for correctness. The bundle IS
+      # byte-reproducible across OSes: a native Linux build of this lockfile
+      # produces `index.js`, `sanitize-permissions.js` and `edit-scope-guard.js`
+      # byte-identical to the Windows-built committed copies. esbuild is a Go
+      # binary with per-version-deterministic codegen, `.gitattributes` pins
+      # `eol=lf` so no CRLF reaches a template literal, and sourcemaps are
+      # gitignored. Running it on all six cells would just cost five more builds.
+      #
+      # The one regression that WOULD break reproducibility is a CRLF file
+      # sneaking into tracked `src/`. If that ever happens, this step is where
+      # it surfaces.
       - run: npm run verify:dist
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
       - run: npm test

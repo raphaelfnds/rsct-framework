@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "verify:dist": "tsup && git diff --exit-code -- dist",
+    "verify:dist": "tsup && git add -A --intent-to-add dist && git diff --exit-code -- dist",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
