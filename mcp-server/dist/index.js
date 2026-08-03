@@ -30115,6 +30115,347 @@ ${head}${overflow}`,
   return { findings, stats, hints };
 }
 
+// src/lib/phase-machine.ts
+init_esm_shims();
+var RSCT_PHASES = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "review",
+  "test"
+];
+var PHASE_ORDER = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "review",
+  "test"
+];
+function nextPhase(current) {
+  const idx = PHASE_ORDER.indexOf(current);
+  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
+  return PHASE_ORDER[idx + 1];
+}
+function isStaleVerificationLabel(state) {
+  return state.phase === "verification" && state.verification?.completed_at != null;
+}
+function startPhaseGeneric(input, config2, internal = {}) {
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const existing = readPhaseState(input.projectRoot);
+  const baseState = existing.state ?? {};
+  const existingPhase = baseState.phase;
+  const staleVerificationLabel = isStaleVerificationLabel(baseState);
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_already_active",
+        existing_phase: existingPhase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "phase_already_active",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: baseState.spec_slug ?? null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: "",
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
+      ]
+    };
+  }
+  const newState = {
+    ...baseState,
+    phase: input.phase,
+    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
+    started_at: startedAt
+  };
+  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
+  const audit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.start`,
+      tool: `rsct_phase_${input.phase}_start`,
+      spec_ref: input.specRef,
+      spec_slug: newState.spec_slug,
+      requested_persona: input.persona ?? null,
+      scope_globs: input.scopeGlobs ?? [],
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(audit);
+  const hints = [];
+  if (writeResult.ok) {
+    hints.push(
+      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
+    );
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
+    );
+  } else {
+    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
+  }
+  return {
+    status: writeResult.ok ? "started" : "state_write_failed",
+    phase: input.phase,
+    spec_ref: input.specRef,
+    spec_slug: newState.spec_slug ?? null,
+    started_at: startedAt,
+    scope_globs: input.scopeGlobs ?? [],
+    requested_persona: input.persona ?? null,
+    phase_state_path: writeResult.path,
+    phase_state_written: writeResult.ok,
+    existing_phase: null,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    hints
+  };
+}
+async function gatePhaseComplete(input, config2, internal = {}) {
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const existing = readPhaseState(input.projectRoot);
+  if (!existing.exists || !existing.state?.phase) {
+    return {
+      status: "no_active_phase",
+      phase: input.phase,
+      channel: null,
+      reject_kind: null,
+      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: null,
+      audit_error: null,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
+      ]
+    };
+  }
+  const state = existing.state;
+  if (state.phase !== input.phase) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_mismatch",
+        active_phase: state.phase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "phase_mismatch",
+      reason: `active phase is '${state.phase}', not '${input.phase}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
+      ]
+    };
+  }
+  if (state.spec_slug && state.spec_slug !== input.specRef) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "spec_ref_mismatch",
+        existing_spec_slug: state.spec_slug
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "spec_ref_mismatch",
+      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
+      ]
+    };
+  }
+  const gate = await gateRequest({
+    toolName: `rsct_phase_${input.phase}_complete`,
+    approval: input.devApproval,
+    dialog: {
+      title: `RSCT \u2014 ${input.phase} complete`,
+      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
+    },
+    projectRoot: input.projectRoot,
+    ...config2?.approval_modes !== void 0 && {
+      approvalModes: config2.approval_modes
+    },
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+    };
+  }
+  const newState = { ...state };
+  delete newState.phase;
+  delete newState.scope_globs;
+  delete newState.started_at;
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
+  }
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  const record2 = recordApproval(gate.approval, {
+    projectRoot: input.projectRoot,
+    now
+  });
+  const recommended = nextPhase(input.phase);
+  const completedAt = now.toISOString();
+  const completeAudit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.complete`,
+      tool: `rsct_phase_${input.phase}_complete`,
+      spec_ref: input.specRef,
+      channel: gate.channel,
+      fabrication_signals: gate.fabrication_signals,
+      next_recommended_phase: recommended,
+      completed_at: completedAt,
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(completeAudit);
+  const hints = [];
+  if (writeResult.ok) {
+    if (recommended) {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
+      );
+    } else {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
+      );
+    }
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
+    );
+  } else {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
+    );
+  }
+  if (!record2.ok) {
+    hints.push(
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
+    );
+  }
+  if (fields.audit_error !== null) {
+    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
+  }
+  return {
+    status: writeResult.ok ? "completed" : "state_write_failed",
+    phase: input.phase,
+    channel: gate.channel,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    spec_ref: input.specRef,
+    cleared: writeResult.ok,
+    next_recommended_phase: recommended,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error ?? null,
+    hints
+  };
+}
+
 // src/tools/phase-verification-start.ts
 var TIER_VALUES = ["trivial", "small", "standard", "complex"];
 var phaseVerificationStartInputSchema = external_exports.object({
@@ -30227,6 +30568,7 @@ async function phaseVerificationStartHandler(rawInput) {
       checklist_stats: checklist.stats,
       phase_state_path: phaseStatePathStr,
       phase_state_written: false,
+      existing_phase: null,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       hints: [
@@ -30239,6 +30581,42 @@ async function phaseVerificationStartHandler(rawInput) {
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
+  const existingPhase = baseState.phase ?? null;
+  if (existingPhase !== null && existingPhase !== "verification") {
+    const rejectAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: "verification.start.rejected",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        reject_kind: "phase_already_active",
+        existing_phase: existingPhase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(rejectAudit);
+    return {
+      status: "phase_already_active",
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk.stats,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting the V phase.`
+      ]
+    };
+  }
+  const staleRestart = isStaleVerificationLabel(baseState);
   const verificationBlock = {
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -30255,6 +30633,22 @@ async function phaseVerificationStartHandler(rawInput) {
     verification: verificationBlock
   };
   const writeResult = writePhaseState(projectRoot, newState);
+  if (staleRestart) {
+    appendAuditEntry(
+      projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        previous_phase: "verification",
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
   const startAudit = appendAuditEntry(
     projectRoot,
     {
@@ -30319,6 +30713,7 @@ async function phaseVerificationStartHandler(rawInput) {
     checklist_stats: checklist.stats,
     phase_state_path: phaseStatePathStr,
     phase_state_written: writeResult.ok,
+    existing_phase: null,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     hints
@@ -31117,346 +31512,6 @@ async function classifyTaskHandler(rawInput) {
 
 // src/tools/phase-status.ts
 init_esm_shims();
-
-// src/lib/phase-machine.ts
-init_esm_shims();
-var RSCT_PHASES = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "review",
-  "test"
-];
-var PHASE_ORDER = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "review",
-  "test"
-];
-function nextPhase(current) {
-  const idx = PHASE_ORDER.indexOf(current);
-  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
-  return PHASE_ORDER[idx + 1];
-}
-function startPhaseGeneric(input, config2, internal = {}) {
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
-  const existing = readPhaseState(input.projectRoot);
-  const baseState = existing.state ?? {};
-  const existingPhase = baseState.phase;
-  const staleVerificationLabel = existingPhase === "verification" && baseState.verification?.completed_at != null;
-  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
-    const audit2 = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.start.rejected`,
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_already_active",
-        existing_phase: existingPhase
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit2);
-    return {
-      status: "phase_already_active",
-      phase: input.phase,
-      spec_ref: input.specRef,
-      spec_slug: baseState.spec_slug ?? null,
-      started_at: startedAt,
-      scope_globs: input.scopeGlobs ?? [],
-      requested_persona: input.persona ?? null,
-      phase_state_path: "",
-      phase_state_written: false,
-      existing_phase: existingPhase,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      hints: [
-        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
-      ]
-    };
-  }
-  const newState = {
-    ...baseState,
-    phase: input.phase,
-    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
-    started_at: startedAt
-  };
-  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  if (staleVerificationLabel && existingPhase !== input.phase) {
-    appendAudit(
-      input.projectRoot,
-      {
-        event: "phase.stale_label_cleared",
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        previous_phase: existingPhase,
-        previous_spec_slug: baseState.spec_slug ?? null,
-        verification_spec_ref: baseState.verification?.spec_ref ?? null,
-        verification_completed_at: baseState.verification?.completed_at ?? null,
-        phase_state_written: writeResult.ok
-      },
-      config2?.audit
-    );
-  }
-  const audit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.start`,
-      tool: `rsct_phase_${input.phase}_start`,
-      spec_ref: input.specRef,
-      spec_slug: newState.spec_slug,
-      requested_persona: input.persona ?? null,
-      scope_globs: input.scopeGlobs ?? [],
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(audit);
-  const hints = [];
-  if (writeResult.ok) {
-    hints.push(
-      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
-    );
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
-    );
-  } else {
-    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
-  }
-  return {
-    status: writeResult.ok ? "started" : "state_write_failed",
-    phase: input.phase,
-    spec_ref: input.specRef,
-    spec_slug: newState.spec_slug ?? null,
-    started_at: startedAt,
-    scope_globs: input.scopeGlobs ?? [],
-    requested_persona: input.persona ?? null,
-    phase_state_path: writeResult.path,
-    phase_state_written: writeResult.ok,
-    existing_phase: null,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    hints
-  };
-}
-async function gatePhaseComplete(input, config2, internal = {}) {
-  const promptFn = internal.promptFn ?? promptYesNo;
-  const now = internal.now ?? /* @__PURE__ */ new Date();
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const existing = readPhaseState(input.projectRoot);
-  if (!existing.exists || !existing.state?.phase) {
-    return {
-      status: "no_active_phase",
-      phase: input.phase,
-      channel: null,
-      reject_kind: null,
-      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: null,
-      audit_error: null,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
-      ]
-    };
-  }
-  const state = existing.state;
-  if (state.phase !== input.phase) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_mismatch",
-        active_phase: state.phase
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "phase_mismatch",
-      reason: `active phase is '${state.phase}', not '${input.phase}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
-      ]
-    };
-  }
-  if (state.spec_slug && state.spec_slug !== input.specRef) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "spec_ref_mismatch",
-        existing_spec_slug: state.spec_slug
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "spec_ref_mismatch",
-      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
-      ]
-    };
-  }
-  const gate = await gateRequest({
-    toolName: `rsct_phase_${input.phase}_complete`,
-    approval: input.devApproval,
-    dialog: {
-      title: `RSCT \u2014 ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
-    },
-    projectRoot: input.projectRoot,
-    ...config2?.approval_modes !== void 0 && {
-      approvalModes: config2.approval_modes
-    },
-    promptFn,
-    now
-  });
-  if (gate.status === "rejected") {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: gate.reject_kind,
-        reason: gate.reason,
-        fabrication_signals: gate.fabrication_signals
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
-    };
-  }
-  const newState = { ...state };
-  delete newState.phase;
-  delete newState.scope_globs;
-  delete newState.started_at;
-  if (nextPhase(input.phase) === null) {
-    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
-  }
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  const record2 = recordApproval(gate.approval, {
-    projectRoot: input.projectRoot,
-    now
-  });
-  const recommended = nextPhase(input.phase);
-  const completedAt = now.toISOString();
-  const completeAudit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.complete`,
-      tool: `rsct_phase_${input.phase}_complete`,
-      spec_ref: input.specRef,
-      channel: gate.channel,
-      fabrication_signals: gate.fabrication_signals,
-      next_recommended_phase: recommended,
-      completed_at: completedAt,
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(completeAudit);
-  const hints = [];
-  if (writeResult.ok) {
-    if (recommended) {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
-      );
-    } else {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
-      );
-    }
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
-    );
-  } else {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
-    );
-  }
-  if (!record2.ok) {
-    hints.push(
-      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
-    );
-  }
-  if (fields.audit_error !== null) {
-    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
-  }
-  return {
-    status: writeResult.ok ? "completed" : "state_write_failed",
-    phase: input.phase,
-    channel: gate.channel,
-    reject_kind: null,
-    reason: null,
-    fabrication_signals: gate.fabrication_signals,
-    spec_ref: input.specRef,
-    cleared: writeResult.ok,
-    next_recommended_phase: recommended,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    anti_replay_persisted: record2.ok,
-    anti_replay_error: record2.ok ? null : record2.error ?? null,
-    hints
-  };
-}
-
-// src/tools/phase-status.ts
 var phaseStatusInputSchema = external_exports.object({
   project_root: external_exports.string().optional()
 }).strict();
