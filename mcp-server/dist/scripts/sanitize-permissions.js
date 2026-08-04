@@ -41,7 +41,25 @@ function isPoisonPill(entry) {
 function isAbsoluteEntry(v) {
   return typeof v === "string" && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v));
 }
-function migrateAbsoluteDirs(projectRoot, audit) {
+var MACHINE_HOME_RE = new RegExp(
+  [
+    "[A-Za-z]:[\\\\/]{1,2}Users[\\\\/]",
+    // C:\Users\  ·  C:/Users/
+    "/home/",
+    // Linux
+    "/Users/",
+    // macOS
+    "/mnt/[a-z]/Users/",
+    // WSL reaching a Windows drive
+    "//wsl\\.localhost/"
+    // Windows reaching WSL
+  ].join("|"),
+  "i"
+);
+function containsMachinePath(v) {
+  return typeof v === "string" && MACHINE_HOME_RE.test(v);
+}
+function migrateAbsoluteEntries(projectRoot, key, matches, audit) {
   const settingsPath = join(projectRoot, ".claude", "settings.json");
   if (!existsSync(settingsPath)) return null;
   let settings;
@@ -50,9 +68,9 @@ function migrateAbsoluteDirs(projectRoot, audit) {
   } catch {
     return null;
   }
-  const dirs = settings.permissions?.additionalDirectories;
+  const dirs = settings.permissions?.[key];
   if (!Array.isArray(dirs) || dirs.length === 0) return null;
-  const absolute = dirs.filter(isAbsoluteEntry);
+  const absolute = dirs.filter(matches);
   if (absolute.length === 0) return null;
   const localPath = join(projectRoot, ".claude", "settings.local.json");
   let local = {};
@@ -66,12 +84,12 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     }
   }
   const localPerms = local.permissions && typeof local.permissions === "object" ? { ...local.permissions } : {};
-  const localDirs = Array.isArray(localPerms.additionalDirectories) ? localPerms.additionalDirectories : [];
+  const localDirs = Array.isArray(localPerms[key]) ? localPerms[key] : [];
   const localSet = new Set(localDirs.filter((x) => typeof x === "string"));
   const toAdd = absolute.filter((a) => !localSet.has(a));
   const nextLocal = {
     ...local,
-    permissions: { ...localPerms, additionalDirectories: [...localDirs, ...toAdd] }
+    permissions: { ...localPerms, [key]: [...localDirs, ...toAdd] }
   };
   try {
     mkdirSync(dirname(localPath), { recursive: true });
@@ -81,10 +99,10 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_write_failed", error });
     return { path: settingsPath, status: "migration_skipped", error: `settings.local.json write failed: ${error}` };
   }
-  const keptDirs = dirs.filter((d) => !isAbsoluteEntry(d));
+  const keptDirs = dirs.filter((d) => !matches(d));
   const nextSettings = {
     ...settings,
-    permissions: { ...settings.permissions, additionalDirectories: keptDirs }
+    permissions: { ...settings.permissions, [key]: keptDirs }
   };
   try {
     writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + "\n", "utf8");
@@ -93,14 +111,25 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "source_write_failed", error });
     return { path: settingsPath, status: "migration_skipped", error: `settings.json write failed: ${error}` };
   }
-  audit({ event: "sanitize.migrated", file: settingsPath, migrated: absolute, to: localPath, count: absolute.length });
+  audit({ event: "sanitize.migrated", file: settingsPath, key, migrated: absolute, to: localPath, count: absolute.length });
   return { path: settingsPath, status: "migrated", stripped: absolute };
+}
+function mergeMigrations(results) {
+  const present = results.filter((r) => r !== null);
+  if (present.length === 0) return null;
+  const skipped = present.find((r) => r.status === "migration_skipped");
+  if (skipped) return skipped;
+  const stripped = present.flatMap((r) => r.stripped ?? []);
+  return { path: present[0].path, status: "migrated", stripped };
 }
 function sanitize(projectRoot, options = {}) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const audit = options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now));
   const result = { projectRoot, files: [] };
-  const migration = migrateAbsoluteDirs(projectRoot, audit);
+  const migration = mergeMigrations([
+    migrateAbsoluteEntries(projectRoot, "additionalDirectories", isAbsoluteEntry, audit),
+    migrateAbsoluteEntries(projectRoot, "allow", containsMachinePath, audit)
+  ]);
   if (migration) result.files.push(migration);
   for (const name of SETTINGS_FILES) {
     const path = join(projectRoot, ".claude", name);
@@ -239,6 +268,6 @@ if (isCliEntry()) {
   process.exit(exitCode);
 }
 
-export { isAbsoluteEntry, isPoisonPill, main, resolveProjectRootFromArgs, sanitize };
+export { containsMachinePath, isAbsoluteEntry, isPoisonPill, main, resolveProjectRootFromArgs, sanitize };
 //# sourceMappingURL=sanitize-permissions.js.map
 //# sourceMappingURL=sanitize-permissions.js.map

@@ -10,6 +10,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  containsMachinePath,
   isPoisonPill,
   main,
   resolveProjectRootFromArgs,
@@ -425,5 +426,154 @@ describe('sanitize-permissions — UTF-8 BOM tolerance (#12)', () => {
     const path = writeSettings(tmpRoot, 'settings.json', BOM + '{"permissions": {,}')
     const file = sanitize(tmpRoot).files.find((f) => f.path === path)
     expect(file?.status).toBe('malformed')
+  })
+})
+
+describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', () => {
+  /**
+   * The corpus IS the spec. Every entry here is either a real one from the field
+   * report on #17 or a common Claude Code permission shape. A false positive
+   * deletes a working permission from the file the team shares, so the negatives
+   * matter as much as the positives.
+   */
+  const MUST_RELOCATE = [
+    String.raw`Bash(git -C "C:\Users\raphael\VSCode\repo" status)`,
+    'Bash(git -C /home/raphael/proj status)',
+    'Read(/Users/raphael/notes/**)',
+    'Read(//wsl.localhost/Ubuntu/home/raphael/**)',
+    'Bash(cat /mnt/c/Users/raphael/.env)',
+    'Bash(git -C "c:/users/RAPHAEL/x" log)', // case-insensitive
+  ]
+
+  const MUST_KEEP = [
+    'Bash(./mvnw -q -o compile)',
+    'Bash(mvn -version)',
+    'Bash(echo "exit=$?")',
+    'mcp__rsct__rsct_persona_review',
+    // Measured false positives of the naive "absolute path anywhere" predicate.
+    'WebFetch(domain:https://github.com)',
+    'Bash(curl -s https://registry.npmjs.org/)',
+    'Bash(sed "s:/opt:/srv:")',
+    // Absolute, but username-free and identical on every machine — relocating
+    // these would only make teammates re-approve them.
+    'Read(/etc/hosts)',
+    'Bash(cd /tmp && ls)',
+    'Read(//c//**)',
+  ]
+
+  it('classifies the whole corpus correctly', () => {
+    for (const e of MUST_RELOCATE) expect(`${e} → ${containsMachinePath(e)}`).toBe(`${e} → true`)
+    for (const e of MUST_KEEP) expect(`${e} → ${containsMachinePath(e)}`).toBe(`${e} → false`)
+  })
+
+  it('ignores non-strings without throwing', () => {
+    for (const v of [null, undefined, 42, {}, [], true]) {
+      expect(containsMachinePath(v)).toBe(false)
+    }
+  })
+
+  it('relocates only the offending entries, verbatim, and keeps the rest', () => {
+    const leak = String.raw`Bash(git -C "C:\Users\raphael\VSCode\repo" status)`
+    const settingsPath = writeSettings(tmpRoot, 'settings.json', {
+      permissions: { allow: [leak, 'Bash(mvn -version)', 'Read(/etc/hosts)'] },
+    })
+    const result = sanitize(tmpRoot)
+
+    expect(result.files.find((f) => f.path === settingsPath)?.status).toBe('migrated')
+    expect(readJson(settingsPath)).toEqual({
+      permissions: { allow: ['Bash(mvn -version)', 'Read(/etc/hosts)'] },
+    })
+    // Verbatim — the command text is never rewritten, the path never genericised.
+    expect(readJson(join(tmpRoot, '.claude', 'settings.local.json'))).toEqual({
+      permissions: { allow: [leak] },
+    })
+  })
+
+  it('migrates BOTH keys but reports the file ONCE', () => {
+    // Two migration passes over one file must not yield two FileResults — the
+    // stderr loop would print the migration line twice and a reader would count
+    // the same file as two.
+    const settingsPath = writeSettings(tmpRoot, 'settings.json', {
+      permissions: {
+        allow: ['Bash(git -C /home/raphael/p status)'],
+        additionalDirectories: ['/home/raphael/other'],
+      },
+    })
+    const result = sanitize(tmpRoot)
+    const migrations = result.files.filter(
+      (f) => f.path === settingsPath && f.status === 'migrated',
+    )
+
+    // ONE migration result, carrying both keys — not one per key. Two would make
+    // the stderr loop print the migration line twice for the same file.
+    expect(migrations).toHaveLength(1)
+    expect(migrations[0]?.stripped).toHaveLength(2)
+    expect(readJson(settingsPath)).toEqual({
+      permissions: { allow: [], additionalDirectories: [] },
+    })
+  })
+
+  it('an entry that is BOTH a machine path and a poison pill is stripped, not parked', () => {
+    // The ordering hazard this pins: migrate-then-strip relocates the entry into
+    // settings.local.json, and the loop's SECOND iteration — over that same local
+    // file — removes it in the same run. Reversed, a live §C bypass would be
+    // parked in the file nobody reviews and survive until the next session.
+    //
+    // Uses a form the pill detector actually recognises. `Bash(git -C <path>
+    // commit)` is NOT recognised — see the sibling test below.
+    writeSettings(tmpRoot, 'settings.json', {
+      permissions: { allow: ['Bash(git commit -m /home/me/x)'] },
+    })
+    sanitize(tmpRoot)
+
+    const local = readJson(join(tmpRoot, '.claude', 'settings.local.json')) as {
+      permissions?: { allow?: unknown[] }
+    }
+    expect(local.permissions?.allow).toEqual([])
+    expect(readJson(join(tmpRoot, '.claude', 'settings.json'))).toEqual({
+      permissions: { allow: [] },
+    })
+  })
+
+  it('DOCUMENTED GAP: `git -C <path> commit` is relocated but never recognised as a pill', () => {
+    // Out of scope for #12, recorded here so the behaviour is pinned rather than
+    // discovered later. Every POISON_PILL_PATTERN requires `commit|push|merge`
+    // immediately after `git`, or a path separator before `git` — so the `-C`
+    // form matches none of them. #12 gets it out of the VERSIONED file, which is
+    // its own job (§E), but the entry survives in settings.local.json and still
+    // authorises a §C bypass on this machine. Tracked separately.
+    writeSettings(tmpRoot, 'settings.json', {
+      permissions: { allow: [String.raw`Bash(git -C "C:\Users\me\repo" commit -m x)`] },
+    })
+    sanitize(tmpRoot)
+
+    expect(readJson(join(tmpRoot, '.claude', 'settings.json'))).toEqual({
+      permissions: { allow: [] },
+    })
+    const local = readJson(join(tmpRoot, '.claude', 'settings.local.json')) as {
+      permissions?: { allow?: unknown[] }
+    }
+    expect(local.permissions?.allow).toHaveLength(1)
+  })
+
+  it('LOCAL-WRITE-FIRST: a malformed local file aborts with settings.json untouched', () => {
+    const before = { permissions: { allow: ['Bash(git -C /home/me/p status)'] } }
+    const settingsPath = writeSettings(tmpRoot, 'settings.json', before)
+    writeSettings(tmpRoot, 'settings.local.json', '{ not json')
+
+    const result = sanitize(tmpRoot)
+    expect(result.files.find((f) => f.path === settingsPath)?.status).toBe('migration_skipped')
+    // The entries are still where they were — a failed migration never loses them.
+    expect(readJson(settingsPath)).toEqual(before)
+  })
+
+  it('is idempotent — a second run finds nothing left to move', () => {
+    writeSettings(tmpRoot, 'settings.json', {
+      permissions: { allow: ['Bash(git -C /home/me/p status)', 'Bash(mvn -version)'] },
+    })
+    sanitize(tmpRoot)
+    const afterFirst = readJson(join(tmpRoot, '.claude', 'settings.local.json'))
+    sanitize(tmpRoot)
+    expect(readJson(join(tmpRoot, '.claude', 'settings.local.json'))).toEqual(afterFirst)
   })
 })
