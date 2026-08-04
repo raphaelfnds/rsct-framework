@@ -12,6 +12,17 @@ BEFORE doing anything else.
    protected_branches, STOP and ask the dev to derive a feature
    branch (feat/, fix/, chore/, docs/) before proceeding.
 
+   Some hints are for the DEV, not for you — relay them and let the
+   dev answer. They are emitted a bounded number of times, so one you
+   read silently is spent. "A newer RSCT release is available": relay
+   it; if the dev declines that release, call rsct_status again with
+   decline_update:"<the tag in the hint>" (only that tag is accepted;
+   a newer release asks once more). If the dev wants no release checks
+   at all, update_check:"off" — reversible with "on". Never pass
+   either parameter on your own initiative: they record a decision
+   only the dev can make, and "off" silences security-patch notices
+   for every project on the machine.
+
 2. `mcp__rsct__rsct_load_context` — reads active plan, decisions
    snapshot, knowledge index, active_phase (if any). The
    next_action_hints field is mandatory reading.

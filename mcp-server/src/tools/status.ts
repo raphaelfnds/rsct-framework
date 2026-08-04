@@ -58,7 +58,7 @@ export interface StatusOutput {
 export const statusTool: Tool = {
   name: 'rsct_status',
   description:
-    'Bootstrap check: returns whether the current project is rsct-managed (has .rsct.json), the project identity, protected branches, current git branch, and one-line hints for Claude. Always succeeds — degrades gracefully when not in an rsct project. Call this near the start of any session in an unfamiliar project.',
+    'Bootstrap check: returns whether the current project is rsct-managed (has .rsct.json), the project identity, protected branches, current git branch, and one-line hints for Claude. Always succeeds — degrades gracefully when not in an rsct project. Call this near the start of any session in an unfamiliar project. Some hints are addressed to the DEV, not to you (a newer release is available, the update check is off, install drift): surface those to them and let them answer — do not consume them silently, since they are emitted a bounded number of times and are then gone for good.',
   inputSchema: {
     type: 'object',
     properties: {

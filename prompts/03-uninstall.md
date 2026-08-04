@@ -889,9 +889,26 @@ Not restored (no PT-BR backup chosen):
 Skipped (Category E):
   - .claude/settings.json: SETTINGS_MALFORMED — manual fix required before re-uninstall.
 
+Not touched (machine-global RSCT install, shared by every project):
+  - ~/.rsct/            incl. update-check.json, which records YOUR choices:
+                        whether the release check is on, and which releases you
+                        declined. Kept on purpose — reinstalling should not
+                        re-ask what you already answered.
+  - ~/.claude/commands/rsct-*.md
+  - the globally installed rsct-mcp package
+  → Removing RSCT from this MACHINE (not just this project):
+      npm uninstall -g rsct-mcp && rm -rf ~/.rsct ~/.claude/commands/rsct-*.md
+
 Branch: chore/rsct-uninstall ready for review / merge.
 ═══════════════════════════════════════════════════════
 ```
+
+This uninstall is **project-scoped**. It never touches `$HOME/.rsct/` — that is the
+machine-wide installation, shared by every rsct-managed project on the box, and
+removing it here would silently uninstall RSCT from all of them. `update-check.json`
+in particular holds a record of dev *decisions* (release-check consent, declined
+releases), so it is treated like `.rsct/audit.log`: preserved by default, removed
+only by the dev, deliberately.
 
 ---
 

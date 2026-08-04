@@ -58,12 +58,15 @@ separate explicit opt-in (mutating another repo is never silent). Confirming the
 topology is an explicit answer.
 
 **Update check.** Setup no longer asks about it and no longer writes any consent —
-it prints one line saying the check is on, what it sends, and how to turn it off.
-The check is ON by default: an unauthenticated GET of the latest release tag, at
-most once a day, suggestion-only, with no project data sent. Turn it off with
+it prints a short notice saying the check is on, what it sends, and how to turn it
+off. The check is ON by default: an unauthenticated GET of the latest release tag,
+at most once a day, suggestion-only, with no project data sent. Turn it off with
 `RSCT_UPDATE_CHECK=off` or by asking Claude to call `rsct_status` with
-`update_check:"off"`. A choice recorded by an earlier version is never overwritten.
-See [README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off).
+`update_check:"off"`. To refuse a single release rather than all of them, Claude
+calls `rsct_status` with `decline_update:"<tag>"` — that one is never raised again,
+a newer one asks once more. A choice recorded by an earlier version is never
+overwritten. See
+[README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off).
 
 **Re-run behavior.** Idempotent. It compares content by SHA and only creates or
 updates what changed; markers it already wrote are recognized, not duplicated.

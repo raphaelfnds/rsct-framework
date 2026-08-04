@@ -467,6 +467,11 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ```
 ~/.rsct/                           # active installation — read by Claude Code
 ├── VERSION
+├── VERSION-CODE                   # release codename
+├── mcp-scope                      # user | project — chosen at install, read by /rsct-setup
+├── update-check.json              # release-check cache: consent, declined releases,
+│                                  #   last check. Machine-global; NOT removed by
+│                                  #   /rsct-uninstall (it records your choices)
 ├── prompts/                       # copy of prompts/ from source
 ├── rules/                         # copy of rules/ from source
 ├── doc-templates/                 # copy of doc-templates/ from source
@@ -558,9 +563,15 @@ machine, a rate limit, a corrupt cache: no hint, no error, never a broken sessio
 **Where it is cached.** `~/.rsct/update-check.json`, shared by every project on the
 machine. Declining a release in one project therefore silences it everywhere.
 
-**Declining a release.** You are asked per release, not once forever. Decline and
-that version is never raised again; when a *newer* one ships you are asked once more.
-Declines accumulate — you are never asked twice about the same release.
+**Declining a release.** You are asked per release, not once forever. Tell Claude you
+are not taking this one and it calls `rsct_status` with `decline_update:"v2.6.0"`:
+that version is never raised again, and when a *newer* one ships you are asked once
+more. Declines accumulate — you are never asked twice about the same release. Only
+the release named in the hint is accepted; any other tag is rejected and nothing is
+recorded, so a mistyped decline cannot quietly swallow a future security patch.
+
+**On a machine that never decided**, RSCT states the posture — what the check does
+and how to switch it off — in up to three sessions, then goes quiet.
 
 **Three ways to turn it off**, in precedence order:
 

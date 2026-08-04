@@ -1,7 +1,7 @@
 /**
  * The rsct-mcp server version (CODE axis) — the bundled `RSCT_MCP_VERSION` literal
  * imported by `src/index.ts` (boot log), `src/tools/status.ts`, `src/tools/load-context.ts`,
- * and `src/tools/update-check.ts`. Adding a new consumer? Import from here — do NOT
+ * and `src/lib/update-check.ts`. Adding a new consumer? Import from here — do NOT
  * duplicate the literal.
  *
  * NOT the single edit point (issue #7 / PH-6): the ONE hand-edited product version

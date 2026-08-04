@@ -33,8 +33,10 @@ permanent silence (#38). Marker schema id stays `v=1.0.0`; tool count unchanged 
 - **`update_check:"on"|"off"` is the opt-out switch**, plus `RSCT_UPDATE_CHECK=off`
   for the environment — the only form that applies before a session exists (CI,
   headless, a machine that must never emit the request). A recorded `"no"` is never
-  overwritten; the framework says once that the setting exists and is reversible,
-  in wording that is true both for a deliberate refusal and for an unanswered prompt.
+  overwritten; the framework says in up to three sessions that the setting exists and
+  is reversible, in wording true both for a deliberate refusal and for an unanswered
+  prompt. A machine that never decided gets the same bounded treatment for the
+  posture itself: what the check sends, and how to switch it off.
 - **`/rsct-setup` Phase 4.9 no longer asks and no longer writes** — it prints what the
   check does and how to turn it off. Reading the cache from bash could not be made
   portable (BSD `grep` reads `\s` as a literal `s`; `grep` is line-oriented while the
@@ -79,8 +81,16 @@ rather than after — recorded because the reasoning is load-bearing for the mod
 
 ### Added
 
-- `RSCT_UPDATE_CHECK=off` kill switch, honoured before any read — also what keeps the
-  test suite off the network and out of the contributor's real `~/.rsct`.
+- `RSCT_UPDATE_CHECK=off` kill switch, honoured before the cache is even read — also
+  what keeps the test suite off the network and out of the contributor's real
+  `~/.rsct`. The two `rsct_status` switches still record to disk while it is set, and
+  report that the environment overrides them rather than claiming an effect.
+- An agent-side protocol for the hint, in three places because one is not enough:
+  the `rsct_status` tool description (reaches every install with no reinstall),
+  `memory-templates/feedback_session-bootstrap.md` (reaches already-installed
+  projects on the next `/rsct-setup`), and `rules/0-session-bootstrap.md` (new
+  installs). Without it the hint was something an agent could read and drop, spending
+  a bounded notice nobody ever saw.
 - A zod ↔ exposed-`inputSchema` parity test for `rsct_status`. There was none, and the
   hand-written schema is what MCP actually exposes: a parameter added to zod and
   forgotten there ships green and completely inert.

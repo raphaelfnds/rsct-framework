@@ -17,8 +17,37 @@ fix and disclosure timeline. Responsible disclosure is appreciated.
 
 | Version | Supported |
 |---|---|
-| `2.1.x` | ✅ |
-| `< 2.1` | ❌ (superseded — upgrade to 2.1.x) |
+| Latest release | ✅ |
+| Anything older | ❌ (superseded — upgrade to the latest release) |
+
+Only the latest release is supported. RSCT ships as prompts plus a single MCP
+binary with no runtime state to migrate, so upgrading is a `git pull`, a
+reinstall, and a `/rsct-setup` re-run.
+
+## Network behaviour
+
+RSCT makes **one** kind of outbound request, and only from the update check:
+
+```
+GET https://api.github.com/repos/raphaelfnds/rsct-framework/releases/latest
+Accept: application/vnd.github+json
+User-Agent: rsct-mcp/<version>
+```
+
+Unauthenticated, at most once per 24 hours, 2-second timeout, fail-silent. **No
+project data, no code, no file names, no telemetry, and nothing identifying you.**
+As with any HTTPS request, GitHub receives your IP, the time, and that
+`User-Agent` — which names the RSCT version you are running.
+
+Since v2.6.0 this runs **by default**. Turn it off with `RSCT_UPDATE_CHECK=off`
+in the environment (this also applies before any session exists — CI, headless),
+by asking Claude to call `rsct_status` with `update_check:"off"`, or by writing
+`"consent": "no"` into `~/.rsct/update-check.json`. See
+[README § Update check](README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off).
+
+Nothing else in the framework opens a network connection. The install-drift check
+(`lib/version-drift.ts`) is a purely local comparison and is deliberately kept in a
+separate module for that reason.
 
 ## Scope notes
 

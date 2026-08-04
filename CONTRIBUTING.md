@@ -26,6 +26,7 @@ than any other: **cross-OS correctness**.
 ```bash
 cd mcp-server
 npm install
+npm run typecheck  # tsc --noEmit — vitest does NOT type-check; this is its own CI gate
 npm run build      # tsup → dist/
 npm test           # vitest (full suite)
 ```
@@ -105,9 +106,26 @@ add a `dist/` entry, mark it too: `git update-index --chmod=+x <path>`.
 ## Tests
 
 - Add or update `vitest` tests for any `rsct-mcp` behavior change.
-- `npm test` must be green before requesting review.
+- `npm test` must be green before requesting review. `npm run typecheck` is a
+  separate gate — vitest transpiles without type-checking, so a wrong call shape
+  runs happily and silently returns the wrong thing.
+- When you touch `prompts/*.md`, run `RSCT_REQUIRE_BASH=1 npm test`. Without that
+  variable the `bash -n` lint gate **skips silently** instead of failing; CI sets it.
 - For bash changes that can't be unit-tested, include a smoke test in the PR
   description and a post-mutation sanity check in the script itself.
+- **Never remove or bypass `mcp-server/tests/setup.ts`.** It is wired through
+  `vitest.config.ts` (`setupFiles`) and sets `RSCT_UPDATE_CHECK=off` for the whole
+  suite. It is the only thing keeping the tests off the real GitHub API and out of
+  your real `~/.rsct/update-check.json` — `statusHandler` resolves the real `$HOME`
+  and the real `fetch` whenever nothing is injected, and roughly sixteen call sites
+  across the status / load-context / topology / universe tests inject nothing. A
+  test that exercises the update check on purpose passes
+  `update: { home: <tmpdir>, env: {}, fetcher }` through `statusHandler`'s `deps`
+  seam — `env: {}` against the real `$HOME` is exactly the combination to avoid.
+- Prefer assertions that would FAIL against a broken implementation. A network
+  assertion on a *fresh* cache proves nothing, because no build would fetch from
+  one; seed a stale cache so the gate under test is the only thing preventing the
+  call.
 
 ## Reporting bugs / requesting features
 
