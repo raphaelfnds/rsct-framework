@@ -33,7 +33,9 @@ dialog + audit log entry per call):
 
 - `mcp__rsct__rsct_request_commit` for commits (for `trivial`/`small` tasks the
   dialog-free free-commit lane applies — bounded, audit-log-anchored ceiling;
-  branch-protection + secret-scan still enforced)
+  branch-protection + secret-scan still enforced. The lane is SUSPENDED while
+  RSCT enforcement is not running — an enforcement script absent or with no hook
+  wired to it — and the next commit falls back to a per-action `dev_approval`)
 - `mcp__rsct__rsct_request_push` for pushes
 - `mcp__rsct__rsct_request_merge` for merges
 - `mcp__rsct__rsct_request_rebase` for rebases / `--squash` merges
@@ -43,7 +45,7 @@ The MCP layer + SessionStart sanitizer hook close the "trust-forever"
 bypass surface that pure prose cannot. Without `rsct-mcp` installed,
 this rule is enforced only by Claude's own compliance.
 
-Commit message length: keep it to **15 non-empty lines at most**. Say what
+Commit message length: keep it within THIS project cap — `commit_message_max_lines` in `.rsct.json`, chosen at `/rsct-setup` (default 15, range 1-500). `rsct_request_commit` rejects over it with `message_too_long` before the §C dialog, and the reject states the active value. Say what
 changed and why; do not narrate the diff file by file — the diff already shows
 that, and a long body encodes a session narrative that ages badly and makes
 `git log` unscannable. Blank lines are not counted, so paragraph spacing is

@@ -23341,7 +23341,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.4.0";
+var RSCT_MCP_VERSION = "2.5.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -30644,7 +30644,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Findings are recommendations \u2014 dev sets the action on each via rsct_phase_verification_complete.",
+  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. Findings are recommendations \u2014 dev sets the action on each via rsct_phase_verification_complete.",
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -32527,7 +32527,7 @@ var phaseReviewStartInputSchema = external_exports.object({
 }).strict();
 var phaseReviewStartTool = {
   name: "rsct_phase_review_start",
-  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],

@@ -8,7 +8,7 @@ import {
   type UniverseDocFile,
   type UniverseGovernanceIndex,
 } from '../lib/universe-content.js'
-import { filterSectionsByQuery, type MarkdownSection } from '../lib/markdown.js'
+import { filterSectionsByQuery } from '../lib/markdown.js'
 
 const SCOPES = ['governance', 'index', 'all'] as const
 

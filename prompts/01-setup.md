@@ -1329,7 +1329,7 @@ sed -E \
   -e "s|\[APP_NAME\]|${APP_NAME}|g" \
   -e "s|\[ORG_SLUG\]|${ORG_SLUG}|g" \
   -e "s|\[TEST_FRAMEWORK\]|${TEST_FRAMEWORK}|g" \
-  -e "s|\[COMMIT_MSG_MAX_LINES\]|${COMMIT_MSG_MAX_LINES}|g" \
+  -e "s|\[COMMIT_MSG_MAX_LINES\]|${COMMIT_MSG_MAX_LINES:-15}|g" \
   -e "s|\[APPLIED_AT\]|${APPLIED_AT}|g" \
   -e "s|\[MODE\]|${MODE}|g" \
   -e "s|\[SETUP_COMMIT_SHA_BEFORE\]|${SETUP_COMMIT_SHA_BEFORE}|g" \
@@ -1420,27 +1420,31 @@ if [ -f "$RSCT_JSON" ] && ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>
     var f = process.argv[1], cap = process.argv[2];
     var s;
     try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — commit cap not recorded."); process.exit(0); }
+    // A UTF-8 BOM would defeat the ^-anchored root match below and make this
+    // block report "root object not found" on a perfectly valid file. Same
+    // decimal-65279 idiom as the settings blocks in Phase 4.V.
+    if (s.charCodeAt(0) === 65279) s = s.slice(1);
     if (/"commit_message_max_lines"/.test(s)) { process.exit(0); }
     var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
     if (!m) { console.error("  WARN: .rsct.json root object not found — commit cap not recorded."); process.exit(0); }
     var eol = /\r\n/.test(s) ? "\r\n" : "\n";
     var at = m[0].length;
     var sep = (s.charAt(at) === "}") ? "" : "," + eol + "  ";
-    s = s.slice(0, at) + "\"commit_message_max_lines\": " + cap + sep + s.slice(at);
-    fs.writeFileSync(f, s, "utf8");
+    var out = s.slice(0, at) + "\"commit_message_max_lines\": " + cap + sep + s.slice(at);
+    // Validate BEFORE writing. Writing first and checking after would leave a
+    // .rsct.json that no RSCT reader can parse — resolveProjectRoot returns null,
+    // health reports config_unparseable, and every gate degrades to a safe no-op.
+    // Mirrors the contracts.json splice earlier in this prompt.
+    try { JSON.parse(out); } catch (e) { console.error("  WARN: commit-cap splice would produce invalid JSON — aborted, .rsct.json untouched."); process.exit(0); }
+    fs.writeFileSync(f, out, "utf8");
     console.log("  commit_message_max_lines backfilled: " + cap);
-  ' "$RSCT_JSON" "$COMMIT_MSG_MAX_LINES"
-  # Post-mutation sanity: the splice landed AND the file is still valid JSON.
-  # The placeholder-style grep alone would pass on a file the splice corrupted.
+  ' "$RSCT_JSON" "${COMMIT_MSG_MAX_LINES:-15}"
+  # Post-mutation sanity. WARN, never exit 1: every soft path above leaves the
+  # file untouched and valid, so a missing key means "not backfilled", not
+  # "broken" — and the three sibling .rsct.json splices in this prompt all warn
+  # and continue. A hard failure here would abort a healthy install.
   if ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>/dev/null; then
-    echo "  ERROR: commit-cap backfill did not land in $RSCT_JSON — inspect manually" >&2
-    exit 1
-  fi
-  if command -v node >/dev/null 2>&1; then
-    if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$RSCT_JSON" 2>/dev/null; then
-      echo "  ERROR: $RSCT_JSON is not valid JSON after the commit-cap backfill — inspect manually" >&2
-      exit 1
-    fi
+    echo "  ⚠ commit-cap not backfilled — the project keeps the framework default (15). Add \"commit_message_max_lines\" to .rsct.json by hand to change it." >&2
   fi
 fi
 ```

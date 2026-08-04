@@ -25,8 +25,13 @@ import {
  * exists to close.
  *
  * This gives it the V phase's shape: per-finding actions, `block` aborts, one
- * audit entry per finding. It does NOT give it a mechanical checklist — see the
- * tool description for why that half was split out.
+ * audit entry per finding.
+ *
+ * It does NOT give it a mechanical checklist. That half needs a diff reader this
+ * codebase does not have — `getStagedDiff` passes `-U0`, so "comments adjacent to
+ * changed lines" has no adjacent line to read — and a dead-code pass resting on
+ * the JS/TS-only import walker would yield nothing forever in, say, a Java
+ * project while charging its runtime at every REVIEW. Tracked separately.
  */
 const findingActionSchema = z
   .object({

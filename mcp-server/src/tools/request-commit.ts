@@ -39,7 +39,6 @@ import {
   auditFields,
   resolveAuditPath,
 } from '../lib/audit-log.js'
-import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import {
   evaluateSettingsDrift,

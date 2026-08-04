@@ -100,7 +100,7 @@ export interface PhaseVerificationStartOutput {
 export const phaseVerificationStartTool: Tool = {
   name: 'rsct_phase_verification_start',
   description:
-    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Findings are recommendations — dev sets the action on each via rsct_phase_verification_complete.',
+    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. Findings are recommendations — dev sets the action on each via rsct_phase_verification_complete.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],

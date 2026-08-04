@@ -24,7 +24,7 @@ export type PhaseReviewStartOutput = StartPhaseResult
 export const phaseReviewStartTool: Tool = {
   name: 'rsct_phase_review_start',
   description:
-    'Start the REVIEW phase — an adversarial code review of the diff, between Code and Test (cycle: R→S→V→C→REVIEW→T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff — e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+    'Start the REVIEW phase — an adversarial code review of the diff, between Code and Test (cycle: R→S→V→C→REVIEW→T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code — e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],

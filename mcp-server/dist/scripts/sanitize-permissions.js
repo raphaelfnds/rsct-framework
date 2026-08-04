@@ -59,18 +59,26 @@ function isAbsoluteEntry(v) {
 }
 var MACHINE_HOME_RE = new RegExp(
   [
-    "[A-Za-z]:[\\\\/]{1,2}Users[\\\\/]",
-    // C:\Users\  ·  C:/Users/
-    "/home/",
-    // Linux
-    "/Users/",
-    // macOS
-    "/mnt/[a-z]/Users/",
-    // WSL reaching a Windows drive
-    "//wsl\\.localhost/"
-    // Windows reaching WSL
-  ].join("|"),
-  "i"
+    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
+    // so this branch needs no anchor. Case-folded by explicit class rather than
+    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
+    "[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]",
+    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
+    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
+    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
+    // working permission from the file the whole team shares.
+    `(^|[\\s"'=(,;])/home/`,
+    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
+    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
+    `(^|[\\s"'=(,;])/Users/`,
+    // WSL reaching a Windows drive. Not subsumed by the branch above: here
+    // `/Users/` is preceded by the drive letter, not by a token boundary.
+    "/mnt/[a-z]/[Uu]sers/",
+    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
+    // shell actually produces, and it is the CAP-41 field-report environment.
+    "//wsl\\.localhost/",
+    "\\\\\\\\wsl\\.localhost\\\\"
+  ].join("|")
 );
 function containsMachinePath(v) {
   return typeof v === "string" && MACHINE_HOME_RE.test(v);
@@ -214,9 +222,21 @@ function sanitize(projectRoot, options = {}) {
   }
   return result;
 }
+function resolveAuditLogPath(projectRoot) {
+  try {
+    const raw = stripBom(readFileSync(join(projectRoot, ".rsct.json"), "utf8"));
+    const cfg = JSON.parse(raw);
+    const configured = cfg.audit?.path;
+    if (typeof configured === "string" && configured.length > 0) {
+      return isAbsolute(configured) ? configured : resolve(projectRoot, configured);
+    }
+  } catch {
+  }
+  return join(projectRoot, ".rsct", "audit.log");
+}
 function defaultAuditWriter(projectRoot, entry, now) {
   try {
-    const auditPath = join(projectRoot, ".rsct", "audit.log");
+    const auditPath = resolveAuditLogPath(projectRoot);
     mkdirSync(dirname(auditPath), { recursive: true });
     const stamped = { ...entry, ts: now.toISOString() };
     appendFileSync(auditPath, JSON.stringify(stamped) + "\n", "utf8");

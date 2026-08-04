@@ -31,7 +31,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Node builtins only, transitively — this file is bundled into a standalone
-// SessionStart hook and stays ~9 KB precisely by never reaching zod.
+// SessionStart hook, and it stays small (~11 KB) precisely by never reaching zod.
 import { stripBom } from '../lib/io-utils.js'
 import { hashSettingsFile } from '../lib/settings-drift.js'
 
@@ -139,13 +139,26 @@ export function isAbsoluteEntry(v: unknown): v is string {
  */
 const MACHINE_HOME_RE = new RegExp(
   [
-    '[A-Za-z]:[\\\\/]{1,2}Users[\\\\/]', // C:\Users\  ·  C:/Users/
-    '/home/', // Linux
-    '/Users/', // macOS
-    '/mnt/[a-z]/Users/', // WSL reaching a Windows drive
-    '//wsl\\.localhost/', // Windows reaching WSL
+    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
+    // so this branch needs no anchor. Case-folded by explicit class rather than
+    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
+    '[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]',
+    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
+    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
+    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
+    // working permission from the file the whole team shares.
+    '(^|[\\s"\'=(,;])/home/',
+    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
+    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
+    '(^|[\\s"\'=(,;])/Users/',
+    // WSL reaching a Windows drive. Not subsumed by the branch above: here
+    // `/Users/` is preceded by the drive letter, not by a token boundary.
+    '/mnt/[a-z]/[Uu]sers/',
+    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
+    // shell actually produces, and it is the CAP-41 field-report environment.
+    '//wsl\\.localhost/',
+    '\\\\\\\\wsl\\.localhost\\\\',
   ].join('|'),
-  'i',
 )
 
 /**
@@ -365,13 +378,41 @@ export function sanitize(
   return result
 }
 
+/**
+ * Where the audit log lives for this project, honouring `audit.path` in
+ * `.rsct.json` exactly as `lib/audit-log.ts` `resolveAuditPath` does.
+ *
+ * Reimplemented here rather than imported, and that is deliberate: this file is
+ * bundled into a standalone SessionStart hook, and `resolveAuditPath` sits in a
+ * module that reaches zod. Reading the one key with a bare `JSON.parse` keeps the
+ * bundle on node builtins.
+ *
+ * It has to agree with the real resolver, and #17 is why that suddenly matters:
+ * the `settings.baseline` this hook writes is read back by
+ * `rsct_request_commit`. Written to a different file than the reader looks at,
+ * the drift report is silently dead in any project that configured `audit.path`.
+ */
+function resolveAuditLogPath(projectRoot: string): string {
+  try {
+    const raw = stripBom(readFileSync(join(projectRoot, '.rsct.json'), 'utf8'))
+    const cfg = JSON.parse(raw) as { audit?: { path?: unknown } }
+    const configured = cfg.audit?.path
+    if (typeof configured === 'string' && configured.length > 0) {
+      return isAbsolute(configured) ? configured : resolve(projectRoot, configured)
+    }
+  } catch {
+    // No config, unreadable, or malformed → the default below.
+  }
+  return join(projectRoot, '.rsct', 'audit.log')
+}
+
 function defaultAuditWriter(
   projectRoot: string,
   entry: Record<string, unknown>,
   now: Date,
 ): void {
   try {
-    const auditPath = join(projectRoot, '.rsct', 'audit.log')
+    const auditPath = resolveAuditLogPath(projectRoot)
     mkdirSync(dirname(auditPath), { recursive: true })
     const stamped = { ...entry, ts: now.toISOString() }
     appendFileSync(auditPath, JSON.stringify(stamped) + '\n', 'utf8')

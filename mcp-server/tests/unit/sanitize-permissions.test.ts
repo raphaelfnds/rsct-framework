@@ -443,7 +443,10 @@ describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', 
     'Read(/Users/raphael/notes/**)',
     'Read(//wsl.localhost/Ubuntu/home/raphael/**)',
     'Bash(cat /mnt/c/Users/raphael/.env)',
-    'Bash(git -C "c:/users/RAPHAEL/x" log)', // case-insensitive
+    'Bash(git -C "c:/users/RAPHAEL/x" log)', // drive letter: case-insensitive
+    // The NATIVE Windows spelling of the WSL UNC path — what a Windows shell
+    // actually produces, and the CAP-41 field-report environment.
+    String.raw`Bash(cd \\wsl.localhost\Ubuntu\home\me && npm test)`,
   ]
 
   const MUST_KEEP = [
@@ -460,6 +463,18 @@ describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', 
     'Read(/etc/hosts)',
     'Bash(cd /tmp && ls)',
     'Read(//c//**)',
+    // Path-shaped entries with a `home`/`users` SEGMENT. An unanchored predicate
+    // relocated all six, which DELETES a working permission from the file the
+    // team shares — the exact failure V-3 named. Found in REVIEW, not by these
+    // tests, because the original corpus had no path-style entry at all.
+    'Read(src/pages/home/**)',
+    'Edit(src/app/home/**)',
+    'Read(app/controllers/users/**)',
+    'Read(**/users/**)',
+    // Lower-case `/users/` is an API path; macOS is `/Users/`. That is why the
+    // POSIX branches are case-SENSITIVE while the drive-letter one is not.
+    'Bash(gh api /users/octocat)',
+    'Bash(curl http://localhost:3000/api/users/1)',
   ]
 
   it('classifies the whole corpus correctly', () => {
