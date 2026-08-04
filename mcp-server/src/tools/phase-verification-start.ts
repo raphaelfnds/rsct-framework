@@ -20,6 +20,7 @@ import {
   type PhaseVerificationBlock,
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { isStaleVerificationLabel } from '../lib/phase-machine.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -74,6 +75,7 @@ export type PhaseVerificationStartStatus =
   | 'verified'
   | 'skipped_tier'
   | 'state_write_failed'
+  | 'phase_already_active'
 
 export interface PhaseVerificationStartOutput {
   status: PhaseVerificationStartStatus
@@ -88,6 +90,8 @@ export interface PhaseVerificationStartOutput {
   checklist_stats: ChecklistStats
   phase_state_path: string
   phase_state_written: boolean
+  /** The phase that blocked this start, when status is phase_already_active. */
+  existing_phase: string | null
   audit_path: string | null
   audit_error: string | null
   hints: string[]
@@ -96,7 +100,7 @@ export interface PhaseVerificationStartOutput {
 export const phaseVerificationStartTool: Tool = {
   name: 'rsct_phase_verification_start',
   description:
-    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Findings are recommendations — dev sets the action on each via rsct_phase_verification_complete.',
+    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. Findings are recommendations — dev sets the action on each via rsct_phase_verification_complete.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -199,6 +203,7 @@ export async function phaseVerificationStartHandler(
       checklist_stats: checklist.stats,
       phase_state_path: phaseStatePathStr,
       phase_state_written: false,
+      existing_phase: null,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       hints: [
@@ -212,6 +217,68 @@ export async function phaseVerificationStartHandler(
   const startedAt = new Date().toISOString()
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
+  const existingPhase = baseState.phase ?? null
+
+  // #27. Every other `_start` routes through `startPhaseGeneric`, which refuses
+  // to overwrite a DIFFERENT active phase. This tool owns its own plumbing (the
+  // checklist and reverse-dep walk diverge from the symmetric pattern) and, as a
+  // side effect, used to write `phase: 'verification'` over whatever label was
+  // there — no gate, no approval, no audit. An agent mid-Code could reach Test
+  // without ever calling `code_complete`, and the phase history would no longer
+  // describe what happened.
+  //
+  // Deliberately placed AFTER the `skipped_tier` return above, so that path
+  // still writes no state at all — which is what makes its "audit-only" claim
+  // literally true.
+  //
+  // Note what is NOT mirrored here: `startPhaseGeneric`'s stale-label exception
+  // is unreachable in this tool. It requires `existingPhase === 'verification'`,
+  // while the guard it excuses requires `existingPhase !== input.phase` — and
+  // here `input.phase` IS `'verification'`, so the two conditions are mutually
+  // exclusive. A literal mirror would be dead code. The live case is a stale
+  // SAME-label restart, handled below.
+  if (existingPhase !== null && existingPhase !== 'verification') {
+    const rejectAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: 'verification.start.rejected',
+        tool: 'rsct_phase_verification_start',
+        spec_ref: input.spec_ref,
+        reject_kind: 'phase_already_active',
+        existing_phase: existingPhase,
+      },
+      config?.audit,
+    )
+    const fields = auditFields(rejectAudit)
+    return {
+      status: 'phase_already_active',
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk.stats,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting the V phase.`,
+      ],
+    }
+  }
+
+  // A completed V being reopened. `startPhaseGeneric` stays silent on a same-label
+  // restart, and that is right for it — restarting the phase you are already in
+  // is routine. Here it is not: the block about to be rebuilt carries a
+  // `completed_at`, so a finished verification record is being discarded. That is
+  // the transition #15's gate exception leans on, and it deserves a forensic line.
+  const staleRestart = isStaleVerificationLabel(baseState)
+
   const verificationBlock: PhaseVerificationBlock = {
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -229,6 +296,25 @@ export async function phaseVerificationStartHandler(
     verification: verificationBlock,
   }
   const writeResult = writePhaseState(projectRoot, newState)
+
+  // Emitted AFTER the write, like the generic's equivalent: a `locked` or failed
+  // write must not leave the log asserting a transition that never landed.
+  if (staleRestart) {
+    appendAuditEntry(
+      projectRoot,
+      {
+        event: 'phase.stale_label_cleared',
+        tool: 'rsct_phase_verification_start',
+        spec_ref: input.spec_ref,
+        previous_phase: 'verification',
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok,
+      },
+      config?.audit,
+    )
+  }
 
   const startAudit = appendAuditEntry(
     projectRoot,
@@ -297,6 +383,7 @@ export async function phaseVerificationStartHandler(
     checklist_stats: checklist.stats,
     phase_state_path: phaseStatePathStr,
     phase_state_written: writeResult.ok,
+    existing_phase: null,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     hints,

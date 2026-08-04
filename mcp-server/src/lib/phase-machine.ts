@@ -107,6 +107,31 @@ export interface StartPhaseInternal {
   now?: Date
 }
 
+/**
+ * Stale-label exception (issue #15). A `verification` label whose block already
+ * carries `completed_at` describes finished work: builds predating the fix could
+ * strand it via `clear_phase: false`, and every documented way out (abandon,
+ * wiping the state) also destroyed the V record that `rsct_phase_code_start`
+ * requires — a closed loop whose only exit was editing the enforcement file by
+ * hand.
+ *
+ * The condition is EXACTLY `phase === 'verification' && completed_at != null`
+ * and must not be widened. Not `verification != null` alone (a V that started and
+ * never completed is what `rejected_incomplete` exists to catch), not other phase
+ * labels (no completion evidence behind them), and not a time-based heuristic
+ * (staleness by clock is not staleness by completion). Anything looser turns this
+ * repair into a general escape hatch from `phase_already_active` — the behavior
+ * the mechanical layer exists to block.
+ *
+ * Exported so `rsct_phase_verification_start`, which owns its own plumbing and
+ * cannot route through `startPhaseGeneric`, asks THIS function rather than
+ * retyping the condition (issue #27). A retyped copy is exactly how a guard this
+ * narrow gets widened by accident.
+ */
+export function isStaleVerificationLabel(state: PhaseState): boolean {
+  return state.phase === 'verification' && state.verification?.completed_at != null
+}
+
 export function startPhaseGeneric(
   input: StartPhaseInput,
   config: RsctConfig | null,
@@ -119,22 +144,7 @@ export function startPhaseGeneric(
   const baseState: PhaseState = existing.state ?? {}
   const existingPhase = baseState.phase
 
-  // Stale-label exception (issue #15). A `verification` label whose block already
-  // carries `completed_at` describes finished work: builds predating the fix
-  // could strand it via `clear_phase: false`, and every documented way out
-  // (abandon, wiping the state) also destroyed the V record that
-  // rsct_phase_code_start requires — a closed loop whose only exit was editing
-  // the enforcement file by hand.
-  //
-  // The condition is EXACTLY `phase === 'verification' && completed_at != null`
-  // and must not be widened. Not `verification != null` alone (a V that started
-  // and never completed is what `rejected_incomplete` exists to catch), not other
-  // phase labels (no completion evidence behind them), and not a time-based
-  // heuristic (staleness by clock is not staleness by completion). Anything
-  // looser turns this repair into a general escape hatch from
-  // `phase_already_active` — the behavior the mechanical layer exists to block.
-  const staleVerificationLabel =
-    existingPhase === 'verification' && baseState.verification?.completed_at != null
+  const staleVerificationLabel = isStaleVerificationLabel(baseState)
 
   if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
     const audit = appendAudit(
@@ -263,6 +273,8 @@ export type CompletePhaseRejectKind =
   | GateRejectKind
   | 'spec_ref_mismatch'
   | 'phase_mismatch'
+  /** #19: a REVIEW finding was marked action="block". */
+  | 'block_actions_present'
 
 export interface CompletePhaseResult {
   status: CompletePhaseStatus

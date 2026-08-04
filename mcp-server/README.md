@@ -80,11 +80,12 @@ never trips the gate.
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 | flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
 | plan-lifecycle-v2 — dialog-free free-commit lane (audit-anchored anti-rollback ceiling + sliding token) · integration gate (mechanical `plan_complete` cross-check + advisory-only cleanup + `rsct_plan_dispose` + retroactive reconciliation) · `rsct_request_rebase` (rebase/squash) · re-bootstrap `context_stale` flag + PreToolUse edit-scope guard · settings.json machine-path hygiene · unified idempotent `/rsct-universe` · `plan_file_retention` toggle | ✅ shipped to `main`; ships in **v2.2.0** (brings the catalog 37 → **39 tools**) |
+| backlog-sweep — unowned `.claude/settings.json` drift reported at the commit gate (#17) · REVIEW gains `findings_actions[]` + a `block` abort (#19) · the install-drift advisory reaches push/merge and the OS dialog, and suspends the free-commit lane (#25) · commit-message cap elicited at setup instead of imposed (#26) · sanitizer relocates machine paths out of `permissions.allow[]`, and every shared-JSON parse site tolerates a UTF-8 BOM (#12) · `verification_start` refuses to overwrite an active phase (#27) · `verify:dist` runs in CI (#28) · excerpt / section-query / finding-vocabulary helpers consolidated (#10) | ✅ shipped to `main`; ships in **v2.5.0** (39 tools, unchanged) |
 | hook-registration — install drift also checks whether the enforcement **hooks are registered** in `.claude/settings.json`, not just whether the script files are current; a present-but-unwired script now escalates alongside an absent one · `stale_components` → `affected_components` (carries a `registration` state) · four doc pages corrected on where the hooks actually live | ✅ shipped to `main`; ships in **v2.4.0** (39 tools, unchanged) |
 | field-test-repairs — install-drift ranking (content evidence; `security` only when an enforcement script is **absent**) · V-phase stale-label repair + `clear_phase` deprecation · commit-message cap (`message_too_long`) · `rsct_capture_issue` adapts to the host repo's labels/types · advisory channel on every `request_commit` return path · `auditFields` collapsed 15 → 1 | ✅ shipped to `main`; ships in **v2.3.0** (39 tools, unchanged) |
 
 **39 tools · 5 resources · tsc strict · ESM ~1.1 MB
-(server) + ~9 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
+(server) + ~11 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
 cross-platform (Windows / macOS / Linux)**
 
 ---
@@ -513,7 +514,9 @@ no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
-- `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected commits too. Today: the security-tier install-drift warning (an enforcement script under `.rsct/scripts/` is absent, or is present with no hook entry in `.claude/settings.json` pointing at it — either way what it enforces is not running). A script that merely *differs* from the shipped copy stays at the normal tier and is not an advisory.
+- `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
+  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, or present with no hook entry pointing at it; either way what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and on push/merge it also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit falls back to a per-action `dev_approval`.
+  2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
 
 Approval consumption rule: never burn the approval on pre-mutation
 rejects. Only `recordConsumedApproval` AFTER a successful commit.
@@ -601,9 +604,18 @@ Benign entries (`Bash(npm test)`, `Edit`, `Read`, `WebFetch(domain:*)`,
 Zero external deps; the script can be invoked directly via
 `node dist/scripts/sanitize-permissions.js --project-root <path>`.
 
-Audit events: appends `sanitize.stripped` / `sanitize.malformed` JSONL
-lines to `.rsct/audit.log` when something is changed. Never blocks
-session start — malformed JSON logs to stderr and exits 0.
+It also relocates entries carrying a machine home path (`C:\Users\`, `/home/`,
+`/Users/`, `/mnt/<d>/Users/`, `//wsl.localhost/`) out of the VERSIONED
+`settings.json` into the gitignored `settings.local.json`, verbatim — both from
+`permissions.additionalDirectories[]` and from `permissions.allow[]`, where the
+path is embedded inside a command string.
+
+Audit events: appends `sanitize.stripped` / `sanitize.malformed` /
+`sanitize.migrated` / `sanitize.migration_skipped` JSONL lines to the audit log
+when something changes, plus a `settings.baseline` hash of `settings.json` on
+every run — that baseline is what `rsct_request_commit` reads back to detect
+unowned drift. Honours `audit.path` from `.rsct.json`. Never blocks session
+start — malformed JSON logs to stderr and exits 0.
 
 ### Audit log
 

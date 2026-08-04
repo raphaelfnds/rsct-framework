@@ -4,7 +4,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync } fr
 import { fileURLToPath } from 'url';
 import { resolve, isAbsolute, join, dirname } from 'path';
 import { cwd } from 'process';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -4052,6 +4052,9 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
+function stripBom(text) {
+  return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
 }
@@ -4400,6 +4403,23 @@ function evaluateEditGuard(args) {
     };
   }
 }
+function hashSettingsContent(text) {
+  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
+}
+function readTextOrNull(path) {
+  try {
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function hashSettingsFile(projectRoot) {
+  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
+  return text === null ? null : hashSettingsContent(text);
+}
+
+// src/scripts/sanitize-permissions.ts
 var POISON_PILL_PATTERNS = [
   // Bare git mutations: Bash(git commit/push/merge ...)
   /^Bash\(\s*git\s+commit\b/i,
@@ -4431,24 +4451,50 @@ function isPoisonPill(entry) {
 function isAbsoluteEntry(v) {
   return typeof v === "string" && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v));
 }
-function migrateAbsoluteDirs(projectRoot, audit) {
+var MACHINE_HOME_RE = new RegExp(
+  [
+    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
+    // so this branch needs no anchor. Case-folded by explicit class rather than
+    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
+    "[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]",
+    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
+    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
+    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
+    // working permission from the file the whole team shares.
+    `(^|[\\s"'=(,;])/home/`,
+    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
+    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
+    `(^|[\\s"'=(,;])/Users/`,
+    // WSL reaching a Windows drive. Not subsumed by the branch above: here
+    // `/Users/` is preceded by the drive letter, not by a token boundary.
+    "/mnt/[a-z]/[Uu]sers/",
+    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
+    // shell actually produces, and it is the CAP-41 field-report environment.
+    "//wsl\\.localhost/",
+    "\\\\\\\\wsl\\.localhost\\\\"
+  ].join("|")
+);
+function containsMachinePath(v) {
+  return typeof v === "string" && MACHINE_HOME_RE.test(v);
+}
+function migrateAbsoluteEntries(projectRoot, key, matches, audit) {
   const settingsPath = join(projectRoot, ".claude", "settings.json");
   if (!existsSync(settingsPath)) return null;
   let settings;
   try {
-    settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    settings = JSON.parse(stripBom(readFileSync(settingsPath, "utf8")));
   } catch {
     return null;
   }
-  const dirs = settings.permissions?.additionalDirectories;
+  const dirs = settings.permissions?.[key];
   if (!Array.isArray(dirs) || dirs.length === 0) return null;
-  const absolute = dirs.filter(isAbsoluteEntry);
+  const absolute = dirs.filter(matches);
   if (absolute.length === 0) return null;
   const localPath = join(projectRoot, ".claude", "settings.local.json");
   let local = {};
   if (existsSync(localPath)) {
     try {
-      local = JSON.parse(readFileSync(localPath, "utf8"));
+      local = JSON.parse(stripBom(readFileSync(localPath, "utf8")));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_malformed", error });
@@ -4456,12 +4502,12 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     }
   }
   const localPerms = local.permissions && typeof local.permissions === "object" ? { ...local.permissions } : {};
-  const localDirs = Array.isArray(localPerms.additionalDirectories) ? localPerms.additionalDirectories : [];
+  const localDirs = Array.isArray(localPerms[key]) ? localPerms[key] : [];
   const localSet = new Set(localDirs.filter((x) => typeof x === "string"));
   const toAdd = absolute.filter((a) => !localSet.has(a));
   const nextLocal = {
     ...local,
-    permissions: { ...localPerms, additionalDirectories: [...localDirs, ...toAdd] }
+    permissions: { ...localPerms, [key]: [...localDirs, ...toAdd] }
   };
   try {
     mkdirSync(dirname(localPath), { recursive: true });
@@ -4471,10 +4517,10 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_write_failed", error });
     return { path: settingsPath, status: "migration_skipped", error: `settings.local.json write failed: ${error}` };
   }
-  const keptDirs = dirs.filter((d) => !isAbsoluteEntry(d));
+  const keptDirs = dirs.filter((d) => !matches(d));
   const nextSettings = {
     ...settings,
-    permissions: { ...settings.permissions, additionalDirectories: keptDirs }
+    permissions: { ...settings.permissions, [key]: keptDirs }
   };
   try {
     writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + "\n", "utf8");
@@ -4483,14 +4529,25 @@ function migrateAbsoluteDirs(projectRoot, audit) {
     audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "source_write_failed", error });
     return { path: settingsPath, status: "migration_skipped", error: `settings.json write failed: ${error}` };
   }
-  audit({ event: "sanitize.migrated", file: settingsPath, migrated: absolute, to: localPath, count: absolute.length });
+  audit({ event: "sanitize.migrated", file: settingsPath, key, migrated: absolute, to: localPath, count: absolute.length });
   return { path: settingsPath, status: "migrated", stripped: absolute };
+}
+function mergeMigrations(results) {
+  const present = results.filter((r) => r !== null);
+  if (present.length === 0) return null;
+  const skipped = present.find((r) => r.status === "migration_skipped");
+  if (skipped) return skipped;
+  const stripped = present.flatMap((r) => r.stripped ?? []);
+  return { path: present[0].path, status: "migrated", stripped };
 }
 function sanitize(projectRoot, options = {}) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const audit = options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now));
   const result = { projectRoot, files: [] };
-  const migration = migrateAbsoluteDirs(projectRoot, audit);
+  const migration = mergeMigrations([
+    migrateAbsoluteEntries(projectRoot, "additionalDirectories", isAbsoluteEntry, audit),
+    migrateAbsoluteEntries(projectRoot, "allow", containsMachinePath, audit)
+  ]);
   if (migration) result.files.push(migration);
   for (const name of SETTINGS_FILES) {
     const path = join(projectRoot, ".claude", name);
@@ -4511,7 +4568,7 @@ function sanitize(projectRoot, options = {}) {
     }
     let parsed;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(stripBom(raw));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       result.files.push({ path, status: "malformed", error: message });
@@ -4553,11 +4610,27 @@ function sanitize(projectRoot, options = {}) {
       count: stripped.length
     });
   }
+  const baselineHash = hashSettingsFile(projectRoot);
+  if (baselineHash !== null) {
+    audit({ event: "settings.baseline", file: join(projectRoot, ".claude", "settings.json"), hash: baselineHash });
+  }
   return result;
+}
+function resolveAuditLogPath(projectRoot) {
+  try {
+    const raw = stripBom(readFileSync(join(projectRoot, ".rsct.json"), "utf8"));
+    const cfg = JSON.parse(raw);
+    const configured = cfg.audit?.path;
+    if (typeof configured === "string" && configured.length > 0) {
+      return isAbsolute(configured) ? configured : resolve(projectRoot, configured);
+    }
+  } catch {
+  }
+  return join(projectRoot, ".rsct", "audit.log");
 }
 function defaultAuditWriter(projectRoot, entry, now) {
   try {
-    const auditPath = join(projectRoot, ".rsct", "audit.log");
+    const auditPath = resolveAuditLogPath(projectRoot);
     mkdirSync(dirname(auditPath), { recursive: true });
     const stamped = { ...entry, ts: now.toISOString() };
     appendFileSync(auditPath, JSON.stringify(stamped) + "\n", "utf8");

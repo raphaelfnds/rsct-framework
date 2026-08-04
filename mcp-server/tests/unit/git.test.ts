@@ -81,3 +81,4 @@ describe('lib/git — readWorktreeInfo', () => {
     expect(r.name).toBe('wt2')
   })
 })
+

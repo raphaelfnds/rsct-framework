@@ -31,6 +31,7 @@ import {
   type DialogOptions,
   type DialogResult,
 } from '../lib/os-dialog.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import {
   gateRequest,
   type GateChannel,
@@ -168,6 +169,23 @@ export async function requestPushHandler(
   const { list: protectedList } = effectiveProtectedList(config)
   const branchProtected = isProtectedBranch(branch, protectedList)
 
+  // #25. Push is outward-facing and hard to reverse, so degraded enforcement
+  // matters MORE here than at commit — and this is exactly where the warning used
+  // to be silent. Evaluated before the pre-gate ack check so it reaches the dev on
+  // rejected attempts too, and drained through `withAdvisories` on every return
+  // path. Prepended: it outranks the routine hint tail.
+  const advisories: string[] = []
+  const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_request_push',
+    auditWriter: appendAudit,
+  })
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint)
+
   // PH-5: pre-integration hygiene gate. Scoped to PROTECTED-branch pushes only
   // (MCP-P1-D) — a feature/WIP push to a non-protected branch (e.g. to trigger CI
   // on an open PR) is legitimate and must not force a dishonest attestation.
@@ -210,7 +228,7 @@ export async function requestPushHandler(
         ...auditFields(audit),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [hint],
+        hints: withAdvisories([hint]),
       }
     }
   }
@@ -220,7 +238,14 @@ export async function requestPushHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — push approval',
-      message: `Approve push of '${branchLabel}' to '${remote}'?`,
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in
+      // hints[]. One line, deliberately: this is a decision surface, and a wall
+      // of text trains the dev to dismiss it unread.
+      message: [
+        `Approve push of '${branchLabel}' to '${remote}'?`,
+        ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+      ].join('\n'),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -254,7 +279,7 @@ export async function requestPushHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`]),
     }
   }
 
@@ -288,7 +313,7 @@ export async function requestPushHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -333,7 +358,7 @@ export async function requestPushHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -364,7 +389,7 @@ export async function requestPushHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ['git push failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.'],
+      hints: withAdvisories(['git push failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.']),
     }
   }
 
@@ -445,7 +470,7 @@ export async function requestPushHandler(
     ...afields,
     anti_replay_persisted: record.ok,
     anti_replay_error: record.ok ? null : record.error,
-    hints,
+    hints: withAdvisories(hints),
   }
 }
 

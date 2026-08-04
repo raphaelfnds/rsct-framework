@@ -105,7 +105,7 @@ Two cases where the message is expected and fine:
 - You updated the binary and ran `/rsct-setup` but have not restarted the IDE
   yet.
 
-## "commit message has N non-empty lines; the limit is 15"
+## "commit message has N non-empty lines; the limit is N"
 
 `rsct_request_commit` rejected the commit before asking you to approve anything —
 nothing was committed and no approval was spent. Rewrite the message shorter and
@@ -123,6 +123,43 @@ If your project genuinely wants longer messages, set a number in `.rsct.json`:
 
 Note the value is a **number**, not a string — `"30"` in quotes is rejected by
 the config schema.
+
+## ".claude/settings.json has changed since this session started"
+
+Not your doing, and RSCT is not blocking anything — it is telling you about a
+file that moved on its own.
+
+`.claude/settings.json` is **versioned** (committed, shared with the team), and
+Claude Code appends permissions you approve during a session straight into it.
+Nobody stages those lines: the agent did not write them, you did not type them,
+and the file just accumulates. RSCT records a baseline at session start and
+reports any later unstaged divergence at the commit gate, listing the new
+entries.
+
+Three ways to resolve it — RSCT will not pick for you:
+
+1. **Stage it with this commit** if the entries belong to the team.
+2. **Move machine-specific ones** to `.claude/settings.local.json`, which is
+   gitignored. Anything carrying your home path belongs here (§E).
+3. **Discard them**: `git checkout -- .claude/settings.json`.
+
+If you see this on every commit and never resolve it, that is the accumulation
+the report exists to stop — pick one.
+
+## "the dialog-free commit lane is suspended while RSCT enforcement is not running"
+
+You are on a `trivial`/`small` task that normally commits without a dialog, and
+RSCT withheld that. It is not a block: approve the commit per-action with a
+`dev_approval` and it lands.
+
+The lane is a privilege granted on the premise that the mechanical layer is
+working. When an enforcement script is missing, or is present with no hook wired
+to run it, that premise is false — so the next commit falls back to a dialog,
+which is the one channel that carries the warning where the agent cannot
+summarize it away.
+
+Fix: run `/rsct-setup`, restart the IDE. The lane restores itself; there is no
+flag to reset. See the SECURITY section above for how to confirm.
 
 ## Windows: `LF will be replaced by CRLF` warnings
 

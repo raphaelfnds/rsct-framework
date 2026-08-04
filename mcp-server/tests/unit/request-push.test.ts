@@ -477,3 +477,92 @@ describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branc
     expect(out2.status).toBe('pushed')
   })
 })
+
+describe('rsct_request_push — install-drift advisory (#25)', () => {
+  // tmpRoot has a .rsct.json and no .rsct/scripts, so both enforcement scripts
+  // read as absent → severity 'security'. Push is outward-facing and hard to
+  // reverse, which is why degraded enforcement matters MORE here than at commit
+  // — and it is exactly where the warning used to be silent.
+  const SECURITY = /SECURITY: RSCT enforcement is not running/
+
+  it('prepends the advisory on a successful push and audits the detection', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+
+    expect(out.status).toBe('pushed')
+    // Prepended: it outranks the routine tail, it does not trail behind it.
+    expect(out.hints[0]).toMatch(SECURITY)
+
+    const entry = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'install.drift_detected')
+    expect(entry).toBeDefined()
+    expect(entry?.tool).toBe('rsct_request_push')
+    expect(entry?.severity).toBe('security')
+  })
+
+  it('carries the advisory when the push is REJECTED before the dialog', async () => {
+    // The pre-gate reject path: a protected branch missing its pre_merge_ack
+    // rejects in chat WITHOUT popping the dialog. That return must still drain
+    // the advisory, or the one path where enforcement matters most is the one
+    // that stays quiet.
+    writeConfig(tmpRoot, { ...BASE_CONFIG, protected_branches: ['main'] })
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('main'),
+        gitExecutor: gitExec({}),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.hints[0]).toMatch(SECURITY)
+  })
+
+  it('puts one line in the OS dialog — the channel the agent cannot rewrite', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    let seen = ''
+    await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        promptFn: async (opts: DialogOptions) => {
+          seen = opts.message
+          return { response: 'yes', channel: 'windows' }
+        },
+        now: FIXED_NOW,
+      },
+    )
+    expect(seen).toContain('Approve push')
+    expect(seen).toContain('RSCT enforcement is NOT running')
+    // One line, not the whole hint — the dialog is a decision surface.
+    expect(seen.split('\n')).toHaveLength(2)
+  })
+
+  it('says nothing when the project is not rsct-managed', async () => {
+    // No .rsct.json at all: nothing was observed, so nothing is claimed.
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+    expect(out.hints.join(' ')).not.toMatch(SECURITY)
+  })
+})

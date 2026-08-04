@@ -10,6 +10,104 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.5.0] - 2026-08-01
+
+Eight backlog issues closed in one pass. Backward-compatible except for one
+deliberate behaviour change (the free-commit lane, below); the marker **schema id
+stays `v=1.0.0`** (frozen) and the tool count is unchanged at **39**.
+
+### Added
+
+- **The versioned `.claude/settings.json` finally has an owner** (#17). Claude
+  Code appends approved permissions to that file on its own: the agent did not
+  write them and truthfully says so, the dev did not either, so nobody stages
+  them and the file sits permanently dirty — while RSCT, which governs it, had
+  nothing to say about its most frequent mutation. The SessionStart sanitizer now
+  records a post-scrub baseline (a `settings.baseline` audit event, not a new
+  file under `.rsct/`), and `rsct_request_commit` reports any later unstaged
+  divergence, listing the new `allow[]` entries verbatim with three ways out:
+  stage it, move it to `settings.local.json`, or discard it. It picks none of
+  them — auto-committing entries nobody reviewed would be worse than the state it
+  fixes — and it stays silent about a file you already staged, because staging IS
+  the ownership the check exists to establish.
+- **REVIEW has somewhere to record what it found** (#19).
+  `rsct_phase_review_complete` takes `findings_actions[]` and returns an
+  `actions_summary`; `action="block"` rejects with `block_actions_present` BEFORE
+  the §C dialog, and one `review.action` audit entry is written per finding —
+  only on an approved completion, since the log records decisions, not attempts.
+- **The enforcement-down advisory reaches push, merge and the OS dialog** (#25).
+  It previously travelled only through `hints[]` on `rsct_request_commit`, which
+  the agent relays at its discretion. `rsct_request_push` and
+  `rsct_request_merge` now carry it on every return path including the pre-gate
+  rejects that pop no dialog — the paths where a degraded enforcement surface
+  matters most, since both are outward-facing and hard to reverse.
+- **`/rsct-setup` asks for the commit-message cap** instead of imposing 15 (#26).
+  Recorded in `.rsct.json`, present in the template, backfilled into existing
+  installs by text-splice, asked once. Range 1–500; "unlimited" is not
+  expressible and the question says so.
+- **The sanitizer relocates machine paths out of `permissions.allow[]`** (#12),
+  not just out of `additionalDirectories[]`. Matches home shapes (`C:\Users\`,
+  `/home/`, `/Users/`, `/mnt/<d>/Users/`, and both spellings of
+  `//wsl.localhost/`) embedded anywhere in a command string, and moves the entry
+  verbatim — the command text is never rewritten. Runs BEFORE the poison-pill
+  strip so an entry that is both gets relocated and then stripped in one pass.
+- **CI runs `verify:dist`** on one matrix cell (#28), so a `src/` change shipped
+  without rebuilding the tracked `dist/` can no longer pass green.
+
+### Changed
+
+- **Behaviour change — the dialog-free free-commit lane is suspended while
+  enforcement is not running** (#25). The lane is a privilege granted on the
+  premise that the mechanical layer is trustworthy; a `security` install drift
+  says verbatim that it is not. Projects that got dialog-free `trivial`/`small`
+  commits will see a dialog until `/rsct-setup` + an IDE restart. Self-clearing,
+  nothing to reset. Be clear on what it buys: **reach, not enforcement** —
+  suspending the lane does not stop a poison-pill bypass, it just makes sure the
+  warning reaches a channel the agent cannot summarize away.
+- **Every shared-JSON parse site tolerates a UTF-8 BOM** (#12). Notepad and
+  PowerShell 5.1 emit one by default, and it used to abort `/rsct-setup` with a
+  "malformed JSON" error, make every uninstall scrub silently skip while
+  reporting success, and — worst — make the sanitizer refuse the file so a
+  poison-pill `Bash(git commit:*)` survived while every surface reported healthy.
+  Eleven sites, all or none: a subset is what made 2.4.0 revert its own BOM
+  handling, because a reader more permissive than the component it reports on
+  will call enforcement live while nothing runs.
+- `rsct_phase_verification_start` refuses to overwrite a DIFFERENT active phase
+  (#27), with `phase_already_active` and an audited attempt. It used to write its
+  label over whatever was there with no gate and no record, so an agent mid-Code
+  could reach Test without ever calling `code_complete`.
+- Internal consolidation with no behaviour change (#10, #19): `makeExcerpt`
+  parameterised, `filterSectionsByQuery` extracted, the five-value finding
+  vocabulary centralised in `lib/findings.ts` (it was hand-written in four
+  places), `DiscoveredImporterRef` aliased to the producer's type. The
+  anti-decisions excerpt keeps its wider 4-line/320-char window — preserved as
+  configuration rather than normalised away, because that window is what keeps a
+  rationale from being cut mid-sentence.
+- The SessionStart hook bundle grew ~9 KB → ~11 KB. It still imports node
+  builtins only; that is the invariant, not the number.
+
+### Fixed
+
+- `verify:dist` was blind to a **newly added** `dist/` artifact — `git diff`
+  ignores untracked files — so a new build entry could ship missing while CI
+  stayed green. Its stated rationale was also false: the bundle **is**
+  byte-reproducible across OSes, verified by a native Linux build matching the
+  Windows-built artifacts byte for byte. One matrix cell is right for cost, not
+  correctness.
+- `rules/C-reauthorize.md` hardcoded "15 non-empty lines", false the moment setup
+  elicits anything else. `memory-templates/feedback_commit-reauthorize.md` said
+  the same, and it is the file the agent actually reads at runtime.
+
+### Known limitations
+
+- Five `git` bypass forms still escape the poison-pill detector, including the
+  wildcard `Bash(git -C:*)` — every pattern assumes the subcommand sits
+  immediately after `git`, but global options may precede it. Tracked in #32,
+  with a test pinning the current behaviour.
+- The REVIEW phase records findings but does not yet produce them mechanically.
+  The checklist needs a context-carrying diff reader that does not exist —
+  `getStagedDiff` passes `-U0`. Tracked in #33.
+
 ## [2.4.0] - 2026-08-01
 
 Closes the hole `2.3.0` left open: enforcement can be *installed* and still not

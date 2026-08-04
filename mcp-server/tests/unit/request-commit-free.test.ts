@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../src/tools/request-commit.js'
 import type { GitExecutor, GitState, StagedStats } from '../../src/lib/git.js'
 import type { PhaseState } from '../../src/lib/phase-scope.js'
+import { hashSettingsContent } from '../../src/lib/settings-drift.js'
 
 let tmpRoot: string
 const FIXED_NOW = new Date('2026-07-11T12:00:00.000Z')
@@ -21,6 +22,15 @@ beforeEach(() => {
     'utf8',
   )
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+  // #25: the free lane is withheld while install drift is at the `security`
+  // tier, and an EMPTY `.rsct/scripts` reads as `absent` — which is that tier.
+  // A project this suite is about is a healthy install, so give it the scripts.
+  // Their bodies are irrelevant here: under vitest the shipped reference does
+  // not resolve, so they read `unreadable`, which escalates on neither axis.
+  mkdirSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true })
+  for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
+    writeFileSync(join(tmpRoot, '.rsct', 'scripts', name), '// present\n', 'utf8')
+  }
 })
 afterEach(() => {
   if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
@@ -174,5 +184,157 @@ describe('rsct_request_commit — free-commit lane (Bloco 1)', () => {
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('protected_branch')
     expect(out.authorized_via).toBe('free_commit') // free auth resolved, then INV-5 blocked
+  })
+})
+
+describe('rsct_request_commit — the free lane is suspended while enforcement is down (#25)', () => {
+  /** Remove the scripts beforeEach seeded → install drift goes `security`. */
+  function breakEnforcement(): void {
+    rmSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true, force: true })
+  }
+
+  it('withholds the dialog-free lane and says why, without blaming the token', async () => {
+    // The lane is a PRIVILEGE granted on the premise that the mechanical
+    // enforcement layer is trustworthy. A `security` drift says, verbatim, that
+    // enforcement is not running — so the premise is provably false.
+    breakEnforcement()
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'free checkpoint' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.channel).not.toBe('free_commit')
+    // The reason must NOT send the dev to mint a token: nothing is wrong with
+    // the token, and that would be repairing the wrong thing.
+    expect(out.reason).toContain('dialog-free commit lane is suspended')
+    expect(out.reason).toContain('/rsct-setup')
+    expect(out.reason).not.toContain('rsct_plan_authorize')
+    // The advisory itself still rides hints[], prepended.
+    expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
+  })
+
+  it('the lane works again as soon as enforcement is back — nothing to reset', async () => {
+    // Self-clearing by construction: the scripts seeded by beforeEach are what
+    // /rsct-setup reinstalls, and the verdict is recomputed per call. No flag,
+    // no stored state, no repair step.
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'free checkpoint' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('free_commit')
+  })
+
+  it('a per-action approval still lands the commit while the lane is suspended', async () => {
+    // Withholding a privilege is not gating. The dev keeps a way through — it
+    // just costs one dialog, which IS the point: the dialog is the out-of-band
+    // channel that actually carries the warning where hints[] cannot.
+    breakEnforcement()
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      {
+        project_root: tmpRoot,
+        message: 'approved by hand',
+        dev_approval: {
+          timestamp: FIXED_NOW.toISOString(),
+          action_scope: 'commit',
+          reason: 'approved by hand',
+        },
+      },
+      internal(smallStats, { promptFn: async () => ({ response: 'yes', channel: 'windows' }) }),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('dev_approval')
+    expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
+  })
+})
+
+describe('rsct_request_commit — settings.json drift is reported, never gated (#17)', () => {
+  /**
+   * Record a baseline as the SessionStart sanitizer would have — APPENDED, like
+   * the real writer. `eligibleProject()` rewrites the audit log wholesale, so a
+   * seed that overwrote would either lose the classify evidence or be lost by it,
+   * depending on call order. Appending makes the order irrelevant.
+   */
+  function seedBaseline(hash: string): void {
+    const line = JSON.stringify({ event: 'settings.baseline', hash, ts: FIXED_NOW.toISOString() })
+    appendFileSync(join(tmpRoot, '.rsct', 'audit.log'), line + '\n', 'utf8')
+  }
+
+  function writeSettingsJson(allow: string[]): void {
+    mkdirSync(join(tmpRoot, '.claude'), { recursive: true })
+    writeFileSync(
+      join(tmpRoot, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { allow } }, null, 2) + '\n',
+      'utf8',
+    )
+  }
+
+  it('reports the harness-appended entries and still lets the commit land', async () => {
+    // The field case: the harness auto-appends approved permissions to the
+    // VERSIONED file, the agent truthfully says it did not modify it, and nobody
+    // stages it. Before #17 no gate had anything to say about that.
+    writeSettingsJson(['Bash(mvn -version)', 'Bash(echo "exit=$?")'])
+    eligibleProject()
+    seedBaseline('a-different-hash')
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: unrelated work' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    // Reported, not blocked — an unrelated dirty settings file must never stop a
+    // legitimate commit.
+    expect(out.status).toBe('committed')
+    const hint = out.hints.join('\n')
+    expect(hint).toContain('.claude/settings.json has changed')
+    expect(hint).toContain('Bash(echo "exit=$?")')
+    expect(hint).toContain('never blocks')
+    expect(readAudit()).toMatch(/"event":"settings\.drift_detected"/)
+  })
+
+  it('says nothing when the file matches the baseline', async () => {
+    writeSettingsJson(['Bash(mvn -version)'])
+    eligibleProject()
+    seedBaseline(
+      hashSettingsContent(readFileSync(join(tmpRoot, '.claude', 'settings.json'), 'utf8')),
+    )
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
+  })
+
+  it('says nothing when the dev already staged the file — that is ownership taken', async () => {
+    writeSettingsJson(['Bash(mvn -version)'])
+    eligibleProject()
+    seedBaseline('a-different-hash')
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'chore: update settings' },
+      internal(smallStats, { stagedPathsOverride: ['.claude/settings.json'] }),
+    )) as RequestCommitOutput
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
+  })
+
+  it('degrades silently when no baseline was ever recorded', async () => {
+    // A project whose SessionStart hook never ran is not drifting — it is
+    // unmeasured, and the check must not invent a finding from that.
+    writeSettingsJson(['Bash(anything)'])
+    eligibleProject()
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
   })
 })

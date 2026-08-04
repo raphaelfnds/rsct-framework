@@ -146,6 +146,17 @@ export function parseNumstatZ(raw: string): StagedStats {
 }
 
 /**
+ * A file's content at `HEAD`, or null when it is untracked there / git fails.
+ * Reads through git rather than the filesystem on purpose: the question is what
+ * the LAST COMMIT holds, which is the only honest baseline for "what did someone
+ * add since". Never throws.
+ */
+export function getFileAtHead(projectRoot: string, relPath: string): string | null {
+  if (!isGitRepo(projectRoot)) return null
+  return safeGitRaw(projectRoot, ['show', `HEAD:${relPath}`])
+}
+
+/**
  * Return the unstaged diff (`git diff`) as a unified-diff string.
  * Same semantics as {@link getStagedDiff}.
  */

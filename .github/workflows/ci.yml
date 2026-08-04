@@ -32,6 +32,24 @@ jobs:
       # fails fast.
       - run: npm run typecheck
       - run: npm run build
+      # `dist/` is TRACKED and shipped, so an install needs no build toolchain —
+      # which means a PR that edits `src/` without rebuilding ships a stale
+      # binary while CI stays green. `verify:dist` rebuilds and diffs against the
+      # committed copy.
+      #
+      # ONE cell only, for COST — not for correctness. The bundle IS
+      # byte-reproducible across OSes: a native Linux build of this lockfile
+      # produces `index.js`, `sanitize-permissions.js` and `edit-scope-guard.js`
+      # byte-identical to the Windows-built committed copies. esbuild is a Go
+      # binary with per-version-deterministic codegen, `.gitattributes` pins
+      # `eol=lf` so no CRLF reaches a template literal, and sourcemaps are
+      # gitignored. Running it on all six cells would just cost five more builds.
+      #
+      # The one regression that WOULD break reproducibility is a CRLF file
+      # sneaking into tracked `src/`. If that ever happens, this step is where
+      # it surfaces.
+      - run: npm run verify:dist
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
       - run: npm test
         # T0.a: the bash lint's `bash -n` gate must FAIL (not silently skip) if a
         # runner lacks bash. All three runners ship bash (Git Bash on Windows).

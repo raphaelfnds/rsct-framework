@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { stripBom } from './io-utils.js'
+
 /**
  * Reader for the project-scope Claude Code settings files. Deliberately DUMB: it
  * resolves the paths, reads, parses, and reports what it saw. It knows nothing
@@ -64,23 +66,17 @@ export interface SettingsFile {
 export const PROJECT_SETTINGS_FILES = ['settings.json', 'settings.local.json'] as const
 
 /**
- * Read and parse one path with a plain `JSON.parse` — deliberately no leniency,
- * and a UTF-8 BOM is the case that makes the point.
+ * Read and parse one path, tolerating a UTF-8 BOM.
  *
- * A BOM (Notepad, PowerShell 5.1 `Out-File -Encoding utf8`) survives
- * `readFileSync(_, 'utf8')` and makes `JSON.parse` throw. Stripping it here
- * would let this reader see a document NOTHING else in RSCT can read:
- * `src/scripts/sanitize-permissions.ts` parses raw, and so do all five bash
- * blocks in `prompts/01-setup.md` and `prompts/03-uninstall.md`. On a BOM'd file
- * the sanitizer aborts and the poison-pill strip never happens — so a lenient
- * reader would find the hook entry, report enforcement as live, and produce
- * exactly the false-healthy verdict this check exists to remove. Being MORE
- * permissive than the component you are reporting on is how you end up lying
- * about it.
+ * #24 deliberately did NOT strip it here, and the reasoning is worth keeping:
+ * a lenient reader would have seen a document nothing else in RSCT could read —
+ * the sanitizer and every bash block parsed raw — so on a BOM'd file it would
+ * have found the hook entry and reported enforcement as live while the sanitizer
+ * aborted and enforced nothing. Being more permissive than the component you
+ * report on is how you end up lying about it.
  *
- * A BOM therefore lands in `malformed` — no evidence, silence. That is the wrong
- * answer in the safe direction; the right fix is to tolerate a BOM everywhere or
- * nowhere, which spans surfaces well outside this module.
+ * #12 removed that asymmetry by making all eleven parse sites tolerate a BOM, so
+ * this reader is no longer ahead of anyone. `stripBom` is the shared one.
  */
 function parseSettings(path: string): SettingsFile {
   let raw: string
@@ -93,7 +89,7 @@ function parseSettings(path: string): SettingsFile {
     return { path, status: code === 'ENOENT' ? 'absent' : 'unreadable', data: null }
   }
   try {
-    return { path, status: 'ok', data: JSON.parse(raw) }
+    return { path, status: 'ok', data: JSON.parse(stripBom(raw)) }
   } catch {
     return { path, status: 'malformed', data: null }
   }

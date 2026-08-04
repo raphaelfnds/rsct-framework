@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { makeExcerpt } from './markdown.js'
+
 export type DecisionStatus = 'active' | 'superseded' | 'deprecated'
 
 export const DECISION_STATUSES: readonly DecisionStatus[] = [
@@ -165,14 +167,7 @@ function extractMeta(section: string): { status?: DecisionStatus; tags?: string[
   return out
 }
 
+/** Defaults (3 lines / 280 chars) plus this module's meta-line filter. */
 function extractExcerpt(section: string): string {
-  const lines = section
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line.length > 0 && !line.startsWith('<!--') && !META_LINE_REGEX.test(line),
-    )
-  const first = lines.slice(0, 3).join(' ')
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first
+  return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) })
 }

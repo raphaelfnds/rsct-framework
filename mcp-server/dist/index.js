@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { homedir } from 'os';
 
 const require$1 = createRequire(import.meta.url);
@@ -8918,7 +8918,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join24 } = __require("path");
+    var { join: join26 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8961,7 +8961,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join24(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join26(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9364,7 +9364,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join24, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join26, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9427,7 +9427,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join24(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9445,7 +9445,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join24(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9467,7 +9467,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join24(__dirname$1, "..", "file.js");
+          return join26(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10457,7 +10457,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join24 = ",";
+            let join26 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10471,7 +10471,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join24 = `,
+                join26 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10479,13 +10479,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join24;
+                res += join26;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10506,7 +10506,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join24 = `,
+              join26 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10520,13 +10520,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join24;
+              separator = join26;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10567,7 +10567,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join24 = ",";
+            let join26 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10580,7 +10580,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join24 = `,
+                join26 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10588,13 +10588,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join24;
+                res += join26;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10607,7 +10607,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join24 = `,
+              join26 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10616,7 +10616,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10674,20 +10674,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join25 = `,
+              const join27 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join25;
+                res2 += join27;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join25}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10703,16 +10703,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join24 = `,
+            const join26 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join24, maximumBreadth);
+              res += stringifyTypedArray(value, join26, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join24;
+              separator = join26;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10723,13 +10723,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join24;
+              separator = join26;
             }
             if (separator !== "") {
               res = `
@@ -22573,6 +22573,9 @@ init_esm_shims();
 
 // src/lib/io-utils.ts
 init_esm_shims();
+function stripBom(text) {
+  return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
 }
@@ -22881,6 +22884,10 @@ function parseNumstatZ(raw) {
     }
   }
   return { files: paths.length, insertions, deletions, paths };
+}
+function getFileAtHead(projectRoot, relPath) {
+  if (!isGitRepo(projectRoot)) return null;
+  return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
 }
 function getUnstagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
@@ -23334,7 +23341,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.4.0";
+var RSCT_MCP_VERSION = "2.5.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23374,10 +23381,21 @@ function parseSections(body) {
   flush();
   return out;
 }
-function makeExcerpt(body) {
-  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("<!--"));
-  const first = lines.slice(0, 3).join(" ");
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
+function filterSectionsByQuery(sections, query) {
+  if (!query) return sections;
+  const needle = query.toLowerCase();
+  return sections.filter(
+    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
+  );
+}
+function makeExcerpt(body, opts = {}) {
+  const maxLines = opts.maxLines ?? 3;
+  const maxChars = opts.maxChars ?? 280;
+  const lines = body.split("\n").map((line) => line.trim()).filter(
+    (line) => line.length > 0 && !line.startsWith("<!--") && !(opts.skipLine?.(line) ?? false)
+  );
+  const first = lines.slice(0, maxLines).join(" ");
+  return first.length > maxChars ? `${first.slice(0, maxChars - 3)}...` : first;
 }
 
 // src/lib/universe-content.ts
@@ -23752,7 +23770,7 @@ function parseSettings(path2) {
     return { path: path2, status: code === "ENOENT" ? "absent" : "unreadable", data: null };
   }
   try {
-    return { path: path2, status: "ok", data: JSON.parse(raw) };
+    return { path: path2, status: "ok", data: JSON.parse(stripBom(raw)) };
   } catch {
     return { path: path2, status: "malformed", data: null };
   }
@@ -24276,11 +24294,7 @@ function extractMeta(section) {
   return out;
 }
 function extractExcerpt(section) {
-  const lines = section.split("\n").map((line) => line.trim()).filter(
-    (line) => line.length > 0 && !line.startsWith("<!--") && !META_LINE_REGEX.test(line)
-  );
-  const first = lines.slice(0, 3).join(" ");
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
+  return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) });
 }
 
 // src/lib/knowledge.ts
@@ -24654,7 +24668,7 @@ async function getKnowledgeHandler(rawInput) {
   const index = readKnowledgeIndex(resolution.root);
   const file = readKnowledgeFile(resolution.root, input.category);
   const isCanonical = KNOWN_CATEGORIES.includes(input.category);
-  const sections = filterSections(file.sections, input.query);
+  const sections = filterSectionsByQuery(file.sections, input.query);
   return {
     rsct_installed: resolution.rsct_installed,
     category: input.category,
@@ -24676,13 +24690,6 @@ async function getKnowledgeHandler(rawInput) {
       availableCategories: index.categories_present
     })
   };
-}
-function filterSections(sections, query) {
-  if (!query) return sections;
-  const needle = query.toLowerCase();
-  return sections.filter(
-    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
-  );
 }
 function buildHints3(args) {
   const hints = [];
@@ -25424,13 +25431,6 @@ function resolveRequestedSlugs(scope, doc, index) {
   if (scope === "all") return ["INDEX", ...governance];
   return governance;
 }
-function filterSections2(sections, query) {
-  if (!query) return sections;
-  const needle = query.toLowerCase();
-  return sections.filter(
-    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
-  );
-}
 async function getUniverseHandler(rawInput) {
   const input = getUniverseInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -25461,7 +25461,7 @@ async function getUniverseHandler(rawInput) {
   const slugs = resolveRequestedSlugs(input.scope, input.doc, index);
   const docs = slugs.map((slug) => {
     const file = readUniverseDoc(block.local_path, slug);
-    return { ...file, sections: filterSections2(file.sections, input.query) };
+    return { ...file, sections: filterSectionsByQuery(file.sections, input.query) };
   });
   if (input.scope !== "index" && index.docs.length === 0) {
     hints.push(
@@ -26050,11 +26050,11 @@ function buildEntry2(id, title, section) {
   return entry;
 }
 function extractExcerpt2(section) {
-  const lines = section.split("\n").map((line) => line.trim()).filter(
-    (line) => line.length > 0 && !line.startsWith("<!--") && !line.startsWith("<TODO:") && !line.startsWith("```")
-  );
-  const first = lines.slice(0, 4).join(" ");
-  return first.length > 320 ? `${first.slice(0, 317)}...` : first;
+  return makeExcerpt(section, {
+    maxLines: 4,
+    maxChars: 320,
+    skipLine: (line) => line.startsWith("<TODO:") || line.startsWith("```")
+  });
 }
 function extractRelated(section) {
   const match = section.match(/^\s*-\s*\*\*Related:?\*\*:?\s*(.+?)\s*$/im);
@@ -26867,6 +26867,13 @@ function evaluateFreeEligibility(args) {
   if (!health.healthy) {
     return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(", ")}` };
   }
+  if (args.installDriftSecurity === true) {
+    return {
+      eligible: false,
+      reason: "install drift at security tier \u2014 RSCT enforcement is not running in this project",
+      installDriftSecurity: true
+    };
+  }
   if (!args.activePlanSlug) {
     return { eligible: false, reason: "no active plan" };
   }
@@ -27098,6 +27105,105 @@ function recordConsumedApproval(approval, options) {
       error: err instanceof Error ? err.message : String(err)
     };
   }
+}
+
+// src/lib/install-advisory.ts
+init_esm_shims();
+var NONE = { hint: null, dialogLine: null, isSecurity: false };
+function evaluateInstallAdvisory(args) {
+  if (!args.rsctInstalled) return NONE;
+  const drift = getInstallDriftNotice({
+    projectRoot: args.projectRoot,
+    projectVersion: args.projectVersion ?? null,
+    mcpVersion: RSCT_MCP_VERSION
+  });
+  if (drift.severity !== "security" || !drift.hint) return NONE;
+  const appendAudit = args.auditWriter ?? appendAuditEntry;
+  appendAudit(
+    args.projectRoot,
+    {
+      event: "install.drift_detected",
+      tool: args.tool,
+      project_version: args.projectVersion ?? null,
+      mcp_version: RSCT_MCP_VERSION,
+      severity: drift.severity,
+      affected_components: drift.affected_components
+    },
+    args.auditConfig
+  );
+  return {
+    hint: drift.hint,
+    dialogLine: "\u26A0 RSCT enforcement is NOT running in this project (see hints).",
+    isSecurity: true
+  };
+}
+
+// src/lib/settings-drift.ts
+init_esm_shims();
+function hashSettingsContent(text) {
+  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
+}
+var SETTINGS_REL_PATH = ".claude/settings.json";
+function readTextOrNull(path2) {
+  try {
+    if (!existsSync(path2)) return null;
+    return readFileSync(path2, "utf8");
+  } catch {
+    return null;
+  }
+}
+function hashSettingsFile(projectRoot) {
+  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
+  return text === null ? null : hashSettingsContent(text);
+}
+function readBaselineFromLog(raw) {
+  let found = null;
+  for (const line of raw.split("\n")) {
+    const clean = line.replace(/\r/g, "").trim();
+    if (!clean) continue;
+    let entry;
+    try {
+      const parsed = JSON.parse(clean);
+      if (!parsed || typeof parsed !== "object") continue;
+      entry = parsed;
+    } catch {
+      continue;
+    }
+    if (entry.event !== "settings.baseline") continue;
+    const hash = entry.hash;
+    if (typeof hash !== "string" || hash.length === 0) continue;
+    found = { hash, recorded_at: typeof entry.ts === "string" ? entry.ts : "" };
+  }
+  return found;
+}
+var SILENT = { verdict: "silent", added_entries: [], hint: null };
+function addedAllowEntries(currentText, headText) {
+  const allowOf = (text) => {
+    if (text === null) return [];
+    try {
+      const doc = JSON.parse(stripBom(text));
+      const allow = doc.permissions?.allow;
+      return Array.isArray(allow) ? allow.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  };
+  const before = new Set(allowOf(headText));
+  return allowOf(currentText).filter((e) => !before.has(e));
+}
+function evaluateSettingsDrift(args) {
+  if (args.baseline === null || args.currentHash === null) return SILENT;
+  if (args.currentHash === args.baseline.hash) return { ...SILENT, verdict: "unchanged" };
+  if (args.staged) return { ...SILENT, verdict: "staged" };
+  const added = addedAllowEntries(args.currentText, args.headText);
+  const list = added.length > 0 ? added.map((e) => `  \u2022 ${e}`).join("\n") : "  (no new allow[] entries \u2014 the change is elsewhere in the file)";
+  return {
+    verdict: "drifted",
+    added_entries: added,
+    hint: `.claude/settings.json has changed since this session started and is NOT staged. It is a VERSIONED file that the harness appends to on its own, so this is most likely machine-written, not yours:
+${list}
+Three ways to resolve it, your call \u2014 RSCT will not decide: (1) stage it with this commit if the entries belong to the team; (2) move machine-specific ones to .claude/settings.local.json, which is gitignored; (3) discard them with git checkout -- .claude/settings.json. (report only, never blocks)`
+  };
 }
 
 // src/lib/commit-message.ts
@@ -27515,23 +27621,36 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const advisories = [];
   const withAdvisories = (hints2) => [...advisories, ...hints2];
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_commit",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.unshift(installAdvisory.hint);
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice({
-      projectRoot,
-      projectVersion: config2?.rsct_version ?? null,
-      mcpVersion: RSCT_MCP_VERSION
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? [];
+    const drift = evaluateSettingsDrift({
+      currentHash: hashSettingsFile(projectRoot),
+      baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config2?.audit)) ?? ""),
+      staged: stagedForDrift.includes(SETTINGS_REL_PATH),
+      currentText: readTextOrNull(join(projectRoot, ".claude", "settings.json")),
+      headText: getFileAtHead(projectRoot, SETTINGS_REL_PATH)
     });
-    if (drift.severity === "security" && drift.hint) {
-      advisories.unshift(drift.hint);
+    if (drift.hint) {
+      advisories.push(drift.hint);
       appendAudit(
         projectRoot,
         {
-          event: "install.drift_detected",
+          event: "settings.drift_detected",
           tool: "rsct_request_commit",
-          project_version: config2?.rsct_version ?? null,
-          mcp_version: RSCT_MCP_VERSION,
-          severity: drift.severity,
-          affected_components: drift.affected_components
+          added_count: drift.added_entries.length,
+          // Redacted excerpt: the first entry, truncated. The dev reads the full
+          // list in the hint; the log is a forensic trail, not a mirror of a file
+          // that may carry machine paths.
+          excerpt: drift.added_entries[0]?.slice(0, 80) ?? null
         },
         config2?.audit
       );
@@ -27634,6 +27753,7 @@ message: ${input.message}`
     const existing = readPhaseState(projectRoot);
     const activePlan2 = findActivePlan(projectRoot);
     const elig = evaluateFreeEligibility({
+      installDriftSecurity: installAdvisory.isSecurity,
       projectRoot,
       config: config2 ?? null,
       now,
@@ -27657,6 +27777,9 @@ message: ${input.message}`
         let reason = planTokenRejectReason(verdict.reason);
         if (verdict.reason === "absent" && elig.lockedHint) {
           reason = `free-commit budget is locked for this plan (${elig.reason}) \u2014 re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`;
+        }
+        if (verdict.reason === "absent" && elig.installDriftSecurity) {
+          reason = "the dialog-free commit lane is suspended while RSCT enforcement is not running \u2014 approve this commit per-action (dev_approval), or run /rsct-setup and restart the IDE to restore it";
         }
         const audit2 = appendAudit(
           projectRoot,
@@ -28369,6 +28492,17 @@ async function requestPushHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(branch, protectedList);
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_push",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint);
   if (branchProtected) {
     const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null;
     const progressOpen = pushingPlan ? progressHasOpenItems(projectRoot, pushingPlan.slug) : void 0;
@@ -28402,7 +28536,7 @@ async function requestPushHandler(rawInput, internal = {}) {
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [hint]
+        hints: withAdvisories([hint])
       };
     }
   }
@@ -28411,7 +28545,14 @@ async function requestPushHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 push approval",
-      message: `Approve push of '${branchLabel}' to '${remote}'?`
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in
+      // hints[]. One line, deliberately: this is a decision surface, and a wall
+      // of text trains the dev to dismiss it unread.
+      message: [
+        `Approve push of '${branchLabel}' to '${remote}'?`,
+        ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
+      ].join("\n")
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -28444,7 +28585,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`])
     };
   }
   const approval = gate.approval;
@@ -28476,7 +28617,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (branchProtected && overrideBranch) {
@@ -28519,7 +28660,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   const push = gitPush(projectRoot, remote, branch, gitExecutor);
@@ -28549,7 +28690,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."]
+      hints: withAdvisories(["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."])
     };
   }
   const record2 = recordApproval(approval, { projectRoot, now });
@@ -28616,7 +28757,7 @@ async function requestPushHandler(rawInput, internal = {}) {
     ...afields,
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
-    hints
+    hints: withAdvisories(hints)
   };
 }
 
@@ -28683,6 +28824,17 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_merge",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint);
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch);
   const progressOpen = integratingPlan ? progressHasOpenItems(projectRoot, integratingPlan.slug) : void 0;
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
@@ -28717,7 +28869,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [hint]
+      hints: withAdvisories([hint])
     };
   }
   const gate = await gateRequest({
@@ -28725,7 +28877,12 @@ async function requestMergeHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 merge approval",
-      message: `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in hints[].
+      message: [
+        `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
+        ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
+      ].join("\n")
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -28760,7 +28917,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`])
     };
   }
   const approval = gate.approval;
@@ -28793,7 +28950,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (input.source_branch === targetBranch) {
@@ -28825,7 +28982,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (allow_unrelated_histories && !overrideBranch) {
@@ -28857,7 +29014,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   const { list: protectedList } = effectiveProtectedList(config2);
@@ -28891,7 +29048,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if ((targetProtected || allow_unrelated_histories) && overrideBranch) {
@@ -28944,7 +29101,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."]
+      hints: withAdvisories(["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."])
     };
   }
   const record2 = recordApproval(approval, { projectRoot, now });
@@ -29018,7 +29175,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
     ...afields,
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
-    hints
+    hints: withAdvisories(hints)
   };
 }
 
@@ -29897,6 +30054,25 @@ function walkReverseDeps(input) {
 
 // src/lib/verification-checklist.ts
 init_esm_shims();
+
+// src/lib/findings.ts
+init_esm_shims();
+var FINDING_ACTIONS = [
+  "block",
+  "address-now",
+  "capture-as-issue",
+  "defer",
+  "accept"
+];
+function emptyActionsSummary() {
+  return Object.fromEntries(FINDING_ACTIONS.map((a) => [a, 0]));
+}
+function makeIdGenerator(prefix) {
+  let counter = 0;
+  return (category) => `${prefix}-${category}-${++counter}`;
+}
+
+// src/lib/verification-checklist.ts
 var CATEGORY_PROMPTS = {
   "business-rules": "Did the spec consider business-rules.md? Check for invariants or compliance constraints.",
   "anti-decisions": "Did the spec consult anti-decisions.md? Avoid re-trying abandoned paths.",
@@ -29919,17 +30095,13 @@ var COMMON_BASENAMES = /* @__PURE__ */ new Set([
   "common",
   "main"
 ]);
-function makeIdGenerator() {
-  let counter = 0;
-  return (cat) => `v-${cat}-${++counter}`;
-}
 function stripExt(p) {
   return basename(p).replace(/\.[^.]+$/, "");
 }
 function runVerificationChecklist(input) {
   const findings = [];
   const hints = [];
-  const nextId = makeIdGenerator();
+  const nextId = makeIdGenerator("v");
   const stats = {
     categories_run: [],
     knowledge_categories_present: [],
@@ -30115,6 +30287,347 @@ ${head}${overflow}`,
   return { findings, stats, hints };
 }
 
+// src/lib/phase-machine.ts
+init_esm_shims();
+var RSCT_PHASES = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "review",
+  "test"
+];
+var PHASE_ORDER = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "review",
+  "test"
+];
+function nextPhase(current) {
+  const idx = PHASE_ORDER.indexOf(current);
+  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
+  return PHASE_ORDER[idx + 1];
+}
+function isStaleVerificationLabel(state) {
+  return state.phase === "verification" && state.verification?.completed_at != null;
+}
+function startPhaseGeneric(input, config2, internal = {}) {
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const existing = readPhaseState(input.projectRoot);
+  const baseState = existing.state ?? {};
+  const existingPhase = baseState.phase;
+  const staleVerificationLabel = isStaleVerificationLabel(baseState);
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_already_active",
+        existing_phase: existingPhase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "phase_already_active",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: baseState.spec_slug ?? null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: "",
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
+      ]
+    };
+  }
+  const newState = {
+    ...baseState,
+    phase: input.phase,
+    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
+    started_at: startedAt
+  };
+  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
+  const audit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.start`,
+      tool: `rsct_phase_${input.phase}_start`,
+      spec_ref: input.specRef,
+      spec_slug: newState.spec_slug,
+      requested_persona: input.persona ?? null,
+      scope_globs: input.scopeGlobs ?? [],
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(audit);
+  const hints = [];
+  if (writeResult.ok) {
+    hints.push(
+      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
+    );
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
+    );
+  } else {
+    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
+  }
+  return {
+    status: writeResult.ok ? "started" : "state_write_failed",
+    phase: input.phase,
+    spec_ref: input.specRef,
+    spec_slug: newState.spec_slug ?? null,
+    started_at: startedAt,
+    scope_globs: input.scopeGlobs ?? [],
+    requested_persona: input.persona ?? null,
+    phase_state_path: writeResult.path,
+    phase_state_written: writeResult.ok,
+    existing_phase: null,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    hints
+  };
+}
+async function gatePhaseComplete(input, config2, internal = {}) {
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const existing = readPhaseState(input.projectRoot);
+  if (!existing.exists || !existing.state?.phase) {
+    return {
+      status: "no_active_phase",
+      phase: input.phase,
+      channel: null,
+      reject_kind: null,
+      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: null,
+      audit_error: null,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
+      ]
+    };
+  }
+  const state = existing.state;
+  if (state.phase !== input.phase) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_mismatch",
+        active_phase: state.phase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "phase_mismatch",
+      reason: `active phase is '${state.phase}', not '${input.phase}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
+      ]
+    };
+  }
+  if (state.spec_slug && state.spec_slug !== input.specRef) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "spec_ref_mismatch",
+        existing_spec_slug: state.spec_slug
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "spec_ref_mismatch",
+      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
+      ]
+    };
+  }
+  const gate = await gateRequest({
+    toolName: `rsct_phase_${input.phase}_complete`,
+    approval: input.devApproval,
+    dialog: {
+      title: `RSCT \u2014 ${input.phase} complete`,
+      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
+    },
+    projectRoot: input.projectRoot,
+    ...config2?.approval_modes !== void 0 && {
+      approvalModes: config2.approval_modes
+    },
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+    };
+  }
+  const newState = { ...state };
+  delete newState.phase;
+  delete newState.scope_globs;
+  delete newState.started_at;
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
+  }
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  const record2 = recordApproval(gate.approval, {
+    projectRoot: input.projectRoot,
+    now
+  });
+  const recommended = nextPhase(input.phase);
+  const completedAt = now.toISOString();
+  const completeAudit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.complete`,
+      tool: `rsct_phase_${input.phase}_complete`,
+      spec_ref: input.specRef,
+      channel: gate.channel,
+      fabrication_signals: gate.fabrication_signals,
+      next_recommended_phase: recommended,
+      completed_at: completedAt,
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(completeAudit);
+  const hints = [];
+  if (writeResult.ok) {
+    if (recommended) {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
+      );
+    } else {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
+      );
+    }
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
+    );
+  } else {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
+    );
+  }
+  if (!record2.ok) {
+    hints.push(
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
+    );
+  }
+  if (fields.audit_error !== null) {
+    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
+  }
+  return {
+    status: writeResult.ok ? "completed" : "state_write_failed",
+    phase: input.phase,
+    channel: gate.channel,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    spec_ref: input.specRef,
+    cleared: writeResult.ok,
+    next_recommended_phase: recommended,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error ?? null,
+    hints
+  };
+}
+
 // src/tools/phase-verification-start.ts
 var TIER_VALUES = ["trivial", "small", "standard", "complex"];
 var phaseVerificationStartInputSchema = external_exports.object({
@@ -30131,7 +30644,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Findings are recommendations \u2014 dev sets the action on each via rsct_phase_verification_complete.",
+  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. Findings are recommendations \u2014 dev sets the action on each via rsct_phase_verification_complete.",
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -30227,6 +30740,7 @@ async function phaseVerificationStartHandler(rawInput) {
       checklist_stats: checklist.stats,
       phase_state_path: phaseStatePathStr,
       phase_state_written: false,
+      existing_phase: null,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       hints: [
@@ -30239,6 +30753,42 @@ async function phaseVerificationStartHandler(rawInput) {
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
+  const existingPhase = baseState.phase ?? null;
+  if (existingPhase !== null && existingPhase !== "verification") {
+    const rejectAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: "verification.start.rejected",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        reject_kind: "phase_already_active",
+        existing_phase: existingPhase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(rejectAudit);
+    return {
+      status: "phase_already_active",
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk.stats,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting the V phase.`
+      ]
+    };
+  }
+  const staleRestart = isStaleVerificationLabel(baseState);
   const verificationBlock = {
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -30255,6 +30805,22 @@ async function phaseVerificationStartHandler(rawInput) {
     verification: verificationBlock
   };
   const writeResult = writePhaseState(projectRoot, newState);
+  if (staleRestart) {
+    appendAuditEntry(
+      projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        previous_phase: "verification",
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
   const startAudit = appendAuditEntry(
     projectRoot,
     {
@@ -30319,6 +30885,7 @@ async function phaseVerificationStartHandler(rawInput) {
     checklist_stats: checklist.stats,
     phase_state_path: phaseStatePathStr,
     phase_state_written: writeResult.ok,
+    existing_phase: null,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     hints
@@ -30327,16 +30894,9 @@ async function phaseVerificationStartHandler(rawInput) {
 
 // src/tools/phase-verification-complete.ts
 init_esm_shims();
-var ACTION_VALUES = [
-  "accept",
-  "address-now",
-  "capture-as-issue",
-  "defer",
-  "block"
-];
 var findingActionSchema = external_exports.object({
   finding_id: external_exports.string().min(1, "finding_id required"),
-  action: external_exports.enum(ACTION_VALUES),
+  action: external_exports.enum(FINDING_ACTIONS),
   note: external_exports.string().optional()
 }).strict();
 var phaseVerificationCompleteInputSchema = external_exports.object({
@@ -30373,7 +30933,7 @@ var phaseVerificationCompleteTool = {
             finding_id: { type: "string" },
             action: {
               type: "string",
-              enum: [...ACTION_VALUES]
+              enum: [...FINDING_ACTIONS]
             },
             note: { type: "string" }
           },
@@ -30393,15 +30953,6 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function emptySummary() {
-  return {
-    accept: 0,
-    "address-now": 0,
-    "capture-as-issue": 0,
-    defer: 0,
-    block: 0
-  };
-}
 async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
   const input = phaseVerificationCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -30411,7 +30962,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
   const now = internal.now ?? /* @__PURE__ */ new Date();
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const summary = emptySummary();
+  const summary = emptyActionsSummary();
   for (const fa of input.findings_actions) {
     summary[fa.action]++;
   }
@@ -31117,346 +31668,6 @@ async function classifyTaskHandler(rawInput) {
 
 // src/tools/phase-status.ts
 init_esm_shims();
-
-// src/lib/phase-machine.ts
-init_esm_shims();
-var RSCT_PHASES = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "review",
-  "test"
-];
-var PHASE_ORDER = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "review",
-  "test"
-];
-function nextPhase(current) {
-  const idx = PHASE_ORDER.indexOf(current);
-  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
-  return PHASE_ORDER[idx + 1];
-}
-function startPhaseGeneric(input, config2, internal = {}) {
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
-  const existing = readPhaseState(input.projectRoot);
-  const baseState = existing.state ?? {};
-  const existingPhase = baseState.phase;
-  const staleVerificationLabel = existingPhase === "verification" && baseState.verification?.completed_at != null;
-  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
-    const audit2 = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.start.rejected`,
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_already_active",
-        existing_phase: existingPhase
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit2);
-    return {
-      status: "phase_already_active",
-      phase: input.phase,
-      spec_ref: input.specRef,
-      spec_slug: baseState.spec_slug ?? null,
-      started_at: startedAt,
-      scope_globs: input.scopeGlobs ?? [],
-      requested_persona: input.persona ?? null,
-      phase_state_path: "",
-      phase_state_written: false,
-      existing_phase: existingPhase,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      hints: [
-        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
-      ]
-    };
-  }
-  const newState = {
-    ...baseState,
-    phase: input.phase,
-    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
-    started_at: startedAt
-  };
-  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  if (staleVerificationLabel && existingPhase !== input.phase) {
-    appendAudit(
-      input.projectRoot,
-      {
-        event: "phase.stale_label_cleared",
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        previous_phase: existingPhase,
-        previous_spec_slug: baseState.spec_slug ?? null,
-        verification_spec_ref: baseState.verification?.spec_ref ?? null,
-        verification_completed_at: baseState.verification?.completed_at ?? null,
-        phase_state_written: writeResult.ok
-      },
-      config2?.audit
-    );
-  }
-  const audit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.start`,
-      tool: `rsct_phase_${input.phase}_start`,
-      spec_ref: input.specRef,
-      spec_slug: newState.spec_slug,
-      requested_persona: input.persona ?? null,
-      scope_globs: input.scopeGlobs ?? [],
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(audit);
-  const hints = [];
-  if (writeResult.ok) {
-    hints.push(
-      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
-    );
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
-    );
-  } else {
-    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
-  }
-  return {
-    status: writeResult.ok ? "started" : "state_write_failed",
-    phase: input.phase,
-    spec_ref: input.specRef,
-    spec_slug: newState.spec_slug ?? null,
-    started_at: startedAt,
-    scope_globs: input.scopeGlobs ?? [],
-    requested_persona: input.persona ?? null,
-    phase_state_path: writeResult.path,
-    phase_state_written: writeResult.ok,
-    existing_phase: null,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    hints
-  };
-}
-async function gatePhaseComplete(input, config2, internal = {}) {
-  const promptFn = internal.promptFn ?? promptYesNo;
-  const now = internal.now ?? /* @__PURE__ */ new Date();
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const existing = readPhaseState(input.projectRoot);
-  if (!existing.exists || !existing.state?.phase) {
-    return {
-      status: "no_active_phase",
-      phase: input.phase,
-      channel: null,
-      reject_kind: null,
-      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: null,
-      audit_error: null,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
-      ]
-    };
-  }
-  const state = existing.state;
-  if (state.phase !== input.phase) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_mismatch",
-        active_phase: state.phase
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "phase_mismatch",
-      reason: `active phase is '${state.phase}', not '${input.phase}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
-      ]
-    };
-  }
-  if (state.spec_slug && state.spec_slug !== input.specRef) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "spec_ref_mismatch",
-        existing_spec_slug: state.spec_slug
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "spec_ref_mismatch",
-      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
-      ]
-    };
-  }
-  const gate = await gateRequest({
-    toolName: `rsct_phase_${input.phase}_complete`,
-    approval: input.devApproval,
-    dialog: {
-      title: `RSCT \u2014 ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
-    },
-    projectRoot: input.projectRoot,
-    ...config2?.approval_modes !== void 0 && {
-      approvalModes: config2.approval_modes
-    },
-    promptFn,
-    now
-  });
-  if (gate.status === "rejected") {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: gate.reject_kind,
-        reason: gate.reason,
-        fabrication_signals: gate.fabrication_signals
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
-    };
-  }
-  const newState = { ...state };
-  delete newState.phase;
-  delete newState.scope_globs;
-  delete newState.started_at;
-  if (nextPhase(input.phase) === null) {
-    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
-  }
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  const record2 = recordApproval(gate.approval, {
-    projectRoot: input.projectRoot,
-    now
-  });
-  const recommended = nextPhase(input.phase);
-  const completedAt = now.toISOString();
-  const completeAudit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.complete`,
-      tool: `rsct_phase_${input.phase}_complete`,
-      spec_ref: input.specRef,
-      channel: gate.channel,
-      fabrication_signals: gate.fabrication_signals,
-      next_recommended_phase: recommended,
-      completed_at: completedAt,
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(completeAudit);
-  const hints = [];
-  if (writeResult.ok) {
-    if (recommended) {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
-      );
-    } else {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
-      );
-    }
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
-    );
-  } else {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
-    );
-  }
-  if (!record2.ok) {
-    hints.push(
-      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
-    );
-  }
-  if (fields.audit_error !== null) {
-    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
-  }
-  return {
-    status: writeResult.ok ? "completed" : "state_write_failed",
-    phase: input.phase,
-    channel: gate.channel,
-    reject_kind: null,
-    reason: null,
-    fabrication_signals: gate.fabrication_signals,
-    spec_ref: input.specRef,
-    cleared: writeResult.ok,
-    next_recommended_phase: recommended,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    anti_replay_persisted: record2.ok,
-    anti_replay_error: record2.ok ? null : record2.error ?? null,
-    hints
-  };
-}
-
-// src/tools/phase-status.ts
 var phaseStatusInputSchema = external_exports.object({
   project_root: external_exports.string().optional()
 }).strict();
@@ -32316,7 +32527,7 @@ var phaseReviewStartInputSchema = external_exports.object({
 }).strict();
 var phaseReviewStartTool = {
   name: "rsct_phase_review_start",
-  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -32346,21 +32557,41 @@ async function phaseReviewStartHandler(rawInput) {
 
 // src/tools/phase-review-complete.ts
 init_esm_shims();
+var findingActionSchema2 = external_exports.object({
+  finding_id: external_exports.string().min(1, "finding_id required"),
+  action: external_exports.enum(FINDING_ACTIONS),
+  note: external_exports.string().optional()
+}).strict();
 var phaseReviewCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
-  dev_approval: external_exports.unknown()
+  dev_approval: external_exports.unknown(),
+  findings_actions: external_exports.array(findingActionSchema2).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.')
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] to record what the review found and what the dev decided about each item \u2014 dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
     properties: {
       project_root: { type: "string" },
       spec_ref: { type: "string" },
-      dev_approval: { type: "object" }
+      dev_approval: { type: "object" },
+      findings_actions: {
+        type: "array",
+        description: 'Per-finding actions. action="block" aborts completion.',
+        items: {
+          type: "object",
+          required: ["finding_id", "action"],
+          properties: {
+            finding_id: { type: "string" },
+            action: { type: "string", enum: [...FINDING_ACTIONS] },
+            note: { type: "string" }
+          },
+          additionalProperties: false
+        }
+      }
     },
     additionalProperties: false
   }
@@ -32368,9 +32599,45 @@ var phaseReviewCompleteTool = {
 async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   const input = phaseReviewCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config;
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const actions_summary = emptyActionsSummary();
+  for (const fa of input.findings_actions) actions_summary[fa.action]++;
+  if (actions_summary.block > 0) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: "review.complete.rejected",
+        tool: "rsct_phase_review_complete",
+        spec_ref: input.spec_ref,
+        reject_kind: "block_actions_present",
+        blocked_count: actions_summary.block
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      phase: "review",
+      spec_ref: input.spec_ref,
+      channel: null,
+      reject_kind: "block_actions_present",
+      reason: `${actions_summary.block} review finding(s) marked action="block". Resolve them, then re-run rsct_phase_review_complete.`,
+      fabrication_signals: [],
+      cleared: false,
+      next_recommended_phase: "review",
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `REVIEW is not complete: ${actions_summary.block} finding(s) are blocking. Fix them or downgrade the action with the dev \u2014 a blocking finding is the one thing this phase will not wave through.`
+      ],
+      actions_summary
+    };
+  }
   const result = await gatePhaseComplete(
     {
-      projectRoot: resolution.root,
+      projectRoot,
       phase: "review",
       specRef: input.spec_ref,
       devApproval: input.dev_approval
@@ -32380,7 +32647,7 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   );
   if (result.status === "completed") {
     const completedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
-    const stamp = stampReviewDecision(resolution.root, {
+    const stamp = stampReviewDecision(projectRoot, {
       spec_ref: input.spec_ref,
       completed_at: completedAt
     });
@@ -32389,8 +32656,22 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
         `\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start may still report the review as incomplete \u2014 retry by re-running rsct_phase_review_complete, or check .rsct/phase-state.json.`
       );
     }
+    for (const fa of input.findings_actions) {
+      appendAudit(
+        projectRoot,
+        {
+          event: "review.action",
+          tool: "rsct_phase_review_complete",
+          spec_ref: input.spec_ref,
+          finding_id: fa.finding_id,
+          action: fa.action,
+          ...fa.note ? { note: fa.note } : {}
+        },
+        config2?.audit
+      );
+    }
   }
-  return result;
+  return { ...result, actions_summary };
 }
 
 // src/tools/phase-test-start.ts

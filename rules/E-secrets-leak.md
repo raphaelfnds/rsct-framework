@@ -31,3 +31,24 @@ How to apply:
 - When in doubt, apply grep with known patterns.
 - Mask local paths when showing commands in chat (prefer `<user>` or `~`).
 - Any doubt — always stop and ask the user before proceeding.
+
+**`.claude/settings.json` is versioned, and it moves on its own.**
+
+The two settings files are not interchangeable, and the boundary is a §E boundary:
+
+| File | Versioned? | Holds |
+|---|---|---|
+| `.claude/settings.json` | **yes, committed** | what the whole team should get |
+| `.claude/settings.local.json` | no, gitignored | anything specific to THIS machine |
+
+Claude Code appends approved permissions to the **versioned** file during a
+session. Nobody decided to version those lines — the agent did not write them and
+truthfully says so, and the dev did not either. So the file sits permanently
+dirty, and a machine-absolute path with an OS username can land in a committed
+file without anyone choosing it. The SessionStart sanitizer relocates the ones it
+can recognize; the rest are still a §E judgement call.
+
+A modification you did not author is still yours to resolve. RSCT reports the
+divergence at the commit gate and offers three ways out — commit it, move it to
+`settings.local.json`, or discard it. It never picks for you: auto-committing
+entries nobody reviewed would be worse than leaving them there.

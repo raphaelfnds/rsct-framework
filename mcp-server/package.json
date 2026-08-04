@@ -1,6 +1,6 @@
 {
   "name": "rsct-mcp",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "MCP server for the RSCT framework — institutional consciousness layer (recall + phase machine + personas) for Claude Code",
   "type": "module",
   "bin": {
@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "verify:dist": "tsup && git diff --exit-code -- dist",
+    "verify:dist": "tsup && git add -A --intent-to-add dist && git diff --exit-code -- dist",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",

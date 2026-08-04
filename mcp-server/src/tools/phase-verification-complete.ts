@@ -17,19 +17,13 @@ import {
   type FabricationSignal,
 } from '../lib/dev-approval.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { FINDING_ACTIONS as ACTION_VALUES, emptyActionsSummary, type ActionsSummary } from '../lib/findings.js'
 import {
   readPhaseState,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
 
-const ACTION_VALUES = [
-  'accept',
-  'address-now',
-  'capture-as-issue',
-  'defer',
-  'block',
-] as const
 
 const findingActionSchema = z
   .object({
@@ -80,13 +74,8 @@ export type PhaseVerificationCompleteRejectKind =
   | 'block_actions_present'
   | 'spec_ref_mismatch'
 
-export interface ActionsSummary {
-  accept: number
-  'address-now': number
-  'capture-as-issue': number
-  defer: number
-  block: number
-}
+/** Re-exported so existing importers keep their path (#19). */
+export type { ActionsSummary }
 
 export interface PhaseVerificationCompleteOutput {
   status: PhaseVerificationCompleteStatus
@@ -160,15 +149,6 @@ export const phaseVerificationCompleteTool: Tool = {
   },
 }
 
-function emptySummary(): ActionsSummary {
-  return {
-    accept: 0,
-    'address-now': 0,
-    'capture-as-issue': 0,
-    defer: 0,
-    block: 0,
-  }
-}
 
 export async function phaseVerificationCompleteHandler(
   rawInput: unknown,
@@ -183,7 +163,7 @@ export async function phaseVerificationCompleteHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
-  const summary = emptySummary()
+  const summary = emptyActionsSummary()
   for (const fa of input.findings_actions) {
     summary[fa.action]++
   }

@@ -429,3 +429,121 @@ describe('phase_abandon clears the review block', () => {
     expect(readState().review).toBeUndefined()
   })
 })
+
+describe('phase-review-complete — findings_actions (#19)', () => {
+  const APPROVAL = {
+    timestamp: VALID_TS,
+    action_scope: 'review_complete:spec_ref=feat-x',
+    reason: 'code review of the diff done; ready for tests',
+  }
+
+  function activeReview(): void {
+    writeState({
+      phase: 'review',
+      spec_slug: 'feat-x',
+      review: { spec_ref: 'feat-x', decision: 'yes', decided_at: VALID_TS },
+    })
+  }
+
+  function auditEvents(): Record<string, unknown>[] {
+    const p = join(tmpRoot, '.rsct', 'audit.log')
+    if (!existsSync(p)) return []
+    return readFileSync(p, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+  }
+
+  it('records one audit entry per finding and summarises the actions', async () => {
+    // Before #19 a review that found residue had nowhere to put it: the tool took
+    // only spec_ref + dev_approval, so the whole phase rested on the agent
+    // remembering the description.
+    activeReview()
+    const r = await phaseReviewCompleteHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-x',
+        dev_approval: APPROVAL,
+        findings_actions: [
+          { finding_id: 'r-dead-code-1', action: 'address-now', note: 'orphaned import' },
+          { finding_id: 'r-stale-comment-2', action: 'accept' },
+          { finding_id: 'r-leftover-3', action: 'capture-as-issue' },
+        ],
+      },
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )
+
+    expect(r.status).toBe('completed')
+    expect(r.actions_summary['address-now']).toBe(1)
+    expect(r.actions_summary.accept).toBe(1)
+    expect(r.actions_summary['capture-as-issue']).toBe(1)
+    expect(r.actions_summary.block).toBe(0)
+
+    const actions = auditEvents().filter((e) => e.event === 'review.action')
+    expect(actions).toHaveLength(3)
+    expect(actions[0]?.finding_id).toBe('r-dead-code-1')
+    expect(actions[0]?.note).toBe('orphaned import')
+  })
+
+  it('a blocking finding aborts BEFORE the dialog, and the phase stays open', async () => {
+    // Popping a dialog for a completion already refused wastes an approval and
+    // teaches the dev to click through. Mirrors the V phase.
+    activeReview()
+    let dialogShown = false
+    const r = await phaseReviewCompleteHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-x',
+        dev_approval: APPROVAL,
+        findings_actions: [
+          { finding_id: 'r-dead-code-1', action: 'block', note: 'unreachable branch shipped' },
+          { finding_id: 'r-stale-comment-2', action: 'accept' },
+        ],
+      },
+      {
+        now: FIXED_NOW,
+        promptFn: async () => {
+          dialogShown = true
+          return { response: 'yes', channel: 'windows' }
+        },
+      },
+    )
+
+    expect(r.status).toBe('rejected')
+    expect(r.reject_kind).toBe('block_actions_present')
+    expect(dialogShown).toBe(false)
+    // The phase is still active — nothing was cleared or stamped.
+    const s = readState()
+    expect(s.phase).toBe('review')
+    expect((s.review as Record<string, unknown>).completed_at).toBeUndefined()
+    // And no per-finding action was logged: those record APPROVED decisions.
+    expect(auditEvents().some((e) => e.event === 'review.action')).toBe(false)
+    expect(auditEvents().some((e) => e.event === 'review.complete.rejected')).toBe(true)
+  })
+
+  it('stays backward compatible — omitting findings_actions still completes', async () => {
+    activeReview()
+    const r = await phaseReviewCompleteHandler(
+      { project_root: tmpRoot, spec_ref: 'feat-x', dev_approval: APPROVAL },
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )
+    expect(r.status).toBe('completed')
+    expect(r.actions_summary.block).toBe(0)
+    expect(auditEvents().some((e) => e.event === 'review.action')).toBe(false)
+  })
+
+  it('logs no action when the gate itself rejects — the log records approved decisions only', async () => {
+    activeReview()
+    const r = await phaseReviewCompleteHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-x',
+        dev_approval: { ...APPROVAL, action_scope: 'wrong_scope' },
+        findings_actions: [{ finding_id: 'r-dead-code-1', action: 'accept' }],
+      },
+      { now: FIXED_NOW, promptFn: async () => ({ response: 'no', channel: 'windows' }) },
+    )
+    expect(r.status).toBe('rejected')
+    expect(auditEvents().some((e) => e.event === 'review.action')).toBe(false)
+  })
+})

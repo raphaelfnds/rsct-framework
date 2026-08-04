@@ -221,3 +221,138 @@ describe('phase-verification-start — a new V never inherits completed_at (#15)
     expect(state.verification?.completed_at).toBeUndefined()
   })
 })
+
+describe('phase-verification-start — respects the active phase (#27)', () => {
+  /** Every audit event of a given name, in order. */
+  function auditEvents(): Record<string, unknown>[] {
+    const p = join(tmpRoot, '.rsct/audit.log')
+    if (!existsSync(p)) return []
+    return readFileSync(p, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+  }
+
+  const readState = (): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >
+
+  function writeState(state: Record<string, unknown>): void {
+    writeFile('.rsct/phase-state.json', JSON.stringify(state))
+  }
+
+  it('refuses to overwrite a DIFFERENT active phase, and audits the refusal', async () => {
+    // The hole #27 closes: this used to write `phase: 'verification'` over an
+    // active `code` label with no gate and no audit, letting an agent reach Test
+    // without ever calling code_complete.
+    writeRsctConfig()
+    writeState({ phase: 'code', spec_slug: 'feat-foo', started_at: '2026-01-01T00:00:00.000Z' })
+
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+
+    expect(out.status).toBe('phase_already_active')
+    expect(out.existing_phase).toBe('code')
+    expect(out.phase_state_written).toBe(false)
+    expect(out.hints.join(' ')).toContain('rsct_phase_code_complete')
+
+    // The label survives untouched — that is the whole point.
+    expect(readState().phase).toBe('code')
+
+    const rejected = auditEvents().find((e) => e.event === 'verification.start.rejected')
+    expect(rejected).toBeDefined()
+    expect(rejected?.reject_kind).toBe('phase_already_active')
+    expect(rejected?.existing_phase).toBe('code')
+    // Nothing may claim the phase started.
+    expect(auditEvents().some((e) => e.event === 'verification.start')).toBe(false)
+  })
+
+  it('allows reopening a COMPLETED verification, and records the discarded record', async () => {
+    // Same-label restart over a block carrying completed_at: a finished V record
+    // is being discarded, which is the transition #15's gate exception rests on.
+    writeRsctConfig()
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: {
+        spec_ref: 'feat-foo',
+        spec_tier: 'standard',
+        started_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T01:00:00.000Z',
+      },
+    })
+
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+
+    const cleared = auditEvents().find((e) => e.event === 'phase.stale_label_cleared')
+    expect(cleared).toBeDefined()
+    expect(cleared?.tool).toBe('rsct_phase_verification_start')
+    expect(cleared?.previous_spec_slug).toBe('feat-foo')
+    expect(cleared?.verification_completed_at).toBe('2026-01-01T01:00:00.000Z')
+    expect(cleared?.phase_state_written).toBe(true)
+  })
+
+  it('restarting an IN-FLIGHT verification is routine — no stale-label event', async () => {
+    // No completed_at, so nothing finished is being discarded. Emitting here
+    // would make the event meaningless by firing on every ordinary re-run.
+    writeRsctConfig()
+    writeState({
+      phase: 'verification',
+      spec_slug: 'feat-foo',
+      verification: {
+        spec_ref: 'feat-foo',
+        spec_tier: 'standard',
+        started_at: '2026-01-01T00:00:00.000Z',
+      },
+    })
+
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-foo',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+    expect(auditEvents().some((e) => e.event === 'phase.stale_label_cleared')).toBe(false)
+  })
+
+  it('is unchanged when no phase is active', async () => {
+    writeRsctConfig()
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-foo',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+    expect(out.existing_phase).toBeNull()
+    expect(readState().phase).toBe('verification')
+    expect(auditEvents().some((e) => e.event === 'phase.stale_label_cleared')).toBe(false)
+  })
+
+  it('the trivial-tier skip still writes NO state, even with another phase active', async () => {
+    // The gate sits after the skip return on purpose: the skip path's
+    // "audit-only, no state write" claim has to stay literally true.
+    writeRsctConfig()
+    writeState({ phase: 'code', spec_slug: 'feat-foo' })
+
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_tier: 'trivial',
+    })) as PhaseVerificationStartOutput
+
+    expect(out.status).toBe('skipped_tier')
+    expect(out.phase_state_written).toBe(false)
+    expect(readState().phase).toBe('code')
+    expect(auditEvents().some((e) => e.event === 'verification.start.rejected')).toBe(false)
+  })
+})

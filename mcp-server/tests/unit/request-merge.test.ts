@@ -722,3 +722,85 @@ describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
     expect(prompt.calls()).toBe(1)
   })
 })
+
+describe('rsct_request_merge — install-drift advisory (#25)', () => {
+  const SECURITY = /SECURITY: RSCT enforcement is not running/
+
+  it('prepends the advisory on a successful merge and audits the detection', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      {
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        dev_approval: approval(),
+        pre_merge_ack: ack(),
+      },
+      {
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: gitExec({
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'merge --no-ff feat/foo': MERGE_OK,
+        }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('merged')
+    expect(out.hints[0]).toMatch(SECURITY)
+
+    const entry = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.event === 'install.drift_detected')
+    expect(entry?.tool).toBe('rsct_request_merge')
+    expect(entry?.severity).toBe('security')
+  })
+
+  it('carries the advisory when the merge is REJECTED before the dialog', async () => {
+    // Missing pre_merge_ack rejects in chat without popping the dialog. That
+    // return path must still drain the advisory.
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: gitExec({}),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.hints[0]).toMatch(SECURITY)
+  })
+
+  it('puts one line in the OS dialog', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    let seen = ''
+    await requestMergeHandler(
+      {
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        dev_approval: approval(),
+        pre_merge_ack: ack(),
+      },
+      {
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: gitExec({
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'merge --no-ff feat/foo': MERGE_OK,
+        }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
+        promptFn: async (opts: DialogOptions) => {
+          seen = opts.message
+          return { response: 'yes', channel: 'windows' }
+        },
+        now: FIXED_NOW,
+      },
+    )
+    expect(seen).toContain('Approve merge')
+    expect(seen).toContain('RSCT enforcement is NOT running')
+    expect(seen.split('\n')).toHaveLength(2)
+  })
+})

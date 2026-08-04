@@ -31,6 +31,7 @@ import {
   type DialogOptions,
   type DialogResult,
 } from '../lib/os-dialog.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import {
   gateRequest,
   type GateChannel,
@@ -192,6 +193,22 @@ export async function requestMergeHandler(
   // ack rejects in chat WITHOUT popping the §C OS dialog (V-P1·PH-5). A reject
   // here returns before the gate, so the dev_approval is never validated or
   // consumed. A merge is always an integration event ⇒ the ack is always required.
+  // #25. Merge is outward-facing and hard to reverse, so degraded enforcement
+  // matters MORE here than at commit — and this is exactly where the warning used
+  // to be silent. Evaluated before the pre-gate ack check so it reaches the dev on
+  // rejected attempts too, and drained through `withAdvisories` on every return path.
+  const advisories: string[] = []
+  const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_request_merge',
+    auditWriter: appendAudit,
+  })
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint)
+
   // plan-lifecycle-v2 (Bloco 2.2, HOLE A): resolve the plan being integrated by
   // the SOURCE branch (not the mtime-winner findActivePlan) and, when found,
   // feed the LIGHT plan_complete cross-check the boolean — does that plan's
@@ -233,7 +250,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [hint],
+      hints: withAdvisories([hint]),
     }
   }
 
@@ -242,7 +259,12 @@ export async function requestMergeHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — merge approval',
-      message: `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in hints[].
+      message: [
+        `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
+        ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+      ].join('\n'),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -278,7 +300,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`]),
     }
   }
 
@@ -313,7 +335,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -346,7 +368,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -380,7 +402,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -416,7 +438,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: withAdvisories([reason]),
     }
   }
 
@@ -471,7 +493,7 @@ export async function requestMergeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ['git merge failed — approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval.'],
+      hints: withAdvisories(['git merge failed — approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval.']),
     }
   }
 
@@ -565,7 +587,7 @@ export async function requestMergeHandler(
     ...afields,
     anti_replay_persisted: record.ok,
     anti_replay_error: record.ok ? null : record.error,
-    hints,
+    hints: withAdvisories(hints),
   }
 }
 

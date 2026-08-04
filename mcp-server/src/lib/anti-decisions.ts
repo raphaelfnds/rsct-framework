@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { makeExcerpt } from './markdown.js'
+
 export interface AntiDecisionEntry {
   id: string
   title: string
@@ -99,19 +101,18 @@ function buildEntry(id: string, title: string, section: string): AntiDecisionEnt
   return entry
 }
 
+/**
+ * Wider window than the other two callers (4 lines / 320 chars) — deliberate,
+ * and preserved as-is by #10 rather than normalised: an anti-decision carries a
+ * rationale for why a path was abandoned, and a 3-line window cuts it
+ * mid-sentence, which is exactly the sentence a reader needs.
+ */
 function extractExcerpt(section: string): string {
-  const lines = section
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line.length > 0 &&
-        !line.startsWith('<!--') &&
-        !line.startsWith('<TODO:') &&
-        !line.startsWith('```'),
-    )
-  const first = lines.slice(0, 4).join(' ')
-  return first.length > 320 ? `${first.slice(0, 317)}...` : first
+  return makeExcerpt(section, {
+    maxLines: 4,
+    maxChars: 320,
+    skipLine: (line) => line.startsWith('<TODO:') || line.startsWith('```'),
+  })
 }
 
 function extractRelated(section: string): string[] {

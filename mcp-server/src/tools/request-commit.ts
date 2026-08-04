@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
@@ -5,6 +6,7 @@ import { findActivePlan, findPlanBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
   getStagedDiff,
+  getFileAtHead,
   getStagedPaths,
   getStagedStats,
   gitCommit,
@@ -35,9 +37,16 @@ import {
 import {
   appendAuditEntry,
   auditFields,
+  resolveAuditPath,
 } from '../lib/audit-log.js'
-import { RSCT_MCP_VERSION } from '../lib/version.js'
-import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
+import {
+  evaluateSettingsDrift,
+  hashSettingsFile,
+  readBaselineFromLog,
+  readTextOrNull,
+  SETTINGS_REL_PATH,
+} from '../lib/settings-drift.js'
 import { checkCommitMessage } from '../lib/commit-message.js'
 import {
   promptYesNo,
@@ -305,28 +314,48 @@ export async function requestCommitHandler(
 
   // Install drift, security tier only: an enforcement script under
   // `.rsct/scripts/` is absent, or is present with no hook entry pointing at it,
-  // so what it enforces is not running here. Evaluated before authorization, so the
-  // advisory reaches the dev on rejected attempts too, and prepended because it
-  // outranks the routine hint tail. The audit entry follows the same rule — it
-  // records that a commit was ATTEMPTED under a degraded enforcement surface,
-  // which is the fact worth reconstructing later. Never blocks.
+  // so what it enforces is not running here. Evaluated before authorization, so
+  // the advisory reaches the dev on rejected attempts too, and prepended because
+  // it outranks the routine hint tail. Never blocks.
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_request_commit',
+    auditWriter: appendAudit,
+  })
+  if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
+
+  // #17: `.claude/settings.json` is VERSIONED and the harness appends approved
+  // permissions to it on its own. Nobody stages those lines — the agent did not
+  // write them and correctly says so, and the dev did not either — so the file
+  // sits permanently dirty and the §E pre-commit review of it decays into
+  // noise-skimming. Report it here, at the one moment someone is deciding what
+  // enters the repo. REPORT ONLY: never blocks, never stages, never edits, never
+  // discards. Auto-committing entries nobody reviewed would be strictly worse
+  // than the status quo this fixes.
   if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice({
-      projectRoot,
-      projectVersion: config?.rsct_version ?? null,
-      mcpVersion: RSCT_MCP_VERSION,
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
+    const drift = evaluateSettingsDrift({
+      currentHash: hashSettingsFile(projectRoot),
+      baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config?.audit)) ?? ''),
+      staged: stagedForDrift.includes(SETTINGS_REL_PATH),
+      currentText: readTextOrNull(join(projectRoot, '.claude', 'settings.json')),
+      headText: getFileAtHead(projectRoot, SETTINGS_REL_PATH),
     })
-    if (drift.severity === 'security' && drift.hint) {
-      advisories.unshift(drift.hint)
+    if (drift.hint) {
+      advisories.push(drift.hint)
       appendAudit(
         projectRoot,
         {
-          event: 'install.drift_detected',
+          event: 'settings.drift_detected',
           tool: 'rsct_request_commit',
-          project_version: config?.rsct_version ?? null,
-          mcp_version: RSCT_MCP_VERSION,
-          severity: drift.severity,
-          affected_components: drift.affected_components,
+          added_count: drift.added_entries.length,
+          // Redacted excerpt: the first entry, truncated. The dev reads the full
+          // list in the hint; the log is a forensic trail, not a mirror of a file
+          // that may carry machine paths.
+          excerpt: drift.added_entries[0]?.slice(0, 80) ?? null,
         },
         config?.audit,
       )
@@ -443,6 +472,7 @@ export async function requestCommitHandler(
     const existing = readPhaseState(projectRoot)
     const activePlan = findActivePlan(projectRoot)
     const elig = evaluateFreeEligibility({
+      installDriftSecurity: installAdvisory.isSecurity,
       projectRoot,
       config: config ?? null,
       now,
@@ -472,6 +502,16 @@ export async function requestCommitHandler(
         // bare "no token" — the dev needs the re-classify / mint-token hint.
         if (verdict.reason === 'absent' && elig.lockedHint) {
           reason = `free-commit budget is locked for this plan (${elig.reason}) — re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`
+        }
+        // #25. Without this, a lane withheld for security drift falls through to
+        // the token path and reports `plan_token_invalid` — which would be a lie:
+        // nothing is wrong with the token, and it would send the dev to mint one
+        // instead of repairing enforcement. The advisory itself is already in
+        // hints[] via withAdvisories; this makes the REASON honest too.
+        if (verdict.reason === 'absent' && elig.installDriftSecurity) {
+          reason =
+            'the dialog-free commit lane is suspended while RSCT enforcement is not running — ' +
+            'approve this commit per-action (dev_approval), or run /rsct-setup and restart the IDE to restore it'
         }
         const audit = appendAudit(
           projectRoot,

@@ -565,6 +565,14 @@ RSCT_JSON_UNIVERSE_NAME=$(extract_json_string "name")  # universe.name
 RSCT_JSON_UNIVERSE_LOCAL=$(extract_json_string "local")
 RSCT_JSON_UNIVERSE_REMOTE=$(extract_json_string "remote")
 RSCT_JSON_PROTECTED_BRANCHES=$(extract_json_array "protected_branches")
+# #26 ask-once: the CURRENT commit-message cap, if the project already has one.
+# `commit_message_max_lines` is a NUMBER, so extract_json_string (which requires
+# surrounding quotes) cannot see it. CRLF-tolerant via `tr -d` first, and the
+# trailing digits are peeled with sed rather than a `$`-anchored grep — anchoring
+# on `$` is the CRLF trap in CLAUDE.md anti-pattern #4.
+RSCT_JSON_COMMIT_MAX_LINES=$(tr -d '\r' < .rsct.json 2>/dev/null \
+  | grep -o '"commit_message_max_lines"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
+  | sed 's/^.*[^0-9]//')
 RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 RSCT_JSON_CANONICAL_SOURCE_ADDED=$(extract_json_string "canonical_source_added")
 # DX-1b ask-once: PRESENCE (not value) of install.create_universe_declined_at —
@@ -736,6 +744,51 @@ Mode: [UPDATE | CREATE]
     via the block below. **To set up a universe LATER**, delete that field from `.rsct.json`, or
     run `/rsct-init-universe` directly. (The offer never fires without same-org siblings AND no
     universe, so it stays quiet for solo/mono projects regardless.)
+
+✍️ COMMIT-MESSAGE LENGTH (#26) — present ONLY when `RSCT_JSON_COMMIT_MAX_LINES`
+  is empty (ask-once: a project that already carries the key keeps its answer, on
+  every re-run). Omit when the MCP isn't installed — the cap is enforced by
+  `rsct_request_commit`, so without it the question has no effect.
+  [Present as ONE plain-language question, Recommended (§B item 1):]
+  "How long may a commit message be in this project, in non-empty lines?
+   RSCT rejects anything longer (`message_too_long`), before the §C dialog, so
+   nothing is approved or spent on a commit that will be refused. Blank lines
+   don't count. `[15]`
+   ✅ Recommended: 15 — long enough for a subject, a rationale paragraph and a
+      short list; short enough that the message stops being a diff narration.
+   Any whole number from 1 to 500. Just press enter to take 15."
+  - Store the answer as `COMMIT_MSG_MAX_LINES`. The block below validates it and
+    falls back to 15, so it is NEVER empty — an empty substitution would render
+    `"commit_message_max_lines": ,` which is invalid JSON and would abort the
+    install at the structural check further down.
+  - **There is no "unlimited".** `resolveCommitMessageMaxLines` clamps to 1…500,
+    so 0 would clamp to 1 and reject every multi-line message. A project that
+    wants effectively no cap sets 500. Say that if the dev asks for "no limit".
+  - On an UPDATE run where the key already exists, do NOT ask and do NOT
+    overwrite — same posture as every other answered question.
+
+```bash
+echo "  CHECKPOINT: Phase 3 resolving commit-message cap (ask-once, validated)"
+# #26. The dev's answer arrives as COMMIT_MSG_MAX_LINES. Everything downstream
+# (the CREATE render's sed, the UPDATE splice) requires a BARE JSON NUMBER, so a
+# non-numeric or out-of-range answer must degrade to the default here rather than
+# reach the file. `case` with a character class is the POSIX way to test "digits
+# only" without a grep dependency (and without grep -i+-F, anti-pattern #7).
+COMMIT_MSG_MAX_LINES_DEFAULT=15
+if [ -n "$RSCT_JSON_COMMIT_MAX_LINES" ]; then
+  # Ask-once: an existing value wins over anything captured this run.
+  COMMIT_MSG_MAX_LINES="$RSCT_JSON_COMMIT_MAX_LINES"
+fi
+case "${COMMIT_MSG_MAX_LINES:-}" in
+  ''|*[!0-9]*) COMMIT_MSG_MAX_LINES="$COMMIT_MSG_MAX_LINES_DEFAULT" ;;
+esac
+# Range guard mirrors lib/commit-message.ts MIN_LIMIT/MAX_LIMIT. Out of range is
+# not an error — the TS side clamps anyway; writing the clamped value keeps the
+# file honest about what will actually be enforced.
+if [ "$COMMIT_MSG_MAX_LINES" -lt 1 ] 2>/dev/null; then COMMIT_MSG_MAX_LINES=1; fi
+if [ "$COMMIT_MSG_MAX_LINES" -gt 500 ] 2>/dev/null; then COMMIT_MSG_MAX_LINES=500; fi
+echo "  commit-message cap: $COMMIT_MSG_MAX_LINES non-empty lines"
+```
 
 ```bash
 echo "  CHECKPOINT: Phase 3 recording create-universe decline (ask-once, text-splice)"
@@ -1276,6 +1329,7 @@ sed -E \
   -e "s|\[APP_NAME\]|${APP_NAME}|g" \
   -e "s|\[ORG_SLUG\]|${ORG_SLUG}|g" \
   -e "s|\[TEST_FRAMEWORK\]|${TEST_FRAMEWORK}|g" \
+  -e "s|\[COMMIT_MSG_MAX_LINES\]|${COMMIT_MSG_MAX_LINES:-15}|g" \
   -e "s|\[APPLIED_AT\]|${APPLIED_AT}|g" \
   -e "s|\[MODE\]|${MODE}|g" \
   -e "s|\[SETUP_COMMIT_SHA_BEFORE\]|${SETUP_COMMIT_SHA_BEFORE}|g" \
@@ -1287,7 +1341,7 @@ sed -E \
 # (macOS). The earlier BRE form (`grep -q '\[\(...\|...\)\]'`) relied on
 # GNU's `\|` extension for alternation, which BSD grep in BRE mode does
 # not support — caught by the v0.7.3 CAP-17 audit sweep (AUDIT-C).
-if grep -qE '\[(APP_NAME|ORG_SLUG|TEST_FRAMEWORK|APPLIED_AT|MODE|SETUP_COMMIT_SHA_BEFORE|PROTECTED_BRANCHES_JSON_ARRAY)\]' "$RSCT_JSON"; then
+if grep -qE '\[(APP_NAME|ORG_SLUG|TEST_FRAMEWORK|APPLIED_AT|MODE|SETUP_COMMIT_SHA_BEFORE|PROTECTED_BRANCHES_JSON_ARRAY|COMMIT_MSG_MAX_LINES)\]' "$RSCT_JSON"; then
   echo "  ERROR: one or more placeholders left unsubstituted in $RSCT_JSON — inspect manually" >&2
   exit 1
 fi
@@ -1338,6 +1392,61 @@ if ! grep -q "\"applied_at\"[[:space:]]*:[[:space:]]*\"${APPLIED_AT}\"" "$RSCT_J
   exit 1
 fi
 echo "  applied_at rotated to ${APPLIED_AT}"
+```
+
+**Canonical bash — UPDATE mode: backfill `commit_message_max_lines` (#26):**
+
+An `.rsct.json` written before #26 has no cap key, so the project silently runs
+on the framework's default and the dev only learns the knob exists by being
+rejected. Backfill it once, top-level, by TEXT-SPLICE — never
+`JSON.parse → JSON.stringify` (CLAUDE.md #5; `.rsct.json` is not a documented
+exception). Preserve-on-update: a file that already has the key is left alone,
+whatever its value.
+
+The key is TOP-LEVEL and not nested under `approval_modes` — that placement is
+deliberate and load-bearing, and it is where `lib/project-root.ts` reads it from.
+
+```bash
+echo "  CHECKPOINT: Phase 4.4 executing canonical commit-message-cap backfill"
+RSCT_JSON="$(pwd)/.rsct.json"
+if [ -f "$RSCT_JSON" ] && ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>/dev/null; then
+  # Path via argv (no pwd reliance); double-quoted JS only — no apostrophe may
+  # appear inside a single-quoted node -e (CAP-42). CRLF-tolerant char classes.
+  # The value is injected as a BARE NUMBER: a quoted "15" fails z.number() and
+  # `.catch(undefined)` swallows it silently, which would discard the answer with
+  # no error anywhere.
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], cap = process.argv[2];
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — commit cap not recorded."); process.exit(0); }
+    // A UTF-8 BOM would defeat the ^-anchored root match below and make this
+    // block report "root object not found" on a perfectly valid file. Same
+    // decimal-65279 idiom as the settings blocks in Phase 4.V.
+    if (s.charCodeAt(0) === 65279) s = s.slice(1);
+    if (/"commit_message_max_lines"/.test(s)) { process.exit(0); }
+    var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
+    if (!m) { console.error("  WARN: .rsct.json root object not found — commit cap not recorded."); process.exit(0); }
+    var eol = /\r\n/.test(s) ? "\r\n" : "\n";
+    var at = m[0].length;
+    var sep = (s.charAt(at) === "}") ? "" : "," + eol + "  ";
+    var out = s.slice(0, at) + "\"commit_message_max_lines\": " + cap + sep + s.slice(at);
+    // Validate BEFORE writing. Writing first and checking after would leave a
+    // .rsct.json that no RSCT reader can parse — resolveProjectRoot returns null,
+    // health reports config_unparseable, and every gate degrades to a safe no-op.
+    // Mirrors the contracts.json splice earlier in this prompt.
+    try { JSON.parse(out); } catch (e) { console.error("  WARN: commit-cap splice would produce invalid JSON — aborted, .rsct.json untouched."); process.exit(0); }
+    fs.writeFileSync(f, out, "utf8");
+    console.log("  commit_message_max_lines backfilled: " + cap);
+  ' "$RSCT_JSON" "${COMMIT_MSG_MAX_LINES:-15}"
+  # Post-mutation sanity. WARN, never exit 1: every soft path above leaves the
+  # file untouched and valid, so a missing key means "not backfilled", not
+  # "broken" — and the three sibling .rsct.json splices in this prompt all warn
+  # and continue. A hard failure here would abort a healthy install.
+  if ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>/dev/null; then
+    echo "  ⚠ commit-cap not backfilled — the project keeps the framework default (15). Add \"commit_message_max_lines\" to .rsct.json by hand to change it." >&2
+  fi
+fi
 ```
 
 CREATE mode (.rsct.json absent) still renders from `doc-templates/rsct.json.template`
@@ -3107,7 +3216,16 @@ if [ -n "$SANITIZER_SRC" ]; then
     let settings = {};
     if (fs.existsSync(target)) {
       try {
-        settings = JSON.parse(fs.readFileSync(target, "utf8"));
+        // #12: tolerate a UTF-8 BOM (U+FEFF). Notepad and PowerShell 5.1
+        // Out-File emit one, readFileSync keeps it, and JSON.parse rejects it —
+        // so one save from the wrong editor aborts every /rsct-setup from here
+        // on, blaming JSON that is in fact fine. Compared as decimal
+        // 65279: no backslash, no \u escape, no regex literal, so nothing in the
+        // markdown-fence → bash-single-quote → MSYS chain can corrupt it (the
+        // same reasoning as String.fromCharCode(92) elsewhere in this file).
+        var raw = fs.readFileSync(target, "utf8");
+        if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+        settings = JSON.parse(raw);
       } catch (e) {
         console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
         process.exit(1);
@@ -3189,7 +3307,10 @@ if [ -n "$SANITIZER_SRC" ]; then
       let settings = {};
       if (fs.existsSync(target)) {
         try {
-          settings = JSON.parse(fs.readFileSync(target, "utf8"));
+          // #12: tolerate a UTF-8 BOM — see 4.V.c for the full reasoning.
+          var raw = fs.readFileSync(target, "utf8");
+          if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+          settings = JSON.parse(raw);
         } catch (e) {
           console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
           process.exit(1);
@@ -3262,7 +3383,13 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
     const target = process.argv[1];
     let cfg = {};
     if (fs.existsSync(target)) {
-      try { cfg = JSON.parse(fs.readFileSync(target, "utf8")); }
+      // #12: tolerate a UTF-8 BOM — see 4.V.c. This block exits 1 on a parse
+      // failure, so a BOM-prefixed .mcp.json aborted the install mid-run.
+      try {
+        var raw = fs.readFileSync(target, "utf8");
+        if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+        cfg = JSON.parse(raw);
+      }
       catch (e) { console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup."); process.exit(1); }
     }
     cfg.mcpServers = cfg.mcpServers || {};

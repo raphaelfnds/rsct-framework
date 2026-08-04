@@ -63,9 +63,25 @@ cd mcp-server
 npm run verify:dist     # rebuilds and fails if the tracked dist/ is stale
 ```
 
-Run this before committing; CI does not (the build is not byte-reproducible
-across OSes, so `verify:dist` is a local, same-environment guard). Sourcemaps
-(`dist/**/*.map`) stay gitignored.
+Run this before committing. **CI also runs it**, on a single matrix cell
+(ubuntu-latest, node 22) — chosen for cost, not for correctness. The bundle *is*
+byte-reproducible across OSes: a native Linux build of this lockfile yields
+`index.js`, `sanitize-permissions.js` and `edit-scope-guard.js` byte-identical to
+the Windows-built committed copies. esbuild is a Go binary whose codegen is
+deterministic per version, `.gitattributes` pins `eol=lf` so no CRLF can reach a
+template literal, and sourcemaps (`dist/**/*.map`) stay gitignored.
+
+The `--intent-to-add` in the script is load-bearing: `git diff` ignores untracked
+files, so without it a **newly added** artifact (a new `tsup` entry, say) would
+pass the check while never being committed — CI green, users installing without
+the file.
+
+The three bundles are tracked with mode `100755`. They carry a shebang and are
+what `package.json` `bin` points at, so executable is the correct mode — and it
+has to be recorded in the index, because `git diff` compares mode as well as
+content: `tsup` on Linux sets the execute bit, Windows git does not track it, and
+without an agreed mode the CI check fails on a byte-identical build. If you ever
+add a `dist/` entry, mark it too: `git update-index --chmod=+x <path>`.
 
 ---
 

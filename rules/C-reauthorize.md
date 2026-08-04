@@ -59,10 +59,12 @@ OS dialog before the mutation lands (with the free-commit-lane exception
 noted under "Plan execution modes" below):
 
 - `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`. Rejects a
-  message longer than **15 non-empty lines** (`message_too_long`), before the §C
+  message longer than this project's cap (`message_too_long`), before the §C
   dialog so nothing is approved or spent on a commit that will be rejected. Blank
-  lines are not counted; `commit_message_max_lines` in `.rsct.json` raises the cap.
-  The rule is length only — no opinion on Conventional Commits or subject grammar.
+  lines are not counted. The cap is `commit_message_max_lines` in `.rsct.json`,
+  chosen at `/rsct-setup` (default 15, range 1–500); the reject message states the
+  active value. The rule is length only — no opinion on Conventional Commits or
+  subject grammar.
 - `mcp__rsct__rsct_request_push` — replaces `Bash(git push ...)`
 - `mcp__rsct__rsct_request_merge` — replaces `Bash(git merge ...)`
 - `mcp__rsct__rsct_request_rebase` — replaces `Bash(git rebase ...)` /
@@ -134,6 +136,18 @@ from the append-only `.rsct/audit.log`, so deleting `phase-state.json` cannot
 silently reset it (fail-closed). Branch protection (INV-5) and the secret scan
 (INV-6) still apply — the free path carries no overrides. When the ceiling trips,
 the lane locks and the next commit falls back to a per-action `dev_approval`.
+
+**The lane is suspended while RSCT enforcement is not running.** It is a privilege
+granted on the premise that the mechanical layer is trustworthy; when an
+enforcement script under `.rsct/scripts/` is missing, or is present with no hook
+in `.claude/settings.json` wired to run it, that premise is provably false and the
+next commit falls back to a per-action `dev_approval`. Nothing is blocked — the
+commit still lands, it just costs one dialog, and the dialog is the point: it is
+the one channel that carries the warning where the agent cannot summarize it away.
+Be clear on what this buys, though: **reach, not enforcement.** If the sanitizer
+is not running, a poison-pill permission can persist and the agent can bypass
+`rsct_request_commit` entirely — suspending the lane does not close that. Run
+`/rsct-setup` and restart the IDE; the lane restores itself, with nothing to reset.
 
 For `standard`/`complex` tasks, execution is **one-at-a-time**: every commit needs
 its own fresh `dev_approval` (the anti-reuse rule above), unless the dev opts in
