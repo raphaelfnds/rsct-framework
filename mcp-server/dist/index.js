@@ -22573,6 +22573,9 @@ init_esm_shims();
 
 // src/lib/io-utils.ts
 init_esm_shims();
+function stripBom(text) {
+  return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
 }
@@ -23752,7 +23755,7 @@ function parseSettings(path2) {
     return { path: path2, status: code === "ENOENT" ? "absent" : "unreadable", data: null };
   }
   try {
-    return { path: path2, status: "ok", data: JSON.parse(raw) };
+    return { path: path2, status: "ok", data: JSON.parse(stripBom(raw)) };
   } catch {
     return { path: path2, status: "malformed", data: null };
   }

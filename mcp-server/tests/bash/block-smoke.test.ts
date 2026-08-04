@@ -1249,3 +1249,74 @@ describe.skipIf(!BASH || !NODE)('block: .rsct.json CREATE render carries the cap
     expect(raw).not.toContain('[COMMIT_MSG_MAX_LINES]')
   }, 60_000)
 })
+
+// ---------------------------------------------------------------------------
+// UTF-8 BOM tolerance across the prompt-side parse sites (issue #12).
+//
+// A BOM (Notepad, PowerShell 5.1 `Out-File -Encoding utf8`) survives
+// `readFileSync(_, 'utf8')` and makes `JSON.parse` throw. Before #12 that meant:
+// 4.V.c/4.V.d printed "malformed JSON" and EXITED 1 — the hooks were never
+// registered; 4.V.c2 aborted the install mid-run; and every uninstall scrub
+// silently skipped, so the uninstall claimed to remove entries it never touched.
+//
+// These run the REAL blocks. The guard is written as `charCodeAt(0) === 65279`
+// precisely because a `﻿` escape or a regex literal has to survive the
+// markdown-fence → bash-single-quote → MSYS chain, and that chain has eaten
+// backslashes in this repo before (CLAUDE.md, MED-16 / CAP-20).
+const BOM = '﻿'
+
+describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
+  it('4.V.c registers the SessionStart hook in a BOM-prefixed settings.json', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
+    })
+    expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('registered')
+    // And the rewrite drops the BOM: tolerate on read, never re-emit.
+    expect(readIn(r, '.claude/settings.json').charCodeAt(0)).not.toBe(0xfeff)
+  }, 60_000)
+
+  it('4.V.d registers the PreToolUse hook in a BOM-prefixed settings.json', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: GUARD_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
+    })
+    expect(readScriptRegistration(r.dir, 'edit-scope-guard.js')).toBe('registered')
+  }, 60_000)
+
+  it('the uninstall scrub still removes the hook from a BOM-prefixed file', () => {
+    const installed = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
+    })
+    // Re-introduce a BOM on the produced file: the dev may re-save it at any
+    // point, and the scrub must not silently no-op on that.
+    const scrubbed = run({
+      promptBasename: '03-uninstall.md', anchor: SESSION_SCRUB_ANCHOR,
+      seedFiles: { '.claude/settings.json': BOM + readIn(installed, '.claude/settings.json') },
+    })
+    expect(scrubbed.out).not.toContain('malformed')
+    expect(readScriptRegistration(scrubbed.dir, 'sanitize-permissions.js')).toBe('unregistered')
+  }, 90_000)
+
+  it('the Phase 1.9 detector reports a hook count, not SETTINGS_MALFORMED', () => {
+    // This block only REPORTS — it feeds the uninstall report. Before #12 a BOM
+    // made it claim the file was broken, so the report told the dev to fix JSON
+    // that was fine.
+    const installed = run({
+      promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
+      preamble: stampPreamble('2.3.0'),
+      seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
+    })
+    const r = run({
+      promptBasename: '03-uninstall.md',
+      anchor: 'CHECKPOINT: Phase 1.9 scanning .claude/settings.json',
+      seedFiles: { '.claude/settings.json': BOM + readIn(installed, '.claude/settings.json') },
+    })
+    expect(r.out).toContain('HOOK_MATCHES=1')
+    expect(r.out).not.toContain('SETTINGS_MALFORMED')
+  }, 90_000)
+})

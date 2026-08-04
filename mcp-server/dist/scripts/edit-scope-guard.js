@@ -4052,6 +4052,9 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
+function stripBom(text) {
+  return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
 }
@@ -4436,7 +4439,7 @@ function migrateAbsoluteDirs(projectRoot, audit) {
   if (!existsSync(settingsPath)) return null;
   let settings;
   try {
-    settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    settings = JSON.parse(stripBom(readFileSync(settingsPath, "utf8")));
   } catch {
     return null;
   }
@@ -4448,7 +4451,7 @@ function migrateAbsoluteDirs(projectRoot, audit) {
   let local = {};
   if (existsSync(localPath)) {
     try {
-      local = JSON.parse(readFileSync(localPath, "utf8"));
+      local = JSON.parse(stripBom(readFileSync(localPath, "utf8")));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_malformed", error });
@@ -4511,7 +4514,7 @@ function sanitize(projectRoot, options = {}) {
     }
     let parsed;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(stripBom(raw));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       result.files.push({ path, status: "malformed", error: message });

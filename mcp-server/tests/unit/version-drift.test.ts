@@ -544,14 +544,14 @@ describe('readScriptRegistration — file-backed (#24)', () => {
     expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
   })
 
-  it('does NOT see through a UTF-8 BOM — no RSCT surface can read that file', () => {
-    // Tempting to strip it. But `src/scripts/sanitize-permissions.ts` and all
-    // five bash blocks parse raw, so on a BOM-prefixed file the sanitizer aborts
-    // and enforcement genuinely is not running. A lenient read here would find
-    // the hook and report healthy — the exact false-healthy #24 closes,
-    // reintroduced by its own fix. `unknown` is the wrong answer, safe direction.
+  it('sees through a UTF-8 BOM now that every RSCT reader does (#12)', () => {
+    // INVERTED from v2.4.0 deliberately. #24 answered `unknown` here because the
+    // sanitizer and every bash block parsed raw: on a BOM-prefixed file the
+    // sanitizer aborted, enforcement genuinely was not running, and a lenient
+    // read would have found the hook and reported healthy. #12 fixed all eleven
+    // parse sites, so the hook this finds really does run.
     const root = project({ settings: '\uFEFF' + withHook('PreToolUse', GUARD_CMD) })
-    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('unknown')
+    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
   })
 
   it('reads a CRLF settings file identically', () => {

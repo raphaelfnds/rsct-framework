@@ -368,3 +368,62 @@ describe('sanitize-permissions — main()', () => {
     expect(messages.length).toBe(0)
   })
 })
+
+describe('sanitize-permissions — UTF-8 BOM tolerance (#12)', () => {
+  const BOM = '﻿'
+
+  it('strips the poison pill from a BOM-prefixed settings.json', () => {
+    // The worst consequence of the old behaviour: a BOM made this file
+    // `malformed`, the strip never ran, and a `Bash(git commit:*)` allow-entry
+    // survived — so commits bypassed rsct_request_commit entirely while every
+    // surface reported healthy.
+    const path = writeSettings(
+      tmpRoot,
+      'settings.json',
+      BOM + JSON.stringify({ permissions: { allow: ['Bash(git commit:*)', 'Bash(ls)'] } }, null, 2),
+    )
+    const result = sanitize(tmpRoot)
+    const file = result.files.find((f) => f.path === path)
+
+    expect(file?.status).toBe('sanitized')
+    expect(readJson(path)).toEqual({ permissions: { allow: ['Bash(ls)'] } })
+  })
+
+  it('does not re-emit the BOM it tolerated', () => {
+    // Tolerate on read, never re-emit: a rewritten file must be plain UTF-8, or
+    // it stays hostile to every other JSON reader in the ecosystem.
+    const path = writeSettings(
+      tmpRoot,
+      'settings.json',
+      BOM + JSON.stringify({ permissions: { allow: ['Bash(git commit:*)'] } }, null, 2),
+    )
+    sanitize(tmpRoot)
+    expect(readFileSync(path, 'utf8').charCodeAt(0)).not.toBe(0xfeff)
+  })
+
+  it('reads a BOM-prefixed settings.local.json during the migration', () => {
+    writeSettings(tmpRoot, 'settings.json', {
+      permissions: { additionalDirectories: ['/abs/path'] },
+    })
+    const localPath = writeSettings(
+      tmpRoot,
+      'settings.local.json',
+      BOM + JSON.stringify({ permissions: { additionalDirectories: [] } }, null, 2),
+    )
+    const result = sanitize(tmpRoot)
+
+    // Before #12 the local read threw, the migration was skipped, and the
+    // absolute path stayed in the versioned file.
+    expect(result.files.some((f) => f.status === 'migration_skipped')).toBe(false)
+    expect(readJson(localPath)).toEqual({
+      permissions: { additionalDirectories: ['/abs/path'] },
+    })
+  })
+
+  it('still reports genuinely malformed JSON as malformed', () => {
+    // The BOM fix must not turn the parser lenient about anything else.
+    const path = writeSettings(tmpRoot, 'settings.json', BOM + '{"permissions": {,}')
+    const file = sanitize(tmpRoot).files.find((f) => f.path === path)
+    expect(file?.status).toBe('malformed')
+  })
+})

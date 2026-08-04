@@ -30,6 +30,10 @@ import {
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Node builtins only, transitively — this file is bundled into a standalone
+// SessionStart hook and stays ~9 KB precisely by never reaching zod.
+import { stripBom } from '../lib/io-utils.js'
+
 const POISON_PILL_PATTERNS: RegExp[] = [
   // Bare git mutations: Bash(git commit/push/merge ...)
   /^Bash\(\s*git\s+commit\b/i,
@@ -127,7 +131,7 @@ function migrateAbsoluteDirs(
   if (!existsSync(settingsPath)) return null
   let settings: SettingsShape
   try {
-    settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as SettingsShape
+    settings = JSON.parse(stripBom(readFileSync(settingsPath, 'utf8'))) as SettingsShape
   } catch {
     return null // the main loop reports settings.json as malformed
   }
@@ -140,7 +144,7 @@ function migrateAbsoluteDirs(
   let local: SettingsShape = {}
   if (existsSync(localPath)) {
     try {
-      local = JSON.parse(readFileSync(localPath, 'utf8')) as SettingsShape
+      local = JSON.parse(stripBom(readFileSync(localPath, 'utf8'))) as SettingsShape
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       audit({ event: 'sanitize.migration_skipped', file: settingsPath, reason: 'local_malformed', error })
@@ -217,7 +221,7 @@ export function sanitize(
     }
     let parsed: SettingsShape
     try {
-      parsed = JSON.parse(raw) as SettingsShape
+      parsed = JSON.parse(stripBom(raw)) as SettingsShape
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       result.files.push({ path, status: 'malformed', error: message })

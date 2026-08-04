@@ -3212,7 +3212,16 @@ if [ -n "$SANITIZER_SRC" ]; then
     let settings = {};
     if (fs.existsSync(target)) {
       try {
-        settings = JSON.parse(fs.readFileSync(target, "utf8"));
+        // #12: tolerate a UTF-8 BOM (U+FEFF). Notepad and PowerShell 5.1
+        // Out-File emit one, readFileSync keeps it, and JSON.parse rejects it —
+        // so one save from the wrong editor aborts every /rsct-setup from here
+        // on, blaming JSON that is in fact fine. Compared as decimal
+        // 65279: no backslash, no \u escape, no regex literal, so nothing in the
+        // markdown-fence → bash-single-quote → MSYS chain can corrupt it (the
+        // same reasoning as String.fromCharCode(92) elsewhere in this file).
+        var raw = fs.readFileSync(target, "utf8");
+        if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+        settings = JSON.parse(raw);
       } catch (e) {
         console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
         process.exit(1);
@@ -3294,7 +3303,10 @@ if [ -n "$SANITIZER_SRC" ]; then
       let settings = {};
       if (fs.existsSync(target)) {
         try {
-          settings = JSON.parse(fs.readFileSync(target, "utf8"));
+          // #12: tolerate a UTF-8 BOM — see 4.V.c for the full reasoning.
+          var raw = fs.readFileSync(target, "utf8");
+          if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+          settings = JSON.parse(raw);
         } catch (e) {
           console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
           process.exit(1);
@@ -3367,7 +3379,13 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
     const target = process.argv[1];
     let cfg = {};
     if (fs.existsSync(target)) {
-      try { cfg = JSON.parse(fs.readFileSync(target, "utf8")); }
+      // #12: tolerate a UTF-8 BOM — see 4.V.c. This block exits 1 on a parse
+      // failure, so a BOM-prefixed .mcp.json aborted the install mid-run.
+      try {
+        var raw = fs.readFileSync(target, "utf8");
+        if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+        cfg = JSON.parse(raw);
+      }
       catch (e) { console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup."); process.exit(1); }
     }
     cfg.mcpServers = cfg.mcpServers || {};

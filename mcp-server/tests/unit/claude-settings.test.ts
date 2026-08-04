@@ -67,14 +67,17 @@ describe('readClaudeSettings', () => {
     expect(file?.data).toBeNull()
   })
 
-  it('reports malformed for a BOM-prefixed document, matching every other RSCT reader', () => {
-    // Deliberate: the sanitizer and all five bash blocks parse raw, so a BOM'd
-    // file is one no RSCT surface can act on. Seeing through it here would let
-    // this module report enforcement as live while it is not.
+  it('parses a BOM-prefixed document \u2014 #12 made every RSCT reader tolerate it', () => {
+    // This assertion is INVERTED from v2.4.0 on purpose. #24 made it `malformed`
+    // because the sanitizer and every bash block parsed raw, so a lenient reader
+    // here would have reported enforcement live on a file that enforced nothing.
+    // #12 removed that asymmetry at all eleven parse sites, so tolerating it is
+    // now the consistent answer rather than the permissive one.
     const r = root()
     mkdirSync(join(r, '.claude'))
     writeFileSync(join(r, '.claude', 'settings.json'), '\uFEFF{"hooks":{}}\n')
-    expect(statusOf(r, 'settings.json')).toBe('malformed')
+    expect(statusOf(r, 'settings.json')).toBe('ok')
+    expect(readClaudeSettings(r)[0]?.data).toEqual({ hooks: {} })
   })
 
   it('parses a valid document and hands back the data untouched', () => {

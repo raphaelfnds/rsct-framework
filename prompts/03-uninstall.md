@@ -203,6 +203,7 @@ whose command contains the marker substring
 the file:
 
 ```bash
+echo "  CHECKPOINT: Phase 1.9 scanning .claude/settings.json for the sanitizer hook"
 SETTINGS_PATH="$(pwd)/.claude/settings.json"
 if [ -f "$SETTINGS_PATH" ]; then
   node -e '
@@ -211,7 +212,15 @@ if [ -f "$SETTINGS_PATH" ]; then
     const MARKER = ".rsct/scripts/sanitize-permissions.js";
     let settings;
     try {
-      settings = JSON.parse(fs.readFileSync(target, "utf8"));
+      // #12: tolerate a UTF-8 BOM (U+FEFF). readFileSync keeps it and
+      // JSON.parse rejects it, so a file saved by Notepad or PowerShell 5.1
+      // reported SETTINGS_MALFORMED and the scrub silently did nothing — the
+      // uninstall would then claim it removed a hook it never touched.
+      // Decimal 65279: no backslash, no \u, no regex literal, so nothing in the
+      // markdown → bash → MSYS quoting chain can corrupt it.
+      var raw = fs.readFileSync(target, "utf8");
+      if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+      settings = JSON.parse(raw);
     } catch (e) {
       console.log("SETTINGS_MALFORMED");
       process.exit(0);
@@ -603,7 +612,10 @@ if [ -f "$SETTINGS_PATH" ]; then
     const MARKER = ".rsct/scripts/sanitize-permissions.js";
     let settings;
     try {
-      settings = JSON.parse(fs.readFileSync(target, "utf8"));
+      // #12: tolerate a UTF-8 BOM — see Phase 1.9 for the full reasoning.
+      var raw = fs.readFileSync(target, "utf8");
+      if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+      settings = JSON.parse(raw);
     } catch (e) {
       console.error("WARN: " + target + " is malformed JSON — SessionStart hook scrub skipped. Fix manually.");
       process.exit(0);
@@ -676,7 +688,10 @@ if [ -f "$SETTINGS_PATH" ]; then
     const MARKER = ".rsct/scripts/edit-scope-guard.js";
     let settings;
     try {
-      settings = JSON.parse(fs.readFileSync(target, "utf8"));
+      // #12: tolerate a UTF-8 BOM — see Phase 1.9 for the full reasoning.
+      var raw = fs.readFileSync(target, "utf8");
+      if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+      settings = JSON.parse(raw);
     } catch (e) {
       console.error("WARN: " + target + " is malformed JSON — PreToolUse guard scrub skipped. Fix manually.");
       process.exit(0);
@@ -742,7 +757,13 @@ if [ -f "$MCP_JSON" ]; then
     const fs = require("fs");
     const target = process.argv[1];
     let cfg;
-    try { cfg = JSON.parse(fs.readFileSync(target, "utf8")); }
+    // #12: tolerate a UTF-8 BOM — see Phase 1.9. Without it the scrub skipped
+    // and the rsct entry survived the uninstall.
+    try {
+      var raw = fs.readFileSync(target, "utf8");
+      if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+      cfg = JSON.parse(raw);
+    }
     catch (e) { console.error("WARN: " + target + " is malformed JSON — .mcp.json scrub skipped. Fix manually."); process.exit(0); }
     if (!cfg.mcpServers || !cfg.mcpServers.rsct) {
       console.log("No rsct entry in .mcp.json — nothing to scrub.");
