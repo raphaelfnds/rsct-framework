@@ -52,3 +52,18 @@ A modification you did not author is still yours to resolve. RSCT reports the
 divergence at the commit gate and offers three ways out — commit it, move it to
 `settings.local.json`, or discard it. It never picks for you: auto-committing
 entries nobody reviewed would be worse than leaving them there.
+
+### What RSCT itself sends
+
+One thing, and only when the update check is on: an unauthenticated
+`GET api.github.com/repos/raphaelfnds/rsct-framework/releases/latest`,
+at most once a day, carrying a `User-Agent` that names rsct-mcp and its
+version. No project data, no code, no file names, no telemetry. It is a
+suggestion channel — nothing is downloaded or installed.
+
+It runs by default since v2.6.0. `RSCT_UPDATE_CHECK=off` in the
+environment disables it outright, and `rsct_status` with
+`update_check:"off"` records the same choice for the machine. Nothing
+else in the framework opens a network connection: the install-drift
+check is a purely local comparison, which is why it lives in a
+different module.

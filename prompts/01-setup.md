@@ -2734,46 +2734,31 @@ Idempotent: a second run sees `applications/<app>/` and only reconciles the inde
 (never overwrites the README). The universe repo is left with **uncommitted** working
 changes on purpose — committing there is the dev's call.
 
-### 4.9 — Update-check consent (optional, ask-once)
+### 4.9 — Update check (informational — no question, no write)
 
-T4: `rsct_status` can surface a one-line "a newer RSCT release is available" hint at
-session start. It is **opt-in** — until consent is recorded, the MCP server makes NO
-network call. This step ASKS ONCE (it never re-asks once `~/.rsct/update-check.json`
-carries a `consent` field) and records the answer. The check is **cached (~daily),
-fail-silent, and suggest-only** — it never auto-updates anything.
+`rsct_status` surfaces a one-line "a newer RSCT release is available" hint at session
+start. Since v2.6.0 it is **ON by default** and this step **asks nothing and writes
+nothing** — it only states the posture, so a dev who never re-reads the docs still
+learns the check exists and how to turn it off.
 
-Ask the dev (only when consent is not yet recorded):
-> *"Allow RSCT to check GitHub for a newer release at session start? It is cached
-> (~once/day), never blocks, and only suggests — never auto-updates. `[y/N]`"*
+The check is **cached (~daily), fail-silent, and suggest-only** — it never downloads
+or updates anything. Declining a release is per-release: that version is never raised
+again, a newer one asks once more.
 
-Set `CONSENT` to `yes` or `no` from the answer (default `no`), then record it:
+Reporting state is `rsct_status`'s job, not this block's: it reads the cache
+properly, tolerates a hand-edited file, and already carries the notices. Detecting
+`"consent": "no"` from bash would need `[[:space:]]` (BSD `grep` reads `\s` as a
+literal `s` and fails silently), a closing-quote anchor so `"none"` does not match
+`"no"`, and would still miss a JSON linebreak between key and value on every OS.
 
 ```bash
-echo "  CHECKPOINT: Phase 4.9 executing canonical update-check consent (ask-once)"
-UPDATE_CHECK_FILE="$HOME/.rsct/update-check.json"
-HAS_CONSENT="no"
-[ -f "$UPDATE_CHECK_FILE" ] && grep -q '"consent"' "$UPDATE_CHECK_FILE" 2>/dev/null && HAS_CONSENT="yes"
-if [ "$HAS_CONSENT" = "yes" ]; then
-  echo "  update-check consent already recorded — no change (ask-once)"
-else
-  # CONSENT is set from the dev's answer above; default to "no" (opt-in / privacy-first).
-  CONSENT="${CONSENT:-no}"
-  mkdir -p "$HOME/.rsct"
-  # RSCT-owned runtime file — a small Node merge is fine (preserves any cache fields).
-  # Path passed as argv (no pwd reliance); double-quoted JS only (no apostrophes — CAP-42).
-  node -e '
-    var fs = require("fs");
-    var p = process.argv[1];
-    var consent = process.argv[2] === "yes" ? "yes" : "no";
-    var o = {};
-    try { var prev = JSON.parse(fs.readFileSync(p, "utf8")); if (prev && typeof prev === "object") o = prev; } catch (e) { o = {}; }
-    o.consent = consent;
-    var tmp = p + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(o, null, 2) + "\n", "utf8");
-    fs.renameSync(tmp, p);
-    console.log("  update-check consent recorded: " + consent);
-  ' "$UPDATE_CHECK_FILE" "$CONSENT"
-fi
+echo "  CHECKPOINT: Phase 4.9 executing canonical update-check notice (informational)"
+echo "  Update check: ON by default — once a day, rsct_status asks GitHub for the"
+echo "  latest release tag (unauthenticated GET; no project data, no code, no"
+echo "  telemetry is sent). It only suggests: nothing is downloaded or installed."
+echo "  Cached in ~/.rsct/update-check.json, shared by every project on this machine."
+echo "  To turn it off: ask Claude to call rsct_status with update_check:\"off\","
+echo "  or set RSCT_UPDATE_CHECK=off in the environment. Already off? It stays off."
 ```
 
 ### 4.10 — Topology confirmation (mono / monorepo / multi-repo)

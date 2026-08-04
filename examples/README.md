@@ -4,7 +4,7 @@ Reference projects showing what an rsct-managed codebase looks like.
 
 | Example | State | Notes |
 |---|---|---|
-| `java-spring/` | Populated | Pre-dates F0 (the knowledge-graph milestone) — `documentation/knowledge/` and `documentation/infrastructure.md` are not yet shown. The §A–§H protocol, decisions, modules, and impact analyses are current. For the full M1 shape (knowledge graph + infrastructure), see the rsct-framework repo itself, which is the working dogfood. |
+| `java-spring/` | Populated | Pre-dates F0 (the knowledge-graph milestone) — `documentation/knowledge/` and `documentation/infrastructure.md` are not yet shown. The §A–§H protocol, decisions, modules, and impact analyses are current. For the full M1 shape (knowledge graph + infrastructure), see the templates a real install renders: [`../doc-templates/knowledge/`](../doc-templates/knowledge/) and [`../doc-templates/infrastructure.md.template`](../doc-templates/infrastructure.md.template). (The framework repo is deliberately NOT rsct-managed — it has no `documentation/` of its own.) |
 | `react-ts/` | Skeleton only | README placeholder — a populated TypeScript/React example is planned. |
 
 Both examples are single-repo (`mono`) projects. For the multi-repo / org-universe

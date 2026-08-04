@@ -1,7 +1,7 @@
 /**
  * The rsct-mcp server version (CODE axis) — the bundled `RSCT_MCP_VERSION` literal
  * imported by `src/index.ts` (boot log), `src/tools/status.ts`, `src/tools/load-context.ts`,
- * and `src/tools/update-check.ts`. Adding a new consumer? Import from here — do NOT
+ * and `src/lib/update-check.ts`. Adding a new consumer? Import from here — do NOT
  * duplicate the literal.
  *
  * NOT the single edit point (issue #7 / PH-6): the ONE hand-edited product version
@@ -13,4 +13,4 @@
  * also updates via `npm version`. CAP-15 (v0.7.0) caught these drifted (0.6.7 vs
  * 0.2.1) → `npm install -g` reported "up to date" against a stale package.
  */
-export const RSCT_MCP_VERSION = '2.5.1'
+export const RSCT_MCP_VERSION = '2.6.0'

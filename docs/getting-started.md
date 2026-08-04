@@ -8,7 +8,7 @@ finish this page first, then read [Multi-repo & contracts](multi-repo.md).
 ## Prerequisites
 
 - **Git** (2.28+ for `git init -b`).
-- **Node.js 20+ and npm 10+** — needed for the `rsct-mcp` companion server (the
+- **Node.js 20+ and npm** — needed for the `rsct-mcp` companion server (the
   mechanical enforcement layer). You can skip it (`--skip-mcp`) and still get the
   passive `CLAUDE.md` rules, but the gates won't be enforced.
 - **Claude Code** (VSCode extension, desktop, web, or the CLI). RSCT relies on
@@ -65,9 +65,31 @@ updates what changed.
 | `.rsct.json` | Project config — protected branches, topology, the `install` block (the uninstall marker). |
 | Memory entries | Under `.claude/projects/.../memory/` — durable facts for the agent. |
 | `.claude/settings.json` | The SessionStart sanitizer hook and the PreToolUse edit-scope guard (only if you opted into `rsct-mcp`). |
+| `.gitignore` | A marker-wrapped block for the branch-local plan-tracking files. |
+| `.rsct/scripts/` | The two enforcement scripts the hooks above point at. |
+| `.mcp.json` | Only when you chose the project registration scope at install time. |
+| `CONVENTIONS.md` | Optional, and only if you say yes — the standing code conventions. |
+
+Setup also creates a `chore/sync-rsct-rules` branch to hold the changes, so nothing
+lands on your protected branch.
 
 Every artifact carries a reversibility marker, so [`/rsct-uninstall`](commands.md#rsct-uninstall)
 can remove it cleanly and SHA256-protect anything you edited by hand.
+
+### One thing that leaves your machine
+
+Setup prints a short notice about it, and it is the only network call RSCT makes:
+once a day, at session start, it asks GitHub for the **latest release tag** so it can
+tell you a new version — a security patch, say — exists. Unauthenticated, cached,
+suggestion-only: nothing is downloaded or installed for you.
+
+**No project data, no code, no file names, no telemetry.** GitHub sees your IP, the
+time, and a `User-Agent` naming RSCT and the version you run.
+
+To turn it off, set `RSCT_UPDATE_CHECK=off` in your environment, or ask Claude to
+call `rsct_status` with `update_check:"off"`. To refuse just one release, Claude
+records that with `decline_update:"<tag>"` and a newer one asks again. Full detail in
+[README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off).
 
 ## First-project walkthrough (5 minutes)
 

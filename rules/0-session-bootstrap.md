@@ -21,6 +21,23 @@ In order, with NO other tool call in between:
    to run `/rsct-setup`. **Read the `hints` field verbatim** before
    anything else.
 
+   Some hints are addressed to the **dev**, not to you — relay those
+   and let them answer. They are emitted a bounded number of times,
+   so a hint you read and drop is spent:
+   - **"A newer RSCT release is available"** — relay it. If they want
+     it: `git pull` + reinstall + `/rsct-setup`. If they decline THIS
+     release, call `rsct_status` again with
+     `decline_update:"<the tag named in the hint>"` — that release is
+     never raised again, a newer one asks once. Only the release named
+     in the hint is accepted. If they want no release checks at all,
+     `update_check:"off"` (reversible with `"on"`).
+   - **"the update check is OFF on this machine"** — relay it once and
+     move on; it is theirs to decide, not yours to fix.
+
+   Never pass `decline_update` or `update_check` on your own
+   initiative. They record a decision only the dev can make, and
+   `update_check:"off"` silences security-patch notices machine-wide.
+
 2. **`mcp__rsct__rsct_load_context`** — reads the active plan,
    decisions snapshot, knowledge index, and `active_phase` (if a
    phase from a prior session is still open). `next_action_hints`
@@ -205,9 +222,11 @@ a GitHub issue body the dev can paste later, or `mode: 'create'`
 
 ### Bootstrap is OPT-OUT, not opt-in
 
-The bootstrap calls (§0.1, §0.2, §0.3) are cheap: pure-query MCP
-tools, zero LLM cost, sub-millisecond. There is no scenario where
-skipping them is a net win. Even when the request feels small, the
+The bootstrap calls (§0.1, §0.2, §0.3) are cheap: no LLM cost, no
+added latency. (`rsct_status` is not side-effect-free — it stamps the
+bootstrap marker and, at most once a day, fires a background release
+check that adds nothing to the call's own latency.) There is no
+scenario where skipping them is a net win. Even when the request feels small, the
 classifier returns `tier: trivial` and tells you to skip the rest —
 **the classifier IS the bypass; you don't bypass it manually**.
 

@@ -80,12 +80,14 @@ never trips the gate.
 | Post-M3 — T1c universe reads · T2 multi-repo topology + contract gate · T3 plan tokens · DX track (onboarding orchestrator, plain-language copy, guided contracts, `docs/`, REVIEW phase, producer-mismatch warning, version reframe) | ✅ shipped to `main`; ships in **v2.0.0** (brings the catalog 30 → **37 tools**) |
 | flow-lock — plan-tracking gate (`code_start`) · consumer + `app.name` name-mismatch warnings (topology) · `/VERSION` single-source · `/rsct-clean-code` command · batch-token offer at planning · `pre_merge_ack` hygiene gate (merge/push) · worktree nudge (`classify_task`) | ✅ shipped to `main`; ships in **v2.1.0** (37 tools, unchanged) |
 | plan-lifecycle-v2 — dialog-free free-commit lane (audit-anchored anti-rollback ceiling + sliding token) · integration gate (mechanical `plan_complete` cross-check + advisory-only cleanup + `rsct_plan_dispose` + retroactive reconciliation) · `rsct_request_rebase` (rebase/squash) · re-bootstrap `context_stale` flag + PreToolUse edit-scope guard · settings.json machine-path hygiene · unified idempotent `/rsct-universe` · `plan_file_retention` toggle | ✅ shipped to `main`; ships in **v2.2.0** (brings the catalog 37 → **39 tools**) |
-| backlog-sweep — unowned `.claude/settings.json` drift reported at the commit gate (#17) · REVIEW gains `findings_actions[]` + a `block` abort (#19) · the install-drift advisory reaches push/merge and the OS dialog, and suspends the free-commit lane (#25) · commit-message cap elicited at setup instead of imposed (#26) · sanitizer relocates machine paths out of `permissions.allow[]`, and every shared-JSON parse site tolerates a UTF-8 BOM (#12) · `verification_start` refuses to overwrite an active phase (#27) · `verify:dist` runs in CI (#28) · excerpt / section-query / finding-vocabulary helpers consolidated (#10) | ✅ shipped to `main`; ships in **v2.5.0** (39 tools, unchanged) |
-| hook-registration — install drift also checks whether the enforcement **hooks are registered** in `.claude/settings.json`, not just whether the script files are current; a present-but-unwired script now escalates alongside an absent one · `stale_components` → `affected_components` (carries a `registration` state) · four doc pages corrected on where the hooks actually live | ✅ shipped to `main`; ships in **v2.4.0** (39 tools, unchanged) |
 | field-test-repairs — install-drift ranking (content evidence; `security` only when an enforcement script is **absent**) · V-phase stale-label repair + `clear_phase` deprecation · commit-message cap (`message_too_long`) · `rsct_capture_issue` adapts to the host repo's labels/types · advisory channel on every `request_commit` return path · `auditFields` collapsed 15 → 1 | ✅ shipped to `main`; ships in **v2.3.0** (39 tools, unchanged) |
+| hook-registration — install drift also checks whether the enforcement **hooks are registered** in `.claude/settings.json`, not just whether the script files are current; a present-but-unwired script now escalates alongside an absent one · `stale_components` → `affected_components` (carries a `registration` state) · four doc pages corrected on where the hooks actually live | ✅ shipped to `main`; ships in **v2.4.0** (39 tools, unchanged) |
+| backlog-sweep — unowned `.claude/settings.json` drift reported at the commit gate (#17) · REVIEW gains `findings_actions[]` + a `block` abort (#19) · the install-drift advisory reaches push/merge and the OS dialog, and suspends the free-commit lane (#25) · commit-message cap elicited at setup instead of imposed (#26) · sanitizer relocates machine paths out of `permissions.allow[]`, and every shared-JSON parse site tolerates a UTF-8 BOM (#12) · `verification_start` refuses to overwrite an active phase (#27) · `verify:dist` runs in CI (#28) · excerpt / section-query / finding-vocabulary helpers consolidated (#10) | ✅ shipped to `main`; ships in **v2.5.0** (39 tools, unchanged) |
+| security patch — five `git` bypass forms closed in the poison-pill detector, incl. the wildcard `Bash(git -C:*)` that commits in ANOTHER repo (#32) · all four open Dependabot advisories cleared by hand, because `fast-uri` is bundled into the tracked `dist/` and a lockfile-only fix leaves the vulnerable code in the shipped artifact | ✅ shipped to `main`; ships in **v2.5.1** (39 tools, unchanged) |
+| update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**39 tools · 5 resources · tsc strict · ESM ~1.1 MB
-(server) + ~11 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
+**39 tools · 5 resources · tsc strict · ESM ~1.2 MB
+(server) + ~13 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
 cross-platform (Windows / macOS / Linux)**
 
 ---
@@ -251,8 +253,30 @@ All tools degrade gracefully outside rsct projects (return
 Fast bootstrap check. Returns rsct identity, protected branches, git state, the
 [`universe` block](#the-universe-block), and hints.
 
-- Input: `project_root?`
-- Output: identity, git, `universe`, hints
+- Input: `project_root?`, `update_check?` (`"on"|"off"`), `decline_update?` (a release tag)
+- Output: identity, git, `worktree`, `universe`, `topology`, hints
+
+The two update-check parameters are the response channel for the release hint this
+tool emits (the check consults by default since v2.6.0 — see
+[README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off)).
+
+- `decline_update:"v2.6.0"` records that the dev declined **that release**: it is
+  never raised again, a newer one asks once more. Only the release currently being
+  offered is accepted — any other tag is rejected and nothing is written, so a
+  mistyped or pre-emptive decline cannot silently swallow a future security patch.
+  Pass it only when the dev actually declined.
+- `update_check:"off"` turns the check off for the machine; `"on"` restores it.
+
+The handler is tolerant by design: a value it does not recognise (including a
+non-string) produces a hint rather than an error, because `rsct_status` is the tool
+every session starts with and failing it would also cost the caller git state,
+topology and the install-drift security advisory. Note the published `inputSchema`
+still advertises `enum: ["on","off"]` — that is the contract the agent should follow,
+and an MCP client that validates arguments locally may reject a variation before the
+handler ever sees it.
+
+`RSCT_UPDATE_CHECK=off` in the environment overrides both parameters; when it is set,
+`update_check:"on"` says so instead of claiming an effect it cannot deliver.
 
 ### `rsct_load_context`
 
@@ -720,6 +744,7 @@ path traversal attempts return a "Resource not found" error.
 | `RSCT_PROJECT_ROOT` | Override project root resolution; takes precedence over `--project-root` CLI arg and over walking up from cwd. |
 | `RSCT_LOG_LEVEL` | pino log level (`trace`/`debug`/`info`/`warn`/`error`/`fatal`). Default `info`. Logs go to stderr only — stdout is reserved for MCP protocol. |
 | `CLAUDE_PROJECT_DIR` | Read by `dist/scripts/sanitize-permissions.js` (the SessionStart hook) as a fallback when `--project-root` is not passed. Set by Claude Code itself at hook fire time. |
+| `RSCT_UPDATE_CHECK` | Set to `off` (also `0`, `false`, `no`) to disable the session-start GitHub release check entirely — no request is made, nothing is written. **Outranks both** `rsct_status`'s `update_check` parameter and the `consent` field in `~/.rsct/update-check.json`, and it is the only switch that applies before a session exists (CI, headless, a machine that must never emit the request). `tests/setup.ts` sets it for the whole suite. |
 | `RSCT_TEST_DIALOG_RESPONSE` | Short-circuits the OS dialog with `yes` or `no`. **Test/CI only** — production code paths should never set this. |
 
 ---
@@ -731,12 +756,26 @@ npm run dev         # tsup --watch
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run
 npm run test:watch  # vitest watch mode
+npm run typecheck   # tsc --noEmit — a SEPARATE gate; vitest does not type-check
 npm run build       # one-shot ESM build to dist/
+npm run verify:dist # rebuild and fail if the tracked dist/ is out of date
 ```
 
-Unit tests live in [`tests/unit/`](./tests/unit/). Fixtures used by tests
-live in [`tests/fixtures/`](./tests/fixtures/) — `sample-rsct/` is a fully
-populated rsct project; `no-rsct/` is the graceful-degradation control.
+Unit tests live in [`tests/unit/`](./tests/unit/), cross-file suites in
+[`tests/integration/`](./tests/integration/), and the prompt-block smoke tests in
+[`tests/bash/`](./tests/bash/) (run with `RSCT_REQUIRE_BASH=1` so the `bash -n`
+gate fails instead of skipping). Fixtures live in
+[`tests/fixtures/`](./tests/fixtures/) — `sample-rsct/` is a fully populated rsct
+project; `no-rsct/` is the graceful-degradation control.
+
+[`tests/setup.ts`](./tests/setup.ts) is a global vitest setup file wired through
+`vitest.config.ts`. It sets `RSCT_UPDATE_CHECK=off` for the whole suite, and it is
+the only thing keeping the tests off `api.github.com` and out of your real
+`~/.rsct/update-check.json` — `statusHandler` resolves the real `$HOME` and the
+real `fetch` whenever nothing is injected, and many call sites inject nothing. A
+test that exercises the update check on purpose passes
+`update: { home: <tmpdir>, env: {}, fetcher }` through `statusHandler`'s `deps`
+seam. Do not remove or bypass it.
 
 ### Architecture
 
@@ -746,6 +785,9 @@ src/
 ├── resources.ts             # rsct:// URI routing
 ├── lib/
 │   ├── project-root.ts      # locate .rsct.json (Windows-safe) + RsctConfig type
+│   ├── version.ts           # RSCT_MCP_VERSION — derived mirror of /VERSION
+│   ├── update-check.ts      # opt-OUT GitHub release check + per-release declines (#38)
+│   ├── version-drift.ts     # install drift: LOCAL compare only, never network
 │   ├── git.ts               # minimal git state + GitExecutor + commit/push/merge
 │   ├── plan.ts              # find active plan_<slug>.md + progress_<slug>.md
 │   ├── decisions.ts         # parse documentation/decisions.md
@@ -785,10 +827,16 @@ Each tool: zod schema for input, structured output type, pure handler.
 Adding a new tool — create `src/tools/<name>.ts` and register it in
 `src/index.ts` (`TOOLS` array + `HANDLERS` map).
 
-`tsup` builds two ESM entry points:
+`tsup` builds three ESM entry points:
 - `dist/index.js` — the MCP server (registered via `bin: { "rsct-mcp": ... }`).
 - `dist/scripts/sanitize-permissions.js` — the SessionStart hook CLI; copied to
   consuming projects' `.rsct/scripts/` by `/rsct-setup` Phase 4.V.
+- `dist/scripts/edit-scope-guard.js` — the PreToolUse edit-scope guard CLI, copied
+  to the same place by the same phase.
+
+All three are **tracked** in git (`dist/` ships prebuilt so the install needs no
+build toolchain) and are mode `100755` — a new bundle needs
+`git update-index --chmod=+x` or `verify:dist` fails on the Linux CI cell.
 
 ---
 
@@ -799,14 +847,11 @@ Adding a new tool — create `src/tools/<name>.ts` and register it in
   via `yaml_files_detected_but_not_parsed`. Closing this needs a dep decision
   (`yaml` npm package ~50 KB vs hand-rolled subset parser ~100 LOC).
   Deferred to M3 backlog.
-- **Uninstall side for the SessionStart hook (deferred from F2.5.6).**
-  `/rsct-uninstall` does NOT yet scan for `.rsct/scripts/sanitize-permissions.js`
-  or scrub the `hooks.SessionStart[]` entry from `.claude/settings.json`.
-  Tracked as F2.5.8b. Real-user removal is manual until then.
-- **`**Status**:` / `**Tags**:` in `decisions.md.template`.** Parser accepts
-  the syntax but the canonical template doesn't yet document it.
-- **npm audit reports vitest dev-chain vulnerabilities** (esbuild dev-server,
-  moderate). Dev-only — does not affect the production binary.
+- **`~/.rsct/update-check.json` survives `/rsct-uninstall`.** The uninstall
+  inventory is project-local; the machine-global `~/.rsct/` is out of its scope by
+  design, so the recorded consent and the declined-release list persist across a
+  full uninstall and reinstall. Documented in `prompts/03-uninstall.md` Phase 6;
+  removing it is `rm ~/.rsct/update-check.json`.
 
 ---
 

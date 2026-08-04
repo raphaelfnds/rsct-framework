@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: Framework / rsct-mcp version
-      description: From `mcp-server/package.json`, or the `rsct_status` tool output.
-      placeholder: e.g. 1.0.0
+      description: From `/VERSION` (the single source), or the `rsct_status` tool output.
+      placeholder: e.g. 2.6.0
     validations:
       required: true
   - type: dropdown

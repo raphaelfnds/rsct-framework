@@ -161,6 +161,43 @@ summarize it away.
 Fix: run `/rsct-setup`, restart the IDE. The lane restores itself; there is no
 flag to reset. See the SECURITY section above for how to confirm.
 
+## RSCT never tells me a new release is out
+
+The check is on by default, so silence means one of these — in the order the code
+evaluates them:
+
+1. **`RSCT_UPDATE_CHECK` is set** to `off`, `0`, `false` or `no` in the environment.
+   This overrides everything else, including `update_check:"on"`. When it is set and
+   you ask to turn the check on, RSCT says so rather than claiming an effect it
+   cannot deliver.
+2. **`~/.rsct/update-check.json` has a `consent` that is not `"yes"`.** Any present
+   value other than `"yes"` means off — that is deliberate, so a hand edit cannot
+   half-enable it. Installs up to v2.5.1 wrote `"no"` when the setup question went
+   unanswered, so you may be opted out without having chosen it. Ask Claude to call
+   `rsct_status` with `update_check:"on"`.
+3. **You declined that release.** Its tag is in `declined_tags[]` and it will not be
+   raised again. A *newer* release asks once more.
+4. **The cache cannot be read.** If `~/.rsct/update-check.json` is corrupt, the check
+   fails closed and stays silent — deliberately, so an unreadable file can never be
+   mistaken for consent. Deleting the file resets it; RSCT recreates it.
+5. **It already checked today.** The TTL is 24h.
+6. **The result lands on the *next* call.** A stale cache refreshes in the
+   background so `rsct_status` adds no latency, so the very first check of a fresh
+   install reports nothing.
+
+## Make the update check stop
+
+Ask Claude to call `rsct_status` with `update_check:"off"` — machine-wide and
+reversible with `"on"`. For CI, headless runs, or a machine that must never make the
+request at all, set `RSCT_UPDATE_CHECK=off` in the environment: it is the only switch
+that applies before a session exists. To refuse a single release instead of all of
+them, Claude calls `decline_update:"<tag>"`.
+
+If you see *"Decline ignored: … is not the release being offered"*, that is working
+as intended: only the release named in the hint can be declined, so a mistyped tag
+cannot silently swallow a future security patch. Use the tag exactly as the hint
+printed it.
+
 ## Windows: `LF will be replaced by CRLF` warnings
 
 Harmless. RSCT strips `\r` before every SHA it computes, so a CRLF round-trip

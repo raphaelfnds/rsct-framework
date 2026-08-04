@@ -61,11 +61,12 @@ import { isNewer } from './update-check.js'
  * would always imply "stamp behind". It is also what `/rsct-setup` itself does
  * (Phase 4.V.b) to decide whether to rewrite.
  *
- * This is a LOCAL comparison — no network, no consent, no cache. It is
- * deliberately separate from `update-check.ts` (which checks the binary against
- * the latest GitHub release and is opt-in / network-gated): mixing an always-on
- * local compare into that module would break its "no network/writes before
- * consent" invariant. The two are complementary and independent axes.
+ * This is a LOCAL comparison — no network, no cache, and nothing the dev can turn
+ * off, because nothing leaves the machine. It is deliberately separate from
+ * `update-check.ts` (which asks GitHub for the latest release; since #38 that one
+ * consults by default but is switchable off, per-machine, and per release). Merging
+ * them would put a check that MUST always run behind a switch that MUST be
+ * respectable — the two are complementary and independent axes.
  *
  * Always fail-safe and SUGGEST-ONLY: absence of evidence is never escalated. An
  * unreadable script, an unresolvable shipped reference, a null/absent/unparseable
