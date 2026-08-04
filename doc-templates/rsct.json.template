@@ -6,6 +6,7 @@
   },
   "protected_branches": [PROTECTED_BRANCHES_JSON_ARRAY],
   "test_framework": "[TEST_FRAMEWORK]",
+  "commit_message_max_lines": [COMMIT_MSG_MAX_LINES],
   "secrets_extra_patterns": [],
   "install": {
     "applied_at": "[APPLIED_AT]",

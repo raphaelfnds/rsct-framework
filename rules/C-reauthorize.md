@@ -59,10 +59,12 @@ OS dialog before the mutation lands (with the free-commit-lane exception
 noted under "Plan execution modes" below):
 
 - `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`. Rejects a
-  message longer than **15 non-empty lines** (`message_too_long`), before the §C
+  message longer than this project's cap (`message_too_long`), before the §C
   dialog so nothing is approved or spent on a commit that will be rejected. Blank
-  lines are not counted; `commit_message_max_lines` in `.rsct.json` raises the cap.
-  The rule is length only — no opinion on Conventional Commits or subject grammar.
+  lines are not counted. The cap is `commit_message_max_lines` in `.rsct.json`,
+  chosen at `/rsct-setup` (default 15, range 1–500); the reject message states the
+  active value. The rule is length only — no opinion on Conventional Commits or
+  subject grammar.
 - `mcp__rsct__rsct_request_push` — replaces `Bash(git push ...)`
 - `mcp__rsct__rsct_request_merge` — replaces `Bash(git merge ...)`
 - `mcp__rsct__rsct_request_rebase` — replaces `Bash(git rebase ...)` /
