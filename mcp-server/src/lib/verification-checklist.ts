@@ -9,6 +9,7 @@ import {
 } from './architecture.js'
 import { checkPremise } from './premise-check.js'
 import { makeIdGenerator, type FindingSeverity } from './findings.js'
+import type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
 
 export type FindingCategory = 'gap' | 'breakage' | 'redundancy' | 'forgotten'
 
@@ -33,11 +34,13 @@ export interface VerificationFinding {
   source: string
 }
 
-export interface DiscoveredImporterRef {
-  file: string
-  depth: number
-  via_paths: string[]
-}
+/**
+ * Structurally identical to `DiscoveredImporter` in `lib/reverse-dep-walk.ts`,
+ * which is what actually flows in here — the two were declared separately and
+ * stayed in sync by luck (#10). Aliased rather than deleted so existing importers
+ * keep their path; `reverse-dep-walk` is the producer and therefore the owner.
+ */
+export type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
 
 export interface ChecklistInput {
   projectRoot: string

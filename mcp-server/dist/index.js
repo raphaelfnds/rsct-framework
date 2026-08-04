@@ -23381,10 +23381,21 @@ function parseSections(body) {
   flush();
   return out;
 }
-function makeExcerpt(body) {
-  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("<!--"));
-  const first = lines.slice(0, 3).join(" ");
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
+function filterSectionsByQuery(sections, query) {
+  if (!query) return sections;
+  const needle = query.toLowerCase();
+  return sections.filter(
+    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
+  );
+}
+function makeExcerpt(body, opts = {}) {
+  const maxLines = opts.maxLines ?? 3;
+  const maxChars = opts.maxChars ?? 280;
+  const lines = body.split("\n").map((line) => line.trim()).filter(
+    (line) => line.length > 0 && !line.startsWith("<!--") && !(opts.skipLine?.(line) ?? false)
+  );
+  const first = lines.slice(0, maxLines).join(" ");
+  return first.length > maxChars ? `${first.slice(0, maxChars - 3)}...` : first;
 }
 
 // src/lib/universe-content.ts
@@ -24283,11 +24294,7 @@ function extractMeta(section) {
   return out;
 }
 function extractExcerpt(section) {
-  const lines = section.split("\n").map((line) => line.trim()).filter(
-    (line) => line.length > 0 && !line.startsWith("<!--") && !META_LINE_REGEX.test(line)
-  );
-  const first = lines.slice(0, 3).join(" ");
-  return first.length > 280 ? `${first.slice(0, 277)}...` : first;
+  return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) });
 }
 
 // src/lib/knowledge.ts
@@ -24661,7 +24668,7 @@ async function getKnowledgeHandler(rawInput) {
   const index = readKnowledgeIndex(resolution.root);
   const file = readKnowledgeFile(resolution.root, input.category);
   const isCanonical = KNOWN_CATEGORIES.includes(input.category);
-  const sections = filterSections(file.sections, input.query);
+  const sections = filterSectionsByQuery(file.sections, input.query);
   return {
     rsct_installed: resolution.rsct_installed,
     category: input.category,
@@ -24683,13 +24690,6 @@ async function getKnowledgeHandler(rawInput) {
       availableCategories: index.categories_present
     })
   };
-}
-function filterSections(sections, query) {
-  if (!query) return sections;
-  const needle = query.toLowerCase();
-  return sections.filter(
-    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
-  );
 }
 function buildHints3(args) {
   const hints = [];
@@ -25431,13 +25431,6 @@ function resolveRequestedSlugs(scope, doc, index) {
   if (scope === "all") return ["INDEX", ...governance];
   return governance;
 }
-function filterSections2(sections, query) {
-  if (!query) return sections;
-  const needle = query.toLowerCase();
-  return sections.filter(
-    (s) => s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle)
-  );
-}
 async function getUniverseHandler(rawInput) {
   const input = getUniverseInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -25468,7 +25461,7 @@ async function getUniverseHandler(rawInput) {
   const slugs = resolveRequestedSlugs(input.scope, input.doc, index);
   const docs = slugs.map((slug) => {
     const file = readUniverseDoc(block.local_path, slug);
-    return { ...file, sections: filterSections2(file.sections, input.query) };
+    return { ...file, sections: filterSectionsByQuery(file.sections, input.query) };
   });
   if (input.scope !== "index" && index.docs.length === 0) {
     hints.push(
@@ -26057,11 +26050,11 @@ function buildEntry2(id, title, section) {
   return entry;
 }
 function extractExcerpt2(section) {
-  const lines = section.split("\n").map((line) => line.trim()).filter(
-    (line) => line.length > 0 && !line.startsWith("<!--") && !line.startsWith("<TODO:") && !line.startsWith("```")
-  );
-  const first = lines.slice(0, 4).join(" ");
-  return first.length > 320 ? `${first.slice(0, 317)}...` : first;
+  return makeExcerpt(section, {
+    maxLines: 4,
+    maxChars: 320,
+    skipLine: (line) => line.startsWith("<TODO:") || line.startsWith("```")
+  });
 }
 function extractRelated(section) {
   const match = section.match(/^\s*-\s*\*\*Related:?\*\*:?\s*(.+?)\s*$/im);

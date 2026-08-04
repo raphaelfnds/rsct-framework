@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { filterSectionsByQuery } from '../lib/markdown.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import {
@@ -83,7 +84,7 @@ export async function getKnowledgeHandler(
   const file = readKnowledgeFile(resolution.root, input.category)
 
   const isCanonical = (KNOWN_CATEGORIES as readonly string[]).includes(input.category)
-  const sections = filterSections(file.sections, input.query)
+  const sections = filterSectionsByQuery(file.sections, input.query)
 
   return {
     rsct_installed: resolution.rsct_installed,
@@ -108,17 +109,6 @@ export async function getKnowledgeHandler(
   }
 }
 
-function filterSections(
-  sections: KnowledgeSection[],
-  query: string | undefined,
-): KnowledgeSection[] {
-  if (!query) return sections
-  const needle = query.toLowerCase()
-  return sections.filter(
-    (s) =>
-      s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle),
-  )
-}
 
 interface HintArgs {
   rsctInstalled: boolean

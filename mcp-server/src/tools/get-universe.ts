@@ -8,7 +8,7 @@ import {
   type UniverseDocFile,
   type UniverseGovernanceIndex,
 } from '../lib/universe-content.js'
-import type { MarkdownSection } from '../lib/markdown.js'
+import { filterSectionsByQuery, type MarkdownSection } from '../lib/markdown.js'
 
 const SCOPES = ['governance', 'index', 'all'] as const
 
@@ -107,17 +107,6 @@ function resolveRequestedSlugs(
   return governance // 'governance'
 }
 
-function filterSections(
-  sections: MarkdownSection[],
-  query: string | undefined,
-): MarkdownSection[] {
-  if (!query) return sections
-  const needle = query.toLowerCase()
-  return sections.filter(
-    (s) =>
-      s.heading.toLowerCase().includes(needle) || s.body.toLowerCase().includes(needle),
-  )
-}
 
 export async function getUniverseHandler(rawInput: unknown): Promise<GetUniverseOutput> {
   const input = getUniverseInputSchema.parse(rawInput ?? {})
@@ -154,7 +143,7 @@ export async function getUniverseHandler(rawInput: unknown): Promise<GetUniverse
   const slugs = resolveRequestedSlugs(input.scope, input.doc, index)
   const docs = slugs.map((slug) => {
     const file = readUniverseDoc(block.local_path as string, slug)
-    return { ...file, sections: filterSections(file.sections, input.query) }
+    return { ...file, sections: filterSectionsByQuery(file.sections, input.query) }
   })
 
   // Hints (content-focused; the index never adds a status/load_context hint — V FV4).
