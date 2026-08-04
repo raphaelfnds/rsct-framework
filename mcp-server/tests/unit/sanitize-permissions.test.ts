@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { hashSettingsContent } from '../../src/lib/settings-drift.js'
 import { tmpdir } from 'node:os'
 import {
   containsMachinePath,
@@ -575,5 +576,46 @@ describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', 
     const afterFirst = readJson(join(tmpRoot, '.claude', 'settings.local.json'))
     sanitize(tmpRoot)
     expect(readJson(join(tmpRoot, '.claude', 'settings.local.json'))).toEqual(afterFirst)
+  })
+})
+
+describe('sanitize-permissions — settings baseline (#17)', () => {
+  function baselineEvents(): Record<string, unknown>[] {
+    const p = join(tmpRoot, '.rsct', 'audit.log')
+    if (!existsSync(p)) return []
+    return readFileSync(p, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.event === 'settings.baseline')
+  }
+
+  it('records a baseline hash of settings.json', () => {
+    writeSettings(tmpRoot, 'settings.json', { permissions: { allow: ['Bash(ls)'] } })
+    sanitize(tmpRoot)
+    const events = baselineEvents()
+    expect(events).toHaveLength(1)
+    expect(typeof events[0]?.hash).toBe('string')
+  })
+
+  it('records the POST-scrub content, not what it found', () => {
+    // The ordering that matters: a baseline taken before the strip would freeze
+    // the poison pill this run just removed, and the next commit would report
+    // the framework's own cleanup as drift.
+    writeSettings(tmpRoot, 'settings.json', {
+      permissions: { allow: ['Bash(git commit:*)', 'Bash(ls)'] },
+    })
+    sanitize(tmpRoot)
+
+    const recorded = baselineEvents()[0]?.hash
+    const afterScrub = hashSettingsContent(
+      readFileSync(join(tmpRoot, '.claude', 'settings.json'), 'utf8'),
+    )
+    expect(recorded).toBe(afterScrub)
+  })
+
+  it('records nothing when there is no settings.json — no file, no claim', () => {
+    sanitize(tmpRoot)
+    expect(baselineEvents()).toHaveLength(0)
   })
 })

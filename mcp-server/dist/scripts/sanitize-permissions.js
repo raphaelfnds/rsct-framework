@@ -3,10 +3,26 @@ import { createRequire } from 'module';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 import { resolve, isAbsolute, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 
 createRequire(import.meta.url);
 function stripBom(text) {
   return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
+function hashSettingsContent(text) {
+  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
+}
+function readTextOrNull(path) {
+  try {
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function hashSettingsFile(projectRoot) {
+  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
+  return text === null ? null : hashSettingsContent(text);
 }
 
 // src/scripts/sanitize-permissions.ts
@@ -191,6 +207,10 @@ function sanitize(projectRoot, options = {}) {
       stripped,
       count: stripped.length
     });
+  }
+  const baselineHash = hashSettingsFile(projectRoot);
+  if (baselineHash !== null) {
+    audit({ event: "settings.baseline", file: join(projectRoot, ".claude", "settings.json"), hash: baselineHash });
   }
   return result;
 }

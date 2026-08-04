@@ -4,7 +4,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync } fr
 import { fileURLToPath } from 'url';
 import { resolve, isAbsolute, join, dirname } from 'path';
 import { cwd } from 'process';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -4403,6 +4403,23 @@ function evaluateEditGuard(args) {
     };
   }
 }
+function hashSettingsContent(text) {
+  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
+}
+function readTextOrNull(path) {
+  try {
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function hashSettingsFile(projectRoot) {
+  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
+  return text === null ? null : hashSettingsContent(text);
+}
+
+// src/scripts/sanitize-permissions.ts
 var POISON_PILL_PATTERNS = [
   // Bare git mutations: Bash(git commit/push/merge ...)
   /^Bash\(\s*git\s+commit\b/i,
@@ -4584,6 +4601,10 @@ function sanitize(projectRoot, options = {}) {
       stripped,
       count: stripped.length
     });
+  }
+  const baselineHash = hashSettingsFile(projectRoot);
+  if (baselineHash !== null) {
+    audit({ event: "settings.baseline", file: join(projectRoot, ".claude", "settings.json"), hash: baselineHash });
   }
   return result;
 }

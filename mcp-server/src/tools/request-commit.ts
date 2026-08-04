@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
@@ -5,6 +6,7 @@ import { findActivePlan, findPlanBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
   getStagedDiff,
+  getFileAtHead,
   getStagedPaths,
   getStagedStats,
   gitCommit,
@@ -35,9 +37,17 @@ import {
 import {
   appendAuditEntry,
   auditFields,
+  resolveAuditPath,
 } from '../lib/audit-log.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
+import {
+  evaluateSettingsDrift,
+  hashSettingsFile,
+  readBaselineFromLog,
+  readTextOrNull,
+  SETTINGS_REL_PATH,
+} from '../lib/settings-drift.js'
 import { checkCommitMessage } from '../lib/commit-message.js'
 import {
   promptYesNo,
@@ -317,6 +327,41 @@ export async function requestCommitHandler(
     auditWriter: appendAudit,
   })
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
+
+  // #17: `.claude/settings.json` is VERSIONED and the harness appends approved
+  // permissions to it on its own. Nobody stages those lines — the agent did not
+  // write them and correctly says so, and the dev did not either — so the file
+  // sits permanently dirty and the §E pre-commit review of it decays into
+  // noise-skimming. Report it here, at the one moment someone is deciding what
+  // enters the repo. REPORT ONLY: never blocks, never stages, never edits, never
+  // discards. Auto-committing entries nobody reviewed would be strictly worse
+  // than the status quo this fixes.
+  if (resolution.rsct_installed) {
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
+    const drift = evaluateSettingsDrift({
+      currentHash: hashSettingsFile(projectRoot),
+      baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config?.audit)) ?? ''),
+      staged: stagedForDrift.includes(SETTINGS_REL_PATH),
+      currentText: readTextOrNull(join(projectRoot, '.claude', 'settings.json')),
+      headText: getFileAtHead(projectRoot, SETTINGS_REL_PATH),
+    })
+    if (drift.hint) {
+      advisories.push(drift.hint)
+      appendAudit(
+        projectRoot,
+        {
+          event: 'settings.drift_detected',
+          tool: 'rsct_request_commit',
+          added_count: drift.added_entries.length,
+          // Redacted excerpt: the first entry, truncated. The dev reads the full
+          // list in the hint; the log is a forensic trail, not a mirror of a file
+          // that may carry machine paths.
+          excerpt: drift.added_entries[0]?.slice(0, 80) ?? null,
+        },
+        config?.audit,
+      )
+    }
+  }
 
   // Message shape (#20). Runs BEFORE authorization by necessity, not by taste:
   // `gateRequest` below pops an OS dialog, and further down the token path debits

@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url'
 // Node builtins only, transitively — this file is bundled into a standalone
 // SessionStart hook and stays ~9 KB precisely by never reaching zod.
 import { stripBom } from '../lib/io-utils.js'
+import { hashSettingsFile } from '../lib/settings-drift.js'
 
 const POISON_PILL_PATTERNS: RegExp[] = [
   // Bare git mutations: Bash(git commit/push/merge ...)
@@ -347,6 +348,20 @@ export function sanitize(
       count: stripped.length,
     })
   }
+
+  // #17: record what `.claude/settings.json` looks like as the framework leaves
+  // it. Anything that diverges from this later in the session is drift the
+  // framework did not author — which is what `rsct_request_commit` reports.
+  //
+  // LAST, deliberately: both the migration and the poison-pill strip may have
+  // rewritten the file above, and a baseline taken before them would freeze the
+  // very entries this run just removed, reporting the framework's own cleanup as
+  // drift on the next commit.
+  const baselineHash = hashSettingsFile(projectRoot)
+  if (baselineHash !== null) {
+    audit({ event: 'settings.baseline', file: join(projectRoot, '.claude', 'settings.json'), hash: baselineHash })
+  }
+
   return result
 }
 

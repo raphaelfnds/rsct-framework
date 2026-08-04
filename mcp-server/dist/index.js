@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, readdirSync, statSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { homedir } from 'os';
 
 const require$1 = createRequire(import.meta.url);
@@ -8918,7 +8918,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join24 } = __require("path");
+    var { join: join26 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8961,7 +8961,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join24(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join26(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9364,7 +9364,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join24, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join26, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9427,7 +9427,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join24(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9445,7 +9445,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join24(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9467,7 +9467,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join24(__dirname$1, "..", "file.js");
+          return join26(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10457,7 +10457,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join24 = ",";
+            let join26 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10471,7 +10471,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join24 = `,
+                join26 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10479,13 +10479,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join24;
+                res += join26;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10506,7 +10506,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join24 = `,
+              join26 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10520,13 +10520,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join24;
+              separator = join26;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10567,7 +10567,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join24 = ",";
+            let join26 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10580,7 +10580,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join24 = `,
+                join26 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10588,13 +10588,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join24;
+                res += join26;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join24}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10607,7 +10607,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join24 = `,
+              join26 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10616,7 +10616,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10674,20 +10674,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join25 = `,
+              const join27 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join25;
+                res2 += join27;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join25}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10703,16 +10703,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join24 = `,
+            const join26 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join24, maximumBreadth);
+              res += stringifyTypedArray(value, join26, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join24;
+              separator = join26;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10723,13 +10723,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join24;
+                separator = join26;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join24;
+              separator = join26;
             }
             if (separator !== "") {
               res = `
@@ -22885,6 +22885,10 @@ function parseNumstatZ(raw) {
   }
   return { files: paths.length, insertions, deletions, paths };
 }
+function getFileAtHead(projectRoot, relPath) {
+  if (!isGitRepo(projectRoot)) return null;
+  return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
+}
 function getUnstagedDiff(projectRoot) {
   if (!isGitRepo(projectRoot)) return null;
   return safeGitRaw(projectRoot, ["diff", "--no-color", "-U0"]);
@@ -27141,6 +27145,74 @@ function evaluateInstallAdvisory(args) {
   };
 }
 
+// src/lib/settings-drift.ts
+init_esm_shims();
+function hashSettingsContent(text) {
+  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
+}
+var SETTINGS_REL_PATH = ".claude/settings.json";
+function readTextOrNull(path2) {
+  try {
+    if (!existsSync(path2)) return null;
+    return readFileSync(path2, "utf8");
+  } catch {
+    return null;
+  }
+}
+function hashSettingsFile(projectRoot) {
+  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
+  return text === null ? null : hashSettingsContent(text);
+}
+function readBaselineFromLog(raw) {
+  let found = null;
+  for (const line of raw.split("\n")) {
+    const clean = line.replace(/\r/g, "").trim();
+    if (!clean) continue;
+    let entry;
+    try {
+      const parsed = JSON.parse(clean);
+      if (!parsed || typeof parsed !== "object") continue;
+      entry = parsed;
+    } catch {
+      continue;
+    }
+    if (entry.event !== "settings.baseline") continue;
+    const hash = entry.hash;
+    if (typeof hash !== "string" || hash.length === 0) continue;
+    found = { hash, recorded_at: typeof entry.ts === "string" ? entry.ts : "" };
+  }
+  return found;
+}
+var SILENT = { verdict: "silent", added_entries: [], hint: null };
+function addedAllowEntries(currentText, headText) {
+  const allowOf = (text) => {
+    if (text === null) return [];
+    try {
+      const doc = JSON.parse(stripBom(text));
+      const allow = doc.permissions?.allow;
+      return Array.isArray(allow) ? allow.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  };
+  const before = new Set(allowOf(headText));
+  return allowOf(currentText).filter((e) => !before.has(e));
+}
+function evaluateSettingsDrift(args) {
+  if (args.baseline === null || args.currentHash === null) return SILENT;
+  if (args.currentHash === args.baseline.hash) return { ...SILENT, verdict: "unchanged" };
+  if (args.staged) return { ...SILENT, verdict: "staged" };
+  const added = addedAllowEntries(args.currentText, args.headText);
+  const list = added.length > 0 ? added.map((e) => `  \u2022 ${e}`).join("\n") : "  (no new allow[] entries \u2014 the change is elsewhere in the file)";
+  return {
+    verdict: "drifted",
+    added_entries: added,
+    hint: `.claude/settings.json has changed since this session started and is NOT staged. It is a VERSIONED file that the harness appends to on its own, so this is most likely machine-written, not yours:
+${list}
+Three ways to resolve it, your call \u2014 RSCT will not decide: (1) stage it with this commit if the entries belong to the team; (2) move machine-specific ones to .claude/settings.local.json, which is gitignored; (3) discard them with git checkout -- .claude/settings.json. (report only, never blocks)`
+  };
+}
+
 // src/lib/commit-message.ts
 init_esm_shims();
 var COMMIT_MESSAGE_MAX_LINES_DEFAULT = 15;
@@ -27565,6 +27637,32 @@ async function requestCommitHandler(rawInput, internal = {}) {
     auditWriter: appendAudit
   });
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint);
+  if (resolution.rsct_installed) {
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? [];
+    const drift = evaluateSettingsDrift({
+      currentHash: hashSettingsFile(projectRoot),
+      baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config2?.audit)) ?? ""),
+      staged: stagedForDrift.includes(SETTINGS_REL_PATH),
+      currentText: readTextOrNull(join(projectRoot, ".claude", "settings.json")),
+      headText: getFileAtHead(projectRoot, SETTINGS_REL_PATH)
+    });
+    if (drift.hint) {
+      advisories.push(drift.hint);
+      appendAudit(
+        projectRoot,
+        {
+          event: "settings.drift_detected",
+          tool: "rsct_request_commit",
+          added_count: drift.added_entries.length,
+          // Redacted excerpt: the first entry, truncated. The dev reads the full
+          // list in the hint; the log is a forensic trail, not a mirror of a file
+          // that may carry machine paths.
+          excerpt: drift.added_entries[0]?.slice(0, 80) ?? null
+        },
+        config2?.audit
+      );
+    }
+  }
   const messageCheck = checkCommitMessage(input.message, config2);
   if (!messageCheck.ok) {
     const audit2 = appendAudit(

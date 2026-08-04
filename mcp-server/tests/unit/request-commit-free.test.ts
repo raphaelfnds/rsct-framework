@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../src/tools/request-commit.js'
 import type { GitExecutor, GitState, StagedStats } from '../../src/lib/git.js'
 import type { PhaseState } from '../../src/lib/phase-scope.js'
+import { hashSettingsContent } from '../../src/lib/settings-drift.js'
 
 let tmpRoot: string
 const FIXED_NOW = new Date('2026-07-11T12:00:00.000Z')
@@ -250,5 +251,90 @@ describe('rsct_request_commit — the free lane is suspended while enforcement i
     expect(out.status).toBe('committed')
     expect(out.authorized_via).toBe('dev_approval')
     expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
+  })
+})
+
+describe('rsct_request_commit — settings.json drift is reported, never gated (#17)', () => {
+  /**
+   * Record a baseline as the SessionStart sanitizer would have — APPENDED, like
+   * the real writer. `eligibleProject()` rewrites the audit log wholesale, so a
+   * seed that overwrote would either lose the classify evidence or be lost by it,
+   * depending on call order. Appending makes the order irrelevant.
+   */
+  function seedBaseline(hash: string): void {
+    const line = JSON.stringify({ event: 'settings.baseline', hash, ts: FIXED_NOW.toISOString() })
+    appendFileSync(join(tmpRoot, '.rsct', 'audit.log'), line + '\n', 'utf8')
+  }
+
+  function writeSettingsJson(allow: string[]): void {
+    mkdirSync(join(tmpRoot, '.claude'), { recursive: true })
+    writeFileSync(
+      join(tmpRoot, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { allow } }, null, 2) + '\n',
+      'utf8',
+    )
+  }
+
+  it('reports the harness-appended entries and still lets the commit land', async () => {
+    // The field case: the harness auto-appends approved permissions to the
+    // VERSIONED file, the agent truthfully says it did not modify it, and nobody
+    // stages it. Before #17 no gate had anything to say about that.
+    writeSettingsJson(['Bash(mvn -version)', 'Bash(echo "exit=$?")'])
+    eligibleProject()
+    seedBaseline('a-different-hash')
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: unrelated work' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    // Reported, not blocked — an unrelated dirty settings file must never stop a
+    // legitimate commit.
+    expect(out.status).toBe('committed')
+    const hint = out.hints.join('\n')
+    expect(hint).toContain('.claude/settings.json has changed')
+    expect(hint).toContain('Bash(echo "exit=$?")')
+    expect(hint).toContain('never blocks')
+    expect(readAudit()).toMatch(/"event":"settings\.drift_detected"/)
+  })
+
+  it('says nothing when the file matches the baseline', async () => {
+    writeSettingsJson(['Bash(mvn -version)'])
+    eligibleProject()
+    seedBaseline(
+      hashSettingsContent(readFileSync(join(tmpRoot, '.claude', 'settings.json'), 'utf8')),
+    )
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
+  })
+
+  it('says nothing when the dev already staged the file — that is ownership taken', async () => {
+    writeSettingsJson(['Bash(mvn -version)'])
+    eligibleProject()
+    seedBaseline('a-different-hash')
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'chore: update settings' },
+      internal(smallStats, { stagedPathsOverride: ['.claude/settings.json'] }),
+    )) as RequestCommitOutput
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
+  })
+
+  it('degrades silently when no baseline was ever recorded', async () => {
+    // A project whose SessionStart hook never ran is not drifting — it is
+    // unmeasured, and the check must not invent a finding from that.
+    writeSettingsJson(['Bash(anything)'])
+    eligibleProject()
+
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'feat: x' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
+    expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
   })
 })

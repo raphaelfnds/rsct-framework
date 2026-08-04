@@ -145,6 +145,75 @@ export function parseNumstatZ(raw: string): StagedStats {
   return { files: paths.length, insertions, deletions, paths }
 }
 
+/** One entry of `git status --porcelain -z`. */
+export interface WorkingTreeEntry {
+  /** Two-character XY status code, e.g. ` M`, `M `, `??`, `A `. */
+  code: string
+  /** Project-relative posix path. For renames, the NEW path. */
+  path: string
+}
+
+/**
+ * Pure parser for `git status --porcelain -z` output. Exported for unit testing
+ * (the real reader is {@link getWorkingTreeStatus}); NOT an MCP input — a
+ * caller-substitutable working-tree state would let the agent silence a drift
+ * report it is the subject of, which is the same A2 / INV-6 lesson that keeps
+ * the staged-diff override test-only.
+ *
+ * Porcelain v1 `-z` records are `XY <path>\0`, and a rename/copy adds a second
+ * NUL-token holding the ORIGINAL path. That second token is consumed, not
+ * parsed — the new path is the one that exists now.
+ */
+export function parseStatusZ(raw: string): WorkingTreeEntry[] {
+  const tokens = raw.split('\0')
+  const out: WorkingTreeEntry[] = []
+  let i = 0
+  while (i < tokens.length) {
+    const tok = tokens[i]!
+    if (tok === '') {
+      i += 1
+      continue
+    }
+    // `XY path` — exactly one space after the two status characters.
+    const code = tok.slice(0, 2)
+    const path = tok.slice(3)
+    if (path !== '') out.push({ code, path: path.replace(/\\/g, '/') })
+    // R/C records carry the original path in the next token.
+    i += code.startsWith('R') || code.startsWith('C') ? 2 : 1
+  }
+  return out
+}
+
+/**
+ * A file's content at `HEAD`, or null when it is untracked there / git fails.
+ * Reads through git rather than the filesystem on purpose: the question is what
+ * the LAST COMMIT holds, which is the only honest baseline for "what did someone
+ * add since". Never throws.
+ */
+export function getFileAtHead(projectRoot: string, relPath: string): string | null {
+  if (!isGitRepo(projectRoot)) return null
+  return safeGitRaw(projectRoot, ['show', `HEAD:${relPath}`])
+}
+
+/**
+ * Working-tree status. `null` outside a repo or when git fails; `[]` for a clean
+ * tree — same contract as {@link getStagedPaths}.
+ *
+ * Uses `-z`, never `--short`: `-z` is NUL-separated and unquoted, so paths with
+ * spaces or non-ASCII survive intact and `core.quotepath` cannot mangle them.
+ * `--short` re-quotes, which is exactly the trap `getStagedPaths` documents.
+ *
+ * Worktree-local by nature — `git status` reports the worktree it runs in, which
+ * is the right scope: the drift this feeds is per-worktree state, like
+ * `phase-state.json`.
+ */
+export function getWorkingTreeStatus(projectRoot: string): WorkingTreeEntry[] | null {
+  if (!isGitRepo(projectRoot)) return null
+  const raw = safeGitRaw(projectRoot, ['status', '--porcelain', '-z'])
+  if (raw === null) return null
+  return parseStatusZ(raw)
+}
+
 /**
  * Return the unstaged diff (`git diff`) as a unified-diff string.
  * Same semantics as {@link getStagedDiff}.
