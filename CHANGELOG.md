@@ -10,6 +10,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **Five `git` bypass forms escaped the poison-pill detector** (#32), including
+  the wildcard `Bash(git -C:*)` which authorises every subcommand. Every pattern
+  assumed `commit|push|merge` sat immediately after `git`, but git accepts global
+  options first — and `git -C <path> commit` commits in ANOTHER repository, which
+  escapes both §C and the project-scoped reasoning the rest of the framework
+  relies on. The patterns now allow a run of global options (`-C`, `-c`,
+  `--git-dir=`, `--work-tree=`, `--exec-path=`, `--namespace=`, and the flag-only
+  ones) between `git` and the subcommand, with quoted arguments so a Windows path
+  with spaces cannot slip past.
+- A pre-existing false positive found while fixing the above: `commit` also
+  matched `commit-graph`, since a hyphen is not a word character. `git
+  commit-graph`, `git merge-base` and `git merge-tree` are read-only and were
+  being stripped. The subcommand anchor is now `(?![w-])`.
+- All four open Dependabot advisories cleared (2 HIGH, 2 MEDIUM) — `fast-uri`
+  3.1.5, `ip-address` 10.4.0, plus `@hono/node-server` 2.1.0, `hono` 4.13.0 and
+  `body-parser` 2.3.0 via `npm audit fix`. Lockfile only; no `package.json`
+  change. Done by hand rather than by merging the Dependabot PRs because
+  `fast-uri` is BUNDLED into the tracked `dist/`, so a lockfile-only change
+  leaves the vulnerable code in the artifact users install — which is exactly
+  why CI rejected PR #35.
+
 ## [2.5.0] - 2026-08-01
 
 Eight backlog issues closed in one pass. Backward-compatible except for one

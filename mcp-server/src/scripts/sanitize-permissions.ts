@@ -35,25 +35,51 @@ import { fileURLToPath } from 'node:url'
 import { stripBom } from '../lib/io-utils.js'
 import { hashSettingsFile } from '../lib/settings-drift.js'
 
+/**
+ * A git GLOBAL option — one of the tokens that may legally sit between `git` and
+ * its subcommand (#32).
+ *
+ * This is the gap that let five bypass forms through: every pattern used to
+ * assume `commit|push|merge` came immediately after `git`, but
+ * `git -C <path> commit` is valid — and it commits in ANOTHER repository, which
+ * also escapes the project-scoped reasoning the rest of the framework relies on.
+ *
+ * The value-taking forms accept a quoted argument, because a Windows path with
+ * spaces (`git -C "C:\Program Files\repo" commit`) is exactly the shape that
+ * would otherwise slip past.
+ */
+const GIT_GLOBAL_OPT = [
+  '-[cC]\\s+(?:"[^"]*"|\'[^\']*\'|[^\\s)]+)', // -C <path>, -c key=value
+  '--(?:git-dir|work-tree|exec-path|namespace)=(?:"[^"]*"|[^\\s)]+)',
+  '--(?:no-pager|paginate|bare|literal-pathspecs|no-replace-objects)',
+  '-p\\b',
+].join('|')
+
+/** Zero or more global options, each preceded by whitespace. */
+const GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`
+
 const POISON_PILL_PATTERNS: RegExp[] = [
-  // Bare git mutations: Bash(git commit/push/merge ...)
-  /^Bash\(\s*git\s+commit\b/i,
-  /^Bash\(\s*git\s+push\b/i,
-  /^Bash\(\s*git\s+merge\b/i,
-  // git followed by colon or wildcard: Bash(git*), Bash(git:*)
-  /^Bash\(\s*git\s*[:*]/i,
+  // Git mutations, with any run of global options between `git` and the
+  // subcommand: Bash(git commit ...), Bash(git -C /repo commit),
+  // Bash(git --git-dir=/r/.git push), Bash(git -c user.name=x merge).
+  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, 'i'),
+  // A wildcard stands where the SUBCOMMAND should be, so it authorises every
+  // subcommand — commit included: Bash(git*), Bash(git:*), Bash(git -C:*).
+  // The option class deliberately excludes `:` and `*` so the wildcard is not
+  // swallowed as part of an option token.
+  /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
   // Blanket Bash wildcard at start: Bash(*), Bash(:*)
   /^Bash\(\s*[:*]/i,
   // Path-prefixed git mutation: Bash(/usr/bin/git commit), Bash(./bin/git push),
   // Bash(C:/Program Files/Git/bin/git merge). Lazy `[^)]*?` allows spaces inside
   // the path (Windows "Program Files") without sliding past the final separator.
-  // The closing `git\s+(commit|push|merge)\b` anchor pins the basename so
+  // The closing `git\s+(commit|push|merge)(?![\w-])` anchor pins the basename so
   // Bash(/somewhere/git-credential-store ...) (a different binary) does NOT
   // match — the `\s+` requires whitespace, not a dash, after `git`.
-  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)\b/i,
+  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
   // Shell wrapper around a git mutation: Bash(sh -c "git commit ..."), Bash(bash -c 'git push origin')
   // Any of the common POSIX shells + -c flag + content containing git commit/push/merge.
-  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)\b/i,
+  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
   // Wildcard-around-git: Bash(*git*) and similar — the bash matcher would
   // pick up commit/push/merge inside the wildcard envelope.
   /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i,
