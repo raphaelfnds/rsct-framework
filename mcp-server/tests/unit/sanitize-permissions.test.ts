@@ -551,13 +551,13 @@ describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', 
     })
   })
 
-  it('DOCUMENTED GAP: `git -C <path> commit` is relocated but never recognised as a pill', () => {
-    // Out of scope for #12, recorded here so the behaviour is pinned rather than
-    // discovered later. Every POISON_PILL_PATTERN requires `commit|push|merge`
-    // immediately after `git`, or a path separator before `git` — so the `-C`
-    // form matches none of them. #12 gets it out of the VERSIONED file, which is
-    // its own job (§E), but the entry survives in settings.local.json and still
-    // authorises a §C bypass on this machine. Tracked separately.
+  it('`git -C <path> commit` is now BOTH relocated and stripped (#32 closed the gap)', () => {
+    // INVERTED from v2.5.0, where this was pinned as a DOCUMENTED GAP: #12 got
+    // the entry out of the versioned file (its own job, §E) but the pill detector
+    // did not recognise the `-C` form, so it survived in settings.local.json and
+    // still authorised a §C bypass on this machine. #32 widened the patterns to
+    // allow git global options before the subcommand, so the loop's second
+    // iteration now strips it from the local file in the same run.
     writeSettings(tmpRoot, 'settings.json', {
       permissions: { allow: [String.raw`Bash(git -C "C:\Users\me\repo" commit -m x)`] },
     })
@@ -569,7 +569,7 @@ describe('sanitize-permissions — machine paths in permissions.allow[] (#12)', 
     const local = readJson(join(tmpRoot, '.claude', 'settings.local.json')) as {
       permissions?: { allow?: unknown[] }
     }
-    expect(local.permissions?.allow).toHaveLength(1)
+    expect(local.permissions?.allow).toEqual([])
   })
 
   it('LOCAL-WRITE-FIRST: a malformed local file aborts with settings.json untouched', () => {
@@ -632,5 +632,65 @@ describe('sanitize-permissions — settings baseline (#17)', () => {
   it('records nothing when there is no settings.json — no file, no claim', () => {
     sanitize(tmpRoot)
     expect(baselineEvents()).toHaveLength(0)
+  })
+})
+
+describe('sanitize-permissions — git global options before the subcommand (#32)', () => {
+  /**
+   * Every pattern used to assume `commit|push|merge` came immediately after
+   * `git`. But git accepts global options first, and `git -C <path> commit`
+   * commits in ANOTHER repository — which escapes both §C and the project-scoped
+   * reasoning the rest of the framework relies on. Five forms walked past.
+   */
+  const MUST_CATCH = [
+    'Bash(git -C /repo commit -m x)',
+    'Bash(git -C /repo push)',
+    'Bash(git -C:*)', // a wildcard where the subcommand belongs
+    'Bash(git --git-dir=/r/.git commit)',
+    'Bash(git -c user.name=x commit)',
+    // Same family, not in the issue but the same shape.
+    String.raw`Bash(git -C "C:\Program Files\repo" commit)`,
+    'Bash(git --work-tree=/w --git-dir=/g merge x)',
+    'Bash(git --no-pager -C /r push)',
+    'Bash(git -c a=b -c c=d commit)',
+  ]
+
+  /**
+   * Read-only subcommands that merely START with a mutating verb. These were
+   * false positives BEFORE #32 too — `commit\b` matches `commit-graph`, since a
+   * hyphen is not a word character — so the fix closes a pre-existing hole while
+   * widening the pattern.
+   */
+  const MUST_KEEP = [
+    'Bash(git commit-graph write)',
+    'Bash(git merge-base HEAD main)',
+    'Bash(git merge-tree a b)',
+    'Bash(git -C /r merge-base a b)',
+    // Global options on a read-only subcommand stay benign.
+    'Bash(git -C /repo status)',
+    'Bash(git --no-pager log)',
+    'Bash(git log -- src/*.ts)', // a wildcard in a pathspec is not a blanket
+  ]
+
+  it('catches every documented bypass form', () => {
+    for (const e of MUST_CATCH) expect(`${e} → ${isPoisonPill(e)}`).toBe(`${e} → true`)
+  })
+
+  it('does not touch read-only git, even with global options or a hyphenated subcommand', () => {
+    for (const e of MUST_KEEP) expect(`${e} → ${isPoisonPill(e)}`).toBe(`${e} → false`)
+  })
+
+  it('still pins the basename — git-credential-store is a different binary', () => {
+    expect(isPoisonPill('Bash(/usr/bin/git-credential-store)')).toBe(false)
+    expect(isPoisonPill('Bash(/usr/bin/git commit)')).toBe(true)
+  })
+
+  it('strips a global-option bypass end to end', () => {
+    const path = writeSettings(tmpRoot, 'settings.local.json', {
+      permissions: { allow: ['Bash(git -C /other/repo commit -m x)', 'Bash(npm test)'] },
+    })
+    const result = sanitize(tmpRoot, { auditWriter: () => {} })
+    expect(result.files.find((f) => f.path === path)?.status).toBe('sanitized')
+    expect(readJson(path)).toEqual({ permissions: { allow: ['Bash(npm test)'] } })
   })
 })
