@@ -531,6 +531,54 @@ The `install` block in `.rsct.json` also records when the framework was applied
 and the git SHA of the pre-setup state — both required for `03-uninstall.md` to
 work safely.
 
+## Update check (what leaves your machine, and how to turn it off)
+
+`rsct_status` can tell you that a newer RSCT release exists. Since **v2.6.0 this
+is ON by default** — a framework that knows about a security patch and says nothing
+is not doing its job. It only ever *suggests*: nothing is downloaded, installed or
+changed for you.
+
+**What is sent.** No project data, no code, no file names, no telemetry, and nothing
+identifying you. The check is a single unauthenticated
+
+```
+GET https://api.github.com/repos/raphaelfnds/rsct-framework/releases/latest
+```
+
+with `Accept: application/vnd.github+json` and `User-Agent: rsct-mcp/<version>`. As
+with any HTTPS request, GitHub sees your IP address, the time, and that User-Agent —
+which names the RSCT version you are running. Networks between you and GitHub can see
+that you connected to `api.github.com`. That is the whole exchange.
+
+**When.** At most once per 24 hours, at session start. `rsct_status` reads only the
+local cache, so it adds no network latency: a stale cache fires a background request
+whose result lands on the *next* call. Every failure mode is silent — an offline
+machine, a rate limit, a corrupt cache: no hint, no error, never a broken session.
+
+**Where it is cached.** `~/.rsct/update-check.json`, shared by every project on the
+machine. Declining a release in one project therefore silences it everywhere.
+
+**Declining a release.** You are asked per release, not once forever. Decline and
+that version is never raised again; when a *newer* one ships you are asked once more.
+Declines accumulate — you are never asked twice about the same release.
+
+**Three ways to turn it off**, in precedence order:
+
+| How | Scope | Use when |
+|---|---|---|
+| `RSCT_UPDATE_CHECK=off` in the environment (`0`, `false` and `no` also count as off) | that process | CI, headless runs, or a machine that must never emit the request at all — this is the only one that applies *before* a session exists, and it **overrides** the file |
+| Ask Claude to call `rsct_status` with `update_check:"off"` | the machine | day to day; reversible with `"on"` |
+| `"consent": "no"` in `~/.rsct/update-check.json` | the machine | scripted provisioning |
+
+Any value in that file other than `"yes"` counts as off, so a typo or a `false`
+cannot accidentally re-enable it — but *deleting* the key does, since an absent
+setting means "never decided" and that is what consult-by-default is for.
+
+If you turned the check off before v2.6.0 — or if `/rsct-setup` recorded "no" because
+the question went unanswered, which is what it did by default — it stays off. RSCT
+mentions in up to three sessions that the setting exists and is reversible, then goes
+quiet for good.
+
 ## Roadmap
 
 ### Future

@@ -10,6 +10,85 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.6.0] - 2026-08-04
+
+The update check consults by default, and declining is per release instead of
+permanent silence (#38). Marker schema id stays `v=1.0.0`; tool count unchanged at
+**39** — the decline channel is two parameters on `rsct_status`, not a new tool.
+
+### Changed
+
+- **The update check is now opt-OUT.** It used to fuse two unrelated decisions into
+  one flag: *may I ask GitHub* and *do you want this release*. `consent` defaulted to
+  `"no"`, and `/rsct-setup` wrote that literal `"no"` whenever the question went
+  unanswered — so a dev who never answered never heard that a release shipped,
+  security patches included. Consent absent now means consult; only a recorded choice
+  turns it off. Nothing about the request changed: unauthenticated GET, 24h cache,
+  fail-silent, suggestion-only, no download.
+- **A decline is per release.** `rsct_status` accepts `decline_update:"v2.6.0"` — that
+  release is never raised again, a newer one asks once more, declines accumulate.
+  Only the release currently on offer can be declined; any other tag is rejected and
+  nothing is written, so a mistyped or pre-emptive decline cannot silently swallow a
+  future patch.
+- **`update_check:"on"|"off"` is the opt-out switch**, plus `RSCT_UPDATE_CHECK=off`
+  for the environment — the only form that applies before a session exists (CI,
+  headless, a machine that must never emit the request). A recorded `"no"` is never
+  overwritten; the framework says once that the setting exists and is reversible,
+  in wording that is true both for a deliberate refusal and for an unanswered prompt.
+- **`/rsct-setup` Phase 4.9 no longer asks and no longer writes** — it prints what the
+  check does and how to turn it off. Reading the cache from bash could not be made
+  portable (BSD `grep` reads `\s` as a literal `s`; `grep` is line-oriented while the
+  value may sit on the next line), and `rsct_status` already reads it properly.
+
+### Fixed
+
+Two defects that were live in v2.5.1 for anyone who had consented, both found while
+auditing this change:
+
+- **A failing network retried on every call.** A non-2xx or a throw never advanced
+  `last_checked`, so the cache stayed stale forever: an offline machine, or one behind
+  a rate-limited shared IP, attempted one 2s-timeout request per `rsct_status` instead
+  of one a day. Attempts are now stamped separately from successes, and an in-process
+  memo bounds them even when the cache cannot be written at all.
+- **A clock in the future froze the check permanently.** `now - last > TTL` is false
+  when `last > now`, so one timestamp written under a wrong clock (VM restore, dual
+  boot) silenced every subsequent release, security patches included. A future stamp
+  now counts as stale.
+
+Four more were risks this redesign would have introduced, closed before it shipped
+rather than after — recorded because the reasoning is load-bearing for the module:
+
+- **A refresh could have erased a decline.** `backgroundRefresh` rewrote the file from
+  a snapshot captured before its `await`. Harmless while the file held nothing worth
+  losing; with declines and consent in it, a decline recorded during the request would
+  vanish moments after the dev was told it was saved. It re-reads after the await and
+  merges by spread, so fields written by a concurrent session — or by a different
+  rsct-mcp version sharing the machine-global cache — survive.
+- **An unreadable cache would have become consent.** Absent, corrupt and `EACCES` all
+  collapsed to `null`, which was fail-safe under opt-in and would have meant "consult"
+  under opt-out: a transient file lock could have fired a request the dev forbade and
+  then overwritten their recorded choice. The read is tri-state and fails closed.
+- **`consent !== 'yes'` had to stay the test, not `=== 'no'`.** Hand-editing the file
+  is the only opt-out shipped versions have, so `"No"`, `false`, `0` and `null` must
+  all keep meaning off. Only an *absent* setting consults.
+- **The notice could have nagged forever or vanished unread.** It travels as a
+  `hints[]` string the agent may never relay, and a flag written on generation is
+  spendable with nobody having read it; on a read-only `$HOME` the write fails
+  silently and "shown once" fires on every call. It is a bounded counter, emitted only
+  when the increment actually persisted.
+
+### Added
+
+- `RSCT_UPDATE_CHECK=off` kill switch, honoured before any read — also what keeps the
+  test suite off the network and out of the contributor's real `~/.rsct`.
+- A zod ↔ exposed-`inputSchema` parity test for `rsct_status`. There was none, and the
+  hand-written schema is what MCP actually exposes: a parameter added to zod and
+  forgotten there ships green and completely inert.
+- `README.md` and `docs/commands.md` now state what the check sends, when, where it is
+  cached and the three ways to turn it off. They did not mention it at all before —
+  including the fact that the `User-Agent` carries the running version, which is why
+  the wording is "no project data, no code, no telemetry" rather than "nothing".
+
 ## [2.5.1] - 2026-08-04
 
 Security patch. No behaviour change to the framework itself; the marker schema id

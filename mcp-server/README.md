@@ -251,8 +251,30 @@ All tools degrade gracefully outside rsct projects (return
 Fast bootstrap check. Returns rsct identity, protected branches, git state, the
 [`universe` block](#the-universe-block), and hints.
 
-- Input: `project_root?`
+- Input: `project_root?`, `update_check?` (`"on"|"off"`), `decline_update?` (a release tag)
 - Output: identity, git, `universe`, hints
+
+The two update-check parameters are the response channel for the release hint this
+tool emits (the check consults by default since v2.6.0 — see
+[README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off)).
+
+- `decline_update:"v2.6.0"` records that the dev declined **that release**: it is
+  never raised again, a newer one asks once more. Only the release currently being
+  offered is accepted — any other tag is rejected and nothing is written, so a
+  mistyped or pre-emptive decline cannot silently swallow a future security patch.
+  Pass it only when the dev actually declined.
+- `update_check:"off"` turns the check off for the machine; `"on"` restores it.
+
+The handler is tolerant by design: a value it does not recognise (including a
+non-string) produces a hint rather than an error, because `rsct_status` is the tool
+every session starts with and failing it would also cost the caller git state,
+topology and the install-drift security advisory. Note the published `inputSchema`
+still advertises `enum: ["on","off"]` — that is the contract the agent should follow,
+and an MCP client that validates arguments locally may reject a variation before the
+handler ever sees it.
+
+`RSCT_UPDATE_CHECK=off` in the environment overrides both parameters; when it is set,
+`update_check:"on"` says so instead of claiming an effect it cannot deliver.
 
 ### `rsct_load_context`
 

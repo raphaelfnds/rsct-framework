@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { rmSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { rmSync, readFileSync, existsSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import {
   runBlock,
@@ -490,44 +490,36 @@ describe.skipIf(!BASH)('block: universe discovery probe (01-setup 1.9 — T1.d)'
   }, 60_000)
 })
 
-// --- Block 6: update-check consent ask-once (01-setup 4.9 — T4) — uses node --------
-// Writes $HOME/.rsct/update-check.json; HOME is hermetic (= temp dir). CONSENT is
-// injected via preamble (the shipped block reads it from the dev's answer).
-const CONSENT_ANCHOR = 'Phase 4.9 executing canonical update-check consent'
+// --- Block 6: update check, informational (01-setup 4.9 — #38) ---------------
+// Since the check consults by default, Phase 4.9 no longer asks and no longer
+// writes: it only reports the posture. The block must therefore touch NO file —
+// reading the cache from bash was the part that could not be made portable (BSD
+// grep reads `\s` as a literal `s`, and grep is line-oriented while the value may
+// sit on the next line). rsct_status owns state reporting.
+const CONSENT_ANCHOR = 'Phase 4.9 executing canonical update-check notice'
 const CC_FILE = '.rsct/update-check.json'
 
-describe.skipIf(!BASH || !NODE)('block: update-check consent (01-setup 4.9 — T4)', () => {
-  it('records consent "yes" on first run (opt-in)', () => {
-    const r = run({ promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR, preamble: 'CONSENT=yes' })
-    expect(readIn(r, CC_FILE)).toContain('"consent": "yes"')
-  }, 60_000)
-
-  it('defaults to "no" when CONSENT is unset (privacy-first)', () => {
+describe.skipIf(!BASH)('block: update check informational (01-setup 4.9 — #38)', () => {
+  it('reports the posture and how to turn it off', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR })
-    expect(readIn(r, CC_FILE)).toContain('"consent": "no"')
+    expect(r.exit).toBe(0)
+    expect(r.out).toMatch(/ON by default/)
+    expect(r.out).toMatch(/update_check/)
+    expect(r.out).toMatch(/RSCT_UPDATE_CHECK=off/)
   }, 60_000)
 
-  it('ask-once — does NOT change an already-recorded consent', () => {
-    const seeded = JSON.stringify({ consent: 'yes', latest_tag: 'v9.9.9' }, null, 2) + '\n'
+  it('writes nothing — no cache file is created', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR })
+    expect(existsSync(join(r.dir, CC_FILE))).toBe(false)
+  }, 60_000)
+
+  it('leaves an existing cache byte-identical (never clobbers a recorded choice)', () => {
+    const seeded = JSON.stringify({ consent: 'no', latest_tag: 'v9.9.9' }, null, 2) + '\n'
     const r = run({
       promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR,
-      preamble: 'CONSENT=no', // would flip to "no" if the ask-once guard failed
       seedFiles: { [CC_FILE]: seeded },
     })
-    expect(readIn(r, CC_FILE)).toContain('"consent": "yes"') // unchanged
-    expect(r.out).toMatch(/already recorded/)
-  }, 60_000)
-
-  it('merge — preserves other cache fields when recording consent', () => {
-    // File exists but has NO consent field yet → ask runs, node merge keeps latest_tag.
-    const seeded = JSON.stringify({ latest_tag: 'v9.9.9' }, null, 2) + '\n'
-    const r = run({
-      promptBasename: '01-setup.md', anchor: CONSENT_ANCHOR,
-      preamble: 'CONSENT=yes', seedFiles: { [CC_FILE]: seeded },
-    })
-    const cc = readIn(r, CC_FILE)
-    expect(cc).toContain('"consent": "yes"')
-    expect(cc).toContain('"latest_tag": "v9.9.9"') // preserved
+    expect(readIn(r, CC_FILE)).toBe(seeded)
   }, 60_000)
 })
 

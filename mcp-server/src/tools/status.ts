@@ -6,7 +6,13 @@ import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 import { detectTopology, type TopologyBlock } from '../lib/topology.js'
-import { getUpdateNotice } from '../lib/update-check.js'
+import {
+  declineUpdateTag,
+  getUpdateNotice,
+  isUpdateCheckKilled,
+  setUpdateCheckConsent,
+  type UpdateOptions,
+} from '../lib/update-check.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
 
 export const statusInputSchema = z
@@ -15,6 +21,15 @@ export const statusInputSchema = z
       .string()
       .optional()
       .describe('Optional absolute path to override project root detection.'),
+    // Values are deliberately LOOSE here while the exposed inputSchema advertises the
+    // strict contract. rsct_status is the session-bootstrap tool documented "always
+    // succeeds", and its .parse() is unguarded — a z.enum would turn a paraphrased
+    // update_check:"On" into a hard failure that also loses git state, topology and
+    // the install-drift security hint. `coerce` extends that to a `true` an agent
+    // might infer from an on/off switch: it becomes "true", which is simply ignored
+    // with a hint. Unknown KEYS still reject (.strict): loose values, strict shape.
+    update_check: z.coerce.string().optional(),
+    decline_update: z.coerce.string().optional(),
   })
   .strict()
 
@@ -51,6 +66,17 @@ export const statusTool: Tool = {
         type: 'string',
         description: 'Optional absolute path to override project root detection.',
       },
+      update_check: {
+        type: 'string',
+        enum: ['on', 'off'],
+        description:
+          'Turn the GitHub update check on or off for this machine. It is ON by default (an unauthenticated GET of the latest release tag, once a day, cached, suggestion-only — no project data is sent). Pass "off" only when the dev asks for it; "on" re-enables it.',
+      },
+      decline_update: {
+        type: 'string',
+        description:
+          'Record that the dev declined a specific release, e.g. "v2.6.0" — that release is never raised again, a newer one asks once more. Only the release currently being offered is accepted; any other tag is rejected. Pass this ONLY when the dev has actually declined.',
+      },
     },
     additionalProperties: false,
   },
@@ -58,7 +84,15 @@ export const statusTool: Tool = {
 
 const MCP_VERSION = RSCT_MCP_VERSION
 
-export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
+/**
+ * `deps` is NOT part of the MCP surface — it is the injection seam that lets tests
+ * exercise the update check against a temp $HOME and a fake fetcher. Without it the
+ * suite would reach api.github.com and rewrite the contributor's real ~/.rsct.
+ */
+export async function statusHandler(
+  rawInput: unknown,
+  deps: { update?: UpdateOptions } = {},
+): Promise<StatusOutput> {
   const input = statusInputSchema.parse(rawInput ?? {})
   const resolution = resolveProjectRoot(input.project_root)
   const git = readGitState(resolution.root)
@@ -96,11 +130,16 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
   const topology = detectTopology(resolution.config, resolution.root, {}, universe)
   if (topology.hint) hints.push(topology.hint)
 
-  // T4: opt-in, cached, fail-silent "a newer RSCT release is available" hint.
-  // Reads only the ~/.rsct cache (zero network latency); a stale cache fires a
-  // non-blocking background refresh. No-op unless consent was granted at /rsct-setup.
-  const update = getUpdateNotice()
-  if (update.hint) hints.push(update.hint)
+  // T4 / #38: consult-by-default, cached, fail-silent "a newer RSCT release is
+  // available" hint. Reads only the ~/.rsct cache (zero network latency); a stale
+  // cache fires a non-blocking background refresh. Turned off by update_check:"off",
+  // by RSCT_UPDATE_CHECK=off, or by `consent` in the cache file.
+  //
+  // Mutations are applied BEFORE the read so they take effect in this same call:
+  // turning the check off must not be followed by a notice pitching how to undo it,
+  // and a decline must silence the very hint the dev is responding to.
+  applyUpdateMutations(input, deps.update, hints)
+  hints.push(...getUpdateNotice(deps.update).hints)
 
   // Install-drift: local compare of this project's stamped rsct_version and of
   // its installed enforcement scripts vs the running binary (no network / no
@@ -131,6 +170,73 @@ export async function statusHandler(rawInput: unknown): Promise<StatusOutput> {
     universe: universe.block,
     topology: topology.block,
     hints,
+  }
+}
+
+/**
+ * Apply the two update-check mutations, in order, pushing one confirmation hint per
+ * applied change. Every failure mode is reported rather than thrown: this runs inside
+ * the tool the whole protocol calls at session start.
+ */
+function applyUpdateMutations(input: StatusInput, opts: UpdateOptions | undefined, hints: string[]): void {
+  if (input.update_check === undefined && input.decline_update === undefined) return
+
+  // The environment kill switch outranks the file, so a confirmation that ignored it
+  // would tell the dev the opposite of the truth on any CI image or shell that
+  // exports it — and they would have no way to discover why nothing happens.
+  const killed = isUpdateCheckKilled(opts)
+  const CANNOT_READ =
+    'The update-check cache (~/.rsct/update-check.json) exists but cannot be read or parsed — nothing was changed. Delete that file to reset it; the framework will recreate it.'
+  /** Caller input is echoed back into hints[], the agent's control channel — bound it. */
+  const show = (v: string): string => (v.length > 40 ? `${v.slice(0, 40)}…` : v)
+
+  let turnedOff = false
+  if (input.update_check !== undefined) {
+    const mode = input.update_check.trim().toLowerCase()
+    if (mode === 'on' || mode === 'off') {
+      const r = setUpdateCheckConsent(mode, opts)
+      if (!r.ok) {
+        hints.push(
+          r.reason === 'unreadable'
+            ? CANNOT_READ
+            : 'Could not persist the update_check setting (the cache file is not writable) — the check is unchanged.',
+        )
+      } else if (mode === 'off') {
+        turnedOff = true
+        hints.push(
+          'Update check turned OFF for this machine — no release will be reported and no network call is made. Reversible with update_check:"on".',
+        )
+      } else {
+        hints.push(
+          killed
+            ? 'Update check turned ON in the config file, but RSCT_UPDATE_CHECK=off is set in this environment and takes precedence — no release will be reported until that variable is unset.'
+            : 'Update check turned ON for this machine — new releases are reported once a day.',
+        )
+      }
+    } else {
+      hints.push(`Ignored update_check:"${show(input.update_check)}" — expected "on" or "off".`)
+    }
+  }
+
+  if (input.decline_update !== undefined) {
+    const r = declineUpdateTag(input.decline_update, opts)
+    if (r.ok) {
+      hints.push(
+        turnedOff
+          ? `Release v${r.tag} declined and recorded — though the update check was just turned off in this same call, so nothing will be reported until it is turned back on.`
+          : `Release v${r.tag} declined — it will not be raised again on this machine; a newer release will ask once.`,
+      )
+    } else if (r.reason === 'mismatch') {
+      hints.push(
+        `Decline ignored: "${show(input.decline_update)}" is not the release being offered (v${r.tag}). Only the release named in the update hint can be declined — nothing was recorded.`,
+      )
+    } else if (r.reason === 'no_offer') {
+      hints.push('Decline ignored: no newer release is currently being offered — nothing was recorded.')
+    } else if (r.reason === 'unreadable') {
+      hints.push(CANNOT_READ)
+    } else {
+      hints.push('Could not persist the decline (the cache file is not writable) — nothing was recorded.')
+    }
   }
 }
 

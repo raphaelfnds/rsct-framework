@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { resolve, join } from 'node:path'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { statusHandler, type StatusOutput } from '../../src/tools/status.js'
+import type { UpdateOptions } from '../../src/lib/update-check.js'
 import { RSCT_MCP_VERSION } from '../../src/lib/version.js'
 
 const SAMPLE_RSCT = resolve(__dirname, '..', 'fixtures', 'sample-rsct')
@@ -42,32 +43,153 @@ describe('rsct_status', () => {
     await expect(statusHandler({ unknown_key: 'x' })).rejects.toThrow()
   })
 
-  // T4: rsct_status surfaces the opt-in update hint when the ~/.rsct cache says a
-  // newer release exists. We point HOME at a seeded temp dir (getUpdateNotice reads
-  // $HOME/.rsct/update-check.json) and restore it after.
-  it('surfaces an update hint when consent+cache show a newer release (and not otherwise)', async () => {
-    const origHome = process.env.HOME
+  // #38: the update check reaches rsct_status through the `deps.update` seam — never
+  // process.env.HOME and never the real fetch, so the suite cannot touch the
+  // contributor's ~/.rsct or api.github.com. `env: {}` opts back in past the global
+  // RSCT_UPDATE_CHECK=off set in tests/setup.ts.
+  const NEWER_TAG = `v${Number(RSCT_MCP_VERSION.split('.')[0]) + 1}.0.0`
+  const seedHome = (data: Record<string, unknown>): string => {
     const h = mkdtempSync(join(tmpdir(), 'rsct-status-upd-'))
-    try {
-      // No consent yet → no update hint.
-      process.env.HOME = h
-      const before = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
-      expect(before.hints.some((x) => /newer RSCT release/.test(x))).toBe(false)
+    mkdirSync(join(h, '.rsct'), { recursive: true })
+    writeFileSync(join(h, '.rsct', 'update-check.json'), JSON.stringify(data))
+    return h
+  }
+  const readHome = (h: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(h, '.rsct', 'update-check.json'), 'utf8'))
+  const NOW = 1_000_000_000_000
+  const FRESH = { last_checked: new Date(NOW).toISOString(), last_attempt: new Date(NOW).toISOString() }
+  const upd = (h: string): { update: UpdateOptions } => ({
+    update: { home: h, now: NOW, env: {}, fetcher: async () => ({ ok: true, json: async () => ({}) }) },
+  })
 
-      // Consent + a fresh cache with a newer tag → hint appears.
-      const maj = Number(RSCT_MCP_VERSION.split('.')[0])
-      mkdirSync(join(h, '.rsct'), { recursive: true })
-      writeFileSync(
-        join(h, '.rsct', 'update-check.json'),
-        JSON.stringify({ consent: 'yes', latest_tag: `v${maj + 1}.0.0`, last_checked: new Date().toISOString() }),
-      )
-      const after = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
-      expect(after.hints.some((x) => /newer RSCT release/.test(x))).toBe(true)
+  it('surfaces an update hint when the cache shows a newer release', async () => {
+    const h = seedHome({ consent: 'yes', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler({ project_root: SAMPLE_RSCT }, upd(h))) as StatusOutput
+      expect(out.hints.some((x) => /newer RSCT release/.test(x))).toBe(true)
     } finally {
-      if (origHome === undefined) delete process.env.HOME
-      else process.env.HOME = origHome
       rmSync(h, { recursive: true, force: true })
     }
+  })
+
+  it('decline_update records the tag and suppresses the hint in the SAME call', async () => {
+    const h = seedHome({ consent: 'yes', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler(
+        { project_root: SAMPLE_RSCT, decline_update: NEWER_TAG },
+        upd(h),
+      )) as StatusOutput
+      expect(out.hints.some((x) => /newer RSCT release/.test(x))).toBe(false)
+      expect(out.hints.some((x) => /declined — it will not be raised again/.test(x))).toBe(true)
+      expect(readHome(h).declined_tags).toEqual([NEWER_TAG.replace(/^v/, '')])
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  it('decline_update for a release that is not on offer is rejected, not recorded', async () => {
+    const h = seedHome({ consent: 'yes', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler(
+        { project_root: SAMPLE_RSCT, decline_update: 'v99.99.99' },
+        upd(h),
+      )) as StatusOutput
+      expect(out.hints.some((x) => /Decline ignored/.test(x))).toBe(true)
+      expect(out.hints.some((x) => /newer RSCT release/.test(x))).toBe(true) // still offered
+      expect(readHome(h).declined_tags).toBeUndefined()
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  it('update_check "off" silences everything without pitching how to undo it', async () => {
+    const h = seedHome({ latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler(
+        { project_root: SAMPLE_RSCT, update_check: 'off' },
+        upd(h),
+      )) as StatusOutput
+      expect(out.hints.some((x) => /newer RSCT release/.test(x))).toBe(false)
+      expect(out.hints.some((x) => /update check is OFF on this machine/.test(x))).toBe(false)
+      expect(out.hints.some((x) => /Update check turned OFF/.test(x))).toBe(true)
+      expect(readHome(h).consent).toBe('no')
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  // rsct_status is the session-bootstrap tool: a paraphrased value must not take the
+  // whole call down with it (that would also lose git state and the drift hint).
+  it('tolerates unrecognized update_check values instead of throwing', async () => {
+    const h = seedHome({ consent: 'yes', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      // A non-string an agent might infer from an on/off switch must not fail the
+      // session-bootstrap tool either — it coerces and lands in the "Ignored" branch.
+      for (const value of ['true', 'yes', '', 'garbage', true, 1]) {
+        const out = (await statusHandler(
+          { project_root: SAMPLE_RSCT, update_check: value },
+          upd(h),
+        )) as StatusOutput
+        expect(out.rsct_installed).toBe(true) // the call still succeeded
+        expect(out.hints.some((x) => /Ignored update_check/.test(x))).toBe(true)
+      }
+      expect(readHome(h).consent).toBe('yes') // untouched by any of them
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  // Seeded 'no' so the assertion cannot pass on the seed: if `.trim().toLowerCase()`
+  // were dropped, 'On' would fall into the Ignored branch and consent would stay 'no'.
+  it('accepts update_check case-insensitively', async () => {
+    const h = seedHome({ consent: 'no', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler(
+        { project_root: SAMPLE_RSCT, update_check: ' On ' },
+        upd(h),
+      )) as StatusOutput
+      expect(out.hints.some((x) => /Update check turned ON/.test(x))).toBe(true)
+      expect(readHome(h).consent).toBe('yes')
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  // The env kill switch outranks the file, so confirming "turned ON" while it is set
+  // would tell the dev the opposite of the truth on any CI image that exports it.
+  it('says so when RSCT_UPDATE_CHECK overrides the setting it was just asked to change', async () => {
+    const h = seedHome({ consent: 'no', latest_tag: NEWER_TAG, ...FRESH })
+    try {
+      const out = (await statusHandler({ project_root: SAMPLE_RSCT, update_check: 'on' }, {
+        update: { home: h, now: NOW, env: { RSCT_UPDATE_CHECK: 'off' } },
+      })) as StatusOutput
+      expect(out.hints.some((x) => /takes precedence/.test(x))).toBe(true)
+      expect(out.hints.some((x) => /newer RSCT release/.test(x))).toBe(false)
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  it('a corrupt cache reports the real cause and never throws out of the tool', async () => {
+    const h = mkdtempSync(join(tmpdir(), 'rsct-status-upd-'))
+    try {
+      mkdirSync(join(h, '.rsct'), { recursive: true })
+      writeFileSync(join(h, '.rsct', 'update-check.json'), '{ not valid json')
+      const out = (await statusHandler(
+        { project_root: SAMPLE_RSCT, decline_update: NEWER_TAG },
+        upd(h),
+      )) as StatusOutput
+      expect(out.rsct_installed).toBe(true)
+      expect(out.hints.some((x) => /cannot be read or parsed/.test(x))).toBe(true)
+    } finally {
+      rmSync(h, { recursive: true, force: true })
+    }
+  })
+
+  // tests/setup.ts is the only barrier between this suite and both api.github.com and
+  // the contributor's real ~/.rsct. Nothing else fails if it is deleted or renamed.
+  it('the global update-check kill switch is actually in force', () => {
+    expect(process.env.RSCT_UPDATE_CHECK).toBe('off')
   })
 
   // T3: status always reports a worktree block; a plain fixture (or subdir of

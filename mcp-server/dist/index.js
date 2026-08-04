@@ -23361,7 +23361,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.5.1";
+var RSCT_MCP_VERSION = "2.6.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -23696,32 +23696,86 @@ init_esm_shims();
 var REPO = "raphaelfnds/rsct-framework";
 var LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 var TTL_MS = 24 * 60 * 60 * 1e3;
+var ENV_KILL_SWITCH = "RSCT_UPDATE_CHECK";
+var NOTICE_MAX_SHOWS = 3;
+var attemptMemo = /* @__PURE__ */ new Map();
 function cachePath(home) {
   return join(home, ".rsct", "update-check.json");
 }
-function readCache(home) {
+function readCacheState(home) {
+  let raw;
   try {
-    const p = cachePath(home);
-    if (!existsSync(p)) return null;
-    const parsed = JSON.parse(readFileSync(p, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : null;
+    raw = readFileSync(cachePath(home), "utf8");
+  } catch (err) {
+    return err?.code === "ENOENT" ? { kind: "missing" } : { kind: "unreadable" };
+  }
+  try {
+    const noBom = raw.charCodeAt(0) === 65279 ? raw.slice(1) : raw;
+    const parsed = JSON.parse(noBom);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { kind: "unreadable" };
+    return { kind: "ok", data: parsed };
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
 }
 function writeCacheAtomic(home, data) {
+  const target = cachePath(home);
+  const tmp = `${target}.${process.pid}.tmp`;
   try {
     mkdirSync(join(home, ".rsct"), { recursive: true });
-    const p = cachePath(home);
-    const tmp = `${p}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(data, null, 2)}
 `, "utf8");
-    renameSync(tmp, p);
+    renameSync(tmp, target);
+    return true;
   } catch {
+    try {
+      unlinkSync(tmp);
+    } catch {
+    }
+    return false;
   }
 }
+function normalizeTag(tag) {
+  return String(tag ?? "").trim().replace(/^[vV]/, "");
+}
+function resolveHome(opts) {
+  const env = opts.env ?? process.env;
+  return opts.home ?? env.HOME ?? homedir();
+}
+function killSwitchOn(env) {
+  const v = String(env[ENV_KILL_SWITCH] ?? "").trim().toLowerCase();
+  return v === "off" || v === "0" || v === "false" || v === "no";
+}
+function consentState(data) {
+  if (!("consent" in data)) return "absent";
+  const c = data.consent;
+  return typeof c === "string" && c.trim().toLowerCase() === "yes" ? "yes" : "off";
+}
+function declinedList(data) {
+  if (!Array.isArray(data.declined_tags)) return [];
+  const out = [];
+  for (const entry of data.declined_tags) {
+    if (typeof entry !== "string") continue;
+    const t = normalizeTag(entry);
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+function noticeCount(data, key) {
+  const v = data[key];
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+function withinTtl(raw, now) {
+  const t = typeof raw === "string" ? Date.parse(raw) : typeof raw === "number" ? raw : NaN;
+  if (!Number.isFinite(t)) return false;
+  if (t > now) return false;
+  return now - t <= TTL_MS;
+}
+function isStale(data, now) {
+  return !withinTtl(data.last_attempt, now) && !withinTtl(data.last_checked, now);
+}
 function parseSemver(v) {
-  const m = String(v).replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  const m = normalizeTag(v).match(/^(\d+)\.(\d+)\.(\d+)/);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 function isNewer(latestTag, current) {
@@ -23740,39 +23794,106 @@ function defaultFetcher() {
     signal: AbortSignal.timeout(2e3)
   });
 }
-async function backgroundRefresh(home, fetcher, nowIso, prev) {
+var OPTOUT_NOTICE = `RSCT's update check is OFF on this machine, so new releases \u2014 including security patches \u2014 are never reported, and no network call is made. This was recorded during /rsct-setup; on installs up to v2.5.1 "off" is also what got recorded when the question went unanswered, so it may not have been a deliberate choice. To turn it on, call rsct_status with update_check:"on"; to leave it off, do nothing.`;
+var POSTURE_NOTICE = 'RSCT now checks GitHub about once a day for a newer release, unless turned off. It is an unauthenticated GET of the latest-release tag: no project data, no code and no telemetry are sent \u2014 GitHub sees the IP, the time, and a User-Agent naming rsct-mcp and its version. To turn it off, call rsct_status with update_check:"off", or set RSCT_UPDATE_CHECK=off in the environment.';
+function updateHint(tag) {
+  const clean = normalizeTag(tag);
+  return `A newer RSCT release (v${clean}) is available \u2014 you have ${RSCT_MCP_VERSION}. Update the framework (git pull + reinstall) then run /rsct-setup to apply it. (suggestion only) If the dev declines THIS release, call rsct_status with decline_update:"v${clean}" \u2014 only the release named here is accepted, it will not be raised again, and a newer one will ask once.`;
+}
+function emitNotice(home, data, key, text) {
+  const count = noticeCount(data, key);
+  if (count >= NOTICE_MAX_SHOWS) return [];
+  const next = { ...data };
+  next[key] = count + 1;
+  return writeCacheAtomic(home, next) ? [text] : [];
+}
+async function backgroundRefresh(home, fetcher, nowIso) {
+  let succeeded = false;
+  let tag;
   try {
     const res = await fetcher();
-    if (!res.ok) return;
-    const body = await res.json();
-    const tag = typeof body.tag_name === "string" ? body.tag_name : prev.latest_tag;
-    const next = { consent: "yes", last_checked: nowIso };
-    if (tag !== void 0) next.latest_tag = tag;
-    writeCacheAtomic(home, next);
+    if (res.ok) {
+      const body = await res.json();
+      if (typeof body.tag_name === "string") tag = body.tag_name;
+      succeeded = true;
+    }
   } catch {
   }
+  const read = readCacheState(home);
+  if (read.kind === "unreadable") return;
+  const next = { ...read.kind === "ok" ? read.data : {}, last_attempt: nowIso };
+  if (succeeded) {
+    next.last_checked = nowIso;
+    if (tag !== void 0) next.latest_tag = tag;
+  }
+  writeCacheAtomic(home, next);
 }
 function getUpdateNotice(opts = {}) {
   try {
-    const home = opts.home ?? process.env.HOME ?? homedir();
-    const cache = readCache(home);
-    if (!cache || cache.consent !== "yes") return { hint: null };
+    const env = opts.env ?? process.env;
+    if (killSwitchOn(env)) return { hints: [] };
+    const home = resolveHome(opts);
+    const read = readCacheState(home);
+    if (read.kind === "unreadable") return { hints: [] };
+    const data = read.kind === "ok" ? read.data : {};
+    const consent = consentState(data);
+    if (consent === "off") {
+      return { hints: emitNotice(home, data, "optout_notice_count", OPTOUT_NOTICE) };
+    }
+    const hints = consent === "absent" ? emitNotice(home, data, "posture_notice_count", POSTURE_NOTICE) : [];
     const now = opts.now ?? Date.now();
-    const last = cache.last_checked ? Date.parse(cache.last_checked) : NaN;
-    const stale = !Number.isFinite(last) || now - last > TTL_MS;
-    if (stale) {
-      void backgroundRefresh(home, opts.fetcher ?? defaultFetcher, new Date(now).toISOString(), cache);
+    if (isStale(data, now) && !withinTtl(attemptMemo.get(home), now)) {
+      attemptMemo.set(home, now);
+      void backgroundRefresh(home, opts.fetcher ?? defaultFetcher, new Date(now).toISOString());
     }
-    if (cache.latest_tag && isNewer(cache.latest_tag, RSCT_MCP_VERSION)) {
-      const tag = cache.latest_tag.replace(/^v/, "");
-      return {
-        hint: `A newer RSCT release (v${tag}) is available \u2014 you have ${RSCT_MCP_VERSION}. Update the framework (git pull + reinstall) then run /rsct-setup to apply it. (suggestion only)`
-      };
+    const tag = typeof data.latest_tag === "string" ? data.latest_tag : "";
+    if (tag && isNewer(tag, RSCT_MCP_VERSION) && !declinedList(data).includes(normalizeTag(tag))) {
+      hints.push(updateHint(tag));
     }
-    return { hint: null };
+    return { hints };
   } catch {
-    return { hint: null };
+    return { hints: [] };
   }
+}
+function declineUpdateTag(tag, opts = {}) {
+  try {
+    const home = resolveHome(opts);
+    const read = readCacheState(home);
+    if (read.kind === "unreadable") return { ok: false, reason: "unreadable" };
+    const data = read.kind === "ok" ? read.data : {};
+    const cached2 = typeof data.latest_tag === "string" ? data.latest_tag : "";
+    const offered = cached2 && isNewer(cached2, RSCT_MCP_VERSION) ? normalizeTag(cached2) : "";
+    if (!offered) return { ok: false, reason: "no_offer" };
+    const wanted = normalizeTag(tag);
+    if (!wanted || wanted !== offered) return { ok: false, reason: "mismatch", tag: offered };
+    const list = declinedList(data);
+    if (list.includes(wanted)) return { ok: true, tag: wanted };
+    const next = { ...data, declined_tags: [...list, wanted] };
+    return writeCacheAtomic(home, next) ? { ok: true, tag: wanted } : { ok: false, reason: "write_failed" };
+  } catch {
+    return { ok: false, reason: "write_failed" };
+  }
+}
+function setUpdateCheckConsent(mode, opts = {}) {
+  try {
+    const home = resolveHome(opts);
+    const read = readCacheState(home);
+    if (read.kind === "unreadable") return { ok: false, reason: "unreadable" };
+    const next = { ...read.kind === "ok" ? read.data : {} };
+    if (mode === "off") {
+      next.consent = "no";
+      next.optout_notice_count = NOTICE_MAX_SHOWS;
+    } else {
+      next.consent = "yes";
+      next.optout_notice_count = 0;
+    }
+    return writeCacheAtomic(home, next) ? { ok: true } : { ok: false, reason: "write_failed" };
+  } catch {
+    return { ok: false, reason: "write_failed" };
+  }
+}
+function isUpdateCheckKilled(opts = {}) {
+  return killSwitchOn(opts.env ?? process.env);
 }
 
 // src/lib/version-drift.ts
@@ -23979,7 +24100,16 @@ function getInstallDriftNotice(args) {
 
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  // Values are deliberately LOOSE here while the exposed inputSchema advertises the
+  // strict contract. rsct_status is the session-bootstrap tool documented "always
+  // succeeds", and its .parse() is unguarded — a z.enum would turn a paraphrased
+  // update_check:"On" into a hard failure that also loses git state, topology and
+  // the install-drift security hint. `coerce` extends that to a `true` an agent
+  // might infer from an on/off switch: it becomes "true", which is simply ignored
+  // with a hint. Unknown KEYS still reject (.strict): loose values, strict shape.
+  update_check: external_exports.coerce.string().optional(),
+  decline_update: external_exports.coerce.string().optional()
 }).strict();
 var statusTool = {
   name: "rsct_status",
@@ -23990,13 +24120,22 @@ var statusTool = {
       project_root: {
         type: "string",
         description: "Optional absolute path to override project root detection."
+      },
+      update_check: {
+        type: "string",
+        enum: ["on", "off"],
+        description: 'Turn the GitHub update check on or off for this machine. It is ON by default (an unauthenticated GET of the latest release tag, once a day, cached, suggestion-only \u2014 no project data is sent). Pass "off" only when the dev asks for it; "on" re-enables it.'
+      },
+      decline_update: {
+        type: "string",
+        description: 'Record that the dev declined a specific release, e.g. "v2.6.0" \u2014 that release is never raised again, a newer one asks once more. Only the release currently being offered is accepted; any other tag is rejected. Pass this ONLY when the dev has actually declined.'
       }
     },
     additionalProperties: false
   }
 };
 var MCP_VERSION = RSCT_MCP_VERSION;
-async function statusHandler(rawInput) {
+async function statusHandler(rawInput, deps = {}) {
   const input = statusInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
   const git = readGitState(resolution.root);
@@ -24014,8 +24153,8 @@ async function statusHandler(rawInput) {
   if (universe.hint) hints.push(universe.hint);
   const topology = detectTopology(resolution.config, resolution.root, {}, universe);
   if (topology.hint) hints.push(topology.hint);
-  const update = getUpdateNotice();
-  if (update.hint) hints.push(update.hint);
+  applyUpdateMutations(input, deps.update, hints);
+  hints.push(...getUpdateNotice(deps.update).hints);
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice({
       projectRoot: resolution.root,
@@ -24041,6 +24180,53 @@ async function statusHandler(rawInput) {
     topology: topology.block,
     hints
   };
+}
+function applyUpdateMutations(input, opts, hints) {
+  if (input.update_check === void 0 && input.decline_update === void 0) return;
+  const killed = isUpdateCheckKilled(opts);
+  const CANNOT_READ = "The update-check cache (~/.rsct/update-check.json) exists but cannot be read or parsed \u2014 nothing was changed. Delete that file to reset it; the framework will recreate it.";
+  const show = (v) => v.length > 40 ? `${v.slice(0, 40)}\u2026` : v;
+  let turnedOff = false;
+  if (input.update_check !== void 0) {
+    const mode = input.update_check.trim().toLowerCase();
+    if (mode === "on" || mode === "off") {
+      const r = setUpdateCheckConsent(mode, opts);
+      if (!r.ok) {
+        hints.push(
+          r.reason === "unreadable" ? CANNOT_READ : "Could not persist the update_check setting (the cache file is not writable) \u2014 the check is unchanged."
+        );
+      } else if (mode === "off") {
+        turnedOff = true;
+        hints.push(
+          'Update check turned OFF for this machine \u2014 no release will be reported and no network call is made. Reversible with update_check:"on".'
+        );
+      } else {
+        hints.push(
+          killed ? "Update check turned ON in the config file, but RSCT_UPDATE_CHECK=off is set in this environment and takes precedence \u2014 no release will be reported until that variable is unset." : "Update check turned ON for this machine \u2014 new releases are reported once a day."
+        );
+      }
+    } else {
+      hints.push(`Ignored update_check:"${show(input.update_check)}" \u2014 expected "on" or "off".`);
+    }
+  }
+  if (input.decline_update !== void 0) {
+    const r = declineUpdateTag(input.decline_update, opts);
+    if (r.ok) {
+      hints.push(
+        turnedOff ? `Release v${r.tag} declined and recorded \u2014 though the update check was just turned off in this same call, so nothing will be reported until it is turned back on.` : `Release v${r.tag} declined \u2014 it will not be raised again on this machine; a newer release will ask once.`
+      );
+    } else if (r.reason === "mismatch") {
+      hints.push(
+        `Decline ignored: "${show(input.decline_update)}" is not the release being offered (v${r.tag}). Only the release named in the update hint can be declined \u2014 nothing was recorded.`
+      );
+    } else if (r.reason === "no_offer") {
+      hints.push("Decline ignored: no newer release is currently being offered \u2014 nothing was recorded.");
+    } else if (r.reason === "unreadable") {
+      hints.push(CANNOT_READ);
+    } else {
+      hints.push("Could not persist the decline (the cache file is not writable) \u2014 nothing was recorded.");
+    }
+  }
 }
 function buildStatusHints(resolution, git) {
   const hints = [];
