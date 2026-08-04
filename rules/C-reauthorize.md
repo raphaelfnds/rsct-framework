@@ -76,9 +76,10 @@ noted under "Plan execution modes" below):
 Each call consumes a single approval (INV-2 anti-reuse store at
 `.rsct/approvals-seen.json`) so the same payload cannot authorize two
 mutations. A SessionStart sanitizer hook strips poison-pill entries
-(`Bash(git commit*)`, `Bash(*git*)`, etc.) from
-`.claude/settings.local.json` at every boot so a once-approved blanket
-cannot persist. Every invocation, override, or rejection is appended
+(`Bash(git commit*)`, `Bash(git -C /repo commit)`, `Bash(*git*)`, etc.) from
+BOTH `.claude/settings.json` and `.claude/settings.local.json` at every boot, so
+a once-approved blanket cannot persist. It also relocates entries carrying a
+machine home path out of the versioned file into the gitignored local one. Every invocation, override, or rejection is appended
 to `.rsct/audit.log` for forensic review.
 
 **CAP-33 — bootstrap visibility on mutating tools (v0.7.11+):** all the

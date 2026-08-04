@@ -598,6 +598,11 @@ entries from `permissions.allow[]` in both `.claude/settings.json` and
 - Shell-wrapped forms (MED-12): `Bash(sh -c "git commit ...")`, `Bash(bash -c 'git push origin')` and the other POSIX shell variants (`zsh`, `dash`, `fish`, `ksh`, `csh`).
 - Wildcard-around-git (MED-12): `Bash(*git*)` and similar — the bash matcher would catch commit/push/merge inside any wildcard envelope.
 - `Bash(*)` / `Bash(:*)`
+- **Global options before the subcommand (#32):** `Bash(git -C /repo commit)`, `Bash(git -c user.name=x commit)`, `Bash(git --git-dir=/r/.git push)`, `Bash(git --work-tree=/w merge x)` and quoted variants like `Bash(git -C "C:/Program Files/repo" commit)`. `git -C <path> commit` is the sharpest of these — it commits in ANOTHER repository, escaping both §C and the project-scoped reasoning everything else relies on.
+- **A wildcard standing where the SUBCOMMAND belongs (#32):** `Bash(git -C:*)` authorises every subcommand, commit included. A wildcard in a pathspec (`Bash(git log -- src/*.ts)`) is NOT stripped — it authorises nothing extra.
+
+Read-only subcommands that merely START with a mutating verb are preserved:
+`Bash(git commit-graph write)`, `Bash(git merge-base a b)`, `Bash(git merge-tree a b)`. A hyphen is not a word character, so before #32 these matched `commit` and were being stripped.
 
 Benign entries (`Bash(npm test)`, `Edit`, `Read`, `WebFetch(domain:*)`,
 `mcp__rsct__*`, read-only git like `Bash(git status)`) are preserved.

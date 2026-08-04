@@ -10,7 +10,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.5.1] - 2026-08-04
+
+Security patch. No behaviour change to the framework itself; the marker schema id
+stays `v=1.0.0` and the tool count is unchanged at **39**.
 
 ### Fixed
 
