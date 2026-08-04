@@ -8,27 +8,20 @@ import {
   readArchitectureModules,
 } from './architecture.js'
 import { checkPremise } from './premise-check.js'
+import { makeIdGenerator, type FindingSeverity } from './findings.js'
 
 export type FindingCategory = 'gap' | 'breakage' | 'redundancy' | 'forgotten'
 
 /**
- * Suggested severity that the V phase complete tool surfaces to the dev.
- * The dev's final action lives in the `findings_actions[]` input of
+ * Suggested severity that the V phase complete tool surfaces to the dev. The
+ * dev's final action lives in the `findings_actions[]` input of
  * `rsct_phase_verification_complete` — these are recommendations, not gates.
  *
- * Severity ladder (high → low):
- *  - block             — V phase complete cannot proceed without dev action
- *  - address-now       — strong recommendation to handle before code-phase
- *  - capture-as-issue  — track separately so it does not block this task
- *  - defer             — record only; revisit at retrospective / next phase
- *  - accept            — finding acknowledged, no action needed
+ * Re-exported from `lib/findings.ts` rather than redeclared (#19), so this
+ * module's consumers keep importing it from here and the value list has exactly
+ * one home. See that module for why severity and action stay two names.
  */
-export type FindingSeverity =
-  | 'block'
-  | 'address-now'
-  | 'capture-as-issue'
-  | 'defer'
-  | 'accept'
+export type { FindingSeverity } from './findings.js'
 
 export interface VerificationFinding {
   id: string
@@ -105,11 +98,6 @@ const COMMON_BASENAMES = new Set([
   'main',
 ])
 
-function makeIdGenerator(): (cat: FindingCategory) => string {
-  let counter = 0
-  return (cat) => `v-${cat}-${++counter}`
-}
-
 function stripExt(p: string): string {
   return basename(p).replace(/\.[^.]+$/, '')
 }
@@ -119,7 +107,9 @@ export function runVerificationChecklist(
 ): ChecklistResult {
   const findings: VerificationFinding[] = []
   const hints: string[] = []
-  const nextId = makeIdGenerator()
+  // `v-` prefix: V-phase ids must stay distinguishable from REVIEW-phase ones in
+  // a shared audit trail, since findings_actions[] references them by hand.
+  const nextId = makeIdGenerator('v')
 
   const stats: ChecklistStats = {
     categories_run: [],

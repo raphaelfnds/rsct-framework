@@ -30061,6 +30061,25 @@ function walkReverseDeps(input) {
 
 // src/lib/verification-checklist.ts
 init_esm_shims();
+
+// src/lib/findings.ts
+init_esm_shims();
+var FINDING_ACTIONS = [
+  "block",
+  "address-now",
+  "capture-as-issue",
+  "defer",
+  "accept"
+];
+function emptyActionsSummary() {
+  return Object.fromEntries(FINDING_ACTIONS.map((a) => [a, 0]));
+}
+function makeIdGenerator(prefix) {
+  let counter = 0;
+  return (category) => `${prefix}-${category}-${++counter}`;
+}
+
+// src/lib/verification-checklist.ts
 var CATEGORY_PROMPTS = {
   "business-rules": "Did the spec consider business-rules.md? Check for invariants or compliance constraints.",
   "anti-decisions": "Did the spec consult anti-decisions.md? Avoid re-trying abandoned paths.",
@@ -30083,17 +30102,13 @@ var COMMON_BASENAMES = /* @__PURE__ */ new Set([
   "common",
   "main"
 ]);
-function makeIdGenerator() {
-  let counter = 0;
-  return (cat) => `v-${cat}-${++counter}`;
-}
 function stripExt(p) {
   return basename(p).replace(/\.[^.]+$/, "");
 }
 function runVerificationChecklist(input) {
   const findings = [];
   const hints = [];
-  const nextId = makeIdGenerator();
+  const nextId = makeIdGenerator("v");
   const stats = {
     categories_run: [],
     knowledge_categories_present: [],
@@ -30886,16 +30901,9 @@ async function phaseVerificationStartHandler(rawInput) {
 
 // src/tools/phase-verification-complete.ts
 init_esm_shims();
-var ACTION_VALUES = [
-  "accept",
-  "address-now",
-  "capture-as-issue",
-  "defer",
-  "block"
-];
 var findingActionSchema = external_exports.object({
   finding_id: external_exports.string().min(1, "finding_id required"),
-  action: external_exports.enum(ACTION_VALUES),
+  action: external_exports.enum(FINDING_ACTIONS),
   note: external_exports.string().optional()
 }).strict();
 var phaseVerificationCompleteInputSchema = external_exports.object({
@@ -30932,7 +30940,7 @@ var phaseVerificationCompleteTool = {
             finding_id: { type: "string" },
             action: {
               type: "string",
-              enum: [...ACTION_VALUES]
+              enum: [...FINDING_ACTIONS]
             },
             note: { type: "string" }
           },
@@ -30952,15 +30960,6 @@ var phaseVerificationCompleteTool = {
     additionalProperties: false
   }
 };
-function emptySummary() {
-  return {
-    accept: 0,
-    "address-now": 0,
-    "capture-as-issue": 0,
-    defer: 0,
-    block: 0
-  };
-}
 async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
   const input = phaseVerificationCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
@@ -30970,7 +30969,7 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
   const now = internal.now ?? /* @__PURE__ */ new Date();
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const summary = emptySummary();
+  const summary = emptyActionsSummary();
   for (const fa of input.findings_actions) {
     summary[fa.action]++;
   }
@@ -32565,21 +32564,41 @@ async function phaseReviewStartHandler(rawInput) {
 
 // src/tools/phase-review-complete.ts
 init_esm_shims();
+var findingActionSchema2 = external_exports.object({
+  finding_id: external_exports.string().min(1, "finding_id required"),
+  action: external_exports.enum(FINDING_ACTIONS),
+  note: external_exports.string().optional()
+}).strict();
 var phaseReviewCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
-  dev_approval: external_exports.unknown()
+  dev_approval: external_exports.unknown(),
+  findings_actions: external_exports.array(findingActionSchema2).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.')
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] to record what the review found and what the dev decided about each item \u2014 dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
     properties: {
       project_root: { type: "string" },
       spec_ref: { type: "string" },
-      dev_approval: { type: "object" }
+      dev_approval: { type: "object" },
+      findings_actions: {
+        type: "array",
+        description: 'Per-finding actions. action="block" aborts completion.',
+        items: {
+          type: "object",
+          required: ["finding_id", "action"],
+          properties: {
+            finding_id: { type: "string" },
+            action: { type: "string", enum: [...FINDING_ACTIONS] },
+            note: { type: "string" }
+          },
+          additionalProperties: false
+        }
+      }
     },
     additionalProperties: false
   }
@@ -32587,9 +32606,45 @@ var phaseReviewCompleteTool = {
 async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   const input = phaseReviewCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
+  const projectRoot = resolution.root;
+  const config2 = resolution.config;
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const actions_summary = emptyActionsSummary();
+  for (const fa of input.findings_actions) actions_summary[fa.action]++;
+  if (actions_summary.block > 0) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: "review.complete.rejected",
+        tool: "rsct_phase_review_complete",
+        spec_ref: input.spec_ref,
+        reject_kind: "block_actions_present",
+        blocked_count: actions_summary.block
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      phase: "review",
+      spec_ref: input.spec_ref,
+      channel: null,
+      reject_kind: "block_actions_present",
+      reason: `${actions_summary.block} review finding(s) marked action="block". Resolve them, then re-run rsct_phase_review_complete.`,
+      fabrication_signals: [],
+      cleared: false,
+      next_recommended_phase: "review",
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `REVIEW is not complete: ${actions_summary.block} finding(s) are blocking. Fix them or downgrade the action with the dev \u2014 a blocking finding is the one thing this phase will not wave through.`
+      ],
+      actions_summary
+    };
+  }
   const result = await gatePhaseComplete(
     {
-      projectRoot: resolution.root,
+      projectRoot,
       phase: "review",
       specRef: input.spec_ref,
       devApproval: input.dev_approval
@@ -32599,7 +32654,7 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   );
   if (result.status === "completed") {
     const completedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
-    const stamp = stampReviewDecision(resolution.root, {
+    const stamp = stampReviewDecision(projectRoot, {
       spec_ref: input.spec_ref,
       completed_at: completedAt
     });
@@ -32608,8 +32663,22 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
         `\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start may still report the review as incomplete \u2014 retry by re-running rsct_phase_review_complete, or check .rsct/phase-state.json.`
       );
     }
+    for (const fa of input.findings_actions) {
+      appendAudit(
+        projectRoot,
+        {
+          event: "review.action",
+          tool: "rsct_phase_review_complete",
+          spec_ref: input.spec_ref,
+          finding_id: fa.finding_id,
+          action: fa.action,
+          ...fa.note ? { note: fa.note } : {}
+        },
+        config2?.audit
+      );
+    }
   }
-  return result;
+  return { ...result, actions_summary };
 }
 
 // src/tools/phase-test-start.ts

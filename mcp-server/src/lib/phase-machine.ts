@@ -273,6 +273,8 @@ export type CompletePhaseRejectKind =
   | GateRejectKind
   | 'spec_ref_mismatch'
   | 'phase_mismatch'
+  /** #19: a REVIEW finding was marked action="block". */
+  | 'block_actions_present'
 
 export interface CompletePhaseResult {
   status: CompletePhaseStatus
