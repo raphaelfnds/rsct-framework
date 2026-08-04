@@ -137,6 +137,18 @@ silently reset it (fail-closed). Branch protection (INV-5) and the secret scan
 (INV-6) still apply — the free path carries no overrides. When the ceiling trips,
 the lane locks and the next commit falls back to a per-action `dev_approval`.
 
+**The lane is suspended while RSCT enforcement is not running.** It is a privilege
+granted on the premise that the mechanical layer is trustworthy; when an
+enforcement script under `.rsct/scripts/` is missing, or is present with no hook
+in `.claude/settings.json` wired to run it, that premise is provably false and the
+next commit falls back to a per-action `dev_approval`. Nothing is blocked — the
+commit still lands, it just costs one dialog, and the dialog is the point: it is
+the one channel that carries the warning where the agent cannot summarize it away.
+Be clear on what this buys, though: **reach, not enforcement.** If the sanitizer
+is not running, a poison-pill permission can persist and the agent can bypass
+`rsct_request_commit` entirely — suspending the lane does not close that. Run
+`/rsct-setup` and restart the IDE; the lane restores itself, with nothing to reset.
+
 For `standard`/`complex` tasks, execution is **one-at-a-time**: every commit needs
 its own fresh `dev_approval` (the anti-reuse rule above), unless the dev opts in
 to batch mode.

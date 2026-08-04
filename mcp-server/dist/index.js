@@ -26867,6 +26867,13 @@ function evaluateFreeEligibility(args) {
   if (!health.healthy) {
     return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(", ")}` };
   }
+  if (args.installDriftSecurity === true) {
+    return {
+      eligible: false,
+      reason: "install drift at security tier \u2014 RSCT enforcement is not running in this project",
+      installDriftSecurity: true
+    };
+  }
   if (!args.activePlanSlug) {
     return { eligible: false, reason: "no active plan" };
   }
@@ -27098,6 +27105,37 @@ function recordConsumedApproval(approval, options) {
       error: err instanceof Error ? err.message : String(err)
     };
   }
+}
+
+// src/lib/install-advisory.ts
+init_esm_shims();
+var NONE = { hint: null, dialogLine: null, isSecurity: false };
+function evaluateInstallAdvisory(args) {
+  if (!args.rsctInstalled) return NONE;
+  const drift = getInstallDriftNotice({
+    projectRoot: args.projectRoot,
+    projectVersion: args.projectVersion ?? null,
+    mcpVersion: RSCT_MCP_VERSION
+  });
+  if (drift.severity !== "security" || !drift.hint) return NONE;
+  const appendAudit = args.auditWriter ?? appendAuditEntry;
+  appendAudit(
+    args.projectRoot,
+    {
+      event: "install.drift_detected",
+      tool: args.tool,
+      project_version: args.projectVersion ?? null,
+      mcp_version: RSCT_MCP_VERSION,
+      severity: drift.severity,
+      affected_components: drift.affected_components
+    },
+    args.auditConfig
+  );
+  return {
+    hint: drift.hint,
+    dialogLine: "\u26A0 RSCT enforcement is NOT running in this project (see hints).",
+    isSecurity: true
+  };
 }
 
 // src/lib/commit-message.ts
@@ -27515,28 +27553,15 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const advisories = [];
   const withAdvisories = (hints2) => [...advisories, ...hints2];
-  if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice({
-      projectRoot,
-      projectVersion: config2?.rsct_version ?? null,
-      mcpVersion: RSCT_MCP_VERSION
-    });
-    if (drift.severity === "security" && drift.hint) {
-      advisories.unshift(drift.hint);
-      appendAudit(
-        projectRoot,
-        {
-          event: "install.drift_detected",
-          tool: "rsct_request_commit",
-          project_version: config2?.rsct_version ?? null,
-          mcp_version: RSCT_MCP_VERSION,
-          severity: drift.severity,
-          affected_components: drift.affected_components
-        },
-        config2?.audit
-      );
-    }
-  }
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_commit",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.unshift(installAdvisory.hint);
   const messageCheck = checkCommitMessage(input.message, config2);
   if (!messageCheck.ok) {
     const audit2 = appendAudit(
@@ -27634,6 +27659,7 @@ message: ${input.message}`
     const existing = readPhaseState(projectRoot);
     const activePlan2 = findActivePlan(projectRoot);
     const elig = evaluateFreeEligibility({
+      installDriftSecurity: installAdvisory.isSecurity,
       projectRoot,
       config: config2 ?? null,
       now,
@@ -27657,6 +27683,9 @@ message: ${input.message}`
         let reason = planTokenRejectReason(verdict.reason);
         if (verdict.reason === "absent" && elig.lockedHint) {
           reason = `free-commit budget is locked for this plan (${elig.reason}) \u2014 re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`;
+        }
+        if (verdict.reason === "absent" && elig.installDriftSecurity) {
+          reason = "the dialog-free commit lane is suspended while RSCT enforcement is not running \u2014 approve this commit per-action (dev_approval), or run /rsct-setup and restart the IDE to restore it";
         }
         const audit2 = appendAudit(
           projectRoot,
@@ -28369,6 +28398,17 @@ async function requestPushHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const { list: protectedList } = effectiveProtectedList(config2);
   const branchProtected = isProtectedBranch(branch, protectedList);
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_push",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint);
   if (branchProtected) {
     const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null;
     const progressOpen = pushingPlan ? progressHasOpenItems(projectRoot, pushingPlan.slug) : void 0;
@@ -28402,7 +28442,7 @@ async function requestPushHandler(rawInput, internal = {}) {
         ...auditFields(audit2),
         anti_replay_persisted: null,
         anti_replay_error: null,
-        hints: [hint]
+        hints: withAdvisories([hint])
       };
     }
   }
@@ -28411,7 +28451,14 @@ async function requestPushHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 push approval",
-      message: `Approve push of '${branchLabel}' to '${remote}'?`
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in
+      // hints[]. One line, deliberately: this is a decision surface, and a wall
+      // of text trains the dev to dismiss it unread.
+      message: [
+        `Approve push of '${branchLabel}' to '${remote}'?`,
+        ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
+      ].join("\n")
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -28444,7 +28491,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`])
     };
   }
   const approval = gate.approval;
@@ -28476,7 +28523,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (branchProtected && overrideBranch) {
@@ -28519,7 +28566,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   const push = gitPush(projectRoot, remote, branch, gitExecutor);
@@ -28549,7 +28596,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."]
+      hints: withAdvisories(["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."])
     };
   }
   const record2 = recordApproval(approval, { projectRoot, now });
@@ -28616,7 +28663,7 @@ async function requestPushHandler(rawInput, internal = {}) {
     ...afields,
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
-    hints
+    hints: withAdvisories(hints)
   };
 }
 
@@ -28683,6 +28730,17 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const allow_unrelated_histories = input.allow_unrelated_histories ?? false;
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const advisories = [];
+  const withAdvisories = (hints2) => [...advisories, ...hints2];
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_merge",
+    auditWriter: appendAudit
+  });
+  if (installAdvisory.hint) advisories.push(installAdvisory.hint);
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch);
   const progressOpen = integratingPlan ? progressHasOpenItems(projectRoot, integratingPlan.slug) : void 0;
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen);
@@ -28717,7 +28775,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [hint]
+      hints: withAdvisories([hint])
     };
   }
   const gate = await gateRequest({
@@ -28725,7 +28783,12 @@ async function requestMergeHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 merge approval",
-      message: `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`
+      // The dialog is the one channel the agent cannot rewrite or summarize
+      // away, which is why the security line belongs here and not only in hints[].
+      message: [
+        `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
+        ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
+      ].join("\n")
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -28760,7 +28823,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`])
     };
   }
   const approval = gate.approval;
@@ -28793,7 +28856,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (input.source_branch === targetBranch) {
@@ -28825,7 +28888,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if (allow_unrelated_histories && !overrideBranch) {
@@ -28857,7 +28920,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   const { list: protectedList } = effectiveProtectedList(config2);
@@ -28891,7 +28954,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: withAdvisories([reason])
     };
   }
   if ((targetProtected || allow_unrelated_histories) && overrideBranch) {
@@ -28944,7 +29007,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: ["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."]
+      hints: withAdvisories(["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."])
     };
   }
   const record2 = recordApproval(approval, { projectRoot, now });
@@ -29018,7 +29081,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
     ...afields,
     anti_replay_persisted: record2.ok,
     anti_replay_error: record2.ok ? null : record2.error,
-    hints
+    hints: withAdvisories(hints)
   };
 }
 

@@ -37,7 +37,7 @@ import {
   auditFields,
 } from '../lib/audit-log.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
-import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import { checkCommitMessage } from '../lib/commit-message.js'
 import {
   promptYesNo,
@@ -305,33 +305,18 @@ export async function requestCommitHandler(
 
   // Install drift, security tier only: an enforcement script under
   // `.rsct/scripts/` is absent, or is present with no hook entry pointing at it,
-  // so what it enforces is not running here. Evaluated before authorization, so the
-  // advisory reaches the dev on rejected attempts too, and prepended because it
-  // outranks the routine hint tail. The audit entry follows the same rule — it
-  // records that a commit was ATTEMPTED under a degraded enforcement surface,
-  // which is the fact worth reconstructing later. Never blocks.
-  if (resolution.rsct_installed) {
-    const drift = getInstallDriftNotice({
-      projectRoot,
-      projectVersion: config?.rsct_version ?? null,
-      mcpVersion: RSCT_MCP_VERSION,
-    })
-    if (drift.severity === 'security' && drift.hint) {
-      advisories.unshift(drift.hint)
-      appendAudit(
-        projectRoot,
-        {
-          event: 'install.drift_detected',
-          tool: 'rsct_request_commit',
-          project_version: config?.rsct_version ?? null,
-          mcp_version: RSCT_MCP_VERSION,
-          severity: drift.severity,
-          affected_components: drift.affected_components,
-        },
-        config?.audit,
-      )
-    }
-  }
+  // so what it enforces is not running here. Evaluated before authorization, so
+  // the advisory reaches the dev on rejected attempts too, and prepended because
+  // it outranks the routine hint tail. Never blocks.
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_request_commit',
+    auditWriter: appendAudit,
+  })
+  if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
 
   // Message shape (#20). Runs BEFORE authorization by necessity, not by taste:
   // `gateRequest` below pops an OS dialog, and further down the token path debits
@@ -443,6 +428,7 @@ export async function requestCommitHandler(
     const existing = readPhaseState(projectRoot)
     const activePlan = findActivePlan(projectRoot)
     const elig = evaluateFreeEligibility({
+      installDriftSecurity: installAdvisory.isSecurity,
       projectRoot,
       config: config ?? null,
       now,
@@ -472,6 +458,16 @@ export async function requestCommitHandler(
         // bare "no token" — the dev needs the re-classify / mint-token hint.
         if (verdict.reason === 'absent' && elig.lockedHint) {
           reason = `free-commit budget is locked for this plan (${elig.reason}) — re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`
+        }
+        // #25. Without this, a lane withheld for security drift falls through to
+        // the token path and reports `plan_token_invalid` — which would be a lie:
+        // nothing is wrong with the token, and it would send the dev to mint one
+        // instead of repairing enforcement. The advisory itself is already in
+        // hints[] via withAdvisories; this makes the REASON honest too.
+        if (verdict.reason === 'absent' && elig.installDriftSecurity) {
+          reason =
+            'the dialog-free commit lane is suspended while RSCT enforcement is not running — ' +
+            'approve this commit per-action (dev_approval), or run /rsct-setup and restart the IDE to restore it'
         }
         const audit = appendAudit(
           projectRoot,

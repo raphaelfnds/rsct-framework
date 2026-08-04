@@ -21,6 +21,15 @@ beforeEach(() => {
     'utf8',
   )
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+  // #25: the free lane is withheld while install drift is at the `security`
+  // tier, and an EMPTY `.rsct/scripts` reads as `absent` — which is that tier.
+  // A project this suite is about is a healthy install, so give it the scripts.
+  // Their bodies are irrelevant here: under vitest the shipped reference does
+  // not resolve, so they read `unreadable`, which escalates on neither axis.
+  mkdirSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true })
+  for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
+    writeFileSync(join(tmpRoot, '.rsct', 'scripts', name), '// present\n', 'utf8')
+  }
 })
 afterEach(() => {
   if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
@@ -174,5 +183,72 @@ describe('rsct_request_commit — free-commit lane (Bloco 1)', () => {
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('protected_branch')
     expect(out.authorized_via).toBe('free_commit') // free auth resolved, then INV-5 blocked
+  })
+})
+
+describe('rsct_request_commit — the free lane is suspended while enforcement is down (#25)', () => {
+  /** Remove the scripts beforeEach seeded → install drift goes `security`. */
+  function breakEnforcement(): void {
+    rmSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true, force: true })
+  }
+
+  it('withholds the dialog-free lane and says why, without blaming the token', async () => {
+    // The lane is a PRIVILEGE granted on the premise that the mechanical
+    // enforcement layer is trustworthy. A `security` drift says, verbatim, that
+    // enforcement is not running — so the premise is provably false.
+    breakEnforcement()
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'free checkpoint' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.channel).not.toBe('free_commit')
+    // The reason must NOT send the dev to mint a token: nothing is wrong with
+    // the token, and that would be repairing the wrong thing.
+    expect(out.reason).toContain('dialog-free commit lane is suspended')
+    expect(out.reason).toContain('/rsct-setup')
+    expect(out.reason).not.toContain('rsct_plan_authorize')
+    // The advisory itself still rides hints[], prepended.
+    expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
+  })
+
+  it('the lane works again as soon as enforcement is back — nothing to reset', async () => {
+    // Self-clearing by construction: the scripts seeded by beforeEach are what
+    // /rsct-setup reinstalls, and the verdict is recomputed per call. No flag,
+    // no stored state, no repair step.
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      { project_root: tmpRoot, message: 'free checkpoint' },
+      internal(smallStats),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('free_commit')
+  })
+
+  it('a per-action approval still lands the commit while the lane is suspended', async () => {
+    // Withholding a privilege is not gating. The dev keeps a way through — it
+    // just costs one dialog, which IS the point: the dialog is the out-of-band
+    // channel that actually carries the warning where hints[] cannot.
+    breakEnforcement()
+    eligibleProject()
+    const out = (await requestCommitHandler(
+      {
+        project_root: tmpRoot,
+        message: 'approved by hand',
+        dev_approval: {
+          timestamp: FIXED_NOW.toISOString(),
+          action_scope: 'commit',
+          reason: 'approved by hand',
+        },
+      },
+      internal(smallStats, { promptFn: async () => ({ response: 'yes', channel: 'windows' }) }),
+    )) as RequestCommitOutput
+
+    expect(out.status).toBe('committed')
+    expect(out.authorized_via).toBe('dev_approval')
+    expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
   })
 })

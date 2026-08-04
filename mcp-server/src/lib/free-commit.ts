@@ -237,6 +237,13 @@ export interface FreeEligibility {
   reason?: string
   /** True when ineligibility is a budget LOCK/exhaustion (surface the re-classify/token hint). */
   lockedHint?: boolean
+  /**
+   * True when the lane was withheld because enforcement is not running (#25).
+   * Distinct from `lockedHint`: the remedy is `/rsct-setup` + an IDE restart, not
+   * a re-classify or a token — telling the dev to mint a token here would send
+   * them to fix the wrong thing.
+   */
+  installDriftSecurity?: boolean
   planSlug?: string
   /** The effective (max of state+audit) tier_max the decision used. */
   tierMax?: string
@@ -259,6 +266,11 @@ export function evaluateFreeEligibility(args: {
   now: Date
   state: PhaseState | null
   activePlanSlug: string | null
+  /**
+   * #25. True when install drift is at the `security` tier — an enforcement
+   * script is absent, or present with no hook wired to run it.
+   */
+  installDriftSecurity?: boolean
   /** Test seam only — real callers omit this (health is computed from disk). */
   healthOverride?: McpHealth
 }): FreeEligibility {
@@ -268,6 +280,28 @@ export function evaluateFreeEligibility(args: {
     evaluateMcpHealth(args.projectRoot, { now: args.now, config: args.config })
   if (!health.healthy) {
     return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(', ')}` }
+  }
+
+  // (2) #25. The dialog-free lane is a PRIVILEGE granted on the premise that the
+  // mechanical enforcement layer is trustworthy — the same premise (1) checks
+  // from the health side. A `security` install drift says, verbatim, that
+  // enforcement is not running in this project, so the premise is provably
+  // false and the privilege is withheld until it is repaired.
+  //
+  // Be honest about what this buys: it is REACH, not enforcement. If the
+  // sanitizer is not running, a poison-pill `Bash(git commit:*)` can persist and
+  // the agent can bypass this tool altogether — suspending the lane does not
+  // close that. What it does close is the case where the ONLY channel carrying
+  // the warning is `hints[]`, which the agent relays at its discretion: falling
+  // back to a per-action approval puts the drift line in the OS dialog instead.
+  //
+  // Self-clearing: re-run /rsct-setup and the drift verdict goes away with it.
+  if (args.installDriftSecurity === true) {
+    return {
+      eligible: false,
+      reason: 'install drift at security tier — RSCT enforcement is not running in this project',
+      installDriftSecurity: true,
+    }
   }
 
   // (3) An active plan slug must resolve — never mint a null-keyed budget.
