@@ -115,6 +115,72 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
     expect(existsSync(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
   }, 90_000)
 
+  // #44: the code axis is a DRIFT REPORT — its whole job is to make a code-only change
+  // visible when the protocol version did not move. These three cover the states that
+  // report can be in. Before the fix all three collapsed into "same", because both
+  // sides of the comparison read the same docstring line.
+  it('fresh install reports the code axis as none, not as a broken marker', () => {
+    const home = newSandbox()
+    const r = runScript(INSTALL, home)
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out).toMatch(/Existing code\s*: none \(fresh install\)/)
+    // The empty arm of the guard has to fall through: folding '' into the sentinel
+    // would make every first install claim its marker is unreadable.
+    expect(r.out).not.toMatch(/unreadable/)
+  }, 60_000)
+
+  it('a real code-version bump is reported as drift, not as "same"', () => {
+    const home = newSandbox()
+    expect(runScript(INSTALL, home).ok).toBe(true)
+    // Rewind only the code marker; the installer re-reads it on the next run.
+    writeFileSync(join(rsctHome(home), 'VERSION-CODE'), '0.0.1\n', 'utf8')
+    const r = runScript(INSTALL, home)
+    expect(r.ok, r.out).toBe(true)
+    const pkgVersion = JSON.parse(
+      readFileSync(join(ROOT, 'mcp-server', 'package.json'), 'utf8'),
+    ).version as string
+    expect(r.out).toMatch(new RegExp(`Existing code\\s*: 0\\.0\\.1 → ${pkgVersion.replace(/\./g, '\\.')} \\(drift detected`))
+  }, 90_000)
+
+  it('a pre-#44 marker holding version.ts prose reports unreadable, not drift', () => {
+    const home = newSandbox()
+    expect(runScript(INSTALL, home).ok).toBe(true)
+    // Exactly what the old unanchored grep wrote: line 2 of version.ts's docstring.
+    writeFileSync(
+      join(rsctHome(home), 'VERSION-CODE'),
+      ' * The rsct-mcp server version (CODE axis) — the bundled `RSCT_MCP_VERSION` literal\n',
+      'utf8',
+    )
+    const r = runScript(INSTALL, home)
+    expect(r.ok, r.out).toBe(true)
+    // Not "prose → 2.6.1 (drift detected)": the dev's code did not move, the marker is
+    // simply unreadable. And the prose must not be echoed above the [y/N] confirm.
+    expect(r.out).toMatch(/Existing code\s*: unreadable/)
+    expect(r.out).not.toMatch(/the bundled/)
+    // Self-healing: this same run rewrites the marker with a real version.
+    const healed = readFileSync(join(rsctHome(home), 'VERSION-CODE'), 'utf8').trim()
+    expect(healed).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/)
+  }, 90_000)
+
+  // A CRLF marker is reachable by copying ~/.rsct between machines.
+  //
+  // HONEST COVERAGE NOTE — measured, do not assume this test protects you locally:
+  // Git Bash strips a trailing CR in command substitution, so on Windows this passes
+  // WITH OR WITHOUT the `tr -d '\r'` in install.sh. Verified by removing the tr and
+  // re-running: still 10/10 green on Git Bash. It only bites on the four Linux/macOS
+  // CI cells, where "2.6.1\r" != "2.6.1" would report drift on EVERY run — #44
+  // inverted. Kept because those cells are exactly where the bug is reachable; do not
+  // "confirm the guard" from a Windows run alone.
+  it('a CRLF marker does not fabricate drift (only provable on Linux/macOS)', () => {
+    const home = newSandbox()
+    expect(runScript(INSTALL, home).ok).toBe(true)
+    const current = readFileSync(join(rsctHome(home), 'VERSION-CODE'), 'utf8').trim()
+    writeFileSync(join(rsctHome(home), 'VERSION-CODE'), `${current}\r\n`, 'utf8')
+    const r = runScript(INSTALL, home)
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out).toMatch(/Existing code\s*: .*\(same — refresh only\)/)
+  }, 90_000)
+
   it('uninstall scrubs ~/.rsct and the slash commands', () => {
     const home = newSandbox()
     expect(runScript(INSTALL, home).ok).toBe(true)
