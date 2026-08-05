@@ -100,14 +100,36 @@ fi
 # fixes from `npm install -g` "up to date" reporting. Neither is the
 # `v=1.0.0` marker SCHEMA ID — that's a separate, frozen idempotency key
 # carried inside markers, never stored in these files.
+# Both reads use the same `tr -d '\r' | head -1` shape as the incoming axes below.
+# ~/.rsct/ can be copied between machines or hand-edited, so a CRLF marker is reachable
+# even though the installer only ever writes LF (anti-pattern #4). On Linux/macOS a
+# surviving CR makes "2.6.1\r" != "2.6.1" and the report would claim drift on EVERY run
+# — issue #44 inverted. Git Bash strips a trailing CR in command substitution, so this
+# is exactly the class a Windows-only check cannot see. `[ -f ]` already covers absence,
+# so the old `2>/dev/null` goes with it.
 EXISTING_VERSION=""
 if [ -f "$RSCT_HOME/VERSION" ]; then
-  EXISTING_VERSION=$(cat "$RSCT_HOME/VERSION" 2>/dev/null | head -1)
+  EXISTING_VERSION=$(tr -d '\r' < "$RSCT_HOME/VERSION" | head -1)
 fi
 EXISTING_CODE_VERSION=""
 if [ -f "$RSCT_HOME/VERSION-CODE" ]; then
-  EXISTING_CODE_VERSION=$(cat "$RSCT_HOME/VERSION-CODE" 2>/dev/null | head -1)
+  EXISTING_CODE_VERSION=$(tr -d '\r' < "$RSCT_HOME/VERSION-CODE" | head -1)
 fi
+# A marker written by a pre-#44 installer holds a sentence from version.ts's docstring,
+# not a version. Read back verbatim it is printed above the [y/N] confirm AND compared,
+# so it would announce "drift detected, will update" to a dev whose code never moved.
+# "The marker is unreadable" is a different fact, and the one worth saying.
+#
+# TWO arms on purpose: the EMPTY case must fall through untouched, because empty means
+# "no marker" and the report below reads that as `none (fresh install)` via [ -n ].
+# Folding '' into the sentinel would make every fresh install claim a broken marker.
+# "unreadable" also differs from "unknown" deliberately — the latter is the INCOMING
+# axis's parse-miss value, and two different diagnoses must not render identically.
+# Self-limiting: the same install that prints it also rewrites the marker.
+case "$EXISTING_CODE_VERSION" in
+  '') ;;
+  *[!0-9.]*) EXISTING_CODE_VERSION="unreadable" ;;
+esac
 
 # --- Read incoming versions ---
 # PROTOCOL/product version from the single-source /VERSION (issue #7). Missing file →
@@ -124,12 +146,37 @@ case "$NEW_VERSION" in
 esac
 # Code version from mcp-server/src/lib/version.ts (single source of truth
 # per its own docstring; mirrored in mcp-server/package.json).
+# Anchored on the DECLARATION, not the bare symbol: version.ts opens with a docstring
+# that mentions `RSCT_MCP_VERSION`, so an unanchored match let `head -1` take the prose
+# line — which carries no single quotes, so the sed substituted nothing and passed the
+# whole sentence through into ~/.rsct/VERSION-CODE. Both sides of the drift comparison
+# then read that same prose and the report was permanently "same", hiding exactly the
+# code-axis drift this axis exists to surface (issue #44).
+#
+# TWO independent defences, on purpose — measured by mutation:
+#   1. the `^export const` anchor, so the docstring line can never win;
+#   2. `sed -n …p`, which PRINTS ONLY lines that actually contain a quoted value —
+#      the old `sed -E "s/…/…/"` (no -n) passed every line through unchanged, which
+#      is what let the prose escape. Reverting either one alone still yields the
+#      correct version; reverting BOTH reproduces #44 and kills four tests.
+#
+# `sed -n …p` LAST, so the pipeline's exit status is sed's (0 even when nothing
+# matched) and a no-match cannot trip a caller running under `set -e`. Putting the
+# grep last would return 1 on no-match. The `tr -d '\r'` guards a CRLF checkout
+# (anti-pattern #4) — belt to the sed's trailing `.*`, which would also absorb a CR,
+# but the pipeline must not depend on that.
 NEW_CODE_VERSION=""
 if [ -f "$SOURCE_DIR/mcp-server/src/lib/version.ts" ]; then
-  NEW_CODE_VERSION=$(grep -E "RSCT_MCP_VERSION" "$SOURCE_DIR/mcp-server/src/lib/version.ts" \
-    | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+  NEW_CODE_VERSION=$(tr -d '\r' < "$SOURCE_DIR/mcp-server/src/lib/version.ts" \
+    | grep -E "^export const RSCT_MCP_VERSION" \
+    | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
 fi
-[ -z "$NEW_CODE_VERSION" ] && NEW_CODE_VERSION="unknown"
+# Same numeric guard the protocol axis uses above: a parse miss must degrade to
+# "unknown" (fail-visible) instead of writing whatever text happened to match. The
+# old `[ -z ]` check only caught the empty case, so a non-empty garbage string passed.
+case "$NEW_CODE_VERSION" in
+  ''|*[!0-9.]*) NEW_CODE_VERSION="unknown" ;;
+esac
 
 # --- Detect Node 20+ for optional MCP companion install ---
 NODE_STATUS="missing"
