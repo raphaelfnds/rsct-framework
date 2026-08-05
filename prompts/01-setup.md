@@ -620,7 +620,16 @@ fields** are subject to discrepancy resolution.
 **UPDATE mode**: CLAUDE.md exists AND has at least one rule (`present-en` or `present-ptbr`).
 → Migrate `present-ptbr` rules to English (wrap result in RSCT markers).
 → Add `missing` rules (wrap in RSCT markers).
-→ Never overwrite `present-en` content.
+→ Reconcile `present-en` sections in Phase 4.3b — **never blindly**. A body is
+  rewritten only when its authorship is PROVED (its hash matches the marker, or it
+  already matches the shipped rule). Anything unproved is preserved and reported, and
+  is replaced only if the dev names that section in `SECTIONS_TO_ADOPT`.
+
+  This replaces the old "never overwrite `present-en` content" rule, which was safe
+  but meant a section froze at whatever release first installed it — so a changed
+  `rules/X-*.md` never reached the project and `CLAUDE.md` drifted away from the
+  binary enforcing it (issue #45). Content OUTSIDE a marker pair is still never
+  touched, by any phase.
 
 **CREATE mode**: CLAUDE.md does not exist OR has no RSCT rules.
 → Create everything from scratch (all sections wrapped in RSCT markers).
@@ -914,8 +923,14 @@ For each rule marked `present-ptbr`:
      project-specific text stays recoverable via git — see below); **(b)** keep
      the dev's section body as-is, only wrapping it in markers with
      `source=migrated-from-ptbr-preserved`; or **(c)** hand-merge the canonical
-     rule into the dev's section. **Default to NOT replacing** until the dev
-     chooses.
+     rule into the dev's section, marking it `source=hand-merged`. **Default to
+     NOT replacing** until the dev chooses.
+
+     The `source=` value matters beyond provenance: Phase 4.3b reconciles only
+     `inserted` and `migrated-from-ptbr`. Options (b) and (c) produce DEV-authored
+     bodies, so their `source=` values put them permanently outside reconciliation —
+     4.3b will never rewrite them, not even under `SECTIONS_TO_ADOPT="__all__"`.
+     Use the exact strings above; an unrecognised value is treated as dev-owned too.
 3. Replace (or, per 2b, wrap-only) the section, **wrapped in markers**:
    ```
    <!-- RSCT-§X-BEGIN v=1.0.0 source=migrated-from-ptbr -->
@@ -950,6 +965,10 @@ file, **wrapped in markers**:
 <content from rules/X-*.md>
 <!-- RSCT-§X-END -->
 ```
+
+Do **not** write a `sha256-body=` field by hand — Phase 4.3b computes and stamps it
+with `sha256_compute` right after this step. A hand-written hash is always wrong, and
+nothing downstream would catch it.
 
 Insertion order when creating new sections:
 ```
@@ -1209,6 +1228,254 @@ After the header is in place, insert the rule sections into the
 
 Phase 4.2 Step D will rotate the `updated:` date on every future
 re-run; the header line itself is preserved as-is.
+
+Do **not** write a `sha256-body=` field by hand into these markers — Phase 4.3b
+computes and stamps it with `sha256_compute`. A hand-written hash is always wrong,
+and nothing downstream would catch it.
+
+### 4.3b — Rule-section reconciliation + body-hash stamp (canonical bash)
+
+Runs in **both** modes, right after the sections exist: in UPDATE mode Phase 4.3 is
+skipped so this follows Step B; in CREATE mode it follows 4.3.
+
+**The problem it fixes (issue #45).** Phase 2 says *"never overwrite `present-en`
+content"*, so once a section was in English its body was frozen **forever** — a rule
+change in `rules/X-*.md` never reached an installed project. Measured on a real 2.3.0
+install taken to 2.6.1: three rule files had changed and none propagated, leaving a
+`CLAUDE.md` that actively contradicted the installed binary (§C documented a fixed
+15-line commit cap while the MCP read `commit_message_max_lines` from `.rsct.json`).
+It was silent too: Phase 4.4 restamps `.rsct.json rsct_version` on every run, so the
+one field a dev would check reported "current" while the bodies stayed old.
+
+**The authorship rule — the invariant that makes this safe.** A body is written ONLY
+when the authorship of the CURRENT body is *proved*: either `sha(body)` equals the
+marker's own `sha256-body`, or `sha(body)` equals the sha of the **currently shipped**
+`rules/X-*.md`. Absence of proof is PRESERVE + a report + a per-section consent
+channel. Authorship is **never** inferred from `source=`, from `rsct_version`, from
+`v=`, nor from the absence of a hash.
+
+Corollary: `sha256-body` is stamped only over bytes this block just emitted, or bytes
+it just proved equal to the shipped rule — never over a body of unknown origin, which
+would launder a stale section into "verified".
+
+**Why comparing against the CURRENT rule is enough** (and why no history is needed):
+`~/.rsct/rules/` holds only one generation — `scripts/install.sh` does `rm -rf` then
+`cp -r`, so the previous release's bodies exist nowhere on the dev's machine. But
+`body == currently shipped rule` is provable with zero history, and on a real upgrade
+that is true for most sections. At that moment the hash can be stamped for free, in
+silence, with no risk. That is the whole migration path for every hashless install in
+the field.
+
+**The trailing-blank-line trim is load-bearing.** Measured against a real 2.3.0
+install: §A, §F and §G differed from their shipped rule by *exactly one trailing blank
+line* — an artifact of the agent pasting the body, not drift. With the trim, a
+classifier carrying no historical data resolves 9 of 9 sections correctly, and the
+three it cannot verify are exactly the three that genuinely changed. Without it, six
+reports, half of them false.
+
+```bash
+echo "  CHECKPOINT: Phase 4.3b executing canonical rule-section reconciliation"
+CLAUDE_MD="$(pwd)/CLAUDE.md"
+RULES_DIR="$HOME/.rsct/rules"
+
+# Sections the dev authorized replacing in THIS run. Same shape as
+# SECTIONS_TO_REMOVE in 03-uninstall.md: set BEFORE the block, from the dev's answer
+# to the report a PREVIOUS run produced. Empty default (anti-pattern #6) means nothing
+# unverifiable is ever rewritten without an explicit id.
+#   adopt two:  SECTIONS_TO_ADOPT="C E"
+#   adopt all:  SECTIONS_TO_ADOPT="__all__"
+SECTIONS_TO_ADOPT="${SECTIONS_TO_ADOPT:-}"
+
+# Same portable helper as Phase 4.5. Re-defined because each block runs in its own
+# shell — never assume a helper from another phase is still in scope.
+sha256_compute() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
+  else openssl dgst -sha256 | awk '{print $NF}'; fi
+}
+
+# THE canonical body form — used identically by the reader, the comparator and the
+# writer, so the three can never disagree. Strips CR (anti-pattern #4) and drops
+# trailing empty lines (see the note above: without this, three pristine sections
+# read as drifted).
+canon_body() {
+  tr -d '\r' | awk '{ n++; L[n] = $0 } END { while (n > 0 && L[n] == "") n--; for (k = 1; k <= n; k++) print L[k] }'
+}
+
+# `§` is U+00A7 — TWO bytes (c2 a7). Inside a bracket expression `[§]` decomposes into
+# "one byte, c2 or a7" and matches NOTHING, silently, on grep 3.0 AND sed 4.9 AND
+# gawk 5.0. This is the one place where CLAUDE.md anti-pattern #2's reflex (prefer a
+# char class over an escape) would be FATAL. Every match below is byte-literal:
+# `grep -F` (never with -i — anti-pattern #7) and awk `index()`, never a regex.
+SECTION_RULES="0|0-session-bootstrap.md
+A|A-bug-mode.md
+B|B-architect-plan.md
+C|C-reauthorize.md
+D|D-branch-protection.md
+E|E-secrets-leak.md
+F|F-state-reversibility.md
+G|G-testing.md
+H|H-adr-learning.md"
+
+SEC_SKIP=0; SEC_STAMP=0; SEC_UPDATE=0; SEC_ADOPT=0
+SEC_PRESERVE=0; SEC_UNVERIFIED=0; SEC_DEVOWNED=0; SEC_ABSENT=0; SEC_MALFORMED=0
+SEC_PENDING=""
+
+if [ ! -f "$CLAUDE_MD" ]; then
+  echo "  ⚠ CLAUDE.md not found — Phase 4.2/4.3 must run first; reconciliation skipped" >&2
+else
+# anti-pattern #1: process substitution, NEVER `| while` — the counters above must
+# survive the loop (CAP-13/CAP-19).
+while IFS='|' read -r SEC RULE_NAME; do
+  [ -z "$SEC" ] && continue
+  RULE_FILE="${RULES_DIR}/${RULE_NAME}"
+  if [ ! -f "$RULE_FILE" ]; then
+    echo "  ⚠ §${SEC}: RULES_MISSING (${RULE_NAME}) — inspect ~/.rsct/rules/" >&2
+    continue
+  fi
+
+  N_BEGIN=$(grep -cF "<!-- RSCT-§${SEC}-BEGIN" "$CLAUDE_MD" || true)
+  N_END=$(grep -cF "<!-- RSCT-§${SEC}-END" "$CLAUDE_MD" || true)
+  if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
+    echo "  ABSENT     §${SEC}: no marker pair (insertion is Phase 4.2 Step B / 4.3)"
+    SEC_ABSENT=$((SEC_ABSENT + 1)); continue
+  fi
+  if [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
+    echo "  ⚠ MALFORMED §${SEC}: ${N_BEGIN} BEGIN / ${N_END} END marker(s), expected 1 each — NOT touched" >&2
+    SEC_MALFORMED=$((SEC_MALFORMED + 1)); continue
+  fi
+
+  BEGIN_LINE=$(grep -F "<!-- RSCT-§${SEC}-BEGIN" "$CLAUDE_MD" | head -1 | tr -d '\r')
+  SEC_SOURCE=$(printf '%s\n' "$BEGIN_LINE" | sed -n 's/.* source=\([A-Za-z0-9_-]*\).*/\1/p')
+  MARKER_SHA=$(printf '%s\n' "$BEGIN_LINE" | sed -n 's/.*sha256-body=\([a-f0-9]\{64\}\).*/\1/p')
+
+  # WHITELIST, never a blacklist. Step A option 2b writes
+  # `source=migrated-from-ptbr-preserved` over the DEV'S OWN prose, deliberately kept.
+  # Its body will never match canonical, and a naive classifier would see
+  # `body == marker sha != canonical` and auto-UPDATE — destroying exactly the content
+  # the dev chose to keep. Any unknown/future source value is treated the same way.
+  case "${SEC_SOURCE:-unknown}" in
+    inserted|migrated-from-ptbr) ;;
+    *)
+      echo "  DEV_OWNED  §${SEC}: source=${SEC_SOURCE:-<none>} — dev-authored body, never reconciled"
+      SEC_DEVOWNED=$((SEC_DEVOWNED + 1)); continue ;;
+  esac
+
+  # awk index($0,b)==1 — byte-substring, anchored at column 1. No regex touches `§`,
+  # and the column anchor stops a marker quoted inside prose from opening a range.
+  BODY=$(awk -v b="<!-- RSCT-§${SEC}-BEGIN" -v e="<!-- RSCT-§${SEC}-END" \
+    'index($0,b)==1 {f=1; next} f && index($0,e)==1 {f=0; next} f' "$CLAUDE_MD" | canon_body)
+  BODY_SHA=$(printf '%s\n' "$BODY" | sha256_compute)
+  RULE_BODY=$(canon_body < "$RULE_FILE")
+  RULE_SHA=$(printf '%s\n' "$RULE_BODY" | sha256_compute)
+  NEW_BEGIN="<!-- RSCT-§${SEC}-BEGIN v=1.0.0 source=${SEC_SOURCE} sha256-body=${RULE_SHA} -->"
+
+  if [ "$BODY_SHA" = "$RULE_SHA" ]; then
+    if [ "$MARKER_SHA" = "$RULE_SHA" ]; then
+      echo "  SKIP       §${SEC}"; SEC_SKIP=$((SEC_SKIP + 1)); continue
+    fi
+    ACTION="STAMP"        # body already canonical — only the marker gains the hash
+  elif [ -z "$MARKER_SHA" ]; then
+    ACTION="UNVERIFIED"   # legacy hashless marker AND drift: cannot classify
+  elif [ "$BODY_SHA" = "$MARKER_SHA" ]; then
+    ACTION="UPDATE"       # untouched since install AND the shipped rule changed
+  else
+    ACTION="PRESERVE"     # dev edited the body after install
+  fi
+
+  # `__all__` deliberately does NOT cover PRESERVE. It is the bulk-migration shortcut
+  # for legacy hashless markers, where the dev is accepting "refresh whatever I cannot
+  # prove I edited". A PRESERVE is different in kind: the hash PROVES the dev changed
+  # that body after install, so overwriting it must cost an explicit id. Without this
+  # split, one `__all__` silently destroys every deliberate local edit — verified by
+  # running exactly that.
+  if [ "$ACTION" = "UNVERIFIED" ] || [ "$ACTION" = "PRESERVE" ]; then
+    ADOPT_MATCH="no"
+    case " ${SECTIONS_TO_ADOPT} " in
+      *" ${SEC} "*) ADOPT_MATCH="yes" ;;
+      *" __all__ "*) [ "$ACTION" = "UNVERIFIED" ] && ADOPT_MATCH="yes" ;;
+    esac
+    case "$ADOPT_MATCH" in
+      yes) ACTION="ADOPT" ;;
+      *)
+        if [ "$ACTION" = "UNVERIFIED" ]; then
+          echo "  UNVERIFIED §${SEC}: body differs from the shipped rule and the marker carries no sha256-body (installed before this check existed) — cannot tell 'dev edited' from 'old release'. NOT touched."
+          SEC_UNVERIFIED=$((SEC_UNVERIFIED + 1))
+        else
+          echo "  PRESERVE   §${SEC}: body edited after install (sha mismatch with marker) — NOT touched."
+          SEC_PRESERVE=$((SEC_PRESERVE + 1))
+        fi
+        SEC_PENDING="${SEC_PENDING}${SEC} "; continue ;;
+    esac
+  fi
+
+  # The ONLY mutation. node, not sed -i: a multi-line splice that must land identically
+  # on GNU and BSD and must preserve the file's existing EOL. This also removes the
+  # Darwin/GNU `sed -i ''` branch entirely. `String.fromCharCode(167)` builds the `§`
+  # so the -e source stays pure ASCII — MSYS mangles escapes inside `node -e`.
+  # The body arrives on stdin ALREADY canonicalised, so bash owns normalisation in
+  # exactly one place and node is a dumb splicer; the two can never diverge.
+  printf '%s\n' "$RULE_BODY" | node -e '
+    var fs = require("fs");
+    var S = String.fromCharCode(167);
+    var file = process.argv[1], id = process.argv[2], newBegin = process.argv[3];
+    var txt = fs.readFileSync(file, "utf8");
+    var nl = txt.indexOf("\r\n") !== -1 ? "\r\n" : "\n";
+    var lines = txt.split(nl);
+    var b = "<!-- RSCT-" + S + id + "-BEGIN";
+    var e = "<!-- RSCT-" + S + id + "-END";
+    var bi = -1, ei = -1, i;
+    for (i = 0; i < lines.length; i++) {
+      if (bi < 0) { if (lines[i].indexOf(b) === 0) bi = i; }
+      else if (lines[i].indexOf(e) === 0) { ei = i; break; }
+    }
+    if (bi < 0 || ei < 0) { console.error("  marker pair not found for " + id + " — untouched"); process.exit(3); }
+    var body = fs.readFileSync(0, "utf8").replace(/\r/g, "").replace(/\n+$/, "").split("\n");
+    var out = lines.slice(0, bi).concat([newBegin], body, lines.slice(ei));
+    fs.writeFileSync(file, out.join(nl), "utf8");
+  ' "$CLAUDE_MD" "$SEC" "$NEW_BEGIN" || { echo "  ⚠ ERROR: §${SEC} splice failed — inspect $CLAUDE_MD manually" >&2; continue; }
+
+  # Post-mutation verification (mirrors Phase 4.5's A2 guard): a writer that claims it
+  # wrote and did not is exactly what this catches.
+  VERIFY=$(awk -v b="<!-- RSCT-§${SEC}-BEGIN" -v e="<!-- RSCT-§${SEC}-END" \
+    'index($0,b)==1 {f=1; next} f && index($0,e)==1 {f=0; next} f' "$CLAUDE_MD" | canon_body)
+  if [ "$(printf '%s\n' "$VERIFY" | sha256_compute)" != "$RULE_SHA" ]; then
+    echo "  ⚠ ERROR: §${SEC} post-write verification failed — inspect $CLAUDE_MD manually" >&2
+    continue
+  fi
+
+  case "$ACTION" in
+    STAMP)  echo "  STAMP      §${SEC}: body already matches the shipped rule — marker now carries sha256-body"; SEC_STAMP=$((SEC_STAMP + 1)) ;;
+    UPDATE) echo "  UPDATE     §${SEC}: shipped rule changed since install; body was provably unmodified"; SEC_UPDATE=$((SEC_UPDATE + 1)) ;;
+    ADOPT)  echo "  ADOPT      §${SEC}: canonical body applied by explicit dev consent (SECTIONS_TO_ADOPT)"; SEC_ADOPT=$((SEC_ADOPT + 1)) ;;
+  esac
+done < <(printf '%s\n' "$SECTION_RULES")
+fi
+
+echo "  Phase 4.3b summary:"
+echo "    SKIP=$SEC_SKIP STAMP=$SEC_STAMP UPDATE=$SEC_UPDATE ADOPT=$SEC_ADOPT"
+echo "    PRESERVE=$SEC_PRESERVE UNVERIFIED=$SEC_UNVERIFIED DEV_OWNED=$SEC_DEVOWNED ABSENT=$SEC_ABSENT MALFORMED=$SEC_MALFORMED"
+if [ -n "$SEC_PENDING" ]; then
+  echo "    → §${SEC_PENDING}need a decision. Show the dev the diff, then re-run THIS block with SECTIONS_TO_ADOPT=\"<ids>\"."
+fi
+```
+
+**When sections are reported pending**, show the dev a focused diff per section and
+ask — same decision shape as Phase 4.2 Step A, defaulting to NOT replacing. This
+helper is read-only:
+
+```bash
+# Read-only. Set both to the section under discussion, then run.
+SEC="C"
+RULE_FILE="$HOME/.rsct/rules/C-reauthorize.md"
+diff -u \
+  <(awk -v b="<!-- RSCT-§${SEC}-BEGIN" -v e="<!-- RSCT-§${SEC}-END" \
+      'index($0,b)==1 {f=1; next} f && index($0,e)==1 {f=0; next} f' "$(pwd)/CLAUDE.md" | tr -d '\r') \
+  <(tr -d '\r' < "$RULE_FILE") | head -120
+```
+
+Then re-run the 4.3b block with `SECTIONS_TO_ADOPT="<ids the dev approved>"`. The
+block is idempotent, so re-running is always safe.
 
 ### 4.4 — Create or update `.rsct.json` (integrity vs config fields)
 

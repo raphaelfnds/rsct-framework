@@ -10,6 +10,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **`CLAUDE.md` rule sections stopped being frozen forever (#45).** Phase 2 said
+  "never overwrite `present-en` content", so once a section was in English its body
+  never changed again — a rule edit in `rules/X-*.md` reached no installed project.
+  Measured taking a real 2.3.0 install to 2.6.1: three rule files had changed and none
+  propagated, leaving a `CLAUDE.md` that actively contradicted the binary enforcing it
+  (§C documented a fixed 15-line commit cap while the MCP read
+  `commit_message_max_lines` from `.rsct.json`). It was silent, too: Phase 4.4
+  restamps `.rsct.json rsct_version` on every run, so the one field a dev would check
+  reported "current" while the bodies stayed old.
+
+  New Phase **4.3b** reconciles the nine sections, under one invariant: **a body is
+  rewritten only when its authorship is provable** — its hash matches the marker, or
+  it already matches the shipped rule. Anything unproved is preserved and reported.
+  Authorship is never inferred from `source=`, from `rsct_version`, from `v=`, or from
+  the absence of a hash.
+
+  Section markers gain `sha256-body=`. This is additive: the marker schema id stays
+  `v=1.0.0`, and the uninstall excision — which matches by prefix and never anchors on
+  `-->` — is unaffected (now pinned by a test rather than reasoned about).
+
+  Migration needed no release history, which the issue assumed impossible. `~/.rsct/`
+  holds exactly one generation (`install.sh` does `rm -rf` then `cp -r`), so no
+  previous rule bodies exist on the machine — but `body == currently shipped rule` is
+  provable with zero history, and on a real upgrade that holds for most sections. The
+  hash is stamped at that moment, free and silent. Measured against a real 2.3.0
+  install, a classifier carrying no historical data resolves 9 of 9 sections
+  correctly.
+
+  Two guards, both mutation-verified:
+  - `SECTIONS_TO_ADOPT="__all__"` is a bulk shortcut for legacy hashless sections and
+    **cannot** overwrite a body the hash proves the dev edited; that costs an explicit
+    section id.
+  - `source=` is a whitelist (`inserted`, `migrated-from-ptbr`). Step A option 2b
+    wraps the dev's OWN prose in markers, so its body never matches canonical — a
+    classifier without the whitelist would auto-UPDATE and destroy it.
+
+  One measurement worth recording: three sections on that real install differed from
+  their rule by **exactly one trailing blank line**, an artifact of the agent pasting
+  the body. The canonical form therefore drops trailing blank lines on both sides;
+  without it those three read as drifted and raise false alarms.
+
+  Cross-OS note for future work: `§` is U+00A7, **two bytes**. Inside a bracket
+  expression `[§]` decomposes into "one byte, c2 or a7" and matches nothing, silently,
+  on grep 3.0, sed 4.9 and gawk 5.0. Every match in 4.3b is byte-literal (`grep -F`,
+  awk `index()`); the splice runs through `node` with `String.fromCharCode(167)`,
+  which also removes the Darwin/GNU `sed -i` branch.
+
 ## [2.6.1] - 2026-08-05
 
 ### Fixed
