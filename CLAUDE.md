@@ -181,6 +181,30 @@ grep -qE '\[(APP_NAME|ORG_SLUG)\]' file
 
 Histórico: CAP-18 AUDIT-C (v0.7.3).
 
+**EXCEÇÃO — nunca aplique este reflexo ao `§`.** O `§` é U+00A7, que em UTF-8
+ocupa **dois bytes** (`c2 a7`). Dentro de bracket expression, `[§]` é lido como
+"um byte, `c2` OU `a7`" e **não casa NADA** — sem erro, sem aviso, resultado
+vazio. Medido em grep 3.0 (Git Bash), sed 4.9 e gawk 5.0.
+
+```bash
+# ❌ NÃO casa nada, em silêncio — a excisão de seção "roda" e não remove nada
+grep -c "<!-- RSCT-[§]C-BEGIN" CLAUDE.md      # → 0, sempre
+
+# ✅ Byte-literal: -F (NUNCA com -i, anti-pattern #7) ou awk index()
+grep -cF "<!-- RSCT-§C-BEGIN" CLAUDE.md
+awk -v b="<!-- RSCT-§C-BEGIN" 'index($0,b)==1 { ... }' CLAUDE.md
+```
+
+Em `node -e`, construa o caractere com `String.fromCharCode(167)` para manter o
+`-e` em ASCII puro (mesma razão do anti-pattern #5 — o MSYS mangla escapes).
+
+Regra prática: o `§` entra **cru**, nunca entre colchetes, nunca quantificado.
+Todo match sobre marcadores `RSCT-§X` no repo é byte-literal por isso.
+
+Histórico: #45 (v2.7.0) — o classificador de seções do `01-setup.md` Phase 4.3b
+e a excisão do `03-uninstall.md` dependem disso; um `[§]` ali desliga a remoção
+de seções sem nenhum sinal.
+
 ### 3. `|` como delimiter de sed quando o pattern contém `|` literal
 
 ```bash
