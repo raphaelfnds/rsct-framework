@@ -124,12 +124,26 @@ case "$NEW_VERSION" in
 esac
 # Code version from mcp-server/src/lib/version.ts (single source of truth
 # per its own docstring; mirrored in mcp-server/package.json).
+# The grep is anchored on the DECLARATION, not the bare symbol: version.ts opens with
+# a docstring that mentions `RSCT_MCP_VERSION`, so an unanchored match let `head -1`
+# take the prose line — which carries no single quotes, so the sed substituted nothing
+# and passed the whole sentence through into ~/.rsct/VERSION-CODE. Both sides of the
+# drift comparison then read that same prose and the report was permanently "same",
+# hiding exactly the code-axis drift this axis exists to surface (issue #44).
+# tr -d '\r' first: a CRLF checkout would otherwise leave the CR inside the captured
+# value (anti-pattern #4). `head -1` keeps the pipeline's exit status at 0 so a
+# no-match grep cannot trip the caller.
 NEW_CODE_VERSION=""
 if [ -f "$SOURCE_DIR/mcp-server/src/lib/version.ts" ]; then
-  NEW_CODE_VERSION=$(grep -E "RSCT_MCP_VERSION" "$SOURCE_DIR/mcp-server/src/lib/version.ts" \
-    | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+  NEW_CODE_VERSION=$(tr -d '\r' < "$SOURCE_DIR/mcp-server/src/lib/version.ts" \
+    | grep -E "^export const RSCT_MCP_VERSION" | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
 fi
-[ -z "$NEW_CODE_VERSION" ] && NEW_CODE_VERSION="unknown"
+# Same numeric guard the protocol axis uses above: a parse miss must degrade to
+# "unknown" (fail-visible) instead of writing whatever text happened to match. The
+# old `[ -z ]` check only caught the empty case, so a non-empty garbage string passed.
+case "$NEW_CODE_VERSION" in
+  ''|*[!0-9.]*) NEW_CODE_VERSION="unknown" ;;
+esac
 
 # --- Detect Node 20+ for optional MCP companion install ---
 NODE_STATUS="missing"

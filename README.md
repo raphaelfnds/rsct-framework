@@ -477,7 +477,9 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ```
 ~/.rsct/                           # active installation — read by Claude Code
 ├── VERSION
-├── VERSION-CODE                   # release codename
+├── VERSION-CODE                   # rsct-mcp code version — the second axis the
+│                                  #   installer reports, so a code-only change
+│                                  #   cannot hide behind an unchanged protocol version
 ├── mcp-scope                      # user | project — chosen at install, read by /rsct-setup
 ├── update-check.json              # release-check cache: consent, declined releases,
 │                                  #   last check. Machine-global; NOT removed by

@@ -72,6 +72,25 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
     const installedVersion = readFileSync(join(rsctHome(home), 'VERSION'), 'utf8').replace(/\r/g, '').trim()
     const sourceVersion = readFileSync(join(ROOT, 'VERSION'), 'utf8').replace(/\r/g, '').trim()
     expect(installedVersion, 'installed ~/.rsct/VERSION should equal source /VERSION').toBe(sourceVersion)
+    // #44: the CODE axis needs the same content assertion. Asserting only that the file
+    // exists let install.sh write a line of version.ts's docstring into it for releases
+    // — the docstring mentions RSCT_MCP_VERSION, so an unanchored grep + head -1 took
+    // the prose. Because the same read fed both sides of the drift comparison, the
+    // report was permanently "same" and the axis silently stopped working.
+    //
+    // Compared against package.json, NOT version.ts: version.ts is the file install.sh
+    // parses, so checking against it could pass with a matching-but-wrong parse.
+    // package.json is an independent mirror (kept in sync by scripts/sync-version.mjs).
+    const installedCodeVersion = readFileSync(join(rsctHome(home), 'VERSION-CODE'), 'utf8')
+      .replace(/\r/g, '')
+      .trim()
+    const pkgVersion = JSON.parse(
+      readFileSync(join(ROOT, 'mcp-server', 'package.json'), 'utf8'),
+    ).version as string
+    expect(
+      installedCodeVersion,
+      'installed ~/.rsct/VERSION-CODE should be the rsct-mcp code version, not prose from version.ts',
+    ).toBe(pkgVersion)
     expect(existsSync(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
     for (const c of COMMANDS) {
       expect(existsSync(join(commandsDir(home), `${c}.md`)), `missing command ${c}.md`).toBe(true)
