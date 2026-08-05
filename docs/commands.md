@@ -71,6 +71,27 @@ overwritten. See
 **Re-run behavior.** Idempotent. It compares content by SHA and only creates or
 updates what changed; markers it already wrote are recognized, not duplicated.
 
+That now includes the nine governance sections of `CLAUDE.md`. Before v2.7.0 a
+section froze at whatever release first installed it, so a changed rule never reached
+your project and `CLAUDE.md` slowly drifted away from the MCP enforcing it. A re-run
+now reconciles them, and the rule is simple: **a section body is rewritten only when
+its authorship is provable.**
+
+| What you see | What it means |
+|---|---|
+| `SKIP` | already matches the shipped rule |
+| `STAMP` | body matches, and the marker just gained its body hash (first run after upgrading) |
+| `UPDATE` | the shipped rule changed and the hash proves you never edited this section — refreshed automatically |
+| `PRESERVE` | you edited it after install; left alone and reported |
+| `UNVERIFIED` | installed before the hash existed AND it differs from the rule, so "you edited it" and "old release" are indistinguishable; left alone and reported |
+
+For `PRESERVE` / `UNVERIFIED` the setup shows you a diff and asks. If you want the
+canonical rule, it re-runs with `SECTIONS_TO_ADOPT="C E"` naming those sections.
+`SECTIONS_TO_ADOPT="__all__"` is a shortcut for the `UNVERIFIED` ones only — it will
+**not** overwrite a section the hash proves you edited; that always costs an explicit
+id. Sections wrapped with `source=migrated-from-ptbr-preserved` or `hand-merged` are
+your own prose and are never reconciled at all.
+
 **Recovery.** [`/rsct-uninstall`](#rsct-uninstall) reverses everything it wrote,
 SHA256-protecting any file you edited by hand.
 

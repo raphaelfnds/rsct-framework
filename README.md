@@ -409,7 +409,7 @@ Every artifact created or modified by RSCT is marked, so it can be removed clean
 
 | Artifact | Marker | What `03-uninstall.md` does |
 |---|---|---|
-| Sections in `CLAUDE.md` | `<!-- RSCT-§X-BEGIN v=1.0.0 source=... -->` ... `<!-- RSCT-§X-END -->` | Excises by marker pair, preserves surrounding content |
+| Sections in `CLAUDE.md` | `<!-- RSCT-§X-BEGIN v=1.0.0 source=... sha256-body=... -->` ... `<!-- RSCT-§X-END -->` | Excises by marker pair, preserves surrounding content. The body hash lets `/rsct-setup` refresh a section whose rule changed while provably preserving one you edited |
 | Canonical source section | `<!-- RSCT-CANONICAL-SOURCE-BEGIN ... -->` ... `<!-- RSCT-CANONICAL-SOURCE-END -->` | Same — clean excision |
 | Files in `documentation/` | First line: `<!-- RSCT-GENERATED v=1.0.0 created=<date> sha256-body=<hex> -->` | Computes SHA of current body; if matches → safe delete; if differs → asks dev |
 | Memory entries | Same marker format | Same SHA256-based protection |
@@ -536,6 +536,13 @@ issue capture, the bilingual EN+pt-BR vocabulary, the content-SHA memory
 classifier, the prebuilt-`dist/` toolchain-free install, and the cross-OS
 correctness sweep (Windows / WSL / Linux / macOS). See
 [CHANGELOG.md](CHANGELOG.md) for the complete CAP-by-CAP history.
+
+Adding an **optional** field that no existing reader requires is *additive* and does
+NOT bump the id — that is how `sha256-body=` reached the `RSCT-§X` section markers in
+v2.7.0 without disturbing anything. The id bumps only when a change would break an
+existing reader: a renamed or removed field, a changed delimiter, or a changed marker
+name. (The section-excision path in `/rsct-uninstall` matches the marker by prefix and
+never anchors on `-->`, so extra fields pass through it untouched — pinned by a test.)
 
 The `v=` marker schema id is intentionally held at `1.0.0` across releases:
 bumping it would make existing installs re-emit duplicate marker blocks on the next
