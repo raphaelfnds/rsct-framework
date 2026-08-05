@@ -3,6 +3,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readPhaseState } from '../lib/phase-scope.js'
+import { readFindingsBaseline, type StoredFinding } from '../lib/findings.js'
 import { readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
 import { readToken } from '../lib/plan-authorization.js'
 import {
@@ -23,15 +24,21 @@ export interface PhaseStatusVerificationSummary {
   spec_ref: string | null
   spec_tier: string | null
   findings_count: number
+  /** #40: the findings themselves — completing the phase requires answering each. */
+  open_findings: StoredFinding[]
+  findings_run_id: string | null
   started_at: string | null
 }
 
 export interface PhaseStatusReviewSummary {
-  spec_ref: string
-  decision: 'yes' | 'no'
+  spec_ref: string | null
+  decision: 'yes' | 'no' | null
   completed: boolean
   decided_at: string | null
   completed_at: string | null
+  /** #40: findings declared at review_start and not yet answered. */
+  open_findings: StoredFinding[]
+  findings_run_id: string | null
 }
 
 export interface PhaseStatusPlanAuthSummary {
@@ -125,18 +132,26 @@ export async function phaseStatusHandler(
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count: Array.isArray(findings) ? findings.length : 0,
+      // #40: the ids themselves, because completing the phase now requires naming
+      // every one of them. A count alone left a resumed session with no way to learn
+      // what to answer except deliberately failing a call or re-running _start —
+      // which rewrites the baseline it is being measured against.
+      open_findings: readFindingsBaseline(findings) ?? [],
+      findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null,
     }
   }
 
   let review: PhaseStatusReviewSummary | null = null
-  if (state?.review) {
+  if (state?.review || state?.review_findings) {
     review = {
-      spec_ref: state.review.spec_ref,
-      decision: state.review.decision,
-      completed: state.review.completed_at != null,
-      decided_at: state.review.decided_at ?? null,
-      completed_at: state.review.completed_at ?? null,
+      spec_ref: state.review?.spec_ref ?? state.review_findings?.spec_ref ?? null,
+      decision: state.review?.decision ?? null,
+      completed: state.review?.completed_at != null,
+      decided_at: state.review?.decided_at ?? null,
+      completed_at: state.review?.completed_at ?? null,
+      open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
+      findings_run_id: state.review_findings?.run_id ?? null,
     }
   }
 

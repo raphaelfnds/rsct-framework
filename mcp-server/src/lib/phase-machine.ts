@@ -1,4 +1,5 @@
 import { type RsctConfig } from './project-root.js'
+import { type FindingsGateRejectKind } from './findings.js'
 import {
   readPhaseState,
   writePhaseState,
@@ -105,6 +106,23 @@ export interface StartPhaseResult {
 export interface StartPhaseInternal {
   auditWriter?: typeof appendAuditEntry
   now?: Date
+  /**
+   * Extra state merged into the transition's SINGLE write (#40).
+   *
+   * A caller that needs to persist something alongside the phase label — REVIEW's
+   * declared findings, say — must not do it in a second `writePhaseState`: the
+   * advisory lock serialises writes but not read-modify-write cycles, so a
+   * background `rsct_status` in another window can land between the two and drop
+   * whichever it did not read. Hand-rolling the transition instead would be worse:
+   * it would be a third copy of this function's guard, stale-label handling and
+   * hint branches, and copying `verification_start`'s guard specifically would
+   * regress #15 (see `isStaleVerificationLabel`).
+   *
+   * Applied AFTER the phase fields, so it sees them and can override deliberately.
+   * A mutator rather than an object because callers also need to REMOVE keys, which
+   * a spread cannot express under `exactOptionalPropertyTypes`.
+   */
+  patch?: (state: PhaseState) => void
 }
 
 /**
@@ -185,6 +203,7 @@ export function startPhaseGeneric(
     started_at: startedAt,
   }
   if (input.scopeGlobs !== undefined) newState.scope_globs = input.scopeGlobs
+  internal.patch?.(newState)
 
   const writeResult = writePhaseState(input.projectRoot, newState)
 
@@ -275,6 +294,8 @@ export type CompletePhaseRejectKind =
   | 'phase_mismatch'
   /** #19: a REVIEW finding was marked action="block". */
   | 'block_actions_present'
+  /** #40: the findings gate — see `lib/findings.ts`. */
+  | FindingsGateRejectKind
 
 export interface CompletePhaseResult {
   status: CompletePhaseStatus

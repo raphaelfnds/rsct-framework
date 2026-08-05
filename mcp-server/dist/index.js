@@ -24715,7 +24715,11 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
   if (active_phase) {
     if (active_phase.phase === "verification" && active_phase.verification) {
       hints.push(
-        `Active phase: verification (spec_ref='${active_phase.verification.spec_ref ?? "?"}', ${active_phase.verification.findings_count} finding(s)). Call rsct_phase_verification_complete with findings_actions[] + dev_approval before editing code.`
+        `Active phase: verification (spec_ref='${active_phase.verification.spec_ref ?? "?"}', ${active_phase.verification.findings_count} finding(s)). Call rsct_phase_verification_complete with an action for EVERY finding + dev_approval before editing code \u2014 rsct_phase_status lists the open ids if you no longer have them.`
+      );
+    } else if (active_phase.phase === "review") {
+      hints.push(
+        `Active phase: review. Every finding declared at rsct_phase_review_start needs an action before rsct_phase_review_complete will close it \u2014 call rsct_phase_status to list the open ones and their findings_run_id.`
       );
     } else {
       hints.push(
@@ -30277,6 +30281,90 @@ function makeIdGenerator(prefix) {
   let counter = 0;
   return (category) => `${prefix}-${category}-${++counter}`;
 }
+function readFindingsBaseline(raw) {
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry;
+    if (typeof rec.id !== "string" || rec.id === "") continue;
+    const f = { id: rec.id };
+    if (typeof rec.category === "string") f.category = rec.category;
+    if (typeof rec.title === "string") f.title = rec.title;
+    out.push(f);
+  }
+  return out.length > 0 ? out : null;
+}
+function computeRunId(findings) {
+  const ids = findings.map((f) => f.id).sort();
+  return createHash("sha256").update(ids.join("\0")).digest("hex").slice(0, 12);
+}
+function describe(f) {
+  return f.title ? `${f.id} (${f.title})` : f.id;
+}
+function checkFindingsGate(input) {
+  const { baseline, storedRunId, suppliedRunId, actions, storedSpecRef, specRef } = input;
+  if (baseline === null) return { ok: true };
+  if (storedSpecRef != null && specRef != null && storedSpecRef !== specRef) {
+    return {
+      ok: false,
+      reject_kind: "findings_spec_mismatch",
+      reason: `The stored findings were declared for spec_ref '${storedSpecRef}', not '${specRef}'. They belong to a different task \u2014 re-run the phase start for this spec_ref rather than answering another one.`,
+      open_findings: baseline
+    };
+  }
+  const baselineDuplicates = baseline.map((f) => f.id).filter((id, i, all) => all.indexOf(id) !== i);
+  if (baselineDuplicates.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "ambiguous_baseline",
+      reason: `The stored findings reuse the same id more than once (${[...new Set(baselineDuplicates)].join(", ")}), so one action would silently close several findings. Re-declare them with a distinct id each.`,
+      open_findings: baseline
+    };
+  }
+  if (storedRunId !== null && suppliedRunId !== null && suppliedRunId !== storedRunId) {
+    return {
+      ok: false,
+      reject_kind: "stale_finding_run",
+      reason: `findings_run_id '${suppliedRunId}' is stale \u2014 the phase was re-run and now holds ${baseline.length} finding(s) under '${storedRunId}'. Re-read the findings listed here; earlier answers describe a set that no longer exists.`,
+      open_findings: baseline
+    };
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const duplicates = /* @__PURE__ */ new Set();
+  for (const a of actions) {
+    if (seen.has(a.finding_id)) duplicates.add(a.finding_id);
+    seen.add(a.finding_id);
+  }
+  if (duplicates.size > 0) {
+    return {
+      ok: false,
+      reject_kind: "duplicate_finding_ids",
+      reason: `The same finding is answered more than once: ${[...duplicates].join(", ")}. Two actions for one finding is not a decision \u2014 send exactly one action per finding.`,
+      open_findings: baseline
+    };
+  }
+  const validIds = new Set(baseline.map((f) => f.id));
+  const unknown2 = [...seen].filter((id) => !validIds.has(id));
+  if (unknown2.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "unknown_finding_ids",
+      reason: `No such finding: ${unknown2.join(", ")}. Valid ids for this phase: ${baseline.map((f) => f.id).join(", ")}.`,
+      open_findings: baseline
+    };
+  }
+  const unanswered = baseline.filter((f) => !seen.has(f.id));
+  if (unanswered.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "unanswered_findings",
+      reason: `${unanswered.length} of ${baseline.length} finding(s) have no action: ${unanswered.map(describe).join("; ")}. Every finding needs a decision before this phase can complete.`,
+      open_findings: unanswered
+    };
+  }
+  return { ok: true };
+}
 
 // src/lib/verification-checklist.ts
 var CATEGORY_PROMPTS = {
@@ -30564,6 +30652,7 @@ function startPhaseGeneric(input, config2, internal = {}) {
     started_at: startedAt
   };
   if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
+  internal.patch?.(newState);
   const writeResult = writePhaseState(input.projectRoot, newState);
   if (staleVerificationLabel && existingPhase !== input.phase) {
     appendAudit(
@@ -30850,7 +30939,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. Findings are recommendations \u2014 dev sets the action on each via rsct_phase_verification_complete.",
+  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise.",
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -30920,6 +31009,7 @@ async function phaseVerificationStartHandler(rawInput) {
     checklistArgs.existingProjectFiles = input.existing_project_files;
   }
   const checklist = runVerificationChecklist(checklistArgs);
+  const findingsRunId = computeRunId(checklist.findings);
   if (input.spec_tier === "trivial" || input.spec_tier === "small") {
     const skipAudit = appendAuditEntry(
       projectRoot,
@@ -30935,6 +31025,7 @@ async function phaseVerificationStartHandler(rawInput) {
     const fields2 = auditFields(skipAudit);
     return {
       status: "skipped_tier",
+      findings_run_id: null,
       rsct_installed: resolution.rsct_installed,
       spec_ref: input.spec_ref,
       spec_tier: input.spec_tier,
@@ -30975,6 +31066,7 @@ async function phaseVerificationStartHandler(rawInput) {
     const fields2 = auditFields(rejectAudit);
     return {
       status: "phase_already_active",
+      findings_run_id: null,
       rsct_installed: resolution.rsct_installed,
       spec_ref: input.spec_ref,
       spec_tier: input.spec_tier,
@@ -31001,6 +31093,7 @@ async function phaseVerificationStartHandler(rawInput) {
     declared_paths: walk.declared,
     discovered_importers: walk.discovered,
     findings: checklist.findings,
+    findings_run_id: findingsRunId,
     started_at: startedAt
   };
   if (requestedPersona !== null) verificationBlock.persona = requestedPersona;
@@ -31062,7 +31155,7 @@ async function phaseVerificationStartHandler(rawInput) {
   const hints = [];
   if (writeResult.ok) {
     hints.push(
-      `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced \u2014 review and call rsct_phase_verification_complete with findings_actions[] + dev_approval.`
+      `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced \u2014 EVERY one needs an action. Call rsct_phase_verification_complete with findings_actions[] covering all of them, findings_run_id='${findingsRunId}', and dev_approval.`
     );
   } else if (writeResult.reason === "locked") {
     hints.push(
@@ -31080,6 +31173,9 @@ async function phaseVerificationStartHandler(rawInput) {
   }
   return {
     status: writeResult.ok ? "verified" : "state_write_failed",
+    // null on a failed write: advertising a run id for a baseline that was never
+    // stored would have the agent answer against nothing.
+    findings_run_id: writeResult.ok ? findingsRunId : null,
     rsct_installed: resolution.rsct_installed,
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -31108,7 +31204,12 @@ var findingActionSchema = external_exports.object({
 var phaseVerificationCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   spec_ref: external_exports.string().min(1, "spec_ref required").describe("Must match the spec_ref recorded by the open V phase in .rsct/phase-state.json."),
-  findings_actions: external_exports.array(findingActionSchema).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.'),
+  findings_actions: external_exports.array(findingActionSchema).default([]).describe(
+    'One action per finding raised by this V phase \u2014 EVERY finding needs one, or completion is rejected. Any action="block" aborts completion.'
+  ),
+  findings_run_id: external_exports.string().optional().describe(
+    "The findings_run_id returned by rsct_phase_verification_start. Echo it back so answers prepared before a re-run are rejected as a stale set rather than re-applied to renumbered findings."
+  ),
   dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
   clear_phase: external_exports.boolean().default(true).describe(
     "DEPRECATED \u2014 ignored. Completing V always clears the active phase block. Kept so an older client passing it is not rejected by the strict schema; remove in the next major."
@@ -31116,7 +31217,7 @@ var phaseVerificationCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationCompleteTool = {
   name: "rsct_phase_verification_complete",
-  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) \u2014 it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the \xA7C dialog.',
+  description: '\xA7C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) \u2014 it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". EVERY finding this phase raised needs an action: unknown ids, duplicates, a stale findings_run_id, or any finding left unanswered all reject before the \xA7C dialog, and the rejection returns open_findings so you can answer them without re-running _start. Any findings_actions entry with action="block" also aborts completion. Note the baseline is only as complete as the inputs _start was given \u2014 omitting spec_claims or existing_project_files shrinks what the checklist can raise.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -31129,9 +31230,13 @@ var phaseVerificationCompleteTool = {
         type: "string",
         description: "Must match the open V phase spec_ref."
       },
+      findings_run_id: {
+        type: "string",
+        description: "The findings_run_id returned by rsct_phase_verification_start. Echo it back so an answer set prepared before a re-run is rejected as stale instead of being re-applied to renumbered findings."
+      },
       findings_actions: {
         type: "array",
-        description: 'Per-finding actions. action="block" aborts completion.',
+        description: 'One action per finding raised by this phase \u2014 every finding needs one or completion is rejected. action="block" aborts completion.',
         items: {
           type: "object",
           required: ["finding_id", "action"],
@@ -31223,6 +31328,51 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       anti_replay_error: null,
       hints: [
         `spec_ref mismatch \u2014 pass the same spec_ref that started this V phase ('${existingSpecRef}').`
+      ]
+    };
+  }
+  const baseline = readFindingsBaseline(existing.state.verification.findings);
+  const findingsGate = checkFindingsGate({
+    baseline,
+    storedRunId: existing.state.verification.findings_run_id ?? null,
+    suppliedRunId: input.findings_run_id ?? null,
+    actions: input.findings_actions,
+    // Redundant here — the spec_ref_mismatch branch above already returned — but
+    // passed so both phases feed the gate identically and neither can drift.
+    storedSpecRef: existing.state.verification.spec_ref ?? null,
+    specRef: input.spec_ref
+  });
+  if (!findingsGate.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: "verification.complete.rejected",
+        tool: "rsct_phase_verification_complete",
+        spec_ref: input.spec_ref,
+        reject_kind: findingsGate.reject_kind,
+        open_findings_count: findingsGate.open_findings?.length ?? 0
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      channel: null,
+      reject_kind: findingsGate.reject_kind,
+      reason: findingsGate.reason,
+      fabrication_signals: [],
+      spec_ref: input.spec_ref,
+      cleared_verification: false,
+      cleared_phase: false,
+      actions_summary: summary,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      open_findings: findingsGate.open_findings ?? [],
+      hints: [
+        findingsGate.reason,
+        `findings_run_id for this phase is '${existing.state.verification.findings_run_id ?? "(none)"}'. Send one action per finding listed in open_findings, then retry.`
       ]
     };
   }
@@ -31932,17 +32082,25 @@ async function phaseStatusHandler(rawInput) {
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count: Array.isArray(findings) ? findings.length : 0,
+      // #40: the ids themselves, because completing the phase now requires naming
+      // every one of them. A count alone left a resumed session with no way to learn
+      // what to answer except deliberately failing a call or re-running _start —
+      // which rewrites the baseline it is being measured against.
+      open_findings: readFindingsBaseline(findings) ?? [],
+      findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null
     };
   }
   let review = null;
-  if (state?.review) {
+  if (state?.review || state?.review_findings) {
     review = {
-      spec_ref: state.review.spec_ref,
-      decision: state.review.decision,
-      completed: state.review.completed_at != null,
-      decided_at: state.review.decided_at ?? null,
-      completed_at: state.review.completed_at ?? null
+      spec_ref: state.review?.spec_ref ?? state.review_findings?.spec_ref ?? null,
+      decision: state.review?.decision ?? null,
+      completed: state.review?.completed_at != null,
+      decided_at: state.review?.decided_at ?? null,
+      completed_at: state.review?.completed_at ?? null,
+      open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
+      findings_run_id: state.review_findings?.run_id ?? null
     };
   }
   const recommended = active ? nextPhase(active) : null;
@@ -32724,30 +32882,72 @@ async function phaseCodeCompleteHandler(rawInput, internal = {}) {
 
 // src/tools/phase-review-start.ts
 init_esm_shims();
+var declaredFindingSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  category: external_exports.string().min(1),
+  title: external_exports.string().min(1),
+  detail: external_exports.string().optional(),
+  severity: external_exports.string().optional(),
+  path: external_exports.string().optional(),
+  line: external_exports.number().optional()
+}).strict();
 var phaseReviewStartInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
   spec_slug: external_exports.string().optional(),
   scope_globs: external_exports.array(external_exports.string()).optional(),
-  persona: external_exports.string().optional()
+  persona: external_exports.string().optional(),
+  findings: external_exports.array(declaredFindingSchema).refine(
+    (fs) => new Set(fs.map((f) => f.id)).size === fs.length,
+    (fs) => ({
+      message: `findings[] reuses the same id (${[
+        ...new Set(fs.map((f) => f.id).filter((id, i, all) => all.indexOf(id) !== i))
+      ].join(", ")}). Each finding needs a distinct id \u2014 one action must map to exactly one finding.`
+    })
+  ).optional()
 }).strict();
 var phaseReviewStartTool = {
   name: "rsct_phase_review_start",
-  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code \u2014 e.g. via the qa + senior-dev personas or /code-review), then call rsct_phase_review_complete. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+  description: 'Start the REVIEW phase \u2014 an adversarial code review of the diff, between Code and Test (cycle: R\u2192S\u2192V\u2192C\u2192REVIEW\u2192T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code \u2014 e.g. via the qa + senior-dev personas or /code-review), then declare what you found via findings[] and call rsct_phase_review_complete. DECLARING A FINDING COMMITS YOU TO RESOLVING IT: every declared finding needs an action at _complete or the phase will not close. Re-running this tool REPLACES the declared set and reopens the review. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
     properties: {
       project_root: { type: "string" },
-      spec_ref: { type: "string" },
-      spec_slug: { type: "string" },
-      scope_globs: { type: "array", items: { type: "string" } },
-      persona: { type: "string" }
+      spec_ref: {
+        type: "string",
+        description: "The spec this review covers. Must match the spec_ref the REVIEW decision was recorded under at rsct_phase_spec_complete, and the one you pass to rsct_phase_review_complete."
+      },
+      spec_slug: { type: "string", description: "Plan slug, when it differs from spec_ref." },
+      scope_globs: {
+        type: "array",
+        items: { type: "string" },
+        description: "Paths this review covers, for the edit-scope guard."
+      },
+      persona: { type: "string", description: "Optional persona lens for the review (e.g. qa, senior-dev)." },
+      findings: {
+        type: "array",
+        description: 'What the review actually surfaced. Each entry needs a stable id you choose (e.g. "r-bug-1"), a category and a title; path/line anchor it. Every finding declared here must be given an action at rsct_phase_review_complete before the phase can close, so declare what you genuinely found \u2014 not a placeholder.',
+        items: {
+          type: "object",
+          required: ["id", "category", "title"],
+          properties: {
+            id: { type: "string" },
+            category: { type: "string" },
+            title: { type: "string" },
+            detail: { type: "string" },
+            severity: { type: "string" },
+            path: { type: "string" },
+            line: { type: "number" }
+          },
+          additionalProperties: false
+        }
+      }
     },
     additionalProperties: false
   }
 };
-async function phaseReviewStartHandler(rawInput) {
+async function phaseReviewStartHandler(rawInput, internal = {}) {
   const input = phaseReviewStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
   const args = {
@@ -32758,7 +32958,61 @@ async function phaseReviewStartHandler(rawInput) {
   if (input.spec_slug !== void 0) args.specSlug = input.spec_slug;
   if (input.scope_globs !== void 0) args.scopeGlobs = input.scope_globs;
   if (input.persona !== void 0) args.persona = input.persona;
-  return startPhaseGeneric(args, resolution.config);
+  const declared = input.findings ?? [];
+  const runId = declared.length > 0 ? computeRunId(declared) : null;
+  const previous = readPhaseState(resolution.root).state;
+  const hadFindings = previous?.review_findings !== void 0;
+  const declaredAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const patch = (state) => {
+    if (runId === null) {
+      delete state.review_findings;
+    } else {
+      const block = {
+        spec_ref: input.spec_ref,
+        run_id: runId,
+        findings: declared,
+        declared_at: declaredAt
+      };
+      state.review_findings = block;
+    }
+    if (state.review?.completed_at !== void 0) {
+      const reopened = { ...state.review };
+      delete reopened.completed_at;
+      state.review = reopened;
+    }
+  };
+  const result = await startPhaseGeneric(args, resolution.config, {
+    ...internal,
+    patch
+  });
+  if (hadFindings && result.status === "started") {
+    const discarded = readFindingsBaseline(previous?.review_findings?.findings) ?? [];
+    const audit = (internal.auditWriter ?? appendAuditEntry)(
+      resolution.root,
+      {
+        event: "review.findings_replaced",
+        tool: "rsct_phase_review_start",
+        spec_ref: input.spec_ref,
+        previous_spec_ref: previous?.review_findings?.spec_ref ?? null,
+        previous_run_id: previous?.review_findings?.run_id ?? null,
+        discarded_count: discarded.length,
+        discarded_ids: discarded.map((f) => f.id),
+        declared_count: declared.length
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields(audit);
+    if (fields.audit_error) result.audit_error = fields.audit_error;
+    result.hints.push(
+      `A previous review had declared ${discarded.length} finding(s); this run replaced them${runId === null ? " with nothing" : ""}. Any findings_actions prepared from that run are now stale \u2014 answer the findings returned here.`
+    );
+  }
+  const persisted = result.status === "started" && result.phase_state_written;
+  return {
+    ...result,
+    findings: persisted ? declared : [],
+    findings_run_id: persisted ? runId : null
+  };
 }
 
 // src/tools/phase-review-complete.ts
@@ -32772,21 +33026,33 @@ var phaseReviewCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
   spec_ref: external_exports.string().min(1),
   dev_approval: external_exports.unknown(),
-  findings_actions: external_exports.array(findingActionSchema2).default([]).describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.')
+  findings_actions: external_exports.array(findingActionSchema2).default([]).describe(
+    'One action per finding declared at rsct_phase_review_start \u2014 EVERY declared finding needs one, or completion is rejected. Any action="block" aborts completion.'
+  ),
+  findings_run_id: external_exports.string().optional().describe(
+    "The findings_run_id returned by rsct_phase_review_start. Echo it back so answers prepared before a re-run are rejected as a stale set."
+  )
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] to record what the review found and what the dev decided about each item \u2014 dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+  description: '\xA7C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion, and the rejection returns open_findings so you can answer them without re-running _start (rsct_phase_status also lists them). Unknown ids, duplicates and a stale findings_run_id reject the same way. Dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
     properties: {
       project_root: { type: "string" },
-      spec_ref: { type: "string" },
+      spec_ref: {
+        type: "string",
+        description: "Must match the spec_ref of the open REVIEW phase."
+      },
       dev_approval: { type: "object" },
+      findings_run_id: {
+        type: "string",
+        description: "The findings_run_id returned by rsct_phase_review_start. Echo it back so an answer set prepared before a re-run is rejected as stale."
+      },
       findings_actions: {
         type: "array",
-        description: 'Per-finding actions. action="block" aborts completion.',
+        description: 'One action per finding declared at rsct_phase_review_start \u2014 every declared finding needs one or completion is rejected. action="block" aborts completion.',
         items: {
           type: "object",
           required: ["finding_id", "action"],
@@ -32810,6 +33076,54 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const actions_summary = emptyActionsSummary();
   for (const fa of input.findings_actions) actions_summary[fa.action]++;
+  const stored = readPhaseState(projectRoot).state?.review_findings;
+  const baseline = readFindingsBaseline(stored?.findings);
+  const findingsGate = checkFindingsGate({
+    baseline,
+    storedRunId: stored?.run_id ?? null,
+    suppliedRunId: input.findings_run_id ?? null,
+    actions: input.findings_actions,
+    // The phase/spec_slug checks live inside gatePhaseComplete, which also pops the
+    // §C dialog — and this gate has to run BEFORE that, so a rejected completion
+    // never spends an approval. Comparing the stored spec_ref here is what keeps the
+    // ordering safe: without it, spec-B could be completed by answering spec-A's
+    // findings, which would then prune spec-A's set as well.
+    storedSpecRef: stored?.spec_ref ?? null,
+    specRef: input.spec_ref
+  });
+  if (!findingsGate.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: "review.complete.rejected",
+        tool: "rsct_phase_review_complete",
+        spec_ref: input.spec_ref,
+        reject_kind: findingsGate.reject_kind,
+        open_findings_count: findingsGate.open_findings?.length ?? 0
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      phase: "review",
+      spec_ref: input.spec_ref,
+      channel: null,
+      reject_kind: findingsGate.reject_kind,
+      reason: findingsGate.reason,
+      fabrication_signals: [],
+      cleared: false,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      actions_summary,
+      next_recommended_phase: "review",
+      open_findings: findingsGate.open_findings ?? [],
+      hints: [
+        findingsGate.reason,
+        `findings_run_id for this review is '${stored?.run_id ?? "(none)"}'. Send one action per finding listed in open_findings, then retry.`
+      ]
+    };
+  }
   if (actions_summary.block > 0) {
     const audit = appendAudit(
       projectRoot,
@@ -32859,8 +33173,19 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
     });
     if (!stamp.ok) {
       result.hints.push(
-        `\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start may still report the review as incomplete \u2014 retry by re-running rsct_phase_review_complete, or check .rsct/phase-state.json.`
+        `\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start will report the review as incomplete. This completion already cleared the phase label, so re-running rsct_phase_review_complete returns no_active_phase \u2014 re-open with rsct_phase_review_start (same findings) and complete again, or inspect .rsct/phase-state.json.`
       );
+    }
+    const s = readPhaseState(projectRoot);
+    if (stamp.ok && s.state?.review_findings !== void 0) {
+      const next = { ...s.state };
+      delete next.review_findings;
+      const pruned = writePhaseState(projectRoot, next);
+      if (!pruned.ok) {
+        result.hints.push(
+          `\u26A0 review completed but the declared findings could not be pruned from phase state (${pruned.reason}) \u2014 rsct_phase_test_start will report the review as incomplete until they are. Re-open with rsct_phase_review_start (same findings) and complete again; re-running rsct_phase_review_complete alone returns no_active_phase, because this completion already cleared the phase label.`
+        );
+      }
     }
     for (const fa of input.findings_actions) {
       appendAudit(
@@ -32957,7 +33282,8 @@ function evaluateReviewGate(args) {
       hint: `Review was declined for this spec_ref (include_review=false at spec_complete). Test phase may proceed; the review is intentionally skipped.`
     };
   }
-  if (decision === "yes" && completedAt !== null) {
+  const pendingFindings = matchesSpec ? stateRead.state?.review_findings?.findings?.length ?? 0 : 0;
+  if (decision === "yes" && completedAt !== null && pendingFindings === 0) {
     return {
       status: "passed",
       spec_tier: specTier,
@@ -32977,6 +33303,21 @@ function evaluateReviewGate(args) {
       review_decision: decision,
       review_completed_at: completedAt,
       hint: `override_review_skip=true acknowledged. Override logged to audit (.rsct/audit.log).`
+    };
+  }
+  if (decision === "yes" && completedAt !== null && pendingFindings > 0) {
+    return {
+      status: "rejected_incomplete",
+      spec_tier: specTier,
+      review_block_found: true,
+      review_spec_ref: reviewSpecRef,
+      review_decision: "yes",
+      review_completed_at: completedAt,
+      // NOTE the recovery named here. By the time this state exists the phase label
+      // is gone (a successful complete clears it), so re-running
+      // rsct_phase_review_complete returns no_active_phase and can never work —
+      // it has to go back through _start. rsct_phase_status lists the open ids.
+      hint: `The review for spec_ref='${specRef}' is stamped complete but still holds ${pendingFindings} unanswered finding(s). Re-open it with rsct_phase_review_start (pass the same findings \u2014 rsct_phase_status lists them), then rsct_phase_review_complete with an action for each. OR pass override_review_skip=true to bypass.`
     };
   }
   if (decision === "yes" && completedAt === null) {

@@ -42,7 +42,15 @@ forgotten) against the project's institutional context. Tier table:
 trivial+small skip V; standard+complex run V. The **Review** phase
 (a code review of the diff, between Code and Test) is opt-in and asked
 once at spec-approval; when included, the test phase will not start until
-the review has run (standard+complex; trivial+small skip it).
+the review has run (standard+complex; trivial+small skip it) — bypassable
+with an audit-logged `override_review_skip`.
+
+Both phases **bind on their findings**: every finding raised needs a
+decision (`block` / `address-now` / `capture-as-issue` / `defer` /
+`accept`) before the phase closes, and `block` aborts it. Answering an id
+the phase never raised is refused. V's findings come from its checklist;
+the Review's are the ones the agent declares, so that half is a
+commitment the agent makes rather than one the machine can impose.
 
 ## Documentation
 

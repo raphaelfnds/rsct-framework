@@ -12,9 +12,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.6.0] - 2026-08-04
 
-The update check consults by default, and declining is per release instead of
-permanent silence (#38). Marker schema id stays `v=1.0.0`; tool count unchanged at
-**39** — the decline channel is two parameters on `rsct_status`, not a new tool.
+Two things stop being silent. The update check consults by **default**, and declining
+a release is per version instead of permanent silence (#38). And the V and REVIEW
+phases stop being completable by answering nothing — every finding they raise now
+needs a decision (#40).
+
+Marker schema id stays `v=1.0.0`; tool count unchanged at **39** — the decline
+channel is two parameters on `rsct_status`, and REVIEW's baseline is a parameter on
+the phase tool it already had, so neither addition is a new tool.
 
 ### Changed
 
@@ -78,6 +83,69 @@ rather than after — recorded because the reasoning is load-bearing for the mod
   spendable with nobody having read it; on a read-only `$HOME` the write fails
   silently and "shown once" fires on every call. It is a bounded counter, emitted only
   when the increment actually persisted.
+
+### Fixed — the V and REVIEW phases can no longer be closed by answering nothing (#40)
+
+Both phases took `findings_actions[]` and nothing checked it. `phase-verification-complete`
+counted the entries and wrote one audit line each; it never compared them against the
+findings the checklist had stored one step earlier — even though those findings are
+right there in phase state at that moment. So a V phase that raised five problems
+closed cleanly on `findings_actions: []`, and closed just as cleanly on five invented
+ids, which then landed in `.rsct/audit.log` as decisions about findings that never
+existed. That log anchors the free-commit ceiling.
+
+- **Coverage.** Every finding the phase raised needs an action, or completion is
+  rejected. This is what makes the phase bind.
+- **Id validation.** An id that is not in the stored baseline is rejected rather than
+  logged. Duplicates too — two actions for one finding is not a decision. A declared
+  set that reuses an id is refused at `_start`, before it is stored: coverage counts
+  distinct ids, so one action would otherwise close several findings and leave the log
+  recording a single decision for all of them.
+- **Cross-spec.** A stored baseline whose `spec_ref` differs from the phase being
+  completed is refused. Without it, a re-plan could be completed by answering the
+  previous spec's findings — which then pruned them, losing the work they tracked.
+- **Run identity.** `_start` returns a `findings_run_id`; echo it at `_complete`. Ids
+  are sequential, so re-running `_start` over changed inputs renumbers them, and an
+  answer set prepared from the earlier run could otherwise be re-applied to whatever
+  now shares an id. (Content-derived ids were tried first and abandoned: the finding
+  type has no `path`, all three `gap` findings share one `affected_paths` with a title
+  taken from the matched entry rather than the claim — so two claims hitting one
+  anti-decision would collide into a single id — and `breakage` titles embed live
+  importer counts, so they move whenever the graph does.)
+- **REVIEW gets a baseline.** `rsct_phase_review_start` accepts `findings[]` — what
+  the review actually surfaced — and the same rules then apply. It closes "I raised
+  five problems and completed the phase answering none". It does **not** close an
+  agent that declares nothing; nothing can, absent a mechanical producer, and #33
+  measured why building one is not viable today. The docs say so rather than implying
+  a stronger guarantee.
+- **Rejections are recoverable.** A findings-gate rejection returns `open_findings`,
+  and `rsct_phase_status` now lists them too. Nothing in the framework used to expose
+  the stored ids — only a count — so a resumed session's sole route back was
+  re-running `_start`, which rewrites the very baseline it is being measured against.
+  Both `_start` tools now also return the `findings_run_id` they tell you to echo, and
+  return `null` for it when nothing was persisted — a receipt for a baseline that does
+  not exist would have the agent answer against nothing.
+- **Discarding a declared set is audited.** Re-running `rsct_phase_review_start`
+  without `findings[]` clears the previous set, which is the one move that makes the
+  gate fail open again. It now emits `review.findings_replaced` with the discarded
+  ids, so the log can tell "a review that found nothing" from "a review that erased
+  five findings".
+- **Fail-open, deliberately.** No usable baseline — absent, empty, `null`, not an
+  array, or elements without ids — skips every check. An unreadable baseline must
+  never make a phase uncompletable, and these handlers have no try/catch around their
+  state reads.
+- **The test gate learned the invariant.** A completed review has no pending findings,
+  because `_complete` prunes them. Findings sitting alongside a `completed_at` mean an
+  older binary stamped it (the global `rsct-mcp` is a symlink to a worktree, so
+  checking out an older branch swaps it in) — the gate now rejects instead of passing.
+
+Two traps found while implementing, both avoided rather than shipped: routing
+`review_start` through `stampReviewDecision` would have fabricated `decision: 'no'`,
+which `evaluateReviewGate` reads as `bypassed_declined` — starting the review phase
+would have disarmed the review gate. And hand-rolling the transition to get a second
+write would have copied `verification_start`'s guard, which omits the stale-label
+exception and would have regressed #15. `startPhaseGeneric` takes an optional state
+patch instead: one write, no duplication, guard untouched.
 
 ### Added
 

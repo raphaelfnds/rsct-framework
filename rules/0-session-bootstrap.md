@@ -113,11 +113,16 @@ For `standard` and `complex` → start with **research**:
 - Then `mcp__rsct__rsct_phase_spec_start` → §B plan → `_complete`.
 
 For `complex` additionally: V phase is mandatory between spec and
-code:
+code (it also runs for `standard` — see the tier table):
 - `mcp__rsct__rsct_phase_verification_start({ spec_ref,
-  declared_paths })` after spec_complete.
-- Review findings, set per-finding actions, then
-  `mcp__rsct__rsct_phase_verification_complete`.
+  declared_paths, spec_claims })` after spec_complete. Pass
+  `spec_claims` — the checklist can only test the claims it is
+  given, so omitting them silently shrinks what it can raise.
+- Review findings, set an action on **every one of them**, then
+  `mcp__rsct__rsct_phase_verification_complete` (echo back the
+  `findings_run_id` it gave you). Leaving any finding unanswered
+  rejects the completion — the rejection lists what is still open,
+  and `rsct_phase_status` lists it too if you lost the ids.
 
 For `standard` and `complex`, ALSO decide the REVIEW step at
 spec_complete — a code review of the diff between Code and Test (cycle:
@@ -130,7 +135,12 @@ R→S→V→C→REVIEW→T):
 - `include_review: true` → after code_complete, run
   `rsct_phase_review_start` → do the review (hunt correctness / security /
   regression / cross-OS bugs in the diff — the qa + senior-dev personas
-  or a review skill help) → `rsct_phase_review_complete`.
+  or a review skill help) → declare what you found via `findings[]` →
+  `rsct_phase_review_complete` with an action for **every** declared
+  finding, echoing the `findings_run_id`. Declaring a finding commits
+  you to resolving it: the phase will not close while any of them is
+  unanswered. Re-running `_start` REPLACES the declared set and is
+  recorded in the audit log.
 - `include_review: false` → the review is skipped and never run.
 - The test phase enforces this (see §5 below). NOTE: this REVIEW *phase*
   is distinct from `rsct_persona_review` (a stateless advisory lens).

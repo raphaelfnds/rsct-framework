@@ -43,10 +43,12 @@ After step 3, branch on the returned tier:
 - standard: rsct_phase_research_start → research → _complete →
   rsct_phase_spec_start → §B plan → rsct_phase_spec_complete({
   include_review }) → **V phase** (rsct_phase_verification_start({
-  declared_paths }) → review findings → rsct_phase_verification_complete) →
+  declared_paths, spec_claims }) → answer EVERY finding →
+  rsct_phase_verification_complete) →
   rsct_phase_code_start({ scope_globs, spec_tier: 'standard' }) →
   edits → rsct_phase_code_complete → **REVIEW phase** (when include_review:
-  rsct_phase_review_start → review the diff → rsct_phase_review_complete) →
+  rsct_phase_review_start({ findings }) → answer EVERY declared finding →
+  rsct_phase_review_complete) →
   rsct_phase_test_start({ spec_tier: 'standard' }) → rsct_phase_test_complete.
 - complex: same chain as standard; V phase is mandatory (skipping
   requires explicit override_verification_skip=true).
@@ -83,6 +85,14 @@ Real-world drift example (2026-06-07): a routine feature task
 rsct_status, rsct_classify_task, or any phase tool — leading to
 direct Edit on a protected branch with no scope contract and no
 auditable approval. Caught retroactively by a self-audit prompt.
+
+Findings BIND. Both the V phase and the REVIEW phase refuse to
+complete while any finding they raised has no action — the rejection
+returns the open ones, and rsct_phase_status lists them if the ids
+scrolled out of context. Declaring a finding at rsct_phase_review_start
+commits you to resolving it, so declare what the review genuinely
+found. Never answer with an id you did not receive: unknown ids are
+rejected, and inventing them was the gap this closes.
 
 How to apply: The bootstrap chain (steps 1–3) runs FIRST in every
 session and FIRST again for every new task within a session. Do not

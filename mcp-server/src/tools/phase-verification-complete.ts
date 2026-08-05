@@ -17,7 +17,15 @@ import {
   type FabricationSignal,
 } from '../lib/dev-approval.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
-import { FINDING_ACTIONS as ACTION_VALUES, emptyActionsSummary, type ActionsSummary } from '../lib/findings.js'
+import {
+  FINDING_ACTIONS as ACTION_VALUES,
+  checkFindingsGate,
+  emptyActionsSummary,
+  readFindingsBaseline,
+  type ActionsSummary,
+  type FindingsGateRejectKind,
+  type StoredFinding,
+} from '../lib/findings.js'
 import {
   readPhaseState,
   writePhaseState,
@@ -46,7 +54,15 @@ export const phaseVerificationCompleteInputSchema = z
     findings_actions: z
       .array(findingActionSchema)
       .default([])
-      .describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.'),
+      .describe(
+        'One action per finding raised by this V phase — EVERY finding needs one, or completion is rejected. Any action="block" aborts completion.',
+      ),
+    findings_run_id: z
+      .string()
+      .optional()
+      .describe(
+        'The findings_run_id returned by rsct_phase_verification_start. Echo it back so answers prepared before a re-run are rejected as a stale set rather than re-applied to renumbered findings.',
+      ),
     dev_approval: z
       .unknown()
       .describe('The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication).'),
@@ -71,6 +87,7 @@ export type PhaseVerificationCompleteStatus =
 
 export type PhaseVerificationCompleteRejectKind =
   | GateRejectKind
+  | FindingsGateRejectKind
   | 'block_actions_present'
   | 'spec_ref_mismatch'
 
@@ -87,6 +104,13 @@ export interface PhaseVerificationCompleteOutput {
   cleared_verification: boolean
   cleared_phase: boolean
   actions_summary: ActionsSummary
+  /**
+   * #40: on a findings-gate rejection, every finding still awaiting an action.
+   * Present only on those rejections — nothing else in the framework surfaces the
+   * stored ids, so without this the only way back is re-running `_start`, which
+   * rewrites the baseline the caller is being measured against.
+   */
+  open_findings?: StoredFinding[]
   audit_path: string | null
   audit_error: string | null
   anti_replay_persisted: boolean | null
@@ -104,7 +128,7 @@ export interface PhaseVerificationCompleteInternal {
 export const phaseVerificationCompleteTool: Tool = {
   name: 'rsct_phase_verification_complete',
   description:
-    '§C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) — it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". Any findings_actions entry with action="block" aborts completion before the §C dialog.',
+    '§C-gated V phase closure. Reads .rsct/phase-state.json (must contain an active verification block with matching spec_ref), validates dev_approval (schema/skew/anti-reuse/fabrication), pops an OS dialog when required, then writes the per-action audit entries + a verification.complete event, stamps `completed_at` on the verification block and clears the active phase. The verification block is RETAINED (CAP-28) — it is the evidence rsct_phase_code_start checks; only the large finding arrays are pruned. Suggested dev_approval.action_scope format: "verification_complete:spec_ref=<X>". EVERY finding this phase raised needs an action: unknown ids, duplicates, a stale findings_run_id, or any finding left unanswered all reject before the §C dialog, and the rejection returns open_findings so you can answer them without re-running _start. Any findings_actions entry with action="block" also aborts completion. Note the baseline is only as complete as the inputs _start was given — omitting spec_claims or existing_project_files shrinks what the checklist can raise.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -117,9 +141,15 @@ export const phaseVerificationCompleteTool: Tool = {
         type: 'string',
         description: 'Must match the open V phase spec_ref.',
       },
+      findings_run_id: {
+        type: 'string',
+        description:
+          'The findings_run_id returned by rsct_phase_verification_start. Echo it back so an answer set prepared before a re-run is rejected as stale instead of being re-applied to renumbered findings.',
+      },
       findings_actions: {
         type: 'array',
-        description: 'Per-finding actions. action="block" aborts completion.',
+        description:
+          'One action per finding raised by this phase — every finding needs one or completion is rejected. action="block" aborts completion.',
         items: {
           type: 'object',
           required: ['finding_id', 'action'],
@@ -225,6 +255,60 @@ export async function phaseVerificationCompleteHandler(
     }
   }
 
+  // #40. Placed AFTER the spec_ref match — demanding answers for another spec's
+  // baseline sends the caller after the wrong findings — and BEFORE the block check,
+  // so an unknown id carrying action:'block' is reported as the unknown id rather
+  // than as an instruction to change the action on a finding that does not exist.
+  //
+  // Every rejection here is a real reject_kind with its own audit entry, exactly like
+  // the three around it: leaving the evasion these guards exist to catch as the only
+  // unlogged outcome would invert the point.
+  const baseline = readFindingsBaseline(existing.state.verification.findings)
+  const findingsGate = checkFindingsGate({
+    baseline,
+    storedRunId: existing.state.verification.findings_run_id ?? null,
+    suppliedRunId: input.findings_run_id ?? null,
+    actions: input.findings_actions,
+    // Redundant here — the spec_ref_mismatch branch above already returned — but
+    // passed so both phases feed the gate identically and neither can drift.
+    storedSpecRef: existing.state.verification.spec_ref ?? null,
+    specRef: input.spec_ref,
+  })
+  if (!findingsGate.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'verification.complete.rejected',
+        tool: 'rsct_phase_verification_complete',
+        spec_ref: input.spec_ref,
+        reject_kind: findingsGate.reject_kind!,
+        open_findings_count: findingsGate.open_findings?.length ?? 0,
+      },
+      config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'rejected',
+      channel: null,
+      reject_kind: findingsGate.reject_kind!,
+      reason: findingsGate.reason!,
+      fabrication_signals: [],
+      spec_ref: input.spec_ref,
+      cleared_verification: false,
+      cleared_phase: false,
+      actions_summary: summary,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      open_findings: findingsGate.open_findings ?? [],
+      hints: [
+        findingsGate.reason!,
+        `findings_run_id for this phase is '${existing.state.verification.findings_run_id ?? '(none)'}'. Send one action per finding listed in open_findings, then retry.`,
+      ],
+    }
+  }
+
   if (summary.block > 0) {
     const audit = appendAudit(
       projectRoot,
@@ -305,6 +389,12 @@ export async function phaseVerificationCompleteHandler(
     }
   }
 
+  // #40 considered gating this on a non-empty baseline, so an agent could not stamp
+  // decisions about findings that never existed. Rejected: the audit log is
+  // agent-written throughout, a decision the dev genuinely made about something the
+  // checklist could not see is still worth recording, and dropping it deletes real
+  // information to prevent a weaker kind of noise. The hole worth closing was the
+  // phase completing unanswered, and the gate above closes that.
   for (const fa of input.findings_actions) {
     appendAudit(
       projectRoot,
