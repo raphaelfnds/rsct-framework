@@ -14,6 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`/rsct-universe` stopped halfway.** It replaced `/rsct-init-universe` and
+  `/rsct-canonical-source` with one entry point, but state B — no universe found —
+  only ran the create engine. The dev ended up with a universe and an **unlinked**
+  project, and had to run the command a second time to reach state C and link. One
+  command doing one of the two things it unified is the thing it was meant to fix.
+
+  State B is now the chain `01-setup` already used for its guided flow: create,
+  verify `.universe.json` is actually on disk at the reported path, then link. A
+  creation that aborted or was declined stops the chain rather than writing a
+  `universe.local` that points at nothing.
+
 - **The framework told the dev to run two slash commands it deletes.**
   `scripts/install.sh` removes `rsct-init-universe.md` and
   `rsct-canonical-source.md` — `/rsct-universe` replaced both — but 27 places
