@@ -97,10 +97,14 @@ when it detects you need a universe.
 `app.org`, universe name, a superset path search, inside-universe + already-linked
 detection), then routes by the detected state:
 
-- **No universe found** → bootstraps a skeleton universe repo: `.universe.json`
-  (the marker — org, universe name, empty `registered_apps[]`), `docs/governance/`,
-  `docs/diagrams/` placeholders, an empty `applications/` registry, `hosts/`, and
-  an empty `contracts.json`. TODO placeholders you fill as the org grows.
+- **No universe found** → bootstraps a skeleton universe repo **and then links this
+  project to it**, in the same run: `.universe.json` (the marker — org, universe
+  name, empty `registered_apps[]`), `docs/governance/`, `docs/diagrams/`
+  placeholders, an empty `applications/` registry, `hosts/`, and an empty
+  `contracts.json`, followed by the canonical-source link below. TODO placeholders
+  you fill as the org grows. If creation is declined or fails, the run stops there
+  and nothing is linked — you are never left pointing at a universe that is not
+  on disk.
 - **Universe exists, project not linked** → adds the `## Canonical architectural
   source` section to this repo's `CLAUDE.md` + the `.rsct.json` `universe` block.
 - **Inside the universe repo** → adjusts/refreshes the skeleton (adds only what's

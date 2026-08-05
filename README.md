@@ -295,7 +295,9 @@ One idempotent command that detects the current state and does the right thing:
 - **No universe yet** → bootstraps a skeleton universe repository at
   `~/projects/<org>-universe/` (`CLAUDE.md` §0, `docs/governance/` — LGPD/DNS/
   naming/retention, `docs/diagrams/` `.drawio` placeholders, `applications/`,
-  `hosts/`). Templates carry TODO placeholders you fill as the org grows.
+  `hosts/`) **and links this project to it in the same run** — one command takes
+  you from nothing to linked. Templates carry TODO placeholders you fill as the
+  org grows.
 - **Universe exists but this project isn't linked** → adds the
   `## Canonical architectural source` section to `CLAUDE.md`, pointing at it.
 - **Inside the universe repo** → adjusts/refreshes the skeleton (adds only
