@@ -10,9 +10,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.0] - 2026-08-05
+
+Two silent failures, both in mechanisms built to make drift visible — and both of
+which had been quietly reporting that everything was fine. Minor rather than patch
+because `/rsct-setup` gains a behaviour it did not have: it can now refresh the
+governance sections of your `CLAUDE.md`. Marker schema id stays `v=1.0.0` (the new
+field is additive); tool count unchanged at **39**.
 
 ### Fixed
+
+- **The installer wrote a docstring where the version belonged (#44).** `version.ts`
+  opens with a docstring that *mentions* `RSCT_MCP_VERSION`, so the unanchored grep let
+  `head -1` take the prose line — which has no single quotes, so the `sed` substituted
+  nothing and the whole sentence went into `~/.rsct/VERSION-CODE`. Both sides of the
+  drift comparison read that file, so they matched byte for byte on every run and the
+  code axis reported `same` forever. That axis exists precisely so a code-only change
+  cannot hide, and it was the thing hiding it.
+
+  The capture is now anchored on the declaration and uses `sed -n …p`, which prints
+  only lines that actually carry a quoted value — two independent defences; reverting
+  either alone still yields the right version, reverting both reproduces the bug.
+  **Both** sides of the comparison gained `tr -d '\r'`: a CRLF marker, reachable by
+  copying `~/.rsct` between machines, made `"2.6.1\r" != "2.6.1"` and reported drift on
+  every run — the same bug inverted, and invisible on Git Bash, which strips the CR in
+  command substitution. The code axis also gained the numeric guard the protocol axis
+  already had, and a pre-fix marker now reports `unreadable` rather than announcing
+  drift to a dev whose code never moved.
 
 - **`CLAUDE.md` rule sections stopped being frozen forever (#45).** Phase 2 said
   "never overwrite `present-en` content", so once a section was in English its body
