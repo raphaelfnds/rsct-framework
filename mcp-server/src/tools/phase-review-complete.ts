@@ -7,12 +7,21 @@ import {
   type CompletePhaseInternal,
   type CompletePhaseResult,
 } from '../lib/phase-machine.js'
-import { stampReviewDecision } from '../lib/phase-scope.js'
+import {
+  readPhaseState,
+  stampReviewDecision,
+  writePhaseState,
+  type PhaseState,
+} from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   FINDING_ACTIONS,
+  checkFindingsGate,
   emptyActionsSummary,
+  readFindingsBaseline,
   type ActionsSummary,
+  type FindingsGateRejectKind,
+  type StoredFinding,
 } from '../lib/findings.js'
 
 /**
@@ -49,30 +58,51 @@ export const phaseReviewCompleteInputSchema = z
     findings_actions: z
       .array(findingActionSchema)
       .default([])
-      .describe('Per-finding actions chosen by the dev. Any action="block" aborts completion.'),
+      .describe(
+        'One action per finding declared at rsct_phase_review_start — EVERY declared finding needs one, or completion is rejected. Any action="block" aborts completion.',
+      ),
+    findings_run_id: z
+      .string()
+      .optional()
+      .describe(
+        'The findings_run_id returned by rsct_phase_review_start. Echo it back so answers prepared before a re-run are rejected as a stale set.',
+      ),
   })
   .strict()
 
 export type PhaseReviewCompleteInput = z.infer<typeof phaseReviewCompleteInputSchema>
 
+export type PhaseReviewCompleteRejectKind = FindingsGateRejectKind | 'block_actions_present'
+
 export type PhaseReviewCompleteOutput = CompletePhaseResult & {
   actions_summary: ActionsSummary
+  /** #40: on a findings-gate rejection, every finding still awaiting an action. */
+  open_findings?: StoredFinding[]
 }
 
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] to record what the review found and what the dev decided about each item — dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+    '§C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion, and the rejection returns open_findings so you can answer them without re-running _start (rsct_phase_status also lists them). Unknown ids, duplicates and a stale findings_run_id reject the same way. Dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
     properties: {
       project_root: { type: 'string' },
-      spec_ref: { type: 'string' },
+      spec_ref: {
+        type: 'string',
+        description: 'Must match the spec_ref of the open REVIEW phase.',
+      },
       dev_approval: { type: 'object' },
+      findings_run_id: {
+        type: 'string',
+        description:
+          'The findings_run_id returned by rsct_phase_review_start. Echo it back so an answer set prepared before a re-run is rejected as stale.',
+      },
       findings_actions: {
         type: 'array',
-        description: 'Per-finding actions. action="block" aborts completion.',
+        description:
+          'One action per finding declared at rsct_phase_review_start — every declared finding needs one or completion is rejected. action="block" aborts completion.',
         items: {
           type: 'object',
           required: ['finding_id', 'action'],
@@ -101,6 +131,60 @@ export async function phaseReviewCompleteHandler(
 
   const actions_summary = emptyActionsSummary()
   for (const fa of input.findings_actions) actions_summary[fa.action]++
+
+  // #40: the same gate the V phase runs, from the same module — the finding
+  // vocabulary was hand-written in four places before #10 and this is that hazard
+  // one level up. Placed before the `block` check so an unknown id carrying
+  // action:'block' is reported as the unknown id, not as an instruction to change
+  // the action on a finding that does not exist.
+  const stored = readPhaseState(projectRoot).state?.review_findings
+  const baseline = readFindingsBaseline(stored?.findings)
+  const findingsGate = checkFindingsGate({
+    baseline,
+    storedRunId: stored?.run_id ?? null,
+    suppliedRunId: input.findings_run_id ?? null,
+    actions: input.findings_actions,
+    // The phase/spec_slug checks live inside gatePhaseComplete, which also pops the
+    // §C dialog — and this gate has to run BEFORE that, so a rejected completion
+    // never spends an approval. Comparing the stored spec_ref here is what keeps the
+    // ordering safe: without it, spec-B could be completed by answering spec-A's
+    // findings, which would then prune spec-A's set as well.
+    storedSpecRef: stored?.spec_ref ?? null,
+    specRef: input.spec_ref,
+  })
+  if (!findingsGate.ok) {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'review.complete.rejected',
+        tool: 'rsct_phase_review_complete',
+        spec_ref: input.spec_ref,
+        reject_kind: findingsGate.reject_kind!,
+        open_findings_count: findingsGate.open_findings?.length ?? 0,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      phase: 'review',
+      spec_ref: input.spec_ref,
+      channel: null,
+      reject_kind: findingsGate.reject_kind!,
+      reason: findingsGate.reason!,
+      fabrication_signals: [],
+      cleared: false,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      actions_summary,
+      next_recommended_phase: 'review',
+      open_findings: findingsGate.open_findings ?? [],
+      hints: [
+        findingsGate.reason!,
+        `findings_run_id for this review is '${stored?.run_id ?? '(none)'}'. Send one action per finding listed in open_findings, then retry.`,
+      ],
+    }
+  }
 
   // `block` aborts BEFORE the §C gate, mirroring the V phase: the dialog is a
   // decision surface, and asking the dev to approve a completion that is already
@@ -159,12 +243,36 @@ export async function phaseReviewCompleteHandler(
     })
     if (!stamp.ok) {
       result.hints.push(
-        `⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start may still report the review as incomplete — retry by re-running rsct_phase_review_complete, or check .rsct/phase-state.json.`,
+        `⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start will report the review as incomplete. This completion already cleared the phase label, so re-running rsct_phase_review_complete returns no_active_phase — re-open with rsct_phase_review_start (same findings) and complete again, or inspect .rsct/phase-state.json.`,
       )
     }
 
+    // #40: prune the declared findings — a completed review has none pending, and
+    // `evaluateReviewGate` now reads that as an invariant rather than as a size
+    // optimisation. Done AFTER the audit entries below would be wrong: if the log
+    // write fails, the decisions would exist in neither place. Done here, a failed
+    // prune leaves the findings and the gate reports the review as incomplete,
+    // which is the safe direction.
+    // Guarded on the stamp: if completed_at did NOT land, pruning would delete the
+    // findings while leaving the review looking incomplete — the answers would exist
+    // only in the audit log, with nothing left to re-answer. Keeping them is the
+    // recoverable direction.
+    const s = readPhaseState(projectRoot)
+    if (stamp.ok && s.state?.review_findings !== undefined) {
+      const next: PhaseState = { ...s.state }
+      delete next.review_findings
+      const pruned = writePhaseState(projectRoot, next)
+      if (!pruned.ok) {
+        result.hints.push(
+          `⚠ review completed but the declared findings could not be pruned from phase state (${pruned.reason}) — rsct_phase_test_start will report the review as incomplete until they are. Re-open with rsct_phase_review_start (same findings) and complete again; re-running rsct_phase_review_complete alone returns no_active_phase, because this completion already cleared the phase label.`,
+        )
+      }
+    }
+
     // One audit entry per finding, AFTER the gate: a rejected complete must not
-    // leave the log asserting decisions that were never approved.
+    // leave the log asserting decisions that were never approved. Deliberately NOT
+    // gated on a declared baseline — see the matching note in
+    // phase-verification-complete.ts.
     for (const fa of input.findings_actions) {
       appendAudit(
         projectRoot,

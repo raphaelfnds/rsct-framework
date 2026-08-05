@@ -173,7 +173,19 @@ export function evaluateReviewGate(args: {
     }
   }
 
-  if (decision === 'yes' && completedAt !== null) {
+  // #40: a completed review has no pending findings — `review_complete` prunes them.
+  // So findings still sitting here alongside a `completed_at` mean the completion did
+  // not go through this binary's gate: an older rsct-mcp stamped it (the global
+  // binary is a symlink to a worktree, so checking out an older branch swaps it), or
+  // the prune failed. Either way the findings were never answered, and reporting
+  // `passed` would let the hole this closes reopen through a downgrade.
+  const pendingFindings = matchesSpec
+    ? ((stateRead.state?.review_findings?.findings as unknown[] | undefined)?.length ?? 0)
+    : 0
+
+  // Note the ordering: this only suppresses `passed`, it does not return. The
+  // override below is a universal escape and must stay reachable from here too.
+  if (decision === 'yes' && completedAt !== null && pendingFindings === 0) {
     return {
       status: 'passed',
       spec_tier: specTier,
@@ -195,6 +207,27 @@ export function evaluateReviewGate(args: {
       review_decision: decision,
       review_completed_at: completedAt,
       hint: `override_review_skip=true acknowledged. Override logged to audit (.rsct/audit.log).`,
+    }
+  }
+
+  // #40: stamped complete, but findings are still pending. A completed review prunes
+  // them, so this state means the completion did not pass through this binary's
+  // gate — an older rsct-mcp stamped it (the global binary is a symlink to a
+  // worktree, so checking out an older branch swaps it in), or the prune failed.
+  // Either way nobody answered them.
+  if (decision === 'yes' && completedAt !== null && pendingFindings > 0) {
+    return {
+      status: 'rejected_incomplete',
+      spec_tier: specTier,
+      review_block_found: true,
+      review_spec_ref: reviewSpecRef,
+      review_decision: 'yes',
+      review_completed_at: completedAt,
+      // NOTE the recovery named here. By the time this state exists the phase label
+      // is gone (a successful complete clears it), so re-running
+      // rsct_phase_review_complete returns no_active_phase and can never work —
+      // it has to go back through _start. rsct_phase_status lists the open ids.
+      hint: `The review for spec_ref='${specRef}' is stamped complete but still holds ${pendingFindings} unanswered finding(s). Re-open it with rsct_phase_review_start (pass the same findings — rsct_phase_status lists them), then rsct_phase_review_complete with an action for each. OR pass override_review_skip=true to bypass.`,
     }
   }
 

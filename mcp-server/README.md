@@ -84,6 +84,7 @@ never trips the gate.
 | hook-registration — install drift also checks whether the enforcement **hooks are registered** in `.claude/settings.json`, not just whether the script files are current; a present-but-unwired script now escalates alongside an absent one · `stale_components` → `affected_components` (carries a `registration` state) · four doc pages corrected on where the hooks actually live | ✅ shipped to `main`; ships in **v2.4.0** (39 tools, unchanged) |
 | backlog-sweep — unowned `.claude/settings.json` drift reported at the commit gate (#17) · REVIEW gains `findings_actions[]` + a `block` abort (#19) · the install-drift advisory reaches push/merge and the OS dialog, and suspends the free-commit lane (#25) · commit-message cap elicited at setup instead of imposed (#26) · sanitizer relocates machine paths out of `permissions.allow[]`, and every shared-JSON parse site tolerates a UTF-8 BOM (#12) · `verification_start` refuses to overwrite an active phase (#27) · `verify:dist` runs in CI (#28) · excerpt / section-query / finding-vocabulary helpers consolidated (#10) | ✅ shipped to `main`; ships in **v2.5.0** (39 tools, unchanged) |
 | security patch — five `git` bypass forms closed in the poison-pill detector, incl. the wildcard `Bash(git -C:*)` that commits in ANOTHER repo (#32) · all four open Dependabot advisories cleared by hand, because `fast-uri` is bundled into the tracked `dist/` and a lockfile-only fix leaves the vulnerable code in the shipped artifact | ✅ shipped to `main`; ships in **v2.5.1** (39 tools, unchanged) |
+| review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
 **39 tools · 5 resources · tsc strict · ESM ~1.2 MB
@@ -277,6 +278,41 @@ handler ever sees it.
 
 `RSCT_UPDATE_CHECK=off` in the environment overrides both parameters; when it is set,
 `update_check:"on"` says so instead of claiming an effect it cannot deliver.
+
+### The findings gate (V and REVIEW)
+
+Both phases raise findings and both refuse to complete while any of them has no
+action (#40). The gate itself is one implementation, in `lib/findings.ts`, so its
+rules cannot drift — though the two tools still call it from different points in
+their own sequence (V after its `spec_ref` check, REVIEW before `gatePhaseComplete`,
+which is why REVIEW passes the stored `spec_ref` into the gate).
+
+- **Coverage** — every finding the phase raised needs an action. This is what makes
+  the phase bind; before it, `findings_actions: []` closed a phase that had raised
+  five problems.
+- **Id validation** — an id not in the stored baseline is rejected rather than logged.
+  Duplicates too: two actions for one finding is not a decision.
+- **Run identity** — `_start` returns a `findings_run_id`; echo it at `_complete`.
+  Supplying a stale one is rejected as a set. Omitting it is allowed: the id set is
+  what the run id hashes, so a stale answer usually surfaces as unknown-or-unanswered
+  anyway. It is not airtight — a re-run that happens to produce the *same ids* yields
+  the same run id, and for REVIEW the ids are agent-chosen, so an agent reusing id
+  strings defeats it by construction. It catches the accident, not the adversary.
+- **Cross-spec** — a stored baseline whose `spec_ref` differs from the one being
+  completed is refused outright. Without that, a re-plan could be completed by
+  answering the previous spec's findings, which also pruned them.
+- **Recovery** — a findings-gate rejection returns `open_findings`, and
+  `rsct_phase_status` lists them, so a resumed session never has to re-run `_start`
+  (which would rewrite the baseline it is being measured against). Other rejections
+  (`block_actions_present`, the §C gate) do not carry the field.
+- **Fail-open** — no usable baseline (absent, empty, `null`, not an array, or elements
+  without ids) skips every check. An unreadable baseline must never make a phase
+  uncompletable.
+
+REVIEW's baseline is **declared**: `rsct_phase_review_start` takes `findings[]`,
+because #33 established there is no viable mechanical producer for it. That closes
+"declared five, answered none" — it does not close an agent that declares nothing,
+and the tool descriptions say so rather than implying a stronger guarantee.
 
 ### `rsct_load_context`
 
@@ -786,6 +822,7 @@ src/
 ├── lib/
 │   ├── project-root.ts      # locate .rsct.json (Windows-safe) + RsctConfig type
 │   ├── version.ts           # RSCT_MCP_VERSION — derived mirror of /VERSION
+│   ├── findings.ts          # finding vocabulary + the shared findings gate (#19/#40)
 │   ├── update-check.ts      # opt-OUT GitHub release check + per-release declines (#38)
 │   ├── version-drift.ts     # install drift: LOCAL compare only, never network
 │   ├── git.ts               # minimal git state + GitExecutor + commit/push/merge

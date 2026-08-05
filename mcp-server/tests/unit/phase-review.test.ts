@@ -395,6 +395,10 @@ describe('phase_status review summary', () => {
       completed: true,
       decided_at: VALID_TS,
       completed_at: FIXED_NOW.toISOString(),
+      // #40: a completed review has no pending findings — the block is pruned at
+      // _complete, and the test gate reads that emptiness as an invariant.
+      open_findings: [],
+      findings_run_id: null,
     })
     expect(r.rsct_phase_order).toContain('review')
   })

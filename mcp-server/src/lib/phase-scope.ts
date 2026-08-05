@@ -128,6 +128,12 @@ export interface PhaseVerificationBlock {
   declared_paths?: string[]
   discovered_importers?: unknown[]
   findings?: unknown[]
+  /**
+   * #40: fingerprint of the id SET in `findings`, echoed back at `_complete` so an
+   * answer set prepared before a re-run is rejected as a set instead of being
+   * re-applied item by item against renumbered ids.
+   */
+  findings_run_id?: string
   started_at?: string
   completed_at?: string
 }
@@ -223,6 +229,27 @@ export interface PhaseReviewBlock {
 }
 
 /**
+ * #40: the findings a REVIEW declared, and the run they belong to.
+ *
+ * Deliberately NOT a field on `PhaseReviewBlock`. That block's only writer is
+ * `stampReviewDecision`, whose merge defaults `decision` to `'no'` when no matching
+ * block exists — and `evaluateReviewGate` reads `decision === 'no'` as
+ * `bypassed_declined`, which requires no `completed_at` at all. Routing
+ * `review_start` through that writer would therefore let STARTING the review phase
+ * disarm the gate the review phase exists to satisfy.
+ *
+ * Written by `review_start` in the same write as the phase transition, and pruned at
+ * `review_complete` — a completed review has no pending findings, and the test gate
+ * now reads that as an invariant rather than as a size optimisation.
+ */
+export interface PhaseFindingsBlock {
+  spec_ref: string
+  run_id: string
+  findings: unknown[]
+  declared_at: string
+}
+
+/**
  * plan-lifecycle-v2 (Bloco 2.1): the keep|delete decision for a plan's
  * branch-local `plan_`/`progress_`/`spec_` artifacts at integration time,
  * keyed by `plan_slug`. Recorded ONCE (ask-once, mirroring PhaseReviewBlock)
@@ -256,6 +283,8 @@ export interface PhaseState {
   verification?: PhaseVerificationBlock
   /** DX-4: the REVIEW-before-Tests decision (see PhaseReviewBlock). */
   review?: PhaseReviewBlock
+  /** #40: findings declared by the REVIEW phase, pending an action each (see PhaseFindingsBlock). */
+  review_findings?: PhaseFindingsBlock
   /** CAP-30: most-recent classify_task verdict (with tier_max ratchet). */
   last_classify?: LastClassifyBlock
   /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */

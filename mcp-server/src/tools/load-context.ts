@@ -272,7 +272,15 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
   if (active_phase) {
     if (active_phase.phase === 'verification' && active_phase.verification) {
       hints.push(
-        `Active phase: verification (spec_ref='${active_phase.verification.spec_ref ?? '?'}', ${active_phase.verification.findings_count} finding(s)). Call rsct_phase_verification_complete with findings_actions[] + dev_approval before editing code.`,
+        `Active phase: verification (spec_ref='${active_phase.verification.spec_ref ?? '?'}', ${active_phase.verification.findings_count} finding(s)). Call rsct_phase_verification_complete with an action for EVERY finding + dev_approval before editing code — rsct_phase_status lists the open ids if you no longer have them.`,
+      )
+    } else if (active_phase.phase === 'review') {
+      // #40: a resumed REVIEW needs the same steer. load_context is step 2 of the
+      // mandatory bootstrap chain, so leaving it on the generic branch means the
+      // tool that runs first every session says nothing about the state this gate
+      // introduced.
+      hints.push(
+        `Active phase: review. Every finding declared at rsct_phase_review_start needs an action before rsct_phase_review_complete will close it — call rsct_phase_status to list the open ones and their findings_run_id.`,
       )
     } else {
       hints.push(

@@ -20,6 +20,7 @@ import {
   type PhaseVerificationBlock,
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { computeRunId } from '../lib/findings.js'
 import { isStaleVerificationLabel } from '../lib/phase-machine.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
@@ -86,6 +87,13 @@ export interface PhaseVerificationStartOutput {
   declared_paths: string[]
   discovered_importers: DiscoveredImporter[]
   findings: VerificationFinding[]
+  /**
+   * #40: identifies the SET of findings above. `rsct_phase_verification_complete`
+   * echoes it back so an answer set prepared before a re-run is rejected as stale.
+   * `null` when nothing was persisted (a skipped tier, or a failed write) — a run id
+   * for a baseline that does not exist would have the agent answer against nothing.
+   */
+  findings_run_id: string | null
   walk_stats: ReverseDepStats
   checklist_stats: ChecklistStats
   phase_state_path: string
@@ -100,7 +108,7 @@ export interface PhaseVerificationStartOutput {
 export const phaseVerificationStartTool: Tool = {
   name: 'rsct_phase_verification_start',
   description:
-    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. Findings are recommendations — dev sets the action on each via rsct_phase_verification_complete.',
+    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given — omitting spec_claims or existing_project_files shrinks the baseline it can raise.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -176,6 +184,7 @@ export async function phaseVerificationStartHandler(
     checklistArgs.existingProjectFiles = input.existing_project_files
   }
   const checklist = runVerificationChecklist(checklistArgs)
+  const findingsRunId = computeRunId(checklist.findings)
 
   if (input.spec_tier === 'trivial' || input.spec_tier === 'small') {
     const skipAudit = appendAuditEntry(
@@ -192,6 +201,7 @@ export async function phaseVerificationStartHandler(
     const fields = auditFields(skipAudit)
     return {
       status: 'skipped_tier',
+      findings_run_id: null,
       rsct_installed: resolution.rsct_installed,
       spec_ref: input.spec_ref,
       spec_tier: input.spec_tier,
@@ -252,6 +262,7 @@ export async function phaseVerificationStartHandler(
     const fields = auditFields(rejectAudit)
     return {
       status: 'phase_already_active',
+      findings_run_id: null,
       rsct_installed: resolution.rsct_installed,
       spec_ref: input.spec_ref,
       spec_tier: input.spec_tier,
@@ -285,6 +296,7 @@ export async function phaseVerificationStartHandler(
     declared_paths: walk.declared,
     discovered_importers: walk.discovered,
     findings: checklist.findings,
+    findings_run_id: findingsRunId,
     started_at: startedAt,
   }
   if (requestedPersona !== null) verificationBlock.persona = requestedPersona
@@ -353,7 +365,7 @@ export async function phaseVerificationStartHandler(
   const hints: string[] = []
   if (writeResult.ok) {
     hints.push(
-      `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced — review and call rsct_phase_verification_complete with findings_actions[] + dev_approval.`,
+      `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced — EVERY one needs an action. Call rsct_phase_verification_complete with findings_actions[] covering all of them, findings_run_id='${findingsRunId}', and dev_approval.`,
     )
   } else if (writeResult.reason === 'locked') {
     hints.push(
@@ -372,6 +384,9 @@ export async function phaseVerificationStartHandler(
 
   return {
     status: writeResult.ok ? 'verified' : 'state_write_failed',
+    // null on a failed write: advertising a run id for a baseline that was never
+    // stored would have the agent answer against nothing.
+    findings_run_id: writeResult.ok ? findingsRunId : null,
     rsct_installed: resolution.rsct_installed,
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
