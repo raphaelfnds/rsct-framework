@@ -71,7 +71,7 @@ describe('rsct_get_universe — no universe / degraded', () => {
     expect(out.universe_available).toBe(false)
     expect(out.docs).toEqual([])
     expect(out.governance.available).toBe(false)
-    expect(out.hints.join(' ')).toMatch(/rsct-canonical-source/)
+    expect(out.hints.join(' ')).toMatch(/rsct-universe/)
   })
 
   it('configured-but-missing universe → universe_available:false + the note hint', async () => {
@@ -97,7 +97,7 @@ describe('rsct_get_universe — no universe / degraded', () => {
     expect(out.governance.available).toBe(false)
     expect(out.docs).toEqual([])
     expect(out.hints.join(' ')).toMatch(/no governance docs/)
-    expect(out.hints.join(' ')).toMatch(/rsct-init-universe/)
+    expect(out.hints.join(' ')).toMatch(/rsct-universe/)
   })
 
   it('non-rsct project → rsct_installed:false + universe_available:false', async () => {

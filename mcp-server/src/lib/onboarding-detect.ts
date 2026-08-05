@@ -37,7 +37,7 @@ export type Situation =
 
 export type Route =
   | 'guard-universe-repo' // STOP: don't run setup as an app here
-  | 'offer-link-existing' // offer /rsct-canonical-source to link the found universe
+  | 'offer-link-existing' // offer /rsct-universe to link the found universe
   | 'offer-create-universe' // offer the guided create→link→register flow
   | 'fix-universe-link' // tell the dev to fix universe.local (never register into a void)
   | 'none' // nothing extra to offer (Phase 4.8 self-guards registration)
@@ -291,18 +291,18 @@ function buildHints(d: Omit<OnboardingDetection, 'hints'>): string[] {
       break
     case 'fix-universe-link':
       hints.push(
-        `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve — fix universe.local or re-run /rsct-canonical-source. Do NOT register this app into it.`,
+        `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve — fix universe.local or re-run /rsct-universe. Do NOT register this app into it.`,
       )
       break
     case 'offer-link-existing':
       hints.push(
-        `A universe was found at ${d.universe.local_path} but this app is not linked to it — offer to link it (/rsct-canonical-source), then register it.`,
+        `A universe was found at ${d.universe.local_path} but this app is not linked to it — offer to link it (/rsct-universe), then register it.`,
       )
       break
     case 'offer-create-universe': {
       const confirmed = d.siblings.filter((s) => s.matched_by === 'rsct_json').map((s) => s.dir)
       hints.push(
-        `Found ${confirmed.length} same-org sibling app(s) (${confirmed.join(', ')}) and no universe — offer the guided flow: create a universe (/rsct-init-universe), link this app (/rsct-canonical-source), then register it. Each step is consent-gated; the dev edits contract content and commits the universe repo themselves.`,
+        `Found ${confirmed.length} same-org sibling app(s) (${confirmed.join(', ')}) and no universe — offer the guided flow: /rsct-universe creates the universe and links this app in one pass, then register it. Each step is consent-gated; the dev edits contract content and commits the universe repo themselves.`,
       )
       break
     }

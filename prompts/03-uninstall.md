@@ -1,7 +1,7 @@
 # RSCT Uninstall — 03-uninstall.md
 
 You are operating inside a software project repository that was previously
-configured by `/rsct-setup` (and optionally `/rsct-canonical-source`).
+configured by `/rsct-setup` (and optionally `/rsct-universe`).
 
 Your task: reverse the changes made by RSCT setup, with full safety guarantees:
 - Never delete a file that the developer modified after creation

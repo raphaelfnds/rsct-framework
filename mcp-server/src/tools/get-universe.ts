@@ -122,7 +122,7 @@ export async function getUniverseHandler(rawInput: unknown): Promise<GetUniverse
       hints.push(`${block.note}.`)
     } else {
       hints.push(
-        'No universe is linked to this project. Run /rsct-canonical-source to link the org universe, then this tool can read its governance docs.',
+        'No universe is linked to this project. Run /rsct-universe to link the org universe (it creates one if none exists), then this tool can read its governance docs.',
       )
     }
     return {
@@ -149,7 +149,7 @@ export async function getUniverseHandler(rawInput: unknown): Promise<GetUniverse
   // Hints (content-focused; the index never adds a status/load_context hint — V FV4).
   if (input.scope !== 'index' && index.docs.length === 0) {
     hints.push(
-      `Universe at ${block.local_path} has no governance docs (docs/governance/ ${index.available ? 'is empty' : 'is missing'}). Run /rsct-init-universe to scaffold them.`,
+      `Universe at ${block.local_path} has no governance docs (docs/governance/ ${index.available ? 'is empty' : 'is missing'}). Run /rsct-universe to scaffold them.`,
     )
   }
   if (input.doc && input.scope !== 'index' && !index.docs.includes(input.doc)) {
@@ -161,7 +161,7 @@ export async function getUniverseHandler(rawInput: unknown): Promise<GetUniverse
   }
   if (input.scope === 'index' && docs[0] && !docs[0].exists) {
     hints.push(
-      `Universe at ${block.local_path} has no docs/INDEX.md. Run /rsct-init-universe to scaffold it.`,
+      `Universe at ${block.local_path} has no docs/INDEX.md. Run /rsct-universe to scaffold it.`,
     )
   }
   if (input.query && docs.length > 0 && docs.every((d) => d.sections.length === 0)) {

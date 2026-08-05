@@ -10,7 +10,7 @@ import {
 
 // T1.a — make the org-level "universe" usable at runtime. The universe layer
 // already exists (universe repo, .universe.json, applications/ registry) and
-// `RsctConfig.universe` is populated by /rsct-canonical-source, but nothing ever
+// `RsctConfig.universe` is populated by /rsct-universe (link mode), but nothing ever
 // READS it. This module resolves + reads the universe and computes a single
 // `UniverseBlock` (the "single source" — both rsct_status and rsct_load_context
 // call getUniverse, so they can never drift). Everything here is FAIL-GRACEFUL:
@@ -191,7 +191,7 @@ export function getUniverse(
     const note = `universe configured but not found at ${resolution.path}`
     return {
       block: { ...NONE_BLOCK, name: config.universe?.name ?? null, local_path: resolution.path, note },
-      hint: `Universe configured at ${resolution.path} but not found there — fix .rsct.json universe.local or re-run /rsct-canonical-source.`,
+      hint: `Universe configured at ${resolution.path} but not found there — fix .rsct.json universe.local or re-run /rsct-universe.`,
     }
   }
 
