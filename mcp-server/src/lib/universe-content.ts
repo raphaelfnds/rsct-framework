@@ -9,11 +9,11 @@ import { parseSections, type MarkdownSection } from './markdown.js'
 // and the rsct_get_universe tool can read the docs on demand. The universe layout
 // is NOT the project layout — a universe has no documentation/{decisions,knowledge,
 // architecture}; its authority lives under docs/governance/ (guaranteed by
-// /rsct-init-universe). Everything here is FAIL-GRACEFUL: any error degrades to an
+// /rsct-universe). Everything here is FAIL-GRACEFUL: any error degrades to an
 // empty result and NEVER throws into the bootstrap path.
 
 /**
- * The canonical governance docs scaffolded by /rsct-init-universe. Used only for
+ * The canonical governance docs scaffolded by /rsct-universe. Used only for
  * tool descriptions and a "missing canonical doc" hint — NOT to gate reads: the
  * index is disk-driven (the actual *.md files are the truth), so an org that adds
  * custom governance docs still surfaces + reads them. (V FV3.)

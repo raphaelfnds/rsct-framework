@@ -23547,7 +23547,7 @@ function getUniverse(config2, projectRoot, opts = {}) {
     const note2 = `universe configured but not found at ${resolution.path}`;
     return {
       block: { ...NONE_BLOCK, name: config2.universe?.name ?? null, local_path: resolution.path, note: note2 },
-      hint: `Universe configured at ${resolution.path} but not found there \u2014 fix .rsct.json universe.local or re-run /rsct-canonical-source.`
+      hint: `Universe configured at ${resolution.path} but not found there \u2014 fix .rsct.json universe.local or re-run /rsct-universe.`
     };
   }
   const data = readUniverse(resolution.path);
@@ -23640,10 +23640,10 @@ function infer(s) {
 function buildTopologyHint(block, universeRoot) {
   if (block.confirmed_mode !== "multi-repo") return null;
   if (!universeRoot) {
-    return "Topology is confirmed multi-repo but no universe is linked \u2014 the contract gate is not active yet. Run /rsct-canonical-source to link the org universe so commits can be checked against contracts.";
+    return "Topology is confirmed multi-repo but no universe is linked \u2014 the contract gate is not active yet. Run /rsct-universe to link the org universe so commits can be checked against contracts.";
   }
   if (!existsSync(join(universeRoot, "contracts.json"))) {
-    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing \u2014 the contract gate is not active yet. Add a contracts.json (scaffold via /rsct-init-universe) to turn it on.`;
+    return `Topology is confirmed multi-repo but ${universeRoot}/contracts.json is missing \u2014 the contract gate is not active yet. Add a contracts.json (scaffold via /rsct-universe) to turn it on.`;
   }
   return null;
 }
@@ -25651,7 +25651,7 @@ async function getUniverseHandler(rawInput) {
       hints.push(`${block.note}.`);
     } else {
       hints.push(
-        "No universe is linked to this project. Run /rsct-canonical-source to link the org universe, then this tool can read its governance docs."
+        "No universe is linked to this project. Run /rsct-universe to link the org universe (it creates one if none exists), then this tool can read its governance docs."
       );
     }
     return {
@@ -25675,7 +25675,7 @@ async function getUniverseHandler(rawInput) {
   });
   if (input.scope !== "index" && index.docs.length === 0) {
     hints.push(
-      `Universe at ${block.local_path} has no governance docs (docs/governance/ ${index.available ? "is empty" : "is missing"}). Run /rsct-init-universe to scaffold them.`
+      `Universe at ${block.local_path} has no governance docs (docs/governance/ ${index.available ? "is empty" : "is missing"}). Run /rsct-universe to scaffold them.`
     );
   }
   if (input.doc && input.scope !== "index" && !index.docs.includes(input.doc)) {
@@ -25685,7 +25685,7 @@ async function getUniverseHandler(rawInput) {
   }
   if (input.scope === "index" && docs[0] && !docs[0].exists) {
     hints.push(
-      `Universe at ${block.local_path} has no docs/INDEX.md. Run /rsct-init-universe to scaffold it.`
+      `Universe at ${block.local_path} has no docs/INDEX.md. Run /rsct-universe to scaffold it.`
     );
   }
   if (input.query && docs.length > 0 && docs.every((d) => d.sections.length === 0)) {
@@ -26083,18 +26083,18 @@ function buildHints4(d) {
       break;
     case "fix-universe-link":
       hints.push(
-        `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve \u2014 fix universe.local or re-run /rsct-canonical-source. Do NOT register this app into it.`
+        `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve \u2014 fix universe.local or re-run /rsct-universe. Do NOT register this app into it.`
       );
       break;
     case "offer-link-existing":
       hints.push(
-        `A universe was found at ${d.universe.local_path} but this app is not linked to it \u2014 offer to link it (/rsct-canonical-source), then register it.`
+        `A universe was found at ${d.universe.local_path} but this app is not linked to it \u2014 offer to link it (/rsct-universe), then register it.`
       );
       break;
     case "offer-create-universe": {
       const confirmed = d.siblings.filter((s) => s.matched_by === "rsct_json").map((s) => s.dir);
       hints.push(
-        `Found ${confirmed.length} same-org sibling app(s) (${confirmed.join(", ")}) and no universe \u2014 offer the guided flow: create a universe (/rsct-init-universe), link this app (/rsct-canonical-source), then register it. Each step is consent-gated; the dev edits contract content and commits the universe repo themselves.`
+        `Found ${confirmed.length} same-org sibling app(s) (${confirmed.join(", ")}) and no universe \u2014 offer the guided flow: /rsct-universe creates the universe and links this app in one pass, then register it. Each step is consent-gated; the dev edits contract content and commits the universe repo themselves.`
       );
       break;
     }

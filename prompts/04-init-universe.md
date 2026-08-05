@@ -5,7 +5,7 @@ You are operating to **bootstrap a new universe repository** for an organization
 A universe is a single-source-of-truth folder for: architecture diagrams,
 governance documents (LGPD, DNS, naming, retention), and inventory of
 applications and hosts. Once created, the universe is referenced by every
-project of the organization via `/rsct-canonical-source`.
+project of the organization via `/rsct-universe`.
 
 This prompt creates the skeleton — empty folders + template files with TODOs.
 The developer fills the content over time as the organization grows. No diagrams
@@ -112,7 +112,7 @@ If not detected: leave empty; dev can fill later.
 
 The framework templates live at one of:
 - `~/.rsct/universe-templates/` — when the framework was installed via
-  `scripts/install.sh` (the common case after `/rsct-init-universe` invokes
+  `scripts/install.sh` (the common case after `/rsct-universe` invokes
   this prompt)
 - `<framework-source>/universe-templates/` — when running this prompt from
   a fresh clone before install
@@ -294,7 +294,7 @@ Next steps for the developer:
        - docs/governance/document-control.md
   2. Add diagrams as .drawio files in docs/diagrams/.
   3. From any project of [ORG_SLUG]:
-       /rsct-canonical-source
+       /rsct-universe
      This wires the project's CLAUDE.md to this universe.
   4. To register an application:
        cp applications/_app.md.template applications/<app-name>.md

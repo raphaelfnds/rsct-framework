@@ -93,7 +93,7 @@ if [ -f "$GUARD_ROOT/.universe.json" ]; then
   echo "This repository is a UNIVERSE (governance repo), not an application."
   echo "/rsct-setup configures APPS. Here you edit the universe files"
   echo "(.universe.json, contracts.json, docs/governance/) and commit them yourself."
-  echo "To refresh just the universe markers/skeleton, use /rsct-init-universe (update mode)."
+  echo "To refresh just the universe markers/skeleton, use /rsct-universe (it refreshes an existing universe)."
 fi
 ```
 
@@ -710,17 +710,17 @@ Mode: [UPDATE | CREATE]
   [Present as a Recommended (§B item 1) consent question:]
   "Universe `[UNIVERSE_NAME]-universe` found at `[PATH]`, but this project is not linked
    to it. Link it now? `[Y/n]`
-   ✅ Recommended: yes — runs `/rsct-canonical-source` (adds the canonical-source
+   ✅ Recommended: yes — runs the link step of `/rsct-universe` (adds the canonical-source
       section to CLAUDE.md + sets `universe.local` in `.rsct.json`), after which this
       app can be registered in the universe (Phase 4.8).
    Note: the universe is a SEPARATE repository. Here in the app I only edit `CLAUDE.md`
    and `.rsct.json`; any change to the universe stays in the universe repo and YOU review
    and commit it there yourself — RSCT never commits the universe."
-  - On YES → after this setup applies its own mutations, invoke `/rsct-canonical-source`
+  - On YES → after this setup applies its own mutations, execute `prompts/02-canonical-source.md`
     (it OWNS `universe.local` + `canonical_source_added` + the CLAUDE.md section — setup
     never writes them directly). Once `universe.local` is set, run Phase 4.8 to register
     the app (it reads `universe.local` fresh from `.rsct.json` at execution time).
-  - On NO → proceed unlinked (no change); the dev can run `/rsct-canonical-source` later.
+  - On NO → proceed unlinked (no change); the dev can run `/rsct-universe` later.
 
 🌱 CREATE A UNIVERSE (DX-1) — present ONLY when Phase 1.9b returned
   `recommended_route: "offer-create-universe"` (≥1 same-org sibling app found at `../`
@@ -733,16 +733,18 @@ Mode: [UPDATE | CREATE]
    those apps — it's what lets RSCT block a commit that breaks a contract another repo
    depends on. Set this up now? `[y/N]`
    ✅ Recommended: yes. With your OK at EACH step, I will:
-     1) create the universe (`/rsct-init-universe`),
-     2) link THIS app (`/rsct-canonical-source`),
+     1) create the universe,
+     2) link THIS app to it,
      3) register this app in the universe (Phase 4.8).
+   (Steps 1-2 are what `/rsct-universe` does on its own; here they run inline so
+   each one is verified before the next.)
    You edit the contract content and commit the universe repository yourself — RSCT never
    touches the universe's git. The contract gate only activates once a SECOND app is
    registered in this universe."
   - On NO → proceed unlinked (mono path), and RECORD the decline so the offer stays quiet on
     future runs (ask-once) — text-splice `install.create_universe_declined_at` into `.rsct.json`
     via the block below. **To set up a universe LATER**, delete that field from `.rsct.json`, or
-    run `/rsct-init-universe` directly. (The offer never fires without same-org siblings AND no
+    run `/rsct-universe` directly. (The offer never fires without same-org siblings AND no
     universe, so it stays quiet for solo/mono projects regardless.)
 
 ✍️ COMMIT-MESSAGE LENGTH (#26) — present ONLY when `RSCT_JSON_COMMIT_MAX_LINES`
@@ -821,12 +823,12 @@ fi
 
   - On YES → run the GUIDED, STATEFUL chain. Each step is consent-gated AND re-probed
     before the next; a failure or a decline STOPS the chain cleanly (no half-built promise):
-    a) Invoke `/rsct-init-universe`. Then VERIFY the universe exists, using the path
-       `/rsct-init-universe` reports as `Universe created at:` (its final report) as
+    a) Execute `prompts/04-init-universe.md`. Then VERIFY the universe exists, using the path
+       it reports as `Universe created at:` (its final report) as
        `<universe-path>`: `[ -f "<universe-path>/.universe.json" ]`. If absent (init-universe aborted — e.g.
        missing templates — or its own OK was declined): **STOP here** and tell the dev
        "universe creation was cancelled or failed — run `/rsct-setup` whenever you want; nothing was linked."
-    b) Invoke `/rsct-canonical-source` (it OWNS `universe.local` + `canonical_source_added`
+    b) Execute `prompts/02-canonical-source.md` (it OWNS `universe.local` + `canonical_source_added`
        + the CLAUDE.md section — setup never writes them directly). Then VERIFY linking:
        `.rsct.json` now has a non-empty `universe.local`. If not: **STOP** and report the app
        is not linked (the state is re-runnable; nothing else was promised).
@@ -839,7 +841,7 @@ fi
   `recommended_route: "fix-universe-link"` (`.rsct.json` `universe.local` is set but the
   universe does not resolve there).
   "⚠️ Your `.rsct.json` points to a universe at `[universe.local_path]`, but it isn't there.
-   Fix the path (`universe.local`) or run `/rsct-canonical-source` again. I will NOT register
+   Fix the path (`universe.local`) or run `/rsct-universe` again. I will NOT register
    this app into a universe that doesn't exist."
   - Skip Phase 4.8 registration for this state (registering into a missing universe is a no-op
     that misleads the dev). No mutation; the dev fixes the path or re-links.
@@ -1203,7 +1205,7 @@ After the header is in place, insert the rule sections into the
    For §0, the marker is `<!-- RSCT-§0-BEGIN ... -->` / `<!-- RSCT-§0-END -->`.
 2. The CLAUDE.md `## 0. Canonical architectural source` placeholder block
    (lines 11–16 of the template) is left untouched — it is filled later
-   by `/rsct-canonical-source` (`prompts/02-canonical-source.md`).
+   by `prompts/02-canonical-source.md` (the link step of `/rsct-universe`).
 
 Phase 4.2 Step D will rotate the `updated:` date on every future
 re-run; the header line itself is preserved as-is.
@@ -1221,7 +1223,7 @@ If `.rsct.json` exists, fields are handled in **two categories**:
 | Field | Why preserved |
 |---|---|
 | `install.setup_commit_sha_before` | Overwriting destroys uninstall's ability to restore pre-setup state via `git checkout` |
-| `install.canonical_source_added` | Managed only by `/rsct-canonical-source` (02-canonical-source.md) |
+| `install.canonical_source_added` | Managed only by `02-canonical-source.md` (link step of `/rsct-universe`) |
 | `install.mode` | Reflects the original install type (CREATE vs UPDATE); never changes across re-runs |
 
 The `install.applied_at` field is **rotated** to current UTC time on
@@ -1250,7 +1252,7 @@ shape where `universe.name` is absent / empty), the rendered
 `bounds_violation` audit event on every subsequent MCP load because
 the strict schema in `lib/project-root.ts` requires `min(1)` on those
 fields. The block is `optional()` in the schema — omitting it is the
-correct null state. `02-canonical-source.md` (the `/rsct-canonical-source`
+correct null state. `02-canonical-source.md` (the link step of `/rsct-universe`,
 command) is the path that adds the universe block later when the dev
 adopts a universe.
 

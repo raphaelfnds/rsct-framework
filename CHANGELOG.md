@@ -10,6 +10,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **`/rsct-universe` stopped halfway.** It replaced `/rsct-init-universe` and
+  `/rsct-canonical-source` with one entry point, but state B — no universe found —
+  only ran the create engine. The dev ended up with a universe and an **unlinked**
+  project, and had to run the command a second time to reach state C and link. One
+  command doing one of the two things it unified is the thing it was meant to fix.
+
+  State B is now the chain `01-setup` already used for its guided flow: create,
+  verify `.universe.json` is actually on disk at the reported path, then link. A
+  creation that aborted or was declined stops the chain rather than writing a
+  `universe.local` that points at nothing.
+
+- **The framework told the dev to run two slash commands it deletes.**
+  `scripts/install.sh` removes `rsct-init-universe.md` and
+  `rsct-canonical-source.md` — `/rsct-universe` replaced both — but 27 places
+  still pointed at them. Nine were runtime hints in the MCP server:
+  `rsct_get_universe`, the topology check and the onboarding detector all
+  answered "no universe is linked" with "run `/rsct-canonical-source`". That is
+  the text an agent acts on, so it mattered more than the prompt prose did.
+
+  The replacement is not uniform, which is why it was not a search-and-replace.
+  Where a prompt EXECUTES another prompt, pointing at `/rsct-universe` would
+  substitute a decision already made for a fresh probe of the environment — the
+  dispatcher picks between four routes, and `01-setup`'s guided chain already
+  knows which one it wants. Those now name the file (`prompts/04-init-universe.md`),
+  the way `06-universe.md` always did. Dev-facing text gets `/rsct-universe`;
+  field-ownership notes name the prompt that owns the field.
+
+  Untouched: `06-universe.md`, `README.md` and `docs/commands.md`, which name the
+  old commands to say they were replaced, and `install.sh` /
+  `uninstall-framework.sh`, which name them to remove them.
+
 ## [2.6.0] - 2026-08-04
 
 Two things stop being silent. The update check consults by **default**, and declining

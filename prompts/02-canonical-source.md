@@ -164,7 +164,7 @@ Wait for explicit OK.
 > to this project? Choose how:
 >
 > **1. Create it now (recommended for a new organization).**
->    I will invoke `/rsct-init-universe` to bootstrap a skeleton
+>    I will execute `prompts/04-init-universe.md` to bootstrap a skeleton
 >    universe at `~/projects/[UNIVERSE_NAME]-universe/`. It creates governance
 >    document templates with TODOs, placeholder folders for applications
 >    and hosts, and a CLAUDE.md operational protocol. You fill the content
@@ -184,7 +184,7 @@ Wait for explicit OK.
 
 Wait for the developer's choice.
 
-- If **option 1**: invoke `/rsct-init-universe` and continue this
+- If **option 1**: execute `prompts/04-init-universe.md` and continue this
   prompt once the universe is created. After creation, the universe is local
   and Phase 3+ proceeds normally with `UNIVERSE_LOCAL_PATH` set to the new path.
 - If **option 2**: ask for the path and re-validate.
@@ -196,7 +196,7 @@ Wait for the developer's choice.
 ## Phase 3 — Identify app-specific elements
 
 **Note for freshly-bootstrapped universes:** if the developer chose Option 1
-in Phase 2 (creating the universe via `/rsct-init-universe`), most artifacts
+in Phase 2 (creating the universe via `prompts/04-init-universe.md`), most artifacts
 listed below will not exist yet — the universe was just bootstrapped with
 placeholders. Report each as "pending curation" rather than "missing", and
 proceed to Phase 4 generating the section with the canonical paths.

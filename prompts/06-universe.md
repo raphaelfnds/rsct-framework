@@ -6,6 +6,10 @@ smart, idempotent entry point: it **detects the current state** and does the
 right thing — bootstrap the org universe if none exists, adjust/refresh it if
 it does, and/or link THIS project to it.
 
+When there is no universe yet, one run does **both**: it creates the universe
+and then links this project to it. That is the unification — the dev should
+never have to run the command twice to get from nothing to linked.
+
 Read this entire file before executing any action.
 
 ---
@@ -136,7 +140,7 @@ and when a state is destructive-ish (creating a repo) confirm first.
 | State | Condition | Action |
 |---|---|---|
 | **A — Inside the universe** | `INSIDE_UNIVERSE=yes` | **Adjust/refresh** the universe skeleton: execute **`prompts/04-init-universe.md`** in its idempotent re-run/update mode (it never overwrites existing files; only adds what is missing). |
-| **B — No universe found** | `INSIDE_UNIVERSE=no` AND `UNIVERSE_PATH=<none>` | **Create** the org universe: execute **`prompts/04-init-universe.md`** (fresh init). If `CREATE_DECLINED` is set, restate that the dev previously declined and ask whether to proceed anyway before creating. |
+| **B — No universe found** | `INSIDE_UNIVERSE=no` AND `UNIVERSE_PATH=<none>` | **Create the org universe AND link this project — both, in one run.** See "State B is a two-step chain" below. If `CREATE_DECLINED` is set, restate that the dev previously declined and ask whether to proceed anyway before creating. |
 | **C — Universe exists, project not linked** | `UNIVERSE_PATH` found AND `PROJECT_LINKED=no` | **Link** this project: execute **`prompts/02-canonical-source.md`** (it writes the `## Canonical architectural source` section into CLAUDE.md and the `.rsct.json` universe block, pointing at `UNIVERSE_PATH`). |
 | **D — Exists and linked** | `UNIVERSE_PATH` found AND `PROJECT_LINKED=yes` | **Refresh** the link: re-run **`prompts/02-canonical-source.md`** in its UPDATE mode (idempotent marker re-write) so the canonical-source section reflects any path/name change. Report "already linked — refreshed" when nothing changed. |
 
@@ -147,8 +151,47 @@ discovered (`ORG_SLUG`, `UNIVERSE_NAME`, `UNIVERSE_PATH`) instead of
 re-probing. Do NOT duplicate their bash here — they remain the canonical
 engines; this dispatcher only decides WHICH one runs.
 
+### State B is a two-step chain — create THEN link
+
+This is the whole point of unifying the two commands: a dev with no universe
+runs ONE command and ends up with a universe **and** a linked project. `04`
+creates the universe; it does not touch this project's `CLAUDE.md` or
+`.rsct.json`. So state B must not stop at creation — stopping there leaves the
+dev unlinked, having to run `/rsct-universe` a second time to reach state C.
+
+With the dev's OK at each step:
+
+1. **Create** — execute `prompts/04-init-universe.md` (fresh init). Take the
+   path it reports as `Universe created at:` as `<new-universe-path>`.
+2. **Verify before linking** — the created universe must actually be on disk:
+
+```bash
+echo "  CHECKPOINT: Phase 2 executing canonical post-create universe verification"
+# NEW_UNIVERSE_PATH is the path 04 reported as "Universe created at:".
+NEW_UNIVERSE_PATH="${NEW_UNIVERSE_PATH:-}"
+if [ -n "$NEW_UNIVERSE_PATH" ] && [ -f "$NEW_UNIVERSE_PATH/.universe.json" ]; then
+  echo "UNIVERSE_CREATED=yes"
+  echo "UNIVERSE_PATH=$NEW_UNIVERSE_PATH"
+else
+  echo "UNIVERSE_CREATED=no"
+fi
+```
+
+   If `UNIVERSE_CREATED=no` (creation aborted, was declined, or templates were
+   missing): **STOP the chain cleanly.** Tell the dev nothing was linked and
+   that re-running `/rsct-universe` is safe. Do NOT attempt the link — linking
+   to a universe that is not there writes a broken `universe.local`.
+3. **Link** — execute `prompts/02-canonical-source.md` with `UNIVERSE_PATH` set
+   to the verified `<new-universe-path>`. This is state C's action; it OWNS
+   `universe.local`, `canonical_source_added` and the CLAUDE.md section.
+
+Report both outcomes in the final line ("universe created at X and this project
+linked to it"), and never claim the link when step 2 stopped the chain.
+
 **Idempotency:** every state is safe to re-run. A → adds only missing skeleton
-files; C/D → marker-guarded CLAUDE.md/`.rsct.json` edits that do not duplicate.
+files; B → after the first run the probe finds the universe, so a re-run lands
+in C or D rather than creating a second one; C/D → marker-guarded
+CLAUDE.md/`.rsct.json` edits that do not duplicate.
 
 ---
 
