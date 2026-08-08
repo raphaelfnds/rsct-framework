@@ -2137,7 +2137,10 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
   # so spec_<slug>.md becomes trackable at the project root. Scoped strictly
   # BETWEEN the BEGIN/END markers via exact-string awk ($0=="spec_*.md") so a
   # dev's own spec_*.md line OUTSIDE the RSCT block is never touched. CRLF-safe.
-  # The reverse switch (documented→ephemeral) self-heals via the CAP-16 backfill.
+  # The reverse switch (documented→ephemeral) does NOT self-heal today: the CAP-16
+  # backfill above is gated on an unanchored `grep -qF "spec_*.md"`, and the comment
+  # this block emits carries that literal, so the guard is always true and the
+  # backfill never fires. Tracked separately — not fixed here.
   if [ "$PLAN_FILE_RETENTION" = "documented" ] \
      && tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
           '$0==b{inblk=1} inblk && $0=="spec_*.md"{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
