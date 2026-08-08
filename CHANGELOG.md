@@ -10,7 +10,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.1] - 2026-08-08
+
+Four inconsistencies a field test found in the text the framework ships, and in the
+one parser that reads a project's decision history. Patch rather than minor: no new
+tool and no new phase — `/rsct-setup` gains a single targeted line removal inside an
+existing `.gitignore` block, and three rule sections plus two memory entries stop
+contradicting the code that enforces them. Marker schema id stays `v=1.0.0`; tool
+count unchanged at **39**.
 
 ### Fixed
 
