@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readGitState, gitBranchMerged } from '../lib/git.js'
+import { effectiveProtectedList } from '../lib/branch-protection.js'
 import { findActivePlan, type ActivePlan } from '../lib/plan.js'
 import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
@@ -224,7 +225,10 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: the enforced list, not the raw key — see the note in status.ts.
+      protected_branches: resolution.rsct_installed
+        ? effectiveProtectedList(resolution.config ?? undefined).list
+        : [],
       test_framework: resolution.config?.test_framework ?? null,
     },
     git,
@@ -262,7 +266,8 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
     return hints
   }
 
-  const protected_branches = resolution.config?.protected_branches ?? []
+  // #50: same effective list the §C gates use — past this point rsct_installed is true.
+  const protected_branches = effectiveProtectedList(resolution.config ?? undefined).list
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `On the protected branch '${git.branch}' — mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`,

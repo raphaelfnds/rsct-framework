@@ -10,7 +10,11 @@
 > until the dev confirms the derivation strategy. The §A–§H prose
 > below remains the full §D when `rsct-mcp` is not installed.
 
-Treat `main` and `test` (when it exists) as protected branches.
+The protected branches are the ones `.rsct.json` declares in
+`protected_branches[]`, plus anything listed in `protected_patterns_extra`.
+When the key is absent, the framework protects `main`, `master`, `test` and
+`dev` by default. Treat that list — never a fixed set of names memorised from
+this text — as the authority; `rsct_status` reports the list in force.
 Without explicit reconfirmed authorization for the current action:
 
 - Prohibited: git commit, git push, git merge (incoming or outgoing),
@@ -77,8 +81,8 @@ If the current branch differs from the branch where a prior plan was approved
 - Explicitly ask the developer which branch to continue work in.
 - Do NOT assume the current branch is intentional.
 
-If the current branch is `main`, `test`, `dev`, or any other protected branch
-declared in `.rsct.json`:
+If the current branch is one of the protected branches declared in
+`.rsct.json` (or one of the defaults, when the key is absent):
 - Strongly recommend creating a new derived branch before any mutation.
 - Recommend reusing the existing working branch from `plan_<slug>.md` if
   the task is a continuation.

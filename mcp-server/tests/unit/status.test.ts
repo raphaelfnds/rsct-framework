@@ -8,6 +8,8 @@ import { RSCT_MCP_VERSION } from '../../src/lib/version.js'
 
 const SAMPLE_RSCT = resolve(__dirname, '..', 'fixtures', 'sample-rsct')
 const NO_RSCT = resolve(__dirname, '..', 'fixtures', 'no-rsct')
+// Has a .rsct.json that omits `protected_branches` — the #50 case.
+const RSCT_NO_BRANCH_KEY = resolve(__dirname, '..', 'fixtures', 'sample-rsct-universe')
 
 describe('rsct_status', () => {
   it('reports rsct_installed=true and reads .rsct.json on an rsct project', async () => {
@@ -29,6 +31,16 @@ describe('rsct_status', () => {
     expect(out.project.app_name).toBeNull()
     expect(out.project.protected_branches).toEqual([])
     expect(out.hints.some((h) => h.includes('/rsct-setup'))).toBe(true)
+  })
+
+  it('reports the ENFORCED branch list when .rsct.json omits the key (#50)', async () => {
+    // Reading the raw config reported [] here while every §C gate was already
+    // protecting the four defaults — the status output contradicted the gates.
+    // Values pinned literally: changing the defaults must be a deliberate act.
+    const out = (await statusHandler({ project_root: RSCT_NO_BRANCH_KEY })) as StatusOutput
+
+    expect(out.rsct_installed).toBe(true)
+    expect(out.project.protected_branches).toEqual(['main', 'master', 'test', 'dev'])
   })
 
   it('always includes mcp_server metadata', async () => {

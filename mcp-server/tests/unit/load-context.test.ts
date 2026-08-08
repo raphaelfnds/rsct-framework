@@ -17,6 +17,8 @@ import { statusHandler, type StatusOutput } from '../../src/tools/status.js'
 
 const SAMPLE_RSCT = resolve(__dirname, '..', 'fixtures', 'sample-rsct')
 const NO_RSCT = resolve(__dirname, '..', 'fixtures', 'no-rsct')
+// Has a .rsct.json that omits `protected_branches` — the #50 case.
+const RSCT_NO_BRANCH_KEY = resolve(__dirname, '..', 'fixtures', 'sample-rsct-universe')
 
 describe('rsct_load_context', () => {
   it('returns a structured snapshot for an rsct project', async () => {
@@ -29,6 +31,25 @@ describe('rsct_load_context', () => {
     expect(out.decisions.adrs_count).toBeGreaterThanOrEqual(5)
     expect(out.decisions.recent_premises[0]?.id).toBe('#3')
     expect(out.decisions.recent_adrs[0]?.id).toBe('ADR-007')
+    expect(out.project.protected_branches).toEqual(['main', 'test'])
+  })
+
+  it('reports the ENFORCED branch list when .rsct.json omits the key (#50)', async () => {
+    // Must agree with rsct_status and with the §C gates. Pinned literally so a
+    // change to the defaults is a deliberate act, not a silent follow-along.
+    const out = (await loadContextHandler({
+      project_root: RSCT_NO_BRANCH_KEY,
+    })) as LoadContextOutput
+
+    expect(out.rsct_installed).toBe(true)
+    expect(out.project.protected_branches).toEqual(['main', 'master', 'test', 'dev'])
+  })
+
+  it('reports no protected branches when the project is not rsct-managed (#50)', async () => {
+    const out = (await loadContextHandler({ project_root: NO_RSCT })) as LoadContextOutput
+
+    expect(out.rsct_installed).toBe(false)
+    expect(out.project.protected_branches).toEqual([])
   })
 
   it('detects active plan and parses metadata', async () => {

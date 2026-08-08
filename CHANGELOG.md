@@ -36,6 +36,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   comment lines from an existing block when they are still verbatim as shipped. A
   dev-edited comment does not match and is left untouched.
 
+- **§D named two protected branches while `.rsct.json` shipped four (#50).** The rule
+  text said `main` and `test`; a second passage in the same file said `main`, `test`,
+  `dev`; and the config setup writes declares `main`, `master`, `test`, `dev` — three
+  lists for one concept, with `master` named nowhere in the rule a dev actually reads.
+  §D now defers to `protected_branches[]` (plus `protected_patterns_extra`) rather than
+  naming branches. `rsct_status` and `rsct_load_context` had the matching defect on the
+  code side: both reported the raw config key while every §C gate used
+  `effectiveProtectedList()`, so an installed project that omits the key reported *no*
+  protected branches while four were being enforced. Both now report the enforced list;
+  a project with no `.rsct.json` still reports none.
+
 ## [2.7.0] - 2026-08-05
 
 Two silent failures, both in mechanisms built to make drift visible — and both of

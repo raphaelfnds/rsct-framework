@@ -23068,6 +23068,35 @@ function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
   return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
 }
 
+// src/lib/branch-protection.ts
+init_esm_shims();
+var DEFAULT_PROTECTED_BRANCHES = [
+  "main",
+  "master",
+  "test",
+  "dev"
+];
+function effectiveProtectedList(config2) {
+  const fromConfig = config2?.protected_branches;
+  const usingConfig = Array.isArray(fromConfig);
+  const base = usingConfig ? [...fromConfig] : [...DEFAULT_PROTECTED_BRANCHES];
+  const extras = config2?.protected_patterns_extra ?? [];
+  const merged = [];
+  for (const entry of [...base, ...extras]) {
+    if (entry.length === 0) continue;
+    if (!merged.includes(entry)) merged.push(entry);
+  }
+  let source;
+  if (extras.length > 0) source = "config+extras";
+  else if (usingConfig) source = "config";
+  else source = "default";
+  return { list: merged, source };
+}
+function isProtectedBranch(branch, list) {
+  if (!branch) return false;
+  return list.includes(branch);
+}
+
 // src/lib/phase-scope.ts
 init_esm_shims();
 var SESSION_ID = randomUUID();
@@ -24171,7 +24200,12 @@ async function statusHandler(rawInput, deps = {}) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: report what the gates ENFORCE, not the raw key. Reading the config
+      // alone made an installed project that omits `protected_branches` report an
+      // empty list while `effectiveProtectedList` was protecting four branches at
+      // every §C gate. Gated on rsct_installed so a project with no `.rsct.json`
+      // still reports nothing rather than inheriting defaults it is not governed by.
+      protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
@@ -24236,7 +24270,7 @@ function buildStatusHints(resolution, git) {
     );
     return hints;
   }
-  const protected_branches = resolution.config?.protected_branches ?? [];
+  const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with the dev before proposing changes.`
@@ -24679,7 +24713,8 @@ async function loadContextHandler(rawInput) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: the enforced list, not the raw key — see the note in status.ts.
+      protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
@@ -24706,7 +24741,7 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
     );
     return hints;
   }
-  const protected_branches = resolution.config?.protected_branches ?? [];
+  const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
@@ -26539,37 +26574,6 @@ function buildHints5(installed, decisionsExist, antiDecisionsExist, recommendati
 
 // src/tools/check-branch.ts
 init_esm_shims();
-
-// src/lib/branch-protection.ts
-init_esm_shims();
-var DEFAULT_PROTECTED_BRANCHES = [
-  "main",
-  "master",
-  "test",
-  "dev"
-];
-function effectiveProtectedList(config2) {
-  const fromConfig = config2?.protected_branches;
-  const usingConfig = Array.isArray(fromConfig);
-  const base = usingConfig ? [...fromConfig] : [...DEFAULT_PROTECTED_BRANCHES];
-  const extras = config2?.protected_patterns_extra ?? [];
-  const merged = [];
-  for (const entry of [...base, ...extras]) {
-    if (entry.length === 0) continue;
-    if (!merged.includes(entry)) merged.push(entry);
-  }
-  let source;
-  if (extras.length > 0) source = "config+extras";
-  else if (usingConfig) source = "config";
-  else source = "default";
-  return { list: merged, source };
-}
-function isProtectedBranch(branch, list) {
-  if (!branch) return false;
-  return list.includes(branch);
-}
-
-// src/tools/check-branch.ts
 var checkBranchInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   branch: external_exports.string().optional().describe(
