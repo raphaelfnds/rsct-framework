@@ -130,7 +130,8 @@ NEVER edit code without first presenting the user a plan containing:
    - **Out of scope** section flags areas where proposals must be questioned.
 6. **Plan tracking files (after dev approval):**
    - Create `plan_<slug>.md` and `progress_<slug>.md` at project root from
-     `doc-templates/plan_slug.md.template` and `progress_slug.md.template`.
+     `~/.rsct/doc-templates/plan_slug.md.template` and
+     `~/.rsct/doc-templates/progress_slug.md.template`.
    - Slug = derived from current branch name (`feat/foo-bar` → `foo-bar`).
    - Gitignored by default; tell dev to use `git add --force` to track on
      this feature branch. **NEVER on main/test branches.**

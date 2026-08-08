@@ -10,6 +10,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **§B pointed at a template path that does not exist inside a project (#52).**
+  `rules/B-architect-plan.md` and the plan-tracking memory entry told the agent to
+  build `plan_<slug>.md` from `doc-templates/plan_slug.md.template`, written as if it
+  were project-relative. `scripts/install.sh` copies the templates to `~/.rsct/`, and
+  `/rsct-setup` never places `doc-templates/` in the target repo, so the path resolved
+  to nothing — while `plan_<slug>.md` is a hard gate for `standard`/`complex` work.
+  Every template reference in `rules/` and `memory-templates/` now carries the install
+  root, with the source-clone form named once alongside it, and a unit guard fails if a
+  bare project-relative reference reappears.
+
 ## [2.7.0] - 2026-08-05
 
 Two silent failures, both in mechanisms built to make drift visible — and both of

@@ -60,9 +60,14 @@ NEVER edit code without first presenting the user a plan containing:
    `standard`/`complex` tasks when `plan_<slug>.md` + `progress_<slug>.md`
    are absent (pass `plan_slug`; override only with `override_plan_tracking`).
    - `plan_<slug>.md` — the approved plan, using the framework template
-     `doc-templates/plan_slug.md.template`.
+     `~/.rsct/doc-templates/plan_slug.md.template`.
    - `progress_<slug>.md` — execution log, using the framework template
-     `doc-templates/progress_slug.md.template`.
+     `~/.rsct/doc-templates/progress_slug.md.template`.
+
+   Templates live at the RSCT install root (`~/.rsct/`) — `/rsct-setup` never
+   copies `doc-templates/` into the project, so a project-relative path does
+   not resolve. From a source clone, read them from
+   `<framework-source>/doc-templates/` instead.
 
    Slug derives from the current branch name (e.g.,
    `feat/aprovacao-requisicao-compra` → `aprovacao-requisicao-compra`).
@@ -80,7 +85,7 @@ NEVER edit code without first presenting the user a plan containing:
    **Accepted alias (single-phase only):** `spec_<slug>.md` may stand in for
    `plan_<slug>.md` when the dev prefers the "spec" wording — same gitignore
    rule, same NEVER-on-protected guarantee, same template
-   (`doc-templates/plan_slug.md.template`). For multi-phase plans keep the
+   (`~/.rsct/doc-templates/plan_slug.md.template`). For multi-phase plans keep the
    master doc named `plan_<slug>.md` so the per-phase `spec_` files never
    collide with it.
 
@@ -120,7 +125,7 @@ NEVER edit code without first presenting the user a plan containing:
    When the approved plan has **3 or more phases** whose file groups are DISJOINT,
    ASK the dev whether to run the non-overlapping groups in parallel via separate
    `git worktree`s — fill the "Phases & parallelization" table in the plan template
-   (`doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
+   (`~/.rsct/doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
    state (phase-state, any batch token, the anti-reuse store) — see §C "Parallel
    work via git worktrees" for the mechanics. Phases that share a file group stay
    **serial**; a repo whose build bundle is tracked (e.g. a committed `dist/`) also

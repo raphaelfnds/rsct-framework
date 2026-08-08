@@ -6,10 +6,12 @@ type: feedback
 After §B plan approval for any non-trivial task:
 
 1. Derive slug from current branch name (e.g., feat/foo-bar → foo-bar).
-2. Create `plan_<slug>.md` at project root using doc-templates/plan_slug.md.template,
+2. Create `plan_<slug>.md` at project root using ~/.rsct/doc-templates/plan_slug.md.template,
    filling all sections with the approved plan content.
-3. Create `progress_<slug>.md` at project root using doc-templates/progress_slug.md.template,
+3. Create `progress_<slug>.md` at project root using ~/.rsct/doc-templates/progress_slug.md.template,
    starting with the initial entry "Plan approved, execution starting".
+   Templates live at the RSCT install root, never inside the project; from a
+   source clone, read them from <framework-source>/doc-templates/ instead.
 4. Remind the developer explicitly:
    "These two files are gitignored by default. To track them on this feature
    branch, run: git add --force plan_<slug>.md progress_<slug>.md
