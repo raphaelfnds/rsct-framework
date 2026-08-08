@@ -4,10 +4,14 @@ Thanks for your interest in improving RSCT! This document covers how to set up,
 the conventions this repository follows, and the one rule that breaks more PRs
 than any other: **cross-OS correctness**.
 
-> The RSCT Framework **governs its own development** (it dogfoods itself). The
-> operational notes for contributors and AI agents working *on* this repo live
-> in [CLAUDE.md](CLAUDE.md) — read it before proposing changes, especially the
-> "Padrões a evitar nos prompts bash" (anti-patterns) section.
+> The RSCT Framework is **not installed in its own repository** — there is no
+> `.rsct.json` and no MCP server driving gates here, so the cycle it enforces
+> mechanically in a managed project is followed by hand.
+> [AGENTS.md](AGENTS.md) is that contract: the session protocol, the tier
+> classification, and where an explicit developer OK stands in for a gate.
+> [CLAUDE.md](CLAUDE.md) holds the engineering rules that bind any change here —
+> read both before proposing changes, especially the "Padrões a evitar nos
+> prompts bash" (anti-patterns) section.
 
 ---
 

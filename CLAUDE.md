@@ -141,6 +141,12 @@ estrutura do repositório,
 catálogo das ferramentas do `rsct-mcp`, fluxo de uso e estado de
 versão — consulte o **[README.md](README.md)** na raiz do projeto.
 
+Para **como conduzir uma sessão de trabalho neste repositório** — protocolo
+de bootstrap, classificação de tier, o ciclo R → S → V → C → Rv → T,
+semântica de autorização e disciplina de plan-tracking — consulte o
+**[AGENTS.md](AGENTS.md)**. Ele é o contrato que substitui os gates
+mecânicos, já que o framework não está instalado no próprio repositório.
+
 ---
 
 ## Padrões a evitar nos prompts bash (anti-regressões)
