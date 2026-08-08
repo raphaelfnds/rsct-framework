@@ -10,7 +10,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.2] - 2026-08-08
+
+One parser left behind by an earlier fix, and the contract it disagreed with. Patch:
+no new tool, no new phase, tool count unchanged at **39**, marker schema id still
+`v=1.0.0`. What changes is that the framework now states **one** shape to write where
+it previously gave three answers, and that a corpus which cannot be read is reported
+as unknown rather than counted as empty.
 
 ### Fixed
 
