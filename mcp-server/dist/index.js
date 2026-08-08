@@ -23068,6 +23068,35 @@ function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
   return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
 }
 
+// src/lib/branch-protection.ts
+init_esm_shims();
+var DEFAULT_PROTECTED_BRANCHES = [
+  "main",
+  "master",
+  "test",
+  "dev"
+];
+function effectiveProtectedList(config2) {
+  const fromConfig = config2?.protected_branches;
+  const usingConfig = Array.isArray(fromConfig);
+  const base = usingConfig ? [...fromConfig] : [...DEFAULT_PROTECTED_BRANCHES];
+  const extras = config2?.protected_patterns_extra ?? [];
+  const merged = [];
+  for (const entry of [...base, ...extras]) {
+    if (entry.length === 0) continue;
+    if (!merged.includes(entry)) merged.push(entry);
+  }
+  let source;
+  if (extras.length > 0) source = "config+extras";
+  else if (usingConfig) source = "config";
+  else source = "default";
+  return { list: merged, source };
+}
+function isProtectedBranch(branch, list) {
+  if (!branch) return false;
+  return list.includes(branch);
+}
+
 // src/lib/phase-scope.ts
 init_esm_shims();
 var SESSION_ID = randomUUID();
@@ -24171,7 +24200,12 @@ async function statusHandler(rawInput, deps = {}) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: report what the gates ENFORCE, not the raw key. Reading the config
+      // alone made an installed project that omits `protected_branches` report an
+      // empty list while `effectiveProtectedList` was protecting four branches at
+      // every §C gate. Gated on rsct_installed so a project with no `.rsct.json`
+      // still reports nothing rather than inheriting defaults it is not governed by.
+      protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
@@ -24236,7 +24270,7 @@ function buildStatusHints(resolution, git) {
     );
     return hints;
   }
-  const protected_branches = resolution.config?.protected_branches ?? [];
+  const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with the dev before proposing changes.`
@@ -24408,19 +24442,46 @@ var DECISION_STATUSES = [
 function readDecisions(projectRoot) {
   const path2 = join(projectRoot, "documentation", "decisions.md");
   if (!existsSync(path2)) {
-    return { exists: false, path: null, premises: [], adrs: [] };
+    return {
+      exists: false,
+      path: null,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: false
+    };
   }
   let body;
   try {
     body = readFileSync(path2, "utf8");
   } catch {
-    return { exists: true, path: path2, premises: [], adrs: [] };
+    return {
+      exists: true,
+      path: path2,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: true
+    };
   }
   const { premises, adrs } = extractDecisions(body);
-  return { exists: true, path: path2, premises, adrs };
+  return {
+    exists: true,
+    path: path2,
+    premises,
+    adrs,
+    has_decision_ids: DECISION_ID_TOKEN.test(body),
+    read_error: false
+  };
 }
-var PREMISE_HEADING = /^###\s+#(\d+)\s+[—-]\s+(.+?)\s*$/;
-var ADR_HEADING = /^###\s+(ADR-\d+)\s+[—-]\s+(.+?)\s*$/;
+var DECISION_ID_TOKEN = /\bADR-\d+\b|(?:^|\s)#\d+\b/m;
+var HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`;
+var PREMISE_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
+var ADR_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(ADR-\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
 function extractDecisions(body) {
   const lines = body.split("\n");
   const premises = [];
@@ -24632,7 +24693,14 @@ async function loadContextHandler(rawInput) {
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse();
   const universe = getUniverse(resolution.config, resolution.root);
   const topology = detectTopology(resolution.config, resolution.root, {}, universe);
-  const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
+  const next_action_hints = buildHints({
+    resolution,
+    git,
+    active_plan,
+    active_phase,
+    knowledge,
+    decisions: decisionsSnapshot
+  });
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
   if (resolution.rsct_installed && active_plan?.branch && git.branch !== active_plan.branch) {
@@ -24679,7 +24747,8 @@ async function loadContextHandler(rawInput) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: the enforced list, not the raw key — see the note in status.ts.
+      protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
     git,
@@ -24698,7 +24767,14 @@ async function loadContextHandler(rawInput) {
     next_action_hints
   };
 }
-function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
+function buildHints({
+  resolution,
+  git,
+  active_plan,
+  active_phase,
+  knowledge,
+  decisions
+}) {
   const hints = [];
   if (!resolution.rsct_installed) {
     hints.push(
@@ -24706,10 +24782,20 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
     );
     return hints;
   }
-  const protected_branches = resolution.config?.protected_branches ?? [];
+  const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
+    );
+  }
+  const parsedNothing = decisions.premises.length === 0 && decisions.adrs.length === 0;
+  if (decisions.read_error) {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". Check it is a readable file (not a directory) and that permissions allow reading it.`
+    );
+  } else if (decisions.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
     );
   }
   if (active_phase) {
@@ -24829,6 +24915,16 @@ function buildHints2(snapshot, filter, filteredCount) {
       "documentation/decisions.md not found \u2014 run /rsct-setup to scaffold the file before proposing decisions-dependent work."
     );
     return hints;
+  }
+  const parsedNothing = snapshot.premises.length === 0 && snapshot.adrs.length === 0;
+  if (snapshot.read_error) {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`
+    );
+  } else if (snapshot.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
+    );
   }
   if (filter && filteredCount === 0) {
     hints.push(
@@ -26539,37 +26635,6 @@ function buildHints5(installed, decisionsExist, antiDecisionsExist, recommendati
 
 // src/tools/check-branch.ts
 init_esm_shims();
-
-// src/lib/branch-protection.ts
-init_esm_shims();
-var DEFAULT_PROTECTED_BRANCHES = [
-  "main",
-  "master",
-  "test",
-  "dev"
-];
-function effectiveProtectedList(config2) {
-  const fromConfig = config2?.protected_branches;
-  const usingConfig = Array.isArray(fromConfig);
-  const base = usingConfig ? [...fromConfig] : [...DEFAULT_PROTECTED_BRANCHES];
-  const extras = config2?.protected_patterns_extra ?? [];
-  const merged = [];
-  for (const entry of [...base, ...extras]) {
-    if (entry.length === 0) continue;
-    if (!merged.includes(entry)) merged.push(entry);
-  }
-  let source;
-  if (extras.length > 0) source = "config+extras";
-  else if (usingConfig) source = "config";
-  else source = "default";
-  return { list: merged, source };
-}
-function isProtectedBranch(branch, list) {
-  if (!branch) return false;
-  return list.includes(branch);
-}
-
-// src/tools/check-branch.ts
 var checkBranchInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
   branch: external_exports.string().optional().describe(

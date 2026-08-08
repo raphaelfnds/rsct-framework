@@ -28,7 +28,7 @@ decisions.md format: firm premises (#N) for non-negotiable constraints,
 or durable ADRs (ADR-NNN, append-only) with context, alternatives,
 decision, consequences. Never rewrite — append. anti-decisions.md
 format: free-form entry with title, what was tried, why it failed,
-date. See doc-templates/knowledge/anti-decisions.md.template.
+date. See ~/.rsct/doc-templates/knowledge/anti-decisions.md.template.
 
 Why: Decisions are forgotten if not recorded; later sessions or new
 team members repeat closed debates. ADRs preserve the *why* that

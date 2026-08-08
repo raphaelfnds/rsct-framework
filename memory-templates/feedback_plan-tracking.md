@@ -6,14 +6,17 @@ type: feedback
 After §B plan approval for any non-trivial task:
 
 1. Derive slug from current branch name (e.g., feat/foo-bar → foo-bar).
-2. Create `plan_<slug>.md` at project root using doc-templates/plan_slug.md.template,
+2. Create `plan_<slug>.md` at project root using ~/.rsct/doc-templates/plan_slug.md.template,
    filling all sections with the approved plan content.
-3. Create `progress_<slug>.md` at project root using doc-templates/progress_slug.md.template,
+3. Create `progress_<slug>.md` at project root using ~/.rsct/doc-templates/progress_slug.md.template,
    starting with the initial entry "Plan approved, execution starting".
+   Templates live at the RSCT install root, never inside the project; from a
+   source clone, read them from <framework-source>/doc-templates/ instead.
 4. Remind the developer explicitly:
-   "These two files are gitignored by default. To track them on this feature
-   branch, run: git add --force plan_<slug>.md progress_<slug>.md
-   Do NOT track them on main or test branches."
+   "These two files are gitignored and are never committed — they are working
+   state for this branch. Do not force-add them. For a durable, versioned
+   design doc use spec_<slug>.md with plan_file_retention: documented
+   in .rsct.json. Never on main or test branches."
 
 During execution:
 - Update progress_<slug>.md after every meaningful step (commit, blocker,
@@ -46,9 +49,11 @@ and **rebase and merge** (`--rebase`) — as well as a local `git merge` /
 `rsct_request_merge`. If the dev declines, proceed without a pending item.
 
 Naming alias: `spec_<slug>.md` is an accepted synonym of `plan_<slug>.md`
-(useful when the dev prefers the M3 phase-machine wording). Same gitignore
-rule, same template, same NEVER-on-protected guarantee. Canonical name
-remains `plan_<slug>.md`; only use `spec_` when the dev explicitly asks.
+(useful when the dev prefers the M3 phase-machine wording). Same template,
+same NEVER-on-protected guarantee; retention is where they differ — `spec_`
+is the one file that becomes tracked under plan_file_retention: documented.
+Canonical name remains `plan_<slug>.md`; only use `spec_` when the dev
+explicitly asks.
 
 Why: workflow audit trail at project root + auditable in feature branch +
 clean main/test history. Files serve dev's working memory across sessions;
@@ -57,8 +62,8 @@ not part of public project knowledge.
 How to apply: Activate immediately after §B plan approval. Maintain the
 two files until task is completed. On task completion, the files can be
 kept (history) or deleted (cleanup) per dev choice. Always recall the
-gitignore + git add --force reminder when creating the files; do not skip
-the dev warning.
+gitignored-and-never-committed reminder when creating the files; do not
+skip the dev warning.
 
 **Session resume — proactive context-pressure detection:** AI cannot
 introspect its own context window. Watch THREE observable signals:

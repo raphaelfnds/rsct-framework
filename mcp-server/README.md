@@ -256,6 +256,10 @@ All tools degrade gracefully outside rsct projects (return
 Fast bootstrap check. Returns rsct identity, protected branches, git state, the
 [`universe` block](#the-universe-block), and hints.
 
+`protected_branches` is the list the §C gates actually enforce — `.rsct.json`
+`protected_branches[]` plus `protected_patterns_extra`, or the built-in defaults
+when the key is absent. A project with no `.rsct.json` reports none.
+
 - Input: `project_root?`, `update_check?` (`"on"|"off"`), `decline_update?` (a release tag)
 - Output: identity, git, `worktree`, `universe`, `topology`, hints
 
@@ -383,6 +387,12 @@ with [`rsct_get_topology`](#rsct_get_topology).
 ### `rsct_get_decisions`
 
 Returns firm premises and ADRs from `documentation/decisions.md`, optionally filtered.
+
+Headings parse at `##` or `###`, with `—`, `–`, `-` or `:` as the separator — §H
+still prescribes one shape to write, the reader just tolerates the rest. A file that
+exists but cannot be read, or that mentions decision ids yet yields no entry, is
+reported in `hints` instead of returning a clean zero. `rsct_load_context` carries
+the same reporting in `next_action_hints`.
 
 - Input: `project_root?`, `filter?: { kind?: 'premise'|'adr', tag?: string, status?: 'active'|'superseded'|'deprecated' }`
 - Output: matched decisions array + counts + hints

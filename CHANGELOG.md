@@ -10,6 +10,82 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **§B pointed at a template path that does not exist inside a project (#52).**
+  `rules/B-architect-plan.md` and the plan-tracking memory entry told the agent to
+  build `plan_<slug>.md` from `doc-templates/plan_slug.md.template`, written as if it
+  were project-relative. `scripts/install.sh` copies the templates to `~/.rsct/`, and
+  `/rsct-setup` never places `doc-templates/` in the target repo, so the path resolved
+  to nothing — while `plan_<slug>.md` is a hard gate for `standard`/`complex` work.
+  Every template reference in `rules/` and `memory-templates/` now carries the install
+  root, with the source-clone form spelled out in §B and in the plan-tracking memory
+  entry, and a unit guard fails if a bare project-relative reference to a template
+  file reappears in `rules/` or `memory-templates/`.
+
+- **§B taught the one command that defeats its own default (#51).** The retention
+  paragraph gitignored `plan_`/`progress_` and then handed the dev
+  `git add --force`, guarded only by prose plus a post-hoc push/merge advisory — no
+  code path inspects the index. §B now states the model once: `plan_`/`progress_` are
+  never committed, and `spec_<slug>.md` is the durable artifact under
+  `plan_file_retention: documented`. The instruction is gone from all eight surfaces
+  that ship into a project, including the comment inside the generated `.gitignore`
+  block. That block is write-once — the update path backfills individual lines and
+  never rewrites the body — so `/rsct-setup` now also **removes** the three stale
+  comment lines from an existing block when they are still verbatim as shipped. A
+  dev-edited comment does not match and is left untouched.
+
+- **§D named two protected branches while `.rsct.json` shipped four (#50).** The rule
+  text said `main` and `test`; a second passage in the same file said `main`, `test`,
+  `dev`; and the config setup writes declares `main`, `master`, `test`, `dev` — three
+  lists for one concept, with `master` named nowhere in the rule a dev actually reads.
+  §D now defers to `protected_branches[]` (plus `protected_patterns_extra`) rather than
+  naming branches. `rsct_status` and `rsct_load_context` had the matching defect on the
+  code side: both reported the raw config key while every §C gate used
+  `effectiveProtectedList()`, so an installed project that omits the key reported *no*
+  protected branches while four were being enforced. Both now report the enforced list;
+  a project with no `.rsct.json` still reports none. The branch-protection **memory
+  entry** carried the same two superseded enumerations and was corrected with §D —
+  it is the copy that reaches installed projects and is re-read at every session
+  start, so fixing only the rule would have left the contradiction where it is
+  actually applied. A guard test now pins both files against naming a fixed pair.
+
+- **The decisions parser accepted exactly one heading shape, and reported zero in
+  silence (#49).** `rsct_load_context` returned `adrs_count: 0` on projects holding
+  dozens of ADRs: the regex demanded `###`, an em dash or hyphen, and whitespace on
+  *both* sides of the separator. A file using `##`, a colon or an en dash parsed to
+  nothing — indistinguishable in the output from a project that has no decisions,
+  while §B mandates reading that file before formulating options. Headings now parse
+  at `##` or `###` with `—`, `–`, `-` or `:` as the separator, premises included, and
+  a file that has content but yields no entry is **reported** by `rsct_get_decisions`
+  and `rsct_load_context` instead of returning a clean zero. The section terminator is
+  deliberately unchanged: both heading branches already `continue`, so a `##` entry
+  cannot terminate itself, and relaxing it would stop a trailing `## Out of scope`
+  from closing the last entry in any file written without `---` separators.
+
+  Widening the parser rather than migrating the files was the deliberate choice:
+  `rules/H-adr-learning.md` makes decision history **append-only** ("Never rewrite an
+  existing ADR"), so rewriting dozens of headings in every field project would have
+  been exactly the rewrite the rule forbids — and would not have stopped the next
+  project from adopting a different shape.
+
+  Two related silent zeros close with it: a `decisions.md` that exists but **cannot be
+  read** (a directory at the path, a permissions or lock error) is now reported instead
+  of returning zero entries, and the "could not parse" warning is raised only when the
+  file actually mentions something id-shaped, so a scaffold holding nothing but section
+  headings stays quiet rather than warning on every bootstrap.
+
+### Known issues
+
+- `/rsct-setup`'s `documented` → `ephemeral` switch does not self-heal. The CAP-16
+  backfill that would restore the `spec_*.md` ignore line is gated on an unanchored
+  `grep -qF "spec_*.md"`, and a comment the block itself emits carries that literal, so
+  the guard never lets the backfill run. Found while removing the `--force` advice from
+  the same block; the misleading comment claiming otherwise was corrected, the defect
+  itself is untouched.
+
 ## [2.7.0] - 2026-08-05
 
 Two silent failures, both in mechanisms built to make drift visible — and both of

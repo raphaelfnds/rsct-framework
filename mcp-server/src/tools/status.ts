@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
+import { effectiveProtectedList } from '../lib/branch-protection.js'
 import { stampBootstrapMarker } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
@@ -162,7 +163,14 @@ export async function statusHandler(
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      protected_branches: resolution.config?.protected_branches ?? [],
+      // #50: report what the gates ENFORCE, not the raw key. Reading the config
+      // alone made an installed project that omits `protected_branches` report an
+      // empty list while `effectiveProtectedList` was protecting four branches at
+      // every §C gate. Gated on rsct_installed so a project with no `.rsct.json`
+      // still reports nothing rather than inheriting defaults it is not governed by.
+      protected_branches: resolution.rsct_installed
+        ? effectiveProtectedList(resolution.config ?? undefined).list
+        : [],
       test_framework: resolution.config?.test_framework ?? null,
     },
     git,
@@ -253,7 +261,8 @@ function buildStatusHints(
     return hints
   }
 
-  const protected_branches = resolution.config?.protected_branches ?? []
+  // #50: same effective list the §C gates use — past this point rsct_installed is true.
+  const protected_branches = effectiveProtectedList(resolution.config ?? undefined).list
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work — confirm with the dev before proposing changes.`,

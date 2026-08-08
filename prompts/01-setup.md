@@ -2047,9 +2047,9 @@ PATTERN_BLOCK=$(cat <<EOF
 $BEGIN_MARKER
 # RSCT plan tracking — branch-local files, NEVER track on main/test
 # spec_*.md is an accepted alias of plan_*.md (same rule, same intent).
-# Use \`git add --force plan_<slug>.md progress_<slug>.md\` (or spec_*) to
-# commit on feature branches. Verify they are absent before any merge to
-# main/test.
+# plan_/progress_ are never committed — they are branch-local working state.
+# Under plan_file_retention=documented, spec_<slug>.md is the tracked artifact
+# and this block drops its ignore line. Verify before any merge to main/test.
 plan_*.md
 progress_*.md
 spec_*.md
@@ -2137,7 +2137,10 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
   # so spec_<slug>.md becomes trackable at the project root. Scoped strictly
   # BETWEEN the BEGIN/END markers via exact-string awk ($0=="spec_*.md") so a
   # dev's own spec_*.md line OUTSIDE the RSCT block is never touched. CRLF-safe.
-  # The reverse switch (documented→ephemeral) self-heals via the CAP-16 backfill.
+  # The reverse switch (documented→ephemeral) does NOT self-heal today: the CAP-16
+  # backfill above is gated on an unanchored `grep -qF "spec_*.md"`, and the comment
+  # this block emits carries that literal, so the guard is always true and the
+  # backfill never fires. Tracked separately — not fixed here.
   if [ "$PLAN_FILE_RETENTION" = "documented" ] \
      && tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
           '$0==b{inblk=1} inblk && $0=="spec_*.md"{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
@@ -2152,6 +2155,44 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  plan_file_retention=documented: removed spec_*.md from the RSCT .gitignore block (spec_ now trackable)"
     else
       echo "  ⚠ documented mode: spec_*.md removal did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # #51 cleanup: blocks written before this release carry a comment telling the dev
+  # to `git add --force` plan_/progress_ — advice the framework no longer gives,
+  # because force-adding is precisely what defeats the ignore rule it sits under.
+  # Remove those three lines when they are still verbatim as shipped. Same shape as
+  # the documented-mode removal above: block-scoped, exact-string awk (never a
+  # regex, so the backtick and the `*` in the text stay inert), CRLF-safe,
+  # tempfile + mv. Removal only — the "NEVER track on main/test" line the block
+  # opens with carries the invariant, so nothing is inserted in its place and the
+  # markers are never rewritten.
+  #
+  # Detection demands the END marker AND all THREE lines verbatim inside the block.
+  # Both conditions are load-bearing. Anchoring on L1 alone would delete the two
+  # lines a dev did NOT edit and leave the one they did as an orphaned sentence
+  # fragment — the opposite of "we do not touch text the dev has taken over". And
+  # without an END marker `inblk` never clears, so the removal would run to EOF and
+  # could take an identical line out of the dev's own content below the block.
+  FORCE_L1='# Use `git add --force plan_<slug>.md progress_<slug>.md` (or spec_*) to'
+  FORCE_L2='# commit on feature branches. Verify they are absent before any merge to'
+  FORCE_L3='# main/test.'
+  if grep -qF "$END_MARKER" "$GITIGNORE" \
+     && tr -d '\r' < "$GITIGNORE" \
+        | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+              -v l1="$FORCE_L1" -v l2="$FORCE_L2" -v l3="$FORCE_L3" \
+            '$0==b{inblk=1} inblk && $0==l1{f1=1} inblk && $0==l2{f2=1}
+             inblk && $0==l3{f3=1} $0==e{inblk=0} END{exit (f1 && f2 && f3)?0:1}'; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+            -v l1="$FORCE_L1" -v l2="$FORCE_L2" -v l3="$FORCE_L3" \
+          '$0==b{inblk=1} $0==e{inblk=0} !(inblk && ($0==l1 || $0==l2 || $0==l3)){print}' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+    # Block-scoped sanity: the anchor line must be gone from INSIDE the block.
+    if tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" -v l1="$FORCE_L1" \
+         '$0==b{inblk=1} inblk && $0==l1{f=1} $0==e{inblk=0} END{exit f?1:0}'; then
+      echo "  #51 cleanup: removed the stale 'git add --force' advice from the RSCT .gitignore block"
+    else
+      echo "  ⚠ #51 cleanup: --force comment removal did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
   # CAP-25 backfill: pre-v0.7.7 RSCT blocks did not list .rsct/phase-state.json,

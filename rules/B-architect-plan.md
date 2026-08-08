@@ -60,9 +60,14 @@ NEVER edit code without first presenting the user a plan containing:
    `standard`/`complex` tasks when `plan_<slug>.md` + `progress_<slug>.md`
    are absent (pass `plan_slug`; override only with `override_plan_tracking`).
    - `plan_<slug>.md` — the approved plan, using the framework template
-     `doc-templates/plan_slug.md.template`.
+     `~/.rsct/doc-templates/plan_slug.md.template`.
    - `progress_<slug>.md` — execution log, using the framework template
-     `doc-templates/progress_slug.md.template`.
+     `~/.rsct/doc-templates/progress_slug.md.template`.
+
+   Templates live at the RSCT install root (`~/.rsct/`) — `/rsct-setup` never
+   copies `doc-templates/` into the project, so a project-relative path does
+   not resolve. From a source clone, read them from
+   `<framework-source>/doc-templates/` instead.
 
    Slug derives from the current branch name (e.g.,
    `feat/aprovacao-requisicao-compra` → `aprovacao-requisicao-compra`).
@@ -78,25 +83,31 @@ NEVER edit code without first presenting the user a plan containing:
    `spec_slug` differs from `plan_slug` (its multi-phase signal).
 
    **Accepted alias (single-phase only):** `spec_<slug>.md` may stand in for
-   `plan_<slug>.md` when the dev prefers the "spec" wording — same gitignore
-   rule, same NEVER-on-protected guarantee, same template
-   (`doc-templates/plan_slug.md.template`). For multi-phase plans keep the
+   `plan_<slug>.md` when the dev prefers the "spec" wording — same role, same
+   template (`~/.rsct/doc-templates/plan_slug.md.template`). Retention is where
+   the two differ, and the difference is not cosmetic: under
+   `plan_file_retention: documented` the `spec_` file is *designed* to be tracked
+   and to reach a protected branch, which `plan_`/`progress_` never are. See
+   below. For multi-phase plans keep the
    master doc named `plan_<slug>.md` so the per-phase `spec_` files never
    collide with it.
 
-   These files are **gitignored by default** (see `.gitignore` patterns
-   `plan_*.md`, `progress_*.md`, and `spec_*.md` added by `/rsct-setup`) under
-   the default `plan_file_retention: ephemeral`. Setting
-   `plan_file_retention: documented` in `.rsct.json` (plan-lifecycle-v2) keeps
-   `spec_<slug>.md` **tracked at the project root** — excluded from the RSCT
-   `.gitignore` block, versioned as durable design docs; `progress_` stays
-   branch-local either way. To track a still-gitignored file on the current
-   feature branch, the developer uses:
-   ```
-   git add --force plan_<slug>.md progress_<slug>.md
-   ```
+   **Retention.** `plan_<slug>.md` and `progress_<slug>.md` are **never
+   committed**. They are working state for one branch, gitignored by
+   `/rsct-setup` under both retention modes (the `.gitignore` patterns
+   `plan_*.md` and `progress_*.md`). Do not force-add them and do not
+   suggest it: `--force` is the one action that defeats the ignore rule, and it
+   leaves them free to travel to a protected branch.
 
-   **These files must NEVER be tracked on `main` or `test` branches.**
+   The supported durable artifact is `spec_<slug>.md`. Under the default
+   `plan_file_retention: ephemeral` it is gitignored like the other two; setting
+   `plan_file_retention: documented` in `.rsct.json` (plan-lifecycle-v2) excludes
+   it from the RSCT `.gitignore` block, so it is **tracked at the project root**
+   and versioned as a durable design doc. `progress_` stays branch-local either
+   way.
+
+   **`plan_`/`progress_` must NEVER be tracked on a protected branch** — the list
+   §D defers to `.rsct.json` for, not a fixed pair of names.
    Before any merge or push to a protected branch, verify they are absent
    from the diff being merged. Always remind the developer of this rule
    when creating the files.
@@ -120,7 +131,7 @@ NEVER edit code without first presenting the user a plan containing:
    When the approved plan has **3 or more phases** whose file groups are DISJOINT,
    ASK the dev whether to run the non-overlapping groups in parallel via separate
    `git worktree`s — fill the "Phases & parallelization" table in the plan template
-   (`doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
+   (`~/.rsct/doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
    state (phase-state, any batch token, the anti-reuse store) — see §C "Parallel
    work via git worktrees" for the mechanics. Phases that share a file group stay
    **serial**; a repo whose build bundle is tracked (e.g. a committed `dist/`) also

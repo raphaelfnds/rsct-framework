@@ -125,6 +125,19 @@ function buildHints(
     return hints
   }
 
+  // #49 — zero entries only means "none" when the file was READ and holds nothing
+  // id-shaped. The other two cases are parser/IO misses and get reported.
+  const parsedNothing = snapshot.premises.length === 0 && snapshot.adrs.length === 0
+  if (snapshot.read_error) {
+    hints.push(
+      `${snapshot.path ?? 'documentation/decisions.md'} exists but could not be read — treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`,
+    )
+  } else if (snapshot.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${snapshot.path ?? 'documentation/decisions.md'} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title — e.g. '### ADR-001 — Title'. Check the file before concluding the project has no recorded decisions.`,
+    )
+  }
+
   if (filter && filteredCount === 0) {
     hints.push(
       'Filter matched zero decisions. Re-run without the filter to see everything, or verify spelling of tag/status values.',

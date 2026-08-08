@@ -17,7 +17,10 @@ audit trail. The branch-derivation step below PRECEDES the phase
 machine — derive the feature branch first, THEN open the code phase.
 See feedback_session-bootstrap.md for the full bootstrap chain.
 
-Treat `main` and `test` (and any configured protected branches) as protected.
+The protected branches are the ones `.rsct.json` declares in `protected_branches[]`,
+plus anything in `protected_patterns_extra`; with the key absent the defaults are
+`main`, `master`, `test` and `dev`. Never memorise a fixed pair of names — rsct_status
+reports the list in force.
 Without explicit reconfirmed authorization: commit, push, merge, rebase, reset,
 force push, and checkout-for-edit are prohibited on these branches.
 Allowed without OK: read-only operations (git log, git diff, git show, git status).
@@ -36,7 +39,8 @@ If current branch differs from where a prior plan was approved (see
 `plan_<slug>.md` metadata if present): explicitly ask the developer which
 branch to continue in. Do not assume the current branch is intentional.
 
-If current branch is `main`/`test`/`dev` or another protected one:
+If the current branch is one of the protected branches (per `.rsct.json`, or the
+defaults when the key is absent):
 strongly recommend a derived branch before any mutation. If continuing
 a known task, recommend the working branch from `plan_<slug>.md`.
 
