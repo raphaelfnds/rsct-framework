@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
+import { corpusMiss } from '../lib/corpus-health.js'
 import {
   readDecisions,
   type DecisionEntry,
@@ -127,12 +128,16 @@ function buildHints(
 
   // #49 — zero entries only means "none" when the file was READ and holds nothing
   // id-shaped. The other two cases are parser/IO misses and get reported.
-  const parsedNothing = snapshot.premises.length === 0 && snapshot.adrs.length === 0
-  if (snapshot.read_error) {
+  const miss = corpusMiss({
+    read_error: snapshot.read_error,
+    has_ids: snapshot.has_decision_ids,
+    parsed_count: snapshot.premises.length + snapshot.adrs.length,
+  })
+  if (miss === 'unreadable') {
     hints.push(
       `${snapshot.path ?? 'documentation/decisions.md'} exists but could not be read — treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`,
     )
-  } else if (snapshot.has_decision_ids && parsedNothing) {
+  } else if (miss === 'ids-unparsed') {
     hints.push(
       `${snapshot.path ?? 'documentation/decisions.md'} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title — e.g. '### ADR-001 — Title'. Check the file before concluding the project has no recorded decisions.`,
     )

@@ -27,8 +27,11 @@ anti-decisions.md.
 decisions.md format: firm premises (#N) for non-negotiable constraints,
 or durable ADRs (ADR-NNN, append-only) with context, alternatives,
 decision, consequences. Never rewrite — append. anti-decisions.md
-format: free-form entry with title, what was tried, why it failed,
-date. See ~/.rsct/doc-templates/knowledge/anti-decisions.md.template.
+format: entries are headed `### AD-NNN — <title>`, sequential and
+append-only, carrying what was tried, why it failed and the date. The
+heading shape is not optional — it is what the abandoned-path
+cross-check binds to. See ~/.rsct/doc-templates/knowledge/anti-decisions.md.template
+for the full entry structure.
 
 Why: Decisions are forgotten if not recorded; later sessions or new
 team members repeat closed debates. ADRs preserve the *why* that

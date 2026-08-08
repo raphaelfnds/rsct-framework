@@ -23400,6 +23400,7 @@ init_esm_shims();
 
 // src/lib/markdown.ts
 init_esm_shims();
+var ENTRY_HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`;
 function parseSections(body) {
   const lines = body.split("\n");
   const out = [];
@@ -24475,12 +24476,11 @@ function readDecisions(projectRoot) {
   };
 }
 var DECISION_ID_TOKEN = /\bADR-\d+\b|(?:^|\s)#\d+\b/m;
-var HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`;
 var PREMISE_HEADING = new RegExp(
-  String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+  String.raw`^#{2,3}\s+#(\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
 );
 var ADR_HEADING = new RegExp(
-  String.raw`^#{2,3}\s+(ADR-\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+  String.raw`^#{2,3}\s+(ADR-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
 );
 function extractDecisions(body) {
   const lines = body.split("\n");
@@ -24562,6 +24562,14 @@ function extractMeta(section) {
 }
 function extractExcerpt(section) {
   return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) });
+}
+
+// src/lib/corpus-health.ts
+init_esm_shims();
+function corpusMiss(input) {
+  if (input.read_error) return "unreadable";
+  if (input.has_ids && input.parsed_count === 0) return "ids-unparsed";
+  return null;
 }
 
 // src/lib/knowledge.ts
@@ -24788,12 +24796,16 @@ function buildHints({
       `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
     );
   }
-  const parsedNothing = decisions.premises.length === 0 && decisions.adrs.length === 0;
-  if (decisions.read_error) {
+  const miss = corpusMiss({
+    read_error: decisions.read_error,
+    has_ids: decisions.has_decision_ids,
+    parsed_count: decisions.premises.length + decisions.adrs.length
+  });
+  if (miss === "unreadable") {
     hints.push(
       `${decisions.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". Check it is a readable file (not a directory) and that permissions allow reading it.`
     );
-  } else if (decisions.has_decision_ids && parsedNothing) {
+  } else if (miss === "ids-unparsed") {
     hints.push(
       `${decisions.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
     );
@@ -24916,12 +24928,16 @@ function buildHints2(snapshot, filter, filteredCount) {
     );
     return hints;
   }
-  const parsedNothing = snapshot.premises.length === 0 && snapshot.adrs.length === 0;
-  if (snapshot.read_error) {
+  const miss = corpusMiss({
+    read_error: snapshot.read_error,
+    has_ids: snapshot.has_decision_ids,
+    parsed_count: snapshot.premises.length + snapshot.adrs.length
+  });
+  if (miss === "unreadable") {
     hints.push(
       `${snapshot.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`
     );
-  } else if (snapshot.has_decision_ids && parsedNothing) {
+  } else if (miss === "ids-unparsed") {
     hints.push(
       `${snapshot.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
     );
@@ -26307,17 +26323,26 @@ function readAntiDecisions(projectRoot) {
     "anti-decisions.md"
   );
   if (!existsSync(path2)) {
-    return { exists: false, path: null, entries: [] };
+    return { exists: false, path: null, entries: [], has_entry_ids: false, read_error: false };
   }
   let body;
   try {
     body = readFileSync(path2, "utf8");
   } catch {
-    return { exists: true, path: path2, entries: [] };
+    return { exists: true, path: path2, entries: [], has_entry_ids: false, read_error: true };
   }
-  return { exists: true, path: path2, entries: extractAntiDecisions(body) };
+  return {
+    exists: true,
+    path: path2,
+    entries: extractAntiDecisions(body),
+    has_entry_ids: AD_ID_TOKEN.test(body),
+    read_error: false
+  };
 }
-var AD_HEADING = /^###\s+(AD-\d+)\s+[—-]\s+(.+?)\s*$/;
+var AD_ID_TOKEN = /\bAD-\d+\b/;
+var AD_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(AD-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
 function extractAntiDecisions(body) {
   const lines = body.split("\n");
   const out = [];
@@ -26586,8 +26611,8 @@ async function checkPremiseHandler(rawInput) {
     scanned_anti_decisions: result.scanned_anti_decisions,
     hints: buildHints5(
       resolution.rsct_installed,
-      snapshot.exists,
-      antiSnapshot.exists,
+      snapshot,
+      antiSnapshot,
       result.recommendation,
       result.anti_decision_matches.length
     )
@@ -26598,7 +26623,7 @@ function selectSubset(premises, adrs, against) {
   if (against === "adrs") return adrs;
   return [...premises, ...adrs];
 }
-function buildHints5(installed, decisionsExist, antiDecisionsExist, recommendation, antiMatchCount) {
+function buildHints5(installed, decisions, antiDecisions, recommendation, antiMatchCount) {
   const hints = [];
   if (!installed) {
     hints.push(
@@ -26606,14 +26631,42 @@ function buildHints5(installed, decisionsExist, antiDecisionsExist, recommendati
     );
     return hints;
   }
-  if (!decisionsExist) {
+  if (!decisions.exists) {
     hints.push(
-      'documentation/decisions.md not found \u2014 zero corpus to check against; recommendation defaulted to "proceed" only because there is nothing to compare with.'
+      recommendation === "proceed" ? 'documentation/decisions.md not found \u2014 zero corpus to check against; "proceed" reflects having nothing to compare with, not a clean check.' : "documentation/decisions.md not found \u2014 the recommendation above rests on the anti-decisions corpus alone."
     );
   }
-  if (!antiDecisionsExist) {
+  if (!antiDecisions.exists) {
     hints.push(
       'documentation/knowledge/anti-decisions.md not found \u2014 abandoned-path cross-check skipped. Bootstrap via /rsct-setup so "we already tried that" signals surface earlier.'
+    );
+  }
+  const decisionsMiss = corpusMiss({
+    read_error: decisions.read_error,
+    has_ids: decisions.has_decision_ids,
+    parsed_count: decisions.premises.length + decisions.adrs.length
+  });
+  if (decisionsMiss === "unreadable") {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} exists but could not be READ \u2014 the zero corpus is UNKNOWN, not empty, and "proceed" is not evidence. Check it is a readable file and not a directory.`
+    );
+  } else if (decisionsMiss === "ids-unparsed") {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} mentions decision ids but none parsed \u2014 treat the zero corpus as UNKNOWN. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
+    );
+  }
+  const antiMiss = corpusMiss({
+    read_error: antiDecisions.read_error,
+    has_ids: antiDecisions.has_entry_ids,
+    parsed_count: antiDecisions.entries.length
+  });
+  if (antiMiss === "unreadable") {
+    hints.push(
+      `${antiDecisions.path ?? "documentation/knowledge/anti-decisions.md"} exists but could not be READ \u2014 the abandoned-path cross-check did not run, and no tool upstream reports this file. Check it is a readable file and not a directory.`
+    );
+  } else if (antiMiss === "ids-unparsed") {
+    hints.push(
+      `${antiDecisions.path ?? "documentation/knowledge/anti-decisions.md"} mentions AD ids but none parsed \u2014 the abandoned-path cross-check ran against nothing. A heading must be '## ' or '### ' followed by 'AD-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
     );
   }
   if (antiMatchCount > 0) {
@@ -30487,6 +30540,32 @@ function runVerificationChecklist(input) {
   stats.knowledge_categories_missing = [...knowledge.categories_missing];
   stats.architecture_overview_present = architecture.exists;
   stats.impact_docs_consulted = impactModules.files.length;
+  const corpusUnread = [];
+  const describeMiss = (file, miss) => {
+    if (miss === "unreadable") corpusUnread.push(`${file} (exists, unreadable)`);
+    else if (miss === "ids-unparsed") corpusUnread.push(`${file} (mentions ids, none parsed)`);
+  };
+  describeMiss(
+    "documentation/decisions.md",
+    corpusMiss({
+      read_error: decisions.read_error,
+      has_ids: decisions.has_decision_ids,
+      parsed_count: decisions.premises.length + decisions.adrs.length
+    })
+  );
+  describeMiss(
+    "documentation/knowledge/anti-decisions.md",
+    corpusMiss({
+      read_error: antiDecisions.read_error,
+      has_ids: antiDecisions.has_entry_ids,
+      parsed_count: antiDecisions.entries.length
+    })
+  );
+  if (corpusUnread.length > 0) {
+    hints.push(
+      `\u26A0 Part of the verification corpus was NOT read: ${corpusUnread.join("; ")}. Treat the scanned counts as UNKNOWN rather than as "nothing recorded", and repair the file before relying on this checklist.`
+    );
+  }
   stats.categories_run.push("gap");
   if (input.specClaims && input.specClaims.length > 0) {
     const corpus = [...decisions.premises, ...decisions.adrs];
@@ -30637,7 +30716,7 @@ ${head}${overflow}`,
       hints.push(
         "Verification corpus is empty (no decisions.md, anti-decisions.md, knowledge categories, or architecture.md). Bootstrap via /rsct-setup so this checklist has signal to surface."
       );
-    } else {
+    } else if (corpusUnread.length === 0) {
       hints.push(
         "Verification checklist found no findings to surface against the available corpus."
       );

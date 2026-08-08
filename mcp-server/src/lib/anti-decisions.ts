@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { makeExcerpt } from './markdown.js'
+import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
 
 export interface AntiDecisionEntry {
   id: string
@@ -15,20 +15,42 @@ export interface AntiDecisionsSnapshot {
   exists: boolean
   path: string | null
   entries: AntiDecisionEntry[]
+  /**
+   * #58 — the body carries a token shaped like an entry id (`AD-NNN`). Together
+   * with an empty result it identifies a parser miss, which has to be REPORTED.
+   * Nothing upstream reads this file — `rsct_load_context` covers `decisions.md`
+   * but not this one — so a clean zero here is the last word anyone gets.
+   */
+  has_entry_ids: boolean
+  /**
+   * #58 — the file exists but could not be READ (a directory at the path, mode
+   * 000, a lock). Content is unknown, so zero entries proves nothing at all.
+   */
+  read_error: boolean
 }
 
 /**
- * Parse `documentation/knowledge/anti-decisions.md` extracting `### AD-NNN —
- * <title>` entries.
+ * Parse `documentation/knowledge/anti-decisions.md` extracting `AD-NNN` entries.
  *
- * Same line-scan strategy as `lib/decisions.ts`: an entry's body runs from
- * its heading until the next H3 / H2 / `---` / end-of-file. The parser is
- * deliberately tolerant of the canonical template's variations and skips
- * the `<TODO: ...>` placeholder line that ships in the template.
+ * Headings parse at `##` or `###` with any separator in
+ * `ENTRY_HEADING_SEPARATOR`. §H prescribes one shape to WRITE —
+ * `### AD-NNN — <title>` — and the reader tolerates the rest (#58); the
+ * separator itself lives in `lib/markdown.ts` so this parser and
+ * `lib/decisions.ts` cannot drift apart again.
  *
- * Anti-decisions are the corpus consumed by `rsct_check_premise` to surface
- * "we already tried that" signals — read by the check-premise tool alongside
- * `lib/decisions.ts` ADRs/premises.
+ * Same line-scan strategy as `lib/decisions.ts`: an entry's body runs from its
+ * heading until the next H3 / H2 / `---` / end-of-file, and the `<TODO: ...>`
+ * placeholder shipped in the template is skipped from the excerpt.
+ *
+ * One shape the terminator does not serve, stated rather than silently carried:
+ * a `##`-level entry followed by `###` sub-headings closes at the first
+ * sub-heading and drops the rest of its body, so `Related` / `Captured` go
+ * unread. Both the template and §H prescribe bullet fields instead of
+ * sub-headings, and `lib/decisions.ts` carries the identical exposure — closing
+ * it needs a level-aware terminator, which is a separate change.
+ *
+ * The corpus is consumed by `rsct_check_premise` and by
+ * `lib/verification-checklist.ts` to surface "we already tried that" signals.
  */
 export function readAntiDecisions(projectRoot: string): AntiDecisionsSnapshot {
   const path = join(
@@ -38,20 +60,37 @@ export function readAntiDecisions(projectRoot: string): AntiDecisionsSnapshot {
     'anti-decisions.md',
   )
   if (!existsSync(path)) {
-    return { exists: false, path: null, entries: [] }
+    return { exists: false, path: null, entries: [], has_entry_ids: false, read_error: false }
   }
 
   let body: string
   try {
     body = readFileSync(path, 'utf8')
   } catch {
-    return { exists: true, path, entries: [] }
+    return { exists: true, path, entries: [], has_entry_ids: false, read_error: true }
   }
 
-  return { exists: true, path, entries: extractAntiDecisions(body) }
+  return {
+    exists: true,
+    path,
+    entries: extractAntiDecisions(body),
+    has_entry_ids: AD_ID_TOKEN.test(body),
+    read_error: false,
+  }
 }
 
-const AD_HEADING = /^###\s+(AD-\d+)\s+[—-]\s+(.+?)\s*$/
+/**
+ * A token shaped like an entry id, anywhere in the body. Used only to tell
+ * "nothing to find" apart from "found nothing" — never to parse. `\d+` and not
+ * `\w+` on purpose: the template ships `AD-NNN` and `AD-XXX` placeholders, and
+ * matching those would raise a parser-miss warning on a file that genuinely holds
+ * no entries. It does not match `ADR-\d+` either — after `AD` comes `R`.
+ */
+const AD_ID_TOKEN = /\bAD-\d+\b/
+
+const AD_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(AD-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
+)
 
 interface PendingEntry {
   id: string

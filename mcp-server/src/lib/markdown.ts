@@ -1,3 +1,24 @@
+/**
+ * The separator between an entry id and its title in a knowledge-file heading —
+ * `### ADR-001 — Title`, `### AD-003: Title`, `## #1 – Title`. Shared by
+ * `lib/decisions.ts` and `lib/anti-decisions.ts` so the two parsers cannot drift
+ * apart. They did, and that divergence was issue #58: the anti-decisions regex was
+ * still the pre-#49 one, character for character, months after the sibling was
+ * widened.
+ *
+ * Two details are load-bearing:
+ *
+ *   * **The ASCII hyphen stays LAST in the class.** A `-` between two other members
+ *     is a RANGE, so `[—-–:]` is the reversed range U+2014 → U+2013 — a
+ *     `SyntaxError` at module load that takes down every tool importing the parser.
+ *     Last position is the only one where `-` is unambiguously literal; the em/en
+ *     adjacency in `[—–:-]` is harmless.
+ *   * **`\s*` BEFORE the separator** is what makes `### ADR-001: Title` parse at
+ *     all — the colon form carries no leading space. The `\s+` after stays
+ *     required, so a hyphenated word cannot be mistaken for a separator.
+ */
+export const ENTRY_HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`
+
 export interface MarkdownSection {
   level: number
   heading: string

@@ -10,6 +10,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **The anti-decisions parser was the pre-#49 regex, character for character (#58).**
+  `AD_HEADING` still demanded `###`, an em dash or hyphen, and whitespace on both
+  sides of the separator — months after its sibling was widened for exactly that
+  defect. The two now share one separator definition in `lib/markdown.ts`, so they
+  cannot drift apart again.
+
+  The root cause was the contract, not the regex. The framework instructed one shape
+  and parsed another: `feedback_adr-autolearning.md` called the format **"free-form"**,
+  the template prescribed `### AD-NNN — <title>`, and §H — the surface always in
+  context — said nothing at all. §H now states the heading, and only the heading; the
+  template keeps sole ownership of the entry schema, because §H has already drifted
+  from it once on the ADR side (it omits `**Status**`/`**Tags**`, which
+  `rsct_get_decisions` filters on). A guard test binds the rule and its memory entry
+  together, the way the §D pair was bound after the same kind of drift.
+
+  Two silent zeros close with it, and they mattered more here than for `decisions.md`:
+  nothing upstream reads anti-decisions — `rsct_load_context` covers the sibling and
+  not this file — so an unreported miss was the last word anyone got. A corpus that
+  exists but cannot be read, or that mentions ids yet yields no entry, is now reported
+  by `rsct_check_premise` and by the V-phase checklist. That checklist used to close
+  the phase with "found no findings to surface against the available corpus" over a
+  file it had never opened.
+
+- **A `rsct_check_premise` hint claimed the answer "defaulted to proceed" when it had
+  not.** The recommendation is computed from both corpora, and an anti-decision hit
+  returns `conflict` with no `decisions.md` present at all — so on that input the hint
+  contradicted the field beside it and the anti-decision warning below it, in the same
+  array.
+
 ## [2.7.1] - 2026-08-08
 
 Four inconsistencies a field test found in the text the framework ships, and in the
