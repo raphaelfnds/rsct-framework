@@ -69,4 +69,29 @@ describe('shipped rule text — invariants', () => {
       expect(file?.body, `${rel} still names a fixed triple`).not.toMatch(/`main`\/`test`/)
     }
   })
+
+  it('#58 — §H and its memory entry agree on the anti-decisions heading shape', () => {
+    // The same failure as the #50 pair, one file over. CAP-32 edited these two
+    // together; afterwards the memory entry acquired "free-form" while §H stayed
+    // silent on the shape, and the parser bound to a third thing. That divergence
+    // IS issue #58, and nothing was watching it.
+    const targets = [
+      'rules/H-adr-learning.md',
+      'memory-templates/feedback_adr-autolearning.md',
+    ]
+    for (const rel of targets) {
+      const file = FILES.find((f) => f.path === rel)
+      expect(file, `${rel} was not scanned`).toBeDefined()
+      // The full heading, not just the id token: `## AD-NNN: <title>` is a shape the
+      // reader tolerates but neither the template nor the memory entry prescribes, and
+      // a bare `toContain('AD-NNN')` would let exactly that divergence back in.
+      expect(file?.body, `${rel} must name the prescribed heading shape`).toContain(
+        '### AD-NNN — ',
+      )
+      expect(
+        file?.body,
+        `${rel} calls the anti-decisions format free-form — the parser binds to a heading`,
+      ).not.toMatch(/free-form/i)
+    }
+  })
 })

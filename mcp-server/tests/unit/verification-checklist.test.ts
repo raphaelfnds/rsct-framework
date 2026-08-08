@@ -302,3 +302,68 @@ describe('runVerificationChecklist — stats coverage', () => {
     expect(r.stats.impact_docs_consulted).toBeGreaterThan(0)
   })
 })
+
+// #58 — this checklist is what closes the V phase. "Found no findings against the
+// available corpus" over a file that was never read is the same silent zero the
+// issue was filed for, one phase later and more expensive.
+describe('runVerificationChecklist — corpus that was not read (#58)', () => {
+  const run = () =>
+    runVerificationChecklist({
+      projectRoot: tmpRoot,
+      declaredPaths: ['src/foo.ts'],
+      discoveredImporters: [],
+      specTier: 'standard',
+    })
+
+  it('reports an unreadable anti-decisions.md instead of a clean pass', () => {
+    writeFile('documentation/decisions.md', '### ADR-001 — Something\nBody.\n')
+    // A directory at the path: exists, cannot be read.
+    mkdirSync(join(tmpRoot, 'documentation', 'knowledge', 'anti-decisions.md'), {
+      recursive: true,
+    })
+
+    const r = run()
+    expect(
+      r.hints.some(
+        (h) => h.includes('was NOT read') && h.includes('anti-decisions.md (exists, unreadable)'),
+      ),
+    ).toBe(true)
+    // No clean-pass assertion here on purpose: a directory at that path still counts
+    // as a present knowledge category, so this case emits a `forgotten` finding and
+    // the clean-pass hint would be absent for an unrelated reason. The suppression is
+    // tested in the next case, where the findings set is provably empty.
+  })
+
+  it('reports a decisions.md that carries ids but parses to nothing, and drops the clean pass', () => {
+    // No knowledge/ directory: nothing else can add a finding, so the clean-pass hint
+    // is absent because of the suppression and for no other reason.
+    writeFile('documentation/decisions.md', '#### ADR-001 -- wrong level and separator\nBody.\n')
+
+    const r = run()
+    expect(r.findings, 'this case must produce no findings, or the next assert is vacuous').toEqual(
+      [],
+    )
+    expect(
+      r.hints.some(
+        (h) => h.includes('was NOT read') && h.includes('decisions.md (mentions ids, none parsed)'),
+      ),
+    ).toBe(true)
+    expect(
+      r.hints.some((h) => h.includes('found no findings to surface')),
+      'must not claim a clean pass over a corpus it could not read',
+    ).toBe(false)
+  })
+
+  it('still claims the clean pass when the corpus was actually read', () => {
+    // The suppression must be scoped to the miss, not applied whenever the corpus is
+    // small. Only decisions.md here, and no knowledge/ directory: a present knowledge
+    // category emits `forgotten` prompts, which would take the findings count above
+    // zero and skip this branch for an unrelated reason.
+    writeFile('documentation/decisions.md', '### ADR-001 — Something\nBody.\n')
+
+    const r = run()
+    expect(r.findings).toEqual([])
+    expect(r.hints.some((h) => h.includes('was NOT read'))).toBe(false)
+    expect(r.hints.some((h) => h.includes('found no findings to surface'))).toBe(true)
+  })
+})

@@ -3,6 +3,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readDecisions } from '../lib/decisions.js'
 import { readAntiDecisions } from '../lib/anti-decisions.js'
+import { corpusMiss } from '../lib/corpus-health.js'
 import {
   checkPremise,
   type AntiDecisionMatch,
@@ -103,8 +104,8 @@ export async function checkPremiseHandler(
     scanned_anti_decisions: result.scanned_anti_decisions,
     hints: buildHints(
       resolution.rsct_installed,
-      snapshot.exists,
-      antiSnapshot.exists,
+      snapshot,
+      antiSnapshot,
       result.recommendation,
       result.anti_decision_matches.length,
     ),
@@ -123,8 +124,8 @@ function selectSubset<T>(
 
 function buildHints(
   installed: boolean,
-  decisionsExist: boolean,
-  antiDecisionsExist: boolean,
+  decisions: ReturnType<typeof readDecisions>,
+  antiDecisions: ReturnType<typeof readAntiDecisions>,
   recommendation: PremiseRecommendation,
   antiMatchCount: number,
 ): string[] {
@@ -135,14 +136,57 @@ function buildHints(
     )
     return hints
   }
-  if (!decisionsExist) {
+  if (!decisions.exists) {
+    // The recommendation is computed from BOTH corpora — an anti-decision hit
+    // returns `conflict` with no decisions.md at all — so this hint may not claim
+    // the answer defaulted to "proceed". It used to, and contradicted both the
+    // field beside it and the ANTI-DECISION hint below it in the same array.
     hints.push(
-      'documentation/decisions.md not found — zero corpus to check against; recommendation defaulted to "proceed" only because there is nothing to compare with.',
+      recommendation === 'proceed'
+        ? 'documentation/decisions.md not found — zero corpus to check against; "proceed" reflects having nothing to compare with, not a clean check.'
+        : 'documentation/decisions.md not found — the recommendation above rests on the anti-decisions corpus alone.',
     )
   }
-  if (!antiDecisionsExist) {
+  if (!antiDecisions.exists) {
     hints.push(
       'documentation/knowledge/anti-decisions.md not found — abandoned-path cross-check skipped. Bootstrap via /rsct-setup so "we already tried that" signals surface earlier.',
+    )
+  }
+
+  // #58 — a "proceed" built on a corpus that was never read is the most expensive
+  // answer this tool can give. Both corpora are reported: #49 gave `decisions.md`
+  // these signals and this tool ignored them, so covering only anti-decisions would
+  // leave one function warning about one file and mute on its sibling in the
+  // identical failure.
+  const decisionsMiss = corpusMiss({
+    read_error: decisions.read_error,
+    has_ids: decisions.has_decision_ids,
+    parsed_count: decisions.premises.length + decisions.adrs.length,
+  })
+  if (decisionsMiss === 'unreadable') {
+    hints.push(
+      `${decisions.path ?? 'documentation/decisions.md'} exists but could not be READ — the zero corpus is UNKNOWN, not empty, and "proceed" is not evidence. Check it is a readable file and not a directory.`,
+    )
+  } else if (decisionsMiss === 'ids-unparsed') {
+    hints.push(
+      `${decisions.path ?? 'documentation/decisions.md'} mentions decision ids but none parsed — treat the zero corpus as UNKNOWN. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title.`,
+    )
+  }
+
+  // Nothing upstream reads anti-decisions — `rsct_load_context` covers decisions.md
+  // and not this file — so an unreported miss here is the last word anyone gets.
+  const antiMiss = corpusMiss({
+    read_error: antiDecisions.read_error,
+    has_ids: antiDecisions.has_entry_ids,
+    parsed_count: antiDecisions.entries.length,
+  })
+  if (antiMiss === 'unreadable') {
+    hints.push(
+      `${antiDecisions.path ?? 'documentation/knowledge/anti-decisions.md'} exists but could not be READ — the abandoned-path cross-check did not run, and no tool upstream reports this file. Check it is a readable file and not a directory.`,
+    )
+  } else if (antiMiss === 'ids-unparsed') {
+    hints.push(
+      `${antiDecisions.path ?? 'documentation/knowledge/anti-decisions.md'} mentions AD ids but none parsed — the abandoned-path cross-check ran against nothing. A heading must be '## ' or '### ' followed by 'AD-NNN', a separator (one of — – - :) and a title.`,
     )
   }
   if (antiMatchCount > 0) {

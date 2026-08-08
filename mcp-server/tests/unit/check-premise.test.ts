@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -261,5 +261,108 @@ describe('rsct_check_premise — input validation', () => {
         against: 'all',
       }),
     ).rejects.toThrow()
+  })
+})
+
+// #58 — the flags are worthless without the wiring. Every case below reverts to
+// green if the hint block in `buildHints` is removed, which is the whole point:
+// #49 tested the hints rather than the snapshot fields for the same reason.
+describe('rsct_check_premise — corpus-miss reporting (#58)', () => {
+  let root: string
+
+  const writeDecisions = (content: string): void => {
+    mkdirSync(join(root, 'documentation'), { recursive: true })
+    writeFileSync(join(root, 'documentation', 'decisions.md'), content, 'utf8')
+  }
+  const writeAnti = (content: string): void => {
+    mkdirSync(join(root, 'documentation', 'knowledge'), { recursive: true })
+    writeFileSync(
+      join(root, 'documentation', 'knowledge', 'anti-decisions.md'),
+      content,
+      'utf8',
+    )
+  }
+  const hintsOf = async (claim: string): Promise<string[]> => {
+    const out = (await checkPremiseHandler({
+      project_root: root,
+      claim,
+    })) as CheckPremiseOutput
+    return out.hints
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'rsct-cp-miss-'))
+    writeFileSync(
+      join(root, '.rsct.json'),
+      JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test', org: 'test' } }),
+      'utf8',
+    )
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('reports a decisions.md that exists but cannot be read', async () => {
+    mkdirSync(join(root, 'documentation', 'decisions.md'), { recursive: true })
+    writeAnti('### AD-001 — Something unrelated\nBody.\n')
+
+    const hints = await hintsOf('add a caching layer')
+    expect(hints.some((h) => h.includes('decisions.md') && h.includes('could not be READ'))).toBe(
+      true,
+    )
+  })
+
+  it('reports a decisions.md that mentions ids but parses to nothing', async () => {
+    writeDecisions('# Decisions\n\n#### ADR-001 -- wrong level and separator\nBody.\n')
+    writeAnti('### AD-001 — Something unrelated\nBody.\n')
+
+    const hints = await hintsOf('add a caching layer')
+    expect(hints.some((h) => h.includes('mentions decision ids but none parsed'))).toBe(true)
+  })
+
+  it('reports an anti-decisions.md that exists but cannot be read', async () => {
+    writeDecisions('### ADR-001 — Something unrelated\nBody.\n')
+    mkdirSync(join(root, 'documentation', 'knowledge', 'anti-decisions.md'), {
+      recursive: true,
+    })
+
+    const hints = await hintsOf('add a caching layer')
+    expect(
+      hints.some((h) => h.includes('anti-decisions.md') && h.includes('could not be READ')),
+    ).toBe(true)
+  })
+
+  it('reports an anti-decisions.md that mentions AD ids but parses to nothing', async () => {
+    writeDecisions('### ADR-001 — Something unrelated\nBody.\n')
+    writeAnti('# Anti-decisions\n\n#### AD-001 -- wrong level and separator\nBody.\n')
+
+    const hints = await hintsOf('add a caching layer')
+    expect(hints.some((h) => h.includes('mentions AD ids but none parsed'))).toBe(true)
+  })
+
+  it('stays quiet when both corpora are readable and parse', async () => {
+    writeDecisions('### ADR-001 — Something unrelated\nBody.\n')
+    writeAnti('### AD-001 — Something else unrelated\nBody.\n')
+
+    const hints = await hintsOf('add a caching layer')
+    expect(hints.some((h) => h.includes('could not be READ'))).toBe(false)
+    expect(hints.some((h) => h.includes('none parsed'))).toBe(false)
+  })
+
+  it('does not claim the answer defaulted to "proceed" when it did not', async () => {
+    // No decisions.md at all, but an anti-decision the claim hits: the recommendation
+    // is `conflict`, and the not-found hint used to assert "defaulted to proceed" —
+    // contradicting both the field beside it and the ANTI-DECISION hint below it.
+    writeAnti('### AD-001 — DynamoDB for orders\nTried it; cost forced a rollback.\n')
+
+    const out = (await checkPremiseHandler({
+      project_root: root,
+      claim: 'use DynamoDB for the orders pipeline',
+    })) as CheckPremiseOutput
+
+    expect(out.recommendation).toBe('conflict')
+    expect(out.hints.some((h) => h.includes('decisions.md not found'))).toBe(true)
+    expect(
+      out.hints.some((h) => h.includes('"proceed"')),
+      'a hint claimed "proceed" while the recommendation was conflict',
+    ).toBe(false)
   })
 })

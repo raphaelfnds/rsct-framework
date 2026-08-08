@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 
 import { readDecisions } from './decisions.js'
 import { readAntiDecisions } from './anti-decisions.js'
+import { corpusMiss, type CorpusMiss } from './corpus-health.js'
 import { readKnowledgeIndex } from './knowledge.js'
 import {
   readArchitectureOverview,
@@ -143,6 +144,38 @@ export function runVerificationChecklist(
   stats.knowledge_categories_missing = [...knowledge.categories_missing]
   stats.architecture_overview_present = architecture.exists
   stats.impact_docs_consulted = impactModules.files.length
+
+  // #58 — "no findings against the available corpus" is only true if the corpus was
+  // actually readable. A file that exists but could not be read, or that carries ids
+  // nothing parsed, must not be counted as an empty-but-fine corpus: this checklist
+  // is what closes the V phase, so a clean pass over an unread file is the same
+  // silent zero #49 and #58 exist to remove — one phase later, and more expensive.
+  const corpusUnread: string[] = []
+  const describeMiss = (file: string, miss: CorpusMiss): void => {
+    if (miss === 'unreadable') corpusUnread.push(`${file} (exists, unreadable)`)
+    else if (miss === 'ids-unparsed') corpusUnread.push(`${file} (mentions ids, none parsed)`)
+  }
+  describeMiss(
+    'documentation/decisions.md',
+    corpusMiss({
+      read_error: decisions.read_error,
+      has_ids: decisions.has_decision_ids,
+      parsed_count: decisions.premises.length + decisions.adrs.length,
+    }),
+  )
+  describeMiss(
+    'documentation/knowledge/anti-decisions.md',
+    corpusMiss({
+      read_error: antiDecisions.read_error,
+      has_ids: antiDecisions.has_entry_ids,
+      parsed_count: antiDecisions.entries.length,
+    }),
+  )
+  if (corpusUnread.length > 0) {
+    hints.push(
+      `⚠ Part of the verification corpus was NOT read: ${corpusUnread.join('; ')}. Treat the scanned counts as UNKNOWN rather than as "nothing recorded", and repair the file before relying on this checklist.`,
+    )
+  }
 
   stats.categories_run.push('gap')
   if (input.specClaims && input.specClaims.length > 0) {
@@ -314,7 +347,9 @@ export function runVerificationChecklist(
       hints.push(
         'Verification corpus is empty (no decisions.md, anti-decisions.md, knowledge categories, or architecture.md). Bootstrap via /rsct-setup so this checklist has signal to surface.',
       )
-    } else {
+    } else if (corpusUnread.length === 0) {
+      // Only claim a clean pass when every corpus file was actually read — the
+      // warning above already says what happened when one was not.
       hints.push(
         'Verification checklist found no findings to surface against the available corpus.',
       )

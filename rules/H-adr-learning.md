@@ -37,6 +37,22 @@ top-level record.
 - An attempted migration / rewrite that was rolled back, with the
   reason.
 
+**Recording format in documentation/knowledge/anti-decisions.md:**
+
+```
+### AD-NNN — <short noun phrase for the abandoned approach>
+```
+
+That heading is the only part a tool binds to, so it is the part that is
+stated here. The full entry structure — what tried / why it failed /
+what was done instead, plus the `Related` and `Captured` fields — lives
+in `~/.rsct/doc-templates/knowledge/anti-decisions.md.template`, which
+owns it. Numbering is sequential and append-only, like ADRs.
+
+The reader tolerates other shapes (`##`, a colon, an en dash) so an
+existing file is not lost, but write this one: tolerance is a safety
+net, not the contract.
+
 **Recording format in documentation/decisions.md:**
 
 For firm premises (non-negotiable):

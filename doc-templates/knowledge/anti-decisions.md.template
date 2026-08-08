@@ -72,7 +72,7 @@ incidents, other anti-decisions>
 - **Captured:** <YYYY-MM-DD> by <dev|claude>
 ```
 
-Numbering: AD-001, AD-002, ... sequential, append-only.
+Numbering: AD-NNN, sequential, append-only.
 
 ---
 

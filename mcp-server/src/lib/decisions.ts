@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { makeExcerpt } from './markdown.js'
+import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
 
 export type DecisionStatus = 'active' | 'superseded' | 'deprecated'
 
@@ -102,28 +102,19 @@ const DECISION_ID_TOKEN = /\bADR-\d+\b|(?:^|\s)#\d+\b/m
 
 // #49 — accept every heading shape a real decisions.md is written in, not only the
 // one §H prescribes. A file using `##`, a colon, or an en dash parsed to zero
-// entries and reported it as a clean zero.
-//
-// Two details are load-bearing:
-//   * the ASCII hyphen stays LAST in the class. A `-` between two other members is
-//     a RANGE, and `[—-–:]` (hyphen between em dash and en dash) is the reversed
-//     range U+2014 → U+2013: a SyntaxError at module load that takes down every
-//     tool importing this file. Last position is the only position where `-` is
-//     unambiguously literal — the em/en adjacency in `[—–:-]` is harmless.
-//   * `\s*` BEFORE the separator is what makes `### ADR-001: Title` parse at all —
-//     the colon form carries no leading space. `\s+` after stays required, so a
-//     hyphenated word cannot be mistaken for a separator.
+// entries and reported it as a clean zero. The separator lives in `lib/markdown.ts`
+// so this parser and the anti-decisions one cannot drift apart (#58); its two
+// load-bearing details are documented there.
 //
 // The section terminator below is deliberately NOT relaxed: both heading branches
 // `continue`, so a matched `##` entry never reaches it and cannot terminate itself.
 // Dropping `^##\s` there would instead stop a trailing `## Out of scope` from
 // closing the last entry in any file written without `---` separators.
-const HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`
 const PREMISE_HEADING = new RegExp(
-  String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
+  String.raw`^#{2,3}\s+#(\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
 )
 const ADR_HEADING = new RegExp(
-  String.raw`^#{2,3}\s+(ADR-\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
+  String.raw`^#{2,3}\s+(ADR-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
 )
 
 interface PendingEntry {

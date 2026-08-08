@@ -391,8 +391,10 @@ Returns firm premises and ADRs from `documentation/decisions.md`, optionally fil
 Headings parse at `##` or `###`, with `—`, `–`, `-` or `:` as the separator — §H
 still prescribes one shape to write, the reader just tolerates the rest. A file that
 exists but cannot be read, or that mentions decision ids yet yields no entry, is
-reported in `hints` instead of returning a clean zero. `rsct_load_context` carries
-the same reporting in `next_action_hints`.
+reported in `hints` instead of returning a clean zero. Every tool that reads the
+corpus carries that reporting: `rsct_load_context` in `next_action_hints`,
+`rsct_check_premise` in `hints`, and the V-phase checklist behind
+`rsct_phase_verification_start`.
 
 - Input: `project_root?`, `filter?: { kind?: 'premise'|'adr', tag?: string, status?: 'active'|'superseded'|'deprecated' }`
 - Output: matched decisions array + counts + hints
@@ -495,7 +497,16 @@ Heuristic check: tokenises a claim, scores against decisions AND anti-decisions 
 
 `conflict` is returned when:
 - a matched decision contains rollback / rejection language (`rolled back`, `superseded`, `deprecated`, `do not`, `rejected`, `anti-pattern`, `never`, `revogado`, `não usar`, etc.), OR
-- the claim matches an anti-decision entry (`### AD-NNN —` in `documentation/knowledge/anti-decisions.md`) — the team explicitly abandoned that path. Anti-decision hits ALWAYS dominate the recommendation, even when an active premise also matches.
+- the claim matches an anti-decision entry in `documentation/knowledge/anti-decisions.md` — the team explicitly abandoned that path. Anti-decision hits ALWAYS dominate the recommendation, even when an active premise also matches.
+
+Anti-decision headings parse at `##` or `###` with `—`, `–`, `-` or `:` as the
+separator; §H prescribes `### AD-NNN — <title>` as the one shape to write, and the
+reader tolerates the rest. Either corpus — `decisions.md` or `anti-decisions.md` —
+that exists but cannot be read, or that mentions ids yet yields no entry, is
+reported in `hints` rather than silently reducing the corpus to zero. That matters
+most here: nothing upstream reads `anti-decisions.md`, so an unreported miss would
+be the last word, and a `proceed` built on it is the most expensive answer this
+tool can give.
 
 ---
 
