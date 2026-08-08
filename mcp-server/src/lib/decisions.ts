@@ -26,13 +26,23 @@ export interface DecisionsSnapshot {
   premises: DecisionEntry[]
   adrs: DecisionEntry[]
   /**
-   * #49 — true when the file exists and holds more than whitespace. Callers use
-   * `exists && has_content && no entries` to detect the silent-zero case: a file
-   * that plainly has content but yielded nothing the parser recognised. That
-   * combination has to be REPORTED; returning a clean zero reads as "this project
-   * has no decisions", which is how dozens of real ADRs stayed invisible.
+   * #49 — the body contains at least one token SHAPED like a decision id
+   * (`ADR-NNN` or `#N`). Combined with an empty result it identifies a parser
+   * miss, which has to be REPORTED: a clean zero reads as "this project has no
+   * decisions", and that is how dozens of real ADRs stayed invisible.
+   *
+   * Deliberately narrower than "the file is non-empty": a decisions.md holding
+   * only section headings genuinely has no entries, and warning about it on every
+   * bootstrap would train the reader to ignore the warning.
    */
-  has_content: boolean
+  has_decision_ids: boolean
+  /**
+   * #49 — the file exists but could not be READ (a directory at that path,
+   * mode 000, a Windows lock). Content is unknown, so this is the one case where
+   * zero entries proves nothing at all — it must be reported, not returned as a
+   * clean zero, which is the exact failure this field exists to close.
+   */
+  read_error: boolean
 }
 
 /**
@@ -49,29 +59,57 @@ export interface DecisionsSnapshot {
 export function readDecisions(projectRoot: string): DecisionsSnapshot {
   const path = join(projectRoot, 'documentation', 'decisions.md')
   if (!existsSync(path)) {
-    return { exists: false, path: null, premises: [], adrs: [], has_content: false }
+    return {
+      exists: false,
+      path: null,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: false,
+    }
   }
 
   let body: string
   try {
     body = readFileSync(path, 'utf8')
   } catch {
-    return { exists: true, path, premises: [], adrs: [], has_content: false }
+    return {
+      exists: true,
+      path,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: true,
+    }
   }
 
   const { premises, adrs } = extractDecisions(body)
-  return { exists: true, path, premises, adrs, has_content: body.trim().length > 0 }
+  return {
+    exists: true,
+    path,
+    premises,
+    adrs,
+    has_decision_ids: DECISION_ID_TOKEN.test(body),
+    read_error: false,
+  }
 }
+
+/**
+ * A token shaped like a decision id, anywhere in the body. Used only to tell
+ * "nothing to find" apart from "found nothing" — never to parse.
+ */
+const DECISION_ID_TOKEN = /\bADR-\d+\b|(?:^|\s)#\d+\b/m
 
 // #49 — accept every heading shape a real decisions.md is written in, not only the
 // one §H prescribes. A file using `##`, a colon, or an en dash parsed to zero
 // entries and reported it as a clean zero.
 //
 // Two details are load-bearing:
-//   * the ASCII hyphen stays LAST in the class. `[—–:-]` is a literal
-//     set; writing the en dash immediately after the em dash would form a reversed
-//     range (U+2014 → U+2013) and throw at module load, taking down every tool that
-//     imports this file.
+//   * the ASCII hyphen stays LAST in the class. A `-` between two other members is
+//     a RANGE, and `[—-–:]` (hyphen between em dash and en dash) is the reversed
+//     range U+2014 → U+2013: a SyntaxError at module load that takes down every
+//     tool importing this file. Last position is the only position where `-` is
+//     unambiguously literal — the em/en adjacency in `[—–:-]` is harmless.
 //   * `\s*` BEFORE the separator is what makes `### ADR-001: Title` parse at all —
 //     the colon form carries no leading space. `\s+` after stays required, so a
 //     hyphenated word cannot be mistaken for a separator.

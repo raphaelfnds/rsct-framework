@@ -83,17 +83,19 @@ NEVER edit code without first presenting the user a plan containing:
    `spec_slug` differs from `plan_slug` (its multi-phase signal).
 
    **Accepted alias (single-phase only):** `spec_<slug>.md` may stand in for
-   `plan_<slug>.md` when the dev prefers the "spec" wording — same
-   NEVER-on-protected guarantee, same template
-   (`~/.rsct/doc-templates/plan_slug.md.template`). Retention is where the two
-   differ: see below. For multi-phase plans keep the
+   `plan_<slug>.md` when the dev prefers the "spec" wording — same role, same
+   template (`~/.rsct/doc-templates/plan_slug.md.template`). Retention is where
+   the two differ, and the difference is not cosmetic: under
+   `plan_file_retention: documented` the `spec_` file is *designed* to be tracked
+   and to reach a protected branch, which `plan_`/`progress_` never are. See
+   below. For multi-phase plans keep the
    master doc named `plan_<slug>.md` so the per-phase `spec_` files never
    collide with it.
 
    **Retention.** `plan_<slug>.md` and `progress_<slug>.md` are **never
    committed**. They are working state for one branch, gitignored by
-   `/rsct-setup` under both retention modes (see the `.gitignore` patterns
-   `plan_*.md`, `progress_*.md`, `spec_*.md`). Do not force-add them and do not
+   `/rsct-setup` under both retention modes (the `.gitignore` patterns
+   `plan_*.md` and `progress_*.md`). Do not force-add them and do not
    suggest it: `--force` is the one action that defeats the ignore rule, and it
    leaves them free to travel to a protected branch.
 
@@ -104,7 +106,8 @@ NEVER edit code without first presenting the user a plan containing:
    and versioned as a durable design doc. `progress_` stays branch-local either
    way.
 
-   **`plan_`/`progress_` must NEVER be tracked on `main` or `test` branches.**
+   **`plan_`/`progress_` must NEVER be tracked on a protected branch** — the list
+   §D defers to `.rsct.json` for, not a fixed pair of names.
    Before any merge or push to a protected branch, verify they are absent
    from the diff being merged. Always remind the developer of this rule
    when creating the files.

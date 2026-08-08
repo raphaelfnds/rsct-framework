@@ -289,12 +289,16 @@ function buildHints({
     )
   }
 
-  // #49 — bootstrap is where `adrs_count: 0` gets believed. A file with content and
-  // no parsed entry is a parser miss, and saying nothing turns it into "this project
-  // records no decisions" for the rest of the session.
-  if (decisions.has_content && decisions.premises.length === 0 && decisions.adrs.length === 0) {
+  // #49 — bootstrap is where `adrs_count: 0` gets believed. A parser or IO miss that
+  // says nothing becomes "this project records no decisions" for the whole session.
+  const parsedNothing = decisions.premises.length === 0 && decisions.adrs.length === 0
+  if (decisions.read_error) {
     hints.push(
-      `${decisions.path ?? 'documentation/decisions.md'} has content, but no premise or ADR heading could be parsed — treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title.`,
+      `${decisions.path ?? 'documentation/decisions.md'} exists but could not be read — treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". Check it is a readable file (not a directory) and that permissions allow reading it.`,
+    )
+  } else if (decisions.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${decisions.path ?? 'documentation/decisions.md'} mentions decision ids but no premise or ADR heading could be parsed — treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title.`,
     )
   }
 

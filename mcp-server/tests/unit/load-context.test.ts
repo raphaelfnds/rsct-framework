@@ -8,6 +8,16 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
+
+function hasGit(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
 
 import {
   loadContextHandler,
@@ -233,5 +243,113 @@ describe('rsct_load_context — active_phase block (CAP-2)', () => {
           h.includes('feat-baz'),
       ),
     ).toBe(true)
+  })
+})
+
+// load_context is the surface the #49 symptom was reported on — `adrs_count: 0` at
+// bootstrap on a project full of ADRs. The parser cases live in get-decisions.test.ts;
+// these drive the whole tool end to end, which is what the report was about.
+describe('rsct_load_context — decisions at bootstrap (#49)', () => {
+  let root: string
+
+  const writeDecisions = (content: string): void => {
+    mkdirSync(join(root, 'documentation'), { recursive: true })
+    writeFileSync(join(root, 'documentation', 'decisions.md'), content, 'utf8')
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'rsct-lc-dec-'))
+    writeFileSync(
+      join(root, '.rsct.json'),
+      JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test', org: 'test' } }),
+      'utf8',
+    )
+  })
+  afterEach(() => {
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+  })
+
+  it('returns the ADRs of a project whose file uses `##` and a colon', async () => {
+    writeDecisions(
+      [
+        '# Architectural decisions',
+        '',
+        '## Durable architectural decisions (ADRs)',
+        '',
+        '## ADR-001: Postgres over Mongo',
+        'Relational integrity outweighed schema flexibility.',
+        '',
+        '## ADR-002 – Tenants never share a schema',
+        'Hard multi-tenancy boundary.',
+        '',
+        '## #1 — Append-only ledger',
+        'Financial events are immutable once committed.',
+      ].join('\n'),
+    )
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(out.decisions.file_exists).toBe(true)
+    expect(out.decisions.adrs_count).toBe(2)
+    expect(out.decisions.premises_count).toBe(1)
+    expect(out.decisions.recent_adrs.map((a) => a.id)).toContain('ADR-001')
+    expect(out.next_action_hints.some((h) => h.includes('no premise or ADR heading'))).toBe(false)
+  })
+
+  it('flags a file that mentions decision ids but parses to nothing', async () => {
+    writeDecisions('# Decisions\n\n#### ADR-001 -- wrong level, wrong separator\nBody.\n')
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(out.decisions.adrs_count).toBe(0)
+    expect(out.next_action_hints.some((h) => h.includes('mentions decision ids'))).toBe(true)
+  })
+
+  it('flags a decisions.md that exists but cannot be read', async () => {
+    mkdirSync(join(root, 'documentation', 'decisions.md'), { recursive: true })
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(out.decisions.file_exists).toBe(true)
+    expect(out.next_action_hints.some((h) => h.includes('could not be read'))).toBe(true)
+  })
+
+  it('stays silent on a scaffold with prose but no decision ids', async () => {
+    writeDecisions('# Architectural decisions\n\n## Firm premises\n\n## ADRs\n')
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(out.next_action_hints.some((h) => h.includes('mentions decision ids'))).toBe(false)
+  })
+})
+
+// #50 — the report field and the HINT are two separate reads of the list. Covering
+// only the field lets the hint be reverted to the raw config with the suite green.
+describe.skipIf(!hasGit())('rsct_load_context — protected-branch hint (#50)', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'rsct-lc-branch-'))
+    const git = (args: string[]): void => execFileSync('git', args, { cwd: root, stdio: 'ignore' })
+    git(['init', '-q'])
+    git(['config', 'user.email', 't@t.t'])
+    git(['config', 'user.name', 't'])
+    writeFileSync(join(root, 'README.md'), '# app\n')
+    git(['add', 'README.md'])
+    git(['commit', '-qm', 'init'])
+    git(['branch', '-M', 'main'])
+    // No `protected_branches` key — the enforced list has to come from the defaults.
+    writeFileSync(
+      join(root, '.rsct.json'),
+      JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test', org: 'test' } }),
+      'utf8',
+    )
+  })
+  afterEach(() => {
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+  })
+
+  it('warns on `main` even though .rsct.json declares no protected branches', async () => {
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(out.git.branch).toBe('main')
+    expect(out.next_action_hints.some((h) => h.includes("On the protected branch 'main'"))).toBe(
+      true,
+    )
   })
 })

@@ -47,8 +47,9 @@ const REFS = collectRefs()
 describe('template paths in shipped rules and memory entries (#52)', () => {
   it('finds the template references it is meant to guard', () => {
     // Without this the guard below would pass vacuously over an empty set if a file
-    // were renamed or a directory moved.
-    expect(REFS.length).toBeGreaterThanOrEqual(7)
+    // were renamed or a directory moved. Exact, not `>=`: a simultaneous add and
+    // delete would keep a `>=` floor satisfied while a guarded reference vanished.
+    expect(REFS.length).toBe(7)
   })
 
   it('every template reference resolves from the RSCT install root', () => {

@@ -2163,14 +2163,25 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
   # Remove those three lines when they are still verbatim as shipped. Same shape as
   # the documented-mode removal above: block-scoped, exact-string awk (never a
   # regex, so the backtick and the `*` in the text stay inert), CRLF-safe,
-  # tempfile + mv. A dev who edited the comment does not match and is left alone.
-  # Removal only — the BEGIN line above already carries the NEVER-on-main/test
-  # invariant, so nothing is inserted in its place and the marker is not rewritten.
+  # tempfile + mv. Removal only — the "NEVER track on main/test" line the block
+  # opens with carries the invariant, so nothing is inserted in its place and the
+  # markers are never rewritten.
+  #
+  # Detection demands the END marker AND all THREE lines verbatim inside the block.
+  # Both conditions are load-bearing. Anchoring on L1 alone would delete the two
+  # lines a dev did NOT edit and leave the one they did as an orphaned sentence
+  # fragment — the opposite of "we do not touch text the dev has taken over". And
+  # without an END marker `inblk` never clears, so the removal would run to EOF and
+  # could take an identical line out of the dev's own content below the block.
   FORCE_L1='# Use `git add --force plan_<slug>.md progress_<slug>.md` (or spec_*) to'
   FORCE_L2='# commit on feature branches. Verify they are absent before any merge to'
   FORCE_L3='# main/test.'
-  if tr -d '\r' < "$GITIGNORE" | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" -v l1="$FORCE_L1" \
-       '$0==b{inblk=1} inblk && $0==l1{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
+  if grep -qF "$END_MARKER" "$GITIGNORE" \
+     && tr -d '\r' < "$GITIGNORE" \
+        | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+              -v l1="$FORCE_L1" -v l2="$FORCE_L2" -v l3="$FORCE_L3" \
+            '$0==b{inblk=1} inblk && $0==l1{f1=1} inblk && $0==l2{f2=1}
+             inblk && $0==l3{f3=1} $0==e{inblk=0} END{exit (f1 && f2 && f3)?0:1}'; then
     tr -d '\r' < "$GITIGNORE" \
       | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
             -v l1="$FORCE_L1" -v l2="$FORCE_L2" -v l3="$FORCE_L3" \

@@ -24442,17 +24442,39 @@ var DECISION_STATUSES = [
 function readDecisions(projectRoot) {
   const path2 = join(projectRoot, "documentation", "decisions.md");
   if (!existsSync(path2)) {
-    return { exists: false, path: null, premises: [], adrs: [], has_content: false };
+    return {
+      exists: false,
+      path: null,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: false
+    };
   }
   let body;
   try {
     body = readFileSync(path2, "utf8");
   } catch {
-    return { exists: true, path: path2, premises: [], adrs: [], has_content: false };
+    return {
+      exists: true,
+      path: path2,
+      premises: [],
+      adrs: [],
+      has_decision_ids: false,
+      read_error: true
+    };
   }
   const { premises, adrs } = extractDecisions(body);
-  return { exists: true, path: path2, premises, adrs, has_content: body.trim().length > 0 };
+  return {
+    exists: true,
+    path: path2,
+    premises,
+    adrs,
+    has_decision_ids: DECISION_ID_TOKEN.test(body),
+    read_error: false
+  };
 }
+var DECISION_ID_TOKEN = /\bADR-\d+\b|(?:^|\s)#\d+\b/m;
 var HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`;
 var PREMISE_HEADING = new RegExp(
   String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
@@ -24766,9 +24788,14 @@ function buildHints({
       `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
     );
   }
-  if (decisions.has_content && decisions.premises.length === 0 && decisions.adrs.length === 0) {
+  const parsedNothing = decisions.premises.length === 0 && decisions.adrs.length === 0;
+  if (decisions.read_error) {
     hints.push(
-      `${decisions.path ?? "documentation/decisions.md"} has content, but no premise or ADR heading could be parsed \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
+      `${decisions.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". Check it is a readable file (not a directory) and that permissions allow reading it.`
+    );
+  } else if (decisions.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
     );
   }
   if (active_phase) {
@@ -24889,9 +24916,14 @@ function buildHints2(snapshot, filter, filteredCount) {
     );
     return hints;
   }
-  if (snapshot.has_content && snapshot.premises.length === 0 && snapshot.adrs.length === 0) {
+  const parsedNothing = snapshot.premises.length === 0 && snapshot.adrs.length === 0;
+  if (snapshot.read_error) {
     hints.push(
-      `${snapshot.path ?? "documentation/decisions.md"} has content, but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
+      `${snapshot.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`
+    );
+  } else if (snapshot.has_decision_ids && parsedNothing) {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
     );
   }
   if (filter && filteredCount === 0) {

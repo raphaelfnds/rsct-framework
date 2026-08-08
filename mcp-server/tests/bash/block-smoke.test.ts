@@ -160,9 +160,14 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     '# commit on feature branches. Verify they are absent before any merge to',
     '# main/test.',
   ]
-  const blockWithComment = (comment: string[]) => [
+  // The line the block opens with. It carries the invariant the cleanup relies on
+  // ("removal only, nothing inserted"), so it must be in the fixture for the
+  // assertion that it survives to mean anything.
+  const INVARIANT_LINE = '# RSCT plan tracking — branch-local files, NEVER track on main/test'
+  const blockWithComment = (comment: string[], eol = '\n') => [
     'node_modules/',
     '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+    INVARIANT_LINE,
     '# spec_*.md is an accepted alias of plan_*.md (same rule, same intent).',
     ...comment,
     'plan_*.md',
@@ -175,7 +180,7 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     '/rsct-framework/',
     '# RSCT-END',
     '',
-  ].join('\n')
+  ].join(eol)
 
   it('fresh — the generated block never advises git add --force (#51)', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR })
@@ -191,29 +196,68 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const gi = readIn(r, '.gitignore')
     expect(gi).not.toContain('--force')
     for (const line of FORCE_COMMENT) expect(gi, `still present: ${line}`).not.toContain(line)
-    // Removal only — the rest of the block and the dev's own content survive.
-    expect(gi).toContain('# spec_*.md is an accepted alias of plan_*.md')
-    expect(gi).toContain('plan_*.md')
+    // Removal only — the invariant line, the ignore patterns and the dev's own
+    // content all survive. inMarkerRange, NOT toContain, for the patterns: the alias
+    // comment contains the substring `plan_*.md`, so toContain would pass even if
+    // the standalone ignore line had been deleted.
+    expect(gi).toContain(INVARIANT_LINE)
+    expect(inMarkerRange(gi, 'plan_*.md'), 'the ignore pattern must survive').toBe(true)
+    expect(inMarkerRange(gi, 'progress_*.md')).toBe(true)
     expect(gi).toContain('.rsct/phase-state.lock')
     expect(gi).toContain('node_modules/')
     expect(countBegin(gi)).toBe(1)
   }, 60_000)
 
-  it('cleanup — a dev-edited --force comment is left untouched (#51)', () => {
-    // The anchor is the first line, matched byte-for-byte. Edit it and the whole
-    // removal must decline: RSCT never rewrites text the dev has taken over.
-    const edited = [
-      '# Use `git add --force plan_<slug>.md` — team exception, see the wiki',
-      '# commit on feature branches. Verify they are absent before any merge to',
+  // Editing ANY of the three lines must decline the WHOLE removal. Anchoring on the
+  // first line alone would delete the two the dev did not touch and leave the one
+  // they did as an orphaned sentence fragment.
+  for (const idx of [0, 1, 2]) {
+    it(`cleanup — declines when the dev edited comment line ${idx + 1} (#51)`, () => {
+      const edited = FORCE_COMMENT.map((l, i) =>
+        i === idx ? `${l} — team exception, see the wiki` : l,
+      )
+      const r = run({
+        promptBasename: '01-setup.md',
+        anchor: GI_ANCHOR,
+        seedFiles: { '.gitignore': blockWithComment(edited) },
+      })
+      const gi = readIn(r, '.gitignore')
+      for (const line of edited) expect(gi, `wrongly removed: ${line}`).toContain(line)
+    }, 60_000)
+  }
+
+  it('cleanup — declines when the block has no END marker (#51)', () => {
+    // Without END, `inblk` never clears: an unguarded removal would run to EOF and
+    // could take an identical line out of the dev's own content below the block.
+    const seed = [
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      ...FORCE_COMMENT,
+      'plan_*.md',
+      '',
+      '# my own notes',
       '# main/test.',
-    ]
+      '',
+    ].join('\n')
     const r = run({
       promptBasename: '01-setup.md',
       anchor: GI_ANCHOR,
-      seedFiles: { '.gitignore': blockWithComment(edited) },
+      seedFiles: { '.gitignore': seed },
     })
     const gi = readIn(r, '.gitignore')
-    for (const line of edited) expect(gi, `wrongly removed: ${line}`).toContain(line)
+    expect(gi, "the dev's own trailing line must survive").toContain('# my own notes\n# main/test.')
+  }, 60_000)
+
+  it('cleanup — works on a CRLF .gitignore (#51)', () => {
+    // Without `tr -d '\r'` the exact-string match never fires on a Windows project
+    // with core.autocrlf=true, and the stale advice would persist in silence.
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: GI_ANCHOR,
+      seedFiles: { '.gitignore': blockWithComment(FORCE_COMMENT, '\r\n') },
+    })
+    const gi = readIn(r, '.gitignore')
+    expect(gi).not.toContain('--force')
+    expect(inMarkerRange(gi, 'plan_*.md')).toBe(true)
   }, 60_000)
 
   it('CRLF — backfill lands on a CRLF .gitignore (tr -d \\r path)', () => {

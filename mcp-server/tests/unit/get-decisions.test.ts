@@ -266,9 +266,10 @@ describe('rsct_get_decisions — silent-zero reporting (#49)', () => {
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-  it('reports a file that has content but parses to zero entries', async () => {
+  it('reports a file that mentions decision ids but parses to zero entries', async () => {
     // H4 heading AND a double-hyphen separator — unparseable twice over, which is
-    // the point: the tool must not answer "no decisions" for a file with content.
+    // the point: the tool must not answer "no decisions" for a file that plainly
+    // holds some.
     writeFileSync(
       join(dir, 'documentation', 'decisions.md'),
       '# Decisions\n\n#### ADR-001 -- wrong level, wrong separator\nReal content lives here.\n',
@@ -277,9 +278,7 @@ describe('rsct_get_decisions — silent-zero reporting (#49)', () => {
 
     const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
     expect(out.total).toBe(0)
-    expect(
-      out.hints.some((h) => h.includes('has content, but no premise or ADR heading')),
-    ).toBe(true)
+    expect(out.hints.some((h) => h.includes('mentions decision ids'))).toBe(true)
   })
 
   it('stays silent when the file is genuinely empty', async () => {
@@ -287,6 +286,32 @@ describe('rsct_get_decisions — silent-zero reporting (#49)', () => {
 
     const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
     expect(out.total).toBe(0)
-    expect(out.hints.some((h) => h.includes('has content'))).toBe(false)
+    expect(out.hints.some((h) => h.includes('mentions decision ids'))).toBe(false)
+  })
+
+  it('stays silent for a scaffold that has prose but no decision ids', async () => {
+    // A decisions.md stripped back to its section headings genuinely has none.
+    // Warning here on every bootstrap would train the reader to ignore the warning.
+    writeFileSync(
+      join(dir, 'documentation', 'decisions.md'),
+      '# Architectural decisions\n\n## Firm premises\n\n## ADRs\n\n## Out of scope\n',
+      'utf8',
+    )
+
+    const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
+    expect(out.total).toBe(0)
+    expect(out.hints.some((h) => h.includes('mentions decision ids'))).toBe(false)
+  })
+
+  it('reports a decisions.md that exists but cannot be read', async () => {
+    // A directory at the path: existsSync passes, readFileSync throws EISDIR. Zero
+    // entries proves nothing here, so a clean zero would be the same silent failure
+    // this whole change exists to remove.
+    mkdirSync(join(dir, 'documentation', 'decisions.md'), { recursive: true })
+
+    const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
+    expect(out.decisions_file.exists).toBe(true)
+    expect(out.total).toBe(0)
+    expect(out.hints.some((h) => h.includes('could not be read'))).toBe(true)
   })
 })
