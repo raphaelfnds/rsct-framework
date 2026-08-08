@@ -125,6 +125,14 @@ function buildHints(
     return hints
   }
 
+  // #49 — a file that plainly has content but yields nothing is a PARSER miss, not
+  // an empty project. Report it; a clean zero reads as "this project has none".
+  if (snapshot.has_content && snapshot.premises.length === 0 && snapshot.adrs.length === 0) {
+    hints.push(
+      `${snapshot.path ?? 'documentation/decisions.md'} has content, but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title — e.g. '### ADR-001 — Title'. Check the file before concluding the project has no recorded decisions.`,
+    )
+  }
+
   if (filter && filteredCount === 0) {
     hints.push(
       'Filter matched zero decisions. Re-run without the filter to see everything, or verify spelling of tag/status values.',

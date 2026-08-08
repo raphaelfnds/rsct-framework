@@ -25,6 +25,14 @@ export interface DecisionsSnapshot {
   path: string | null
   premises: DecisionEntry[]
   adrs: DecisionEntry[]
+  /**
+   * #49 — true when the file exists and holds more than whitespace. Callers use
+   * `exists && has_content && no entries` to detect the silent-zero case: a file
+   * that plainly has content but yielded nothing the parser recognised. That
+   * combination has to be REPORTED; returning a clean zero reads as "this project
+   * has no decisions", which is how dozens of real ADRs stayed invisible.
+   */
+  has_content: boolean
 }
 
 /**
@@ -41,22 +49,44 @@ export interface DecisionsSnapshot {
 export function readDecisions(projectRoot: string): DecisionsSnapshot {
   const path = join(projectRoot, 'documentation', 'decisions.md')
   if (!existsSync(path)) {
-    return { exists: false, path: null, premises: [], adrs: [] }
+    return { exists: false, path: null, premises: [], adrs: [], has_content: false }
   }
 
   let body: string
   try {
     body = readFileSync(path, 'utf8')
   } catch {
-    return { exists: true, path, premises: [], adrs: [] }
+    return { exists: true, path, premises: [], adrs: [], has_content: false }
   }
 
   const { premises, adrs } = extractDecisions(body)
-  return { exists: true, path, premises, adrs }
+  return { exists: true, path, premises, adrs, has_content: body.trim().length > 0 }
 }
 
-const PREMISE_HEADING = /^###\s+#(\d+)\s+[—-]\s+(.+?)\s*$/
-const ADR_HEADING = /^###\s+(ADR-\d+)\s+[—-]\s+(.+?)\s*$/
+// #49 — accept every heading shape a real decisions.md is written in, not only the
+// one §H prescribes. A file using `##`, a colon, or an en dash parsed to zero
+// entries and reported it as a clean zero.
+//
+// Two details are load-bearing:
+//   * the ASCII hyphen stays LAST in the class. `[—–:-]` is a literal
+//     set; writing the en dash immediately after the em dash would form a reversed
+//     range (U+2014 → U+2013) and throw at module load, taking down every tool that
+//     imports this file.
+//   * `\s*` BEFORE the separator is what makes `### ADR-001: Title` parse at all —
+//     the colon form carries no leading space. `\s+` after stays required, so a
+//     hyphenated word cannot be mistaken for a separator.
+//
+// The section terminator below is deliberately NOT relaxed: both heading branches
+// `continue`, so a matched `##` entry never reaches it and cannot terminate itself.
+// Dropping `^##\s` there would instead stop a trailing `## Out of scope` from
+// closing the last entry in any file written without `---` separators.
+const HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`
+const PREMISE_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
+)
+const ADR_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(ADR-\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`,
+)
 
 interface PendingEntry {
   kind: 'premise' | 'adr'

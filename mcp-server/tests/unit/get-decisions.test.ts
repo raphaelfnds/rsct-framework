@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { resolve } from 'node:path'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { join, resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import {
   getDecisionsHandler,
   type GetDecisionsOutput,
@@ -170,5 +172,121 @@ describe('lib/decisions extractDecisions — EOF regression guard', () => {
     expect(adrs[0]?.status).toBe('active')
     expect(adrs[0]?.excerpt).toContain('last line of the file')
     expect(adrs[0]?.excerpt).not.toMatch(/\*\*Status\*\*/)
+  })
+})
+
+describe('lib/decisions extractDecisions — heading tolerance (#49)', () => {
+  // A hand-written decisions.md rarely matches §H byte for byte. Every shape below
+  // used to yield zero entries, returned as a clean `adrs_count: 0`.
+
+  it('parses ADRs and premises written at `##` level', () => {
+    const body = [
+      '# Decisions',
+      '',
+      '## Firm premises (non-negotiable)',
+      '',
+      '## #1 — Tenants never share a schema',
+      'Hard multi-tenancy boundary.',
+      '',
+      '## Durable architectural decisions (ADRs)',
+      '',
+      '## ADR-001 — Postgres over Mongo',
+      '**Status**: active',
+      'Relational integrity outweighed schema flexibility.',
+    ].join('\n')
+
+    const { premises, adrs } = extractDecisions(body)
+    expect(premises.map((p) => p.id)).toEqual(['#1'])
+    expect(adrs.map((a) => a.id)).toEqual(['ADR-001'])
+    expect(adrs[0]?.title).toBe('Postgres over Mongo')
+    expect(adrs[0]?.status).toBe('active')
+  })
+
+  it('does not turn the container headings into entries', () => {
+    // These now sit at the same level as the entries themselves — none may parse.
+    const body = [
+      '## Firm premises (non-negotiable)',
+      '## Durable architectural decisions (ADRs)',
+      '## ADRs',
+      '## Out of scope',
+    ].join('\n')
+
+    const { premises, adrs } = extractDecisions(body)
+    expect(premises).toEqual([])
+    expect(adrs).toEqual([])
+  })
+
+  it('accepts colon and en dash alongside the em dash and the hyphen', () => {
+    const body = [
+      '### ADR-001: Colon, no leading space',
+      'body one.',
+      '',
+      '### ADR-002 – En dash U+2013',
+      'body two.',
+      '',
+      '### ADR-003 - ASCII hyphen',
+      'body three.',
+      '',
+      '### ADR-004 — Em dash U+2014',
+      'body four.',
+    ].join('\n')
+
+    const { adrs } = extractDecisions(body)
+    expect(adrs.map((a) => a.id)).toEqual(['ADR-001', 'ADR-002', 'ADR-003', 'ADR-004'])
+    expect(adrs[0]?.title).toBe('Colon, no leading space')
+    expect(adrs[1]?.title).toBe('En dash U+2013')
+  })
+
+  it('a `##` section heading still closes the entry before it', () => {
+    // The terminator stays `^##\s` on purpose. Accepting `##` entries by relaxing it
+    // would let a trailing section be swallowed into the previous ADR's body in any
+    // file written without `---` separators — silently, and masked by excerpt
+    // truncation. Both heading branches `continue`, so an entry never self-terminates.
+    const body = [
+      '### ADR-007 — Last real decision',
+      'The decision body.',
+      '',
+      '## Out of scope',
+      '- Multi-currency at launch.',
+    ].join('\n')
+
+    const { adrs } = extractDecisions(body)
+    expect(adrs.length).toBe(1)
+    expect(adrs[0]?.excerpt).not.toContain('Out of scope')
+    expect(adrs[0]?.excerpt).not.toContain('Multi-currency')
+  })
+})
+
+describe('rsct_get_decisions — silent-zero reporting (#49)', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rsct-decisions-'))
+    mkdirSync(join(dir, 'documentation'), { recursive: true })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('reports a file that has content but parses to zero entries', async () => {
+    // H4 heading AND a double-hyphen separator — unparseable twice over, which is
+    // the point: the tool must not answer "no decisions" for a file with content.
+    writeFileSync(
+      join(dir, 'documentation', 'decisions.md'),
+      '# Decisions\n\n#### ADR-001 -- wrong level, wrong separator\nReal content lives here.\n',
+      'utf8',
+    )
+
+    const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
+    expect(out.total).toBe(0)
+    expect(
+      out.hints.some((h) => h.includes('has content, but no premise or ADR heading')),
+    ).toBe(true)
+  })
+
+  it('stays silent when the file is genuinely empty', async () => {
+    writeFileSync(join(dir, 'documentation', 'decisions.md'), '\n   \n', 'utf8')
+
+    const out = (await getDecisionsHandler({ project_root: dir })) as GetDecisionsOutput
+    expect(out.total).toBe(0)
+    expect(out.hints.some((h) => h.includes('has content'))).toBe(false)
   })
 })

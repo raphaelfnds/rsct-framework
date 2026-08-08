@@ -153,7 +153,14 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   // T2: repo topology via the single source (same detectTopology as status).
   // Reuse the already-resolved universe block (avoids a second resolution).
   const topology = detectTopology(resolution.config, resolution.root, {}, universe)
-  const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge })
+  const next_action_hints = buildHints({
+    resolution,
+    git,
+    active_plan,
+    active_phase,
+    knowledge,
+    decisions: decisionsSnapshot,
+  })
   if (universe.hint) next_action_hints.push(universe.hint)
   if (topology.hint) next_action_hints.push(topology.hint)
   // plan-lifecycle-v2 (Bloco 2.4): retroactive reconciliation. If the active
@@ -254,9 +261,17 @@ interface HintArgs {
   active_plan: ActivePlan | null
   active_phase: ActivePhaseInfo | null
   knowledge: KnowledgeIndex
+  decisions: ReturnType<typeof readDecisions>
 }
 
-function buildHints({ resolution, git, active_plan, active_phase, knowledge }: HintArgs): string[] {
+function buildHints({
+  resolution,
+  git,
+  active_plan,
+  active_phase,
+  knowledge,
+  decisions,
+}: HintArgs): string[] {
   const hints: string[] = []
 
   if (!resolution.rsct_installed) {
@@ -271,6 +286,15 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }: H
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `On the protected branch '${git.branch}' — mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`,
+    )
+  }
+
+  // #49 — bootstrap is where `adrs_count: 0` gets believed. A file with content and
+  // no parsed entry is a parser miss, and saying nothing turns it into "this project
+  // records no decisions" for the rest of the session.
+  if (decisions.has_content && decisions.premises.length === 0 && decisions.adrs.length === 0) {
+    hints.push(
+      `${decisions.path ?? 'documentation/decisions.md'} has content, but no premise or ADR heading could be parsed — treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of — – - :) and a title.`,
     )
   }
 

@@ -24442,19 +24442,24 @@ var DECISION_STATUSES = [
 function readDecisions(projectRoot) {
   const path2 = join(projectRoot, "documentation", "decisions.md");
   if (!existsSync(path2)) {
-    return { exists: false, path: null, premises: [], adrs: [] };
+    return { exists: false, path: null, premises: [], adrs: [], has_content: false };
   }
   let body;
   try {
     body = readFileSync(path2, "utf8");
   } catch {
-    return { exists: true, path: path2, premises: [], adrs: [] };
+    return { exists: true, path: path2, premises: [], adrs: [], has_content: false };
   }
   const { premises, adrs } = extractDecisions(body);
-  return { exists: true, path: path2, premises, adrs };
+  return { exists: true, path: path2, premises, adrs, has_content: body.trim().length > 0 };
 }
-var PREMISE_HEADING = /^###\s+#(\d+)\s+[—-]\s+(.+?)\s*$/;
-var ADR_HEADING = /^###\s+(ADR-\d+)\s+[—-]\s+(.+?)\s*$/;
+var HEADING_SEPARATOR = String.raw`\s*[—–:-]\s+`;
+var PREMISE_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+#(\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
+var ADR_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(ADR-\d+)` + HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
 function extractDecisions(body) {
   const lines = body.split("\n");
   const premises = [];
@@ -24666,7 +24671,14 @@ async function loadContextHandler(rawInput) {
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse();
   const universe = getUniverse(resolution.config, resolution.root);
   const topology = detectTopology(resolution.config, resolution.root, {}, universe);
-  const next_action_hints = buildHints({ resolution, git, active_plan, active_phase, knowledge });
+  const next_action_hints = buildHints({
+    resolution,
+    git,
+    active_plan,
+    active_phase,
+    knowledge,
+    decisions: decisionsSnapshot
+  });
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
   if (resolution.rsct_installed && active_plan?.branch && git.branch !== active_plan.branch) {
@@ -24733,7 +24745,14 @@ async function loadContextHandler(rawInput) {
     next_action_hints
   };
 }
-function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
+function buildHints({
+  resolution,
+  git,
+  active_plan,
+  active_phase,
+  knowledge,
+  decisions
+}) {
   const hints = [];
   if (!resolution.rsct_installed) {
     hints.push(
@@ -24745,6 +24764,11 @@ function buildHints({ resolution, git, active_plan, active_phase, knowledge }) {
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
       `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
+    );
+  }
+  if (decisions.has_content && decisions.premises.length === 0 && decisions.adrs.length === 0) {
+    hints.push(
+      `${decisions.path ?? "documentation/decisions.md"} has content, but no premise or ADR heading could be parsed \u2014 treat premises_count/adrs_count of 0 as UNKNOWN, not as "none". A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title.`
     );
   }
   if (active_phase) {
@@ -24864,6 +24888,11 @@ function buildHints2(snapshot, filter, filteredCount) {
       "documentation/decisions.md not found \u2014 run /rsct-setup to scaffold the file before proposing decisions-dependent work."
     );
     return hints;
+  }
+  if (snapshot.has_content && snapshot.premises.length === 0 && snapshot.adrs.length === 0) {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} has content, but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
+    );
   }
   if (filter && filteredCount === 0) {
     hints.push(

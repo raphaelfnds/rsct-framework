@@ -47,6 +47,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   protected branches while four were being enforced. Both now report the enforced list;
   a project with no `.rsct.json` still reports none.
 
+- **The decisions parser accepted exactly one heading shape, and reported zero in
+  silence (#49).** `rsct_load_context` returned `adrs_count: 0` on projects holding
+  dozens of ADRs: the regex demanded `###`, an em dash or hyphen, and whitespace on
+  *both* sides of the separator. A file using `##`, a colon or an en dash parsed to
+  nothing — indistinguishable in the output from a project that has no decisions,
+  while §B mandates reading that file before formulating options. Headings now parse
+  at `##` or `###` with `—`, `–`, `-` or `:` as the separator, premises included, and
+  a file that has content but yields no entry is **reported** by `rsct_get_decisions`
+  and `rsct_load_context` instead of returning a clean zero. The section terminator is
+  deliberately unchanged: both heading branches already `continue`, so a `##` entry
+  cannot terminate itself, and relaxing it would stop a trailing `## Out of scope`
+  from closing the last entry in any file written without `---` separators.
+
 ## [2.7.0] - 2026-08-05
 
 Two silent failures, both in mechanisms built to make drift visible — and both of
