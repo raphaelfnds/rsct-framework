@@ -15,3 +15,4 @@
 - [ ] Updated [CHANGELOG.md](../CHANGELOG.md) under `[Unreleased]`
 - [ ] No real client/company names or secrets introduced
 - [ ] Branch is derived (`feat/`, `fix/`, `chore/`, `docs/`) — not a direct commit to `main`
+- [ ] **Framework surfaces** — if this touches `rules/`, `prompts/`, `mcp-server/src/`, `doc-templates/` or `memory-templates/`, the cycle in [AGENTS.md](../AGENTS.md) was run: tier stated, spec approved before code, and V + REVIEW for `standard`/`complex`
