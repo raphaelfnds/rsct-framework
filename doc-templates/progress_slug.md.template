@@ -1,8 +1,7 @@
 # Progress: [TASK_NAME]
 
-> ⚠️ **Branch-local file** — gitignored by default. To track on this feature
-> branch: `git add --force progress_[TASK_SLUG].md` (or
-> `spec_[TASK_SLUG].md` if you used the "spec" alias from §B item 6).
+> ⚠️ **Branch-local file** — gitignored and never committed; the execution log
+> stays branch-local under every retention mode.
 > **NEVER on main/test branches.**
 
 Plan: `plan_[TASK_SLUG].md` (or `spec_[TASK_SLUG].md` if alias is in use).

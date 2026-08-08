@@ -24,6 +24,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   root, with the source-clone form named once alongside it, and a unit guard fails if a
   bare project-relative reference reappears.
 
+- **§B taught the one command that defeats its own default (#51).** The retention
+  paragraph gitignored `plan_`/`progress_` and then handed the dev
+  `git add --force`, guarded only by prose plus a post-hoc push/merge advisory — no
+  code path inspects the index. §B now states the model once: `plan_`/`progress_` are
+  never committed, and `spec_<slug>.md` is the durable artifact under
+  `plan_file_retention: documented`. The instruction is gone from all eight surfaces
+  that ship into a project, including the comment inside the generated `.gitignore`
+  block. That block is write-once — the update path backfills individual lines and
+  never rewrites the body — so `/rsct-setup` now also **removes** the three stale
+  comment lines from an existing block when they are still verbatim as shipped. A
+  dev-edited comment does not match and is left untouched.
+
 ## [2.7.0] - 2026-08-05
 
 Two silent failures, both in mechanisms built to make drift visible — and both of

@@ -1,9 +1,9 @@
 # Plan: [TASK_NAME]
 
-> ⚠️ **Branch-local file** — gitignored by default. To track on this feature
-> branch: `git add --force plan_[TASK_SLUG].md` (or
-> `spec_[TASK_SLUG].md` if you preferred the "spec" alias from §B item 6).
-> **NEVER on main/test branches.**
+> ⚠️ **Branch-local file** — gitignored and never committed; working state for
+> this branch only. **NEVER on main/test branches.** For a durable, versioned
+> design doc use `spec_[TASK_SLUG].md` with `plan_file_retention: documented`
+> in `.rsct.json` (see §B item 6).
 
 ## Metadata
 

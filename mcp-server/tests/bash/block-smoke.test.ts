@@ -152,6 +152,70 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect((gi.match(/\/rsct-framework\//g) ?? []).length).toBe(1)
   }, 60_000)
 
+  // #51 — the block used to instruct `git add --force`, the one action that defeats
+  // the ignore rule it sits under. Fresh installs must not emit it, and existing
+  // blocks (write-once: the body is never rewritten) get a targeted line removal.
+  const FORCE_COMMENT = [
+    '# Use `git add --force plan_<slug>.md progress_<slug>.md` (or spec_*) to',
+    '# commit on feature branches. Verify they are absent before any merge to',
+    '# main/test.',
+  ]
+  const blockWithComment = (comment: string[]) => [
+    'node_modules/',
+    '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+    '# spec_*.md is an accepted alias of plan_*.md (same rule, same intent).',
+    ...comment,
+    'plan_*.md',
+    'progress_*.md',
+    'spec_*.md',
+    '.rsct/audit.log',
+    '.rsct/approvals-seen.json',
+    '.rsct/phase-state.json',
+    '.rsct/phase-state.lock',
+    '/rsct-framework/',
+    '# RSCT-END',
+    '',
+  ].join('\n')
+
+  it('fresh — the generated block never advises git add --force (#51)', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR })
+    expect(readIn(r, '.gitignore')).not.toContain('--force')
+  }, 60_000)
+
+  it('cleanup — strips the stale --force advice from an existing block (#51)', () => {
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: GI_ANCHOR,
+      seedFiles: { '.gitignore': blockWithComment(FORCE_COMMENT) },
+    })
+    const gi = readIn(r, '.gitignore')
+    expect(gi).not.toContain('--force')
+    for (const line of FORCE_COMMENT) expect(gi, `still present: ${line}`).not.toContain(line)
+    // Removal only — the rest of the block and the dev's own content survive.
+    expect(gi).toContain('# spec_*.md is an accepted alias of plan_*.md')
+    expect(gi).toContain('plan_*.md')
+    expect(gi).toContain('.rsct/phase-state.lock')
+    expect(gi).toContain('node_modules/')
+    expect(countBegin(gi)).toBe(1)
+  }, 60_000)
+
+  it('cleanup — a dev-edited --force comment is left untouched (#51)', () => {
+    // The anchor is the first line, matched byte-for-byte. Edit it and the whole
+    // removal must decline: RSCT never rewrites text the dev has taken over.
+    const edited = [
+      '# Use `git add --force plan_<slug>.md` — team exception, see the wiki',
+      '# commit on feature branches. Verify they are absent before any merge to',
+      '# main/test.',
+    ]
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: GI_ANCHOR,
+      seedFiles: { '.gitignore': blockWithComment(edited) },
+    })
+    const gi = readIn(r, '.gitignore')
+    for (const line of edited) expect(gi, `wrongly removed: ${line}`).toContain(line)
+  }, 60_000)
+
   it('CRLF — backfill lands on a CRLF .gitignore (tr -d \\r path)', () => {
     const oldCrlf = [
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
