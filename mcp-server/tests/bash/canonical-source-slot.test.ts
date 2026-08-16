@@ -294,17 +294,21 @@ describe('#66 — the uninstall reaches the placeholder and stops at the guard',
     expect(body).toContain('MORE DEV')
   })
 
-  // A CRLF checkout is the Windows default. The excision must be CORRECT there —
-  // the markers are matched unanchored, so `\r` cannot break the match. It does
-  // NOT preserve the line endings: awk on MSYS strips `\r` from input records and
-  // the file comes back LF, exactly as `sed -i` did before. Pinned as the measured
-  // behaviour so nobody re-adds a "preserves CRLF" claim without checking.
-  it('excises correctly on a CRLF file, normalising line endings as sed did', () => {
+  // A CRLF checkout is the Windows default, so the excision must be CORRECT there:
+  // the markers are matched unanchored, so a trailing `\r` cannot break the match.
+  //
+  // What this test deliberately does NOT assert is the resulting line endings. They
+  // are platform-dependent: awk on MSYS strips `\r` from input records and the file
+  // comes back LF, while GNU and BSD awk keep it as part of the record and CRLF
+  // survives. An earlier version of this test pinned the Windows behaviour as
+  // universal and went red on macOS and ubuntu in CI. Nothing downstream may depend
+  // on either outcome.
+  it('excises correctly on a CRLF file, whatever the platform does to line endings', () => {
     const r = uninstall([...header, REAL_BEGIN, 'body', REAL_END, 'DEV TAIL', ''].join('\n').replace(/\n/g, '\r\n'))
     const body = read(r.dir)
     expect(body).not.toContain('RSCT-CANONICAL-SOURCE-BEGIN')
+    expect(body).not.toContain('body')
     expect(body).toContain('DEV TAIL')
-    expect(body).not.toContain('\r')
   })
 })
 

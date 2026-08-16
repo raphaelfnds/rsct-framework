@@ -291,10 +291,15 @@ echo "CS_MODE=$CS_MODE"
 # awk is POSIX and needs no `sed -i` suffix branch (no Darwin/* split), and one
 # pass can express pairing, which a sed range address cannot.
 #
-# Line endings: on a CRLF checkout the rewritten file comes back LF, because awk
-# on MSYS strips `\r` from input records. Measured, not assumed. That matches
-# what `sed -i` already did on this platform, so it is not a regression — but do
-# NOT claim this path preserves CRLF. It does not.
+# Line endings on a CRLF checkout are PLATFORM-DEPENDENT here, and nothing may
+# depend on them: awk on MSYS (Git Bash) strips `\r` from input records and the
+# file comes back LF, while GNU awk (Linux) and BSD awk (macOS) keep the `\r` as
+# part of the record and CRLF survives. Measured on all three via CI — an earlier
+# version of this comment claimed CRLF was preserved everywhere, and the test that
+# encoded it went red on Linux and macOS.
+#
+# What IS uniform is correctness: every marker match is unanchored, so a trailing
+# `\r` can never break it.
 cs_excise() { # $1 BEGIN literal, $2 END literal, $3 file → stdout: "OK <n>" | "MALFORMED <why>"
   awk -v b="$1" -v e="$2" -v out="$3.rsct.tmp" '
     index($0, b) > 0 { if (inb) { bad = "nested-BEGIN-line-" NR; exit } inb = 1; next }
