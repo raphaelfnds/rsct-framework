@@ -10,6 +10,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **`/rsct-setup` reserved a slot in `CLAUDE.md` that `/rsct-universe` never filled (#66).**
+  The template wrote a `## 0. Canonical architectural source` placeholder; the link step
+  anchored its insertion on the `RSCT_APP` header line — which lands the block **above the
+  document's own H1** — and emitted the heading *unnumbered*, so its CREATE/UPDATE probe
+  could never match the slot it was supposed to replace. A linked project ended up with two
+  headings and a surviving `<TODO>`. The reporter had to run the prompt against its own
+  instructions to get a correct file.
+
+  The placeholder now carries its own marker pair, `RSCT-CANONICAL-SOURCE-SLOT-BEGIN`/`-END`,
+  and linking **replaces it in place**. The name is deliberately not a substring of the real
+  marker: `06-universe.md` decides "is this project linked?" with a byte match on
+  `RSCT-CANONICAL-SOURCE-BEGIN`, so reusing the real pair made every freshly installed
+  project read as *already linked* and put the "universe exists, project not linked" state
+  permanently out of reach. Measured before it shipped.
+
+  Linking resolves four states rather than two, so a project installed **before** this
+  release — whose placeholder carries no markers — is migrated instead of having a second
+  section appended to it.
+
+- **`/rsct-uninstall` left the placeholder behind, dead command included (#66).** On a
+  project that was never linked, neither the section loop nor the canonical-source excision
+  matched the placeholder, and the "delete `CLAUDE.md` if only the header remains" branch
+  could not fire *because the placeholder was still in it*. Both the marked slot and the
+  older unmarked form are now removed with the sections — not behind the canonical-source
+  scope question, which a dev who never linked a universe would rightly decline.
+
+- **Two excisions could destroy a developer's `CLAUDE.md` (#66).** `sed '/BEGIN/,/END/d'`
+  with an unmatched closing address deletes to **end of file**, and the check that followed
+  asked only whether the markers were gone — which a truncation makes trivially true.
+  Counting the markers is not enough either: a file whose `END` precedes its `BEGIN` counts
+  one of each. Both sites now validate pairing in a single `awk` pass and refuse to touch a
+  file whose markers are unpaired, while correctly handling more than one well-formed pair.
+
+- **Five shipped templates named commands `install.sh` deletes (#66).**
+  `doc-templates/CLAUDE.md.template` pointed at `/rsct-canonical-source`, landing it in every
+  freshly installed project; three `universe-templates/` files pointed at
+  `/rsct-init-universe`, and those are rendered into every universe repo. The v2.6.1 sweep of
+  27 legacy references reached the prompts and the docs but not the text the framework writes
+  **into** a project. A guard now walks every shipped directory, `universe-templates/`
+  included.
+
+No new tool (catalog unchanged at **39**), no new phase, marker schema id still `v=1.0.0`.
+
 ## [2.7.2] - 2026-08-08
 
 One parser left behind by an earlier fix, and the contract it disagreed with. Patch:
