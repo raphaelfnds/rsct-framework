@@ -512,8 +512,14 @@ Phase 1.10 / `canonical_source_added`), Phase 3 will OFFER to link it (T1.d).
 When `rsct-mcp` is installed, call `mcp__rsct__rsct_detect_onboarding` (pass
 `project_root` **explicitly** — same Windows/WSL caveat as Phase 5 step 3). It is the
 single deterministic classifier; store its `situation`, `recommended_route`,
-`siblings`, and `hints`. It drives Phase 3 routing (the prompt narrates in plain
-language; the tool's English `hints` are guidance for you, not user copy):
+`siblings`, `discovered_universe_path`, and `hints`. It drives Phase 3 routing (the prompt
+narrates in plain language; the tool's English `hints` are guidance for you, not user copy).
+
+`discovered_universe_path` is set when a universe was found at a canonical path but not yet
+resolved through `.rsct.json` — typically a first install, though it also covers a
+config carrying no `app.org`. On that branch
+`universe.available` is `false` and `universe.local_path` is `null` **by design**; the two
+keep meaning "what the resolver returned". It is the `[PATH]` source for the 🌌 block:
 
 | `recommended_route` | Phase 3 action |
 |---|---|
@@ -712,10 +718,23 @@ Mode: [UPDATE | CREATE]
   [numbered list — only what was NOT found above and is not already
    in DISCREPANCIES]
 
-🌌 UNIVERSE LINK (T1.d) — present ONLY when Phase 1.9 FOUND a universe AND this
-  project is NOT yet linked to it (`.rsct.json` has no `universe.local`, i.e.
-  `canonical_source_added` is false / the `universe` block is absent). Omit entirely
-  when already linked or no universe was found.
+🌌 UNIVERSE LINK (T1.d) — present ONLY when Phase 1.9b returned `recommended_route:
+  "offer-link-existing"`. When the MCP is NOT installed, fall back to the old condition:
+  Phase 1.9 FOUND a universe AND this project is not yet linked (`.rsct.json` has no
+  `universe.local`, i.e. `canonical_source_added` is false / the `universe` block is
+  absent). **Omit entirely when already linked, or when no universe was found.**
+
+  Gating on the route — not on the bash probe — matters because the two can disagree.
+  The probe includes an org-blind `../universe` that the detector deliberately does not
+  claim; keying this block on the probe while 🌱 keys on the route would render two
+  contradictory offers on the same run.
+
+  **Where `[PATH]` comes from**, in order: `discovered_universe_path` from 1.9b, else
+  `universe.local_path` from 1.9b, else the Phase 1.9 bash probe. On a first install the
+  detector reports the universe on `discovered_universe_path` while `universe.available`
+  is still false — nothing has resolved it yet, and that is expected. **`[UNIVERSE_NAME]`
+  is the basename with the `-universe` suffix REMOVED** — the sentence below appends it,
+  so passing the raw basename renders "acme-universe-universe".
   [Present as a Recommended (§B item 1) consent question:]
   "Universe `[UNIVERSE_NAME]-universe` found at `[PATH]`, but this project is not linked
    to it. Link it now? `[Y/n]`

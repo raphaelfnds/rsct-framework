@@ -23514,6 +23514,7 @@ var NONE_BLOCK = {
   governance: EMPTY_GOVERNANCE_INDEX
 };
 var MAX_UNIVERSE_JSON_BYTES = 1e6;
+var CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
 function isUniverseDir(dir) {
   try {
     return statSync(dir).isDirectory() && existsSync(join(dir, ".universe.json"));
@@ -23523,6 +23524,49 @@ function isUniverseDir(dir) {
 }
 function normalizeOrg(org) {
   return org ? org.replace(/-\d*$/, "") : null;
+}
+function universeCandidates(projectRoot, basenames, home, includeOrgBlind) {
+  const candidates = [];
+  for (const b of basenames) candidates.push(resolve(projectRoot, "..", `${b}-universe`));
+  if (includeOrgBlind) candidates.push(resolve(projectRoot, "..", "universe"));
+  for (const sub of ["projetos", "projects", "dev", "workspace"]) {
+    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`));
+  }
+  return candidates;
+}
+function discoverUniverseCandidate(projectRoot, orgKey, opts = {}) {
+  try {
+    const raw = orgKey?.trim() || null;
+    if (!raw) return null;
+    const inferred = normalizeOrg(raw);
+    const basenames = [
+      ...new Set(
+        [inferred, raw].filter(
+          // `!!x` drops the empty string `normalizeOrg` returns for a digits-only org
+          // (`-9` → ''), which would otherwise probe `../-universe`.
+          //
+          // The rest is a path-traversal guard: a basename becomes a path component, and
+          // `rawSelfOrg` can come from a git remote (`parseGitRemoteOrg` returns the first
+          // URL segment verbatim). That is untrusted input reaching `resolve()` for the
+          // first time here — on Windows a `\` in it is a separator and walks out of the
+          // scanned parent.
+          (x) => !!x && !/[\\/]/.test(x) && x !== "." && x !== ".."
+        )
+      )
+    ];
+    if (basenames.length === 0) return null;
+    const home = opts.home ?? process.env.HOME ?? homedir();
+    const self = resolve(projectRoot);
+    const selfKey = CASE_INSENSITIVE_FS ? self.toLowerCase() : self;
+    for (const c of universeCandidates(projectRoot, basenames, home, false)) {
+      const cKey = CASE_INSENSITIVE_FS ? resolve(c).toLowerCase() : resolve(c);
+      if (cKey === selfKey) continue;
+      if (isUniverseDir(c)) return c;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 function resolveUniverseRoot(config2, projectRoot, opts = {}) {
   const uni = config2?.universe;
@@ -23535,12 +23579,7 @@ function resolveUniverseRoot(config2, projectRoot, opts = {}) {
   const org = config2?.app?.org ?? null;
   const inferred = normalizeOrg(org);
   const basenames = [...new Set([name, inferred, org].filter((x) => !!x))];
-  const candidates = [];
-  for (const b of basenames) candidates.push(resolve(projectRoot, "..", `${b}-universe`));
-  candidates.push(resolve(projectRoot, "..", "universe"));
-  for (const sub of ["projetos", "projects", "dev", "workspace"]) {
-    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`));
-  }
+  const candidates = universeCandidates(projectRoot, basenames, home, true);
   for (const c of candidates) {
     if (c && isUniverseDir(c)) return { kind: "found", path: c };
   }
@@ -26040,9 +26079,9 @@ init_esm_shims();
 var MAX_ENTRIES = 400;
 var MAX_SIBLINGS = 50;
 var MAX_GIT_CONFIG_BYTES = 1e6;
-var CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
+var CASE_INSENSITIVE_FS2 = process.platform === "win32" || process.platform === "darwin";
 function caseFold(p) {
-  return CASE_INSENSITIVE_FS ? p.toLowerCase() : p;
+  return CASE_INSENSITIVE_FS2 ? p.toLowerCase() : p;
 }
 function matchKey(raw) {
   if (!raw) return null;
@@ -26198,11 +26237,13 @@ function buildHints4(d) {
         `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve \u2014 fix universe.local or re-run /rsct-universe. Do NOT register this app into it.`
       );
       break;
-    case "offer-link-existing":
+    case "offer-link-existing": {
+      const where = d.discovered_universe_path ?? d.universe.local_path;
       hints.push(
-        `A universe was found at ${d.universe.local_path} but this app is not linked to it \u2014 offer to link it (/rsct-universe), then register it.`
+        `A universe was found at ${where} but this app is not linked to it \u2014 offer to link it (/rsct-universe), then register it.`
       );
       break;
+    }
     case "offer-create-universe": {
       const confirmed = d.siblings.filter((s) => s.matched_by === "rsct_json").map((s) => s.dir);
       hints.push(
@@ -26221,7 +26262,7 @@ function buildHints4(d) {
   const advisory = d.siblings.filter((s) => s.matched_by === "git_remote").map((s) => s.dir);
   if (advisory.length > 0) {
     hints.push(
-      `Possible same-org repos without RSCT (advisory, not counted toward the universe suggestion): ${advisory.join(", ")}.`
+      `Possible same-org repos without RSCT (advisory only \u2014 never counted toward a universe offer): ${advisory.join(", ")}.`
     );
   }
   return hints;
@@ -26238,6 +26279,7 @@ function detectOnboarding(config2, projectRoot, opts = {}) {
   const configuredMissing = hasLocal && !uni.available;
   const linked = uni.available && hasLocal;
   let siblings = [];
+  let discoveredUniversePath = null;
   let situation;
   let route;
   if (isUniverseRepo) {
@@ -26259,8 +26301,12 @@ function detectOnboarding(config2, projectRoot, opts = {}) {
     route = "fix-universe-link";
   } else {
     siblings = scanSiblings(root, selfKey);
+    discoveredUniversePath = discoverUniverseCandidate(root, rawSelfOrg, opts);
     const confirmed = siblings.filter((s) => s.matched_by === "rsct_json");
-    if (confirmed.length >= 1) {
+    if (discoveredUniversePath) {
+      situation = "has-universe-unlinked";
+      route = "offer-link-existing";
+    } else if (confirmed.length >= 1) {
       situation = "siblings-no-universe";
       route = "offer-create-universe";
     } else {
@@ -26278,6 +26324,7 @@ function detectOnboarding(config2, projectRoot, opts = {}) {
       linked,
       configured_missing: configuredMissing
     },
+    discovered_universe_path: discoveredUniversePath,
     siblings,
     situation,
     recommended_route: route
@@ -26291,7 +26338,7 @@ var detectOnboardingInputSchema = external_exports.object({
 }).strict();
 var detectOnboardingTool = {
   name: "rsct_detect_onboarding",
-  description: "Onboarding orchestrator brain for /rsct-setup: classifies the SITUATION (is-universe / has-universe-linked / has-universe-unlinked / universe-configured-missing / offer-register / siblings-no-universe / solo) and the recommended ROUTE (guard-universe-repo / offer-link-existing / offer-create-universe / fix-universe-link / none). Reports is_universe_repo (the deterministic universe\u2260app guard \u2014 if true, STOP setup: this is a governance repo, not an app) and same-org SIBLING apps found one level up (read-only `../` scan; rsct_json matches drive the 'create a universe?' suggestion, git_remote matches are advisory). /rsct-setup calls this once at discovery, then narrates + consent-gates the guided flow. Always succeeds; degrades to 'solo' when nothing applies.",
+  description: "Onboarding orchestrator brain for /rsct-setup: classifies the SITUATION (is-universe / has-universe-linked / has-universe-unlinked / universe-configured-missing / offer-register / siblings-no-universe / solo) and the recommended ROUTE (guard-universe-repo / offer-link-existing / offer-create-universe / fix-universe-link / none). Reports is_universe_repo (the deterministic universe\u2260app guard \u2014 if true, STOP setup: this is a governance repo, not an app) and same-org SIBLING apps found one level up (read-only `../` scan; rsct_json matches drive the 'create a universe?' suggestion, git_remote matches are advisory). Also reports discovered_universe_path: a universe found at a canonical candidate path (`../<org>-universe` or `$HOME/{projetos,projects,dev,workspace}/<org>-universe`) that has NOT been resolved through .rsct.json \u2014 typically before the project is set up, though it also covers a config carrying no app.org. On that branch universe.available is still false, because nothing has resolved it yet. Use it as the path to show when the route is offer-link-existing; universe.available and universe.local_path keep meaning strictly 'what the resolver returned'. Read-only throughout. /rsct-setup calls this once at discovery, then narrates + consent-gates the guided flow. Always succeeds; degrades to 'solo' when nothing applies.",
   inputSchema: {
     type: "object",
     properties: {

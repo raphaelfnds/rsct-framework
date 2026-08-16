@@ -483,10 +483,18 @@ app), `has-universe-linked`, `has-universe-unlinked`, `universe-configured-missi
 `offer-register`, `siblings-no-universe` (same-org sibling repos detected, no universe yet →
 offer to create one), or `solo` — and returns the recommended **route** for the setup prompt to
 follow. The same-org sibling scan reads `../` one level (origin-pinned, CRLF-safe, case-folded
-self-skip); it never writes.
+self-skip); universe discovery additionally probes the canonical candidate paths, which include
+`$HOME/{projetos,projects,dev,workspace}/<org>-universe`. It never writes.
+
+When the resolver returns nothing — typically before `.rsct.json` exists — a fresh project
+sitting beside its org's universe used to be told to **create a second one**. Discovery closes
+that: `discovered_universe_path` reports a universe found at a canonical path but not yet
+resolved, and `universe.available` / `universe.local_path` keep meaning strictly what the
+resolver returned.
 
 - Input: `project_root?`
-- Output: `rsct_installed`, `situation`, `route`, the resolved universe/sibling signals + hints
+- Output: `rsct_installed`, `situation`, `route`, `discovered_universe_path`, the resolved
+  universe/sibling signals + hints
 
 ### `rsct_check_premise`
 
