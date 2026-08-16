@@ -67,6 +67,106 @@ describe('onboarding-detect — universe≠app guard (G3)', () => {
   })
 })
 
+// #65 — before `.rsct.json` exists, `getUniverse` early-returns and `uni.available` is
+// false by construction, so `offer-link-existing` was unreachable pre-install. A fresh
+// project beside an existing universe was told to CREATE a second one over apps already
+// governed. These are the regressions; the guards live in universe.test.ts.
+describe('onboarding-detect — universe discovery before install (#65)', () => {
+  it('T1 — the reported field state routes to link, keeping the siblings', () => {
+    const parent = tmp()
+    mkUniverse(parent, 'acme-universe', ['acme-01', 'acme-02'])
+    for (const a of ['acme-01', 'acme-02', 'acme-03']) mkApp(parent, a, 'acme')
+    const root = join(parent, 'novo')
+    mkdirSync(root, { recursive: true })
+    mkGitRemote(root, 'https://github.com/acme/novo.git')
+
+    // config === null — the project has no .rsct.json yet, which is the whole point.
+    const d = detectOnboarding(null, root, opts())
+
+    expect(d.situation).toBe('has-universe-unlinked')
+    expect(d.recommended_route).toBe('offer-link-existing')
+    expect(d.discovered_universe_path).toBe(join(parent, 'acme-universe'))
+    // The promotion must not cost the caller the sibling list.
+    expect(d.siblings.map((s) => s.dir)).toEqual(['acme-01', 'acme-02', 'acme-03'])
+  })
+
+  it('T8 — the promoted branch reports discovery WITHOUT claiming it resolved', () => {
+    // `universe.available` and `local_path` keep meaning exactly what `getUniverse`
+    // returned. Asserted together with the situation, or the test passes on main.
+    const parent = tmp()
+    mkUniverse(parent, 'acme-universe', [])
+    const root = join(parent, 'novo')
+    mkdirSync(root, { recursive: true })
+    mkGitRemote(root, 'https://github.com/acme/novo.git')
+    const d = detectOnboarding(null, root, opts())
+    expect(d.situation).toBe('has-universe-unlinked')
+    expect(d.universe.available).toBe(false)
+    expect(d.universe.local_path).toBeNull()
+    expect(d.discovered_universe_path).not.toBeNull()
+  })
+
+  it('T7 — the link hint carries a real path on BOTH branches', () => {
+    // The route is reached from two places that populate opposite fields. Reading either
+    // one alone prints "A universe was found at null" on the other.
+    const p1 = tmp()
+    mkUniverse(p1, 'acme-universe', [])
+    const preInstall = join(p1, 'novo')
+    mkdirSync(preInstall, { recursive: true })
+    mkGitRemote(preInstall, 'https://github.com/acme/novo.git')
+    const a = detectOnboarding(null, preInstall, opts())
+
+    const p2 = tmp()
+    mkUniverse(p2, 'acme-universe', [])
+    const postInstall = join(p2, 'app')
+    mkdirSync(postInstall, { recursive: true })
+    const b = detectOnboarding(cfg(), postInstall, opts())
+
+    for (const d of [a, b]) {
+      expect(d.recommended_route).toBe('offer-link-existing')
+      const hint = d.hints.find((h) => /universe was found at/.test(h))
+      expect(hint, 'the link hint must be emitted').toBeDefined()
+      expect(hint).not.toMatch(/at null/)
+    }
+  })
+
+  it('T2 — discovery survives past the sibling cap', () => {
+    // MAX_SIBLINGS is 50 and the scan's own universe check sits after the break, so a
+    // discovery folded into that loop would miss a universe that sorts late. The fixture
+    // names siblings `acme-NN` on purpose: with `app-NN` the universe lands at readdir
+    // index 0 and the test would pass under its own mutation.
+    const parent = tmp()
+    for (let i = 1; i <= 52; i++) mkApp(parent, `acme-${String(i).padStart(2, '0')}`, 'acme')
+    mkUniverse(parent, 'acme-universe', [])
+    const root = join(parent, 'novo')
+    mkdirSync(root, { recursive: true })
+    mkGitRemote(root, 'https://github.com/acme/novo.git')
+    const d = detectOnboarding(null, root, opts())
+    expect(d.recommended_route).toBe('offer-link-existing')
+  })
+
+  it('T3 — a universe belonging to another org is not claimed', () => {
+    const parent = tmp()
+    mkUniverse(parent, 'platform-universe', [])
+    mkApp(parent, 'acme-01', 'acme')
+    const root = join(parent, 'novo')
+    mkdirSync(root, { recursive: true })
+    mkGitRemote(root, 'https://github.com/acme/novo.git')
+    const d = detectOnboarding(null, root, opts())
+    expect(d.recommended_route).toBe('offer-create-universe')
+    expect(d.discovered_universe_path).toBeNull()
+  })
+
+  it('T10 — a repo that IS a universe still short-circuits, even with one discoverable', () => {
+    const parent = tmp()
+    const root = mkUniverse(parent, 'acme-universe', [])
+    mkUniverse(parent, 'acme-governance-universe', []) // discoverable? no — wrong basename
+    mkApp(parent, 'acme-01', 'acme')
+    const d = detectOnboarding(cfg({ app: { name: 'acme-universe', org: 'acme' } }), root, opts())
+    expect(d.recommended_route).toBe('guard-universe-repo')
+    expect(d.discovered_universe_path).toBeNull()
+  })
+})
+
 describe('onboarding-detect — siblings → suggest CREATE (G1)', () => {
   it('≥1 rsct_json sibling, no universe → siblings-no-universe/offer-create (sorted, other-org excluded)', () => {
     const parent = tmp()

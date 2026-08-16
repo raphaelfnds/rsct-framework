@@ -6,6 +6,7 @@ import {
   resolveUniverseRoot,
   readUniverse,
   getUniverse,
+  discoverUniverseCandidate,
 } from '../../src/lib/universe.js'
 import type { RsctConfig } from '../../src/lib/project-root.js'
 import { statusHandler } from '../../src/tools/status.js'
@@ -66,6 +67,126 @@ describe('lib/universe — resolveUniverseRoot', () => {
     writeFileSync(join(uni, '.universe.json'), '{"name":"bluelt-universe","registered_apps":[]}')
     const r = resolveUniverseRoot(cfg({ app: { name: 'apibluelt', org: 'bluelt-23' } }), tmp(), { home })
     expect(r).toEqual({ kind: 'found', path: uni })
+  })
+})
+
+// #65 — pre-install discovery. `getUniverse` early-returns on a null config, so before
+// `/rsct-setup` writes `.rsct.json` the resolver cannot answer "is there a universe here?"
+// at all. These pin the primitive that can, and the parity that keeps it from drifting.
+describe('lib/universe — discoverUniverseCandidate (#65)', () => {
+  function mkUni(parent: string, name: string): string {
+    const d = join(parent, name)
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, '.universe.json'), JSON.stringify({ name, registered_apps: [] }))
+    return d
+  }
+  function projectIn(parent: string): string {
+    const root = join(parent, 'app')
+    mkdirSync(root, { recursive: true })
+    return root
+  }
+
+  it('T1b — finds `<org>-universe` for an org carrying a `-NN` suffix', () => {
+    // The reason discovery cannot build basenames from normalizeOrg alone: `acme-23`
+    // normalizes to `acme`, and `../acme-universe` does not exist on this tree. An
+    // inferred-only implementation returns null here and the reported bug survives.
+    const parent = tmp()
+    mkUni(parent, 'acme-23-universe')
+    expect(discoverUniverseCandidate(projectIn(parent), 'acme-23', { home: tmp() })).toBe(
+      join(parent, 'acme-23-universe'),
+    )
+  })
+
+  it('prefers the inferred basename over the raw one, matching the resolver', () => {
+    const parent = tmp()
+    mkUni(parent, 'acme-universe')
+    mkUni(parent, 'acme-23-universe')
+    expect(discoverUniverseCandidate(projectIn(parent), 'acme-23', { home: tmp() })).toBe(
+      join(parent, 'acme-universe'),
+    )
+  })
+
+  it('T1c — finds the universe when the org differs only in case', () => {
+    // Can only fail on a case-SENSITIVE filesystem: `resolveUniverseRoot` builds candidate
+    // names case-exact by design, so an `Acme` org probes `Acme-universe`. On Windows and
+    // macOS that hits anyway; on Linux it misses, and the reported bug survives on one OS.
+    const parent = tmp()
+    mkUni(parent, 'acme-universe')
+    expect(discoverUniverseCandidate(projectIn(parent), 'Acme', { home: tmp() })).not.toBeNull()
+  })
+
+  it('T5 — never claims the org-blind `../universe`', () => {
+    const parent = tmp()
+    mkUni(parent, 'universe')
+    expect(discoverUniverseCandidate(projectIn(parent), 'acme', { home: tmp() })).toBeNull()
+  })
+
+  it('T6 — reaches the $HOME candidates, not only `../`', () => {
+    const parent = tmp()
+    const home = tmp()
+    mkdirSync(join(home, 'projetos'), { recursive: true })
+    mkUni(join(home, 'projetos'), 'acme-universe')
+    expect(discoverUniverseCandidate(projectIn(parent), 'acme', { home })).toBe(
+      join(home, 'projetos', 'acme-universe'),
+    )
+  })
+
+  it('T11 — returns null for blank, degenerate and absent orgs', () => {
+    const parent = tmp()
+    mkUni(parent, 'acme-universe')
+    const root = projectIn(parent)
+    // `normalizeOrg('-9')` is '' — an unguarded empty basename would probe `../-universe`.
+    for (const org of [null, undefined, '', '   ', '-9']) {
+      expect(discoverUniverseCandidate(root, org, { home: tmp() })).toBeNull()
+    }
+  })
+
+  it('T13 — a repo named `<org>-universe` does not discover itself', () => {
+    const parent = tmp()
+    const root = mkUni(parent, 'acme-universe')
+    expect(discoverUniverseCandidate(root, 'acme', { home: tmp() })).toBeNull()
+  })
+
+  it('T9 — claims a corrupt universe exactly as the resolver does', () => {
+    // `isUniverseDir` never opens the file, so the resolver claims a broken universe and
+    // reports it unreadable downstream. Discovery must agree: adding a parse here would be
+    // a third definition of "is this a universe", which is the drift #65 exists to remove.
+    const parent = tmp()
+    const d = join(parent, 'acme-universe')
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, '.universe.json'), '{ not json')
+    const root = projectIn(parent)
+    const resolved = resolveUniverseRoot(cfg({ app: { name: 'app', org: 'acme' } }), root, { home: tmp() })
+    expect(resolved.kind).toBe('found')
+    expect(discoverUniverseCandidate(root, 'acme', { home: tmp() })).toBe(resolved.kind === 'found' ? resolved.path : null)
+  })
+
+  it('T4 — agrees with the resolver on the name-derived candidates', () => {
+    // Authored over a tree where a one-basename implementation diverges: with org
+    // `acme-23` and only `acme-23-universe` present, an inferred-only discovery returns
+    // null while the resolver finds it.
+    const parent = tmp()
+    mkUni(parent, 'acme-23-universe')
+    const root = projectIn(parent)
+    const home = tmp()
+    const resolved = resolveUniverseRoot(cfg({ app: { name: 'app', org: 'acme-23' } }), root, { home })
+    expect(resolved.kind).toBe('found')
+    expect(discoverUniverseCandidate(root, 'acme-23', { home })).toBe(
+      resolved.kind === 'found' ? resolved.path : null,
+    )
+  })
+
+  it('T12 — the resolver still prefers `../universe` over the $HOME candidates', () => {
+    // `../universe` is pushed BETWEEN the sibling and $HOME candidates. Extracting the list
+    // and appending the org-blind entry instead of splicing it would silently reorder a
+    // shipped precedence, and nothing else in the suite covers it.
+    const parent = tmp()
+    const home = tmp()
+    mkUni(parent, 'universe')
+    mkdirSync(join(home, 'projetos'), { recursive: true })
+    mkUni(join(home, 'projetos'), 'acme-universe')
+    const r = resolveUniverseRoot(cfg({ app: { name: 'app', org: 'acme' } }), projectIn(parent), { home })
+    expect(r).toEqual({ kind: 'found', path: join(parent, 'universe') })
   })
 })
 

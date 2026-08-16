@@ -1,7 +1,13 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { RsctConfig } from './project-root.js'
-import { getUniverse, isUniverseDir, normalizeOrg, type UniverseOptions } from './universe.js'
+import {
+  discoverUniverseCandidate,
+  getUniverse,
+  isUniverseDir,
+  normalizeOrg,
+  type UniverseOptions,
+} from './universe.js'
 
 // DX-1 — onboarding detector. Given a project, deterministically classify the
 // onboarding SITUATION and the recommended ROUTE so /rsct-setup can act as the
@@ -70,7 +76,18 @@ export interface OnboardingDetection {
     /** .rsct.json `universe.local` is set but the target doesn't resolve. */
     configured_missing: boolean
   }
-  /** Same-org siblings (populated only in the no-universe branch). */
+  /**
+   * A universe directory found at a canonical candidate path but NOT resolved through
+   * `getUniverse` — the pre-install case, where there is no `.rsct.json` for the resolver
+   * to key on. Reported on its own field, never folded into `universe.available` or
+   * `universe.local_path`: those keep meaning exactly what `getUniverse` returned, or the
+   * two would mean different things depending on which branch produced them.
+   *
+   * Non-null implies `situation === 'has-universe-unlinked'` with `universe.available`
+   * still false — a combination that could not occur before, and is deliberate.
+   */
+  discovered_universe_path: string | null
+  /** Same-org siblings (populated in the no-universe and discovery branches). */
   siblings: SiblingApp[]
   situation: Situation
   recommended_route: Route
@@ -294,11 +311,17 @@ function buildHints(d: Omit<OnboardingDetection, 'hints'>): string[] {
         `.rsct.json points at a universe (${d.universe.local_path}) that does not resolve — fix universe.local or re-run /rsct-universe. Do NOT register this app into it.`,
       )
       break
-    case 'offer-link-existing':
+    case 'offer-link-existing': {
+      // BOTH operands are required. This route is reached from two branches that populate
+      // opposite fields: post-install (`uni.available && !linked`) sets `local_path` and
+      // leaves discovery null; pre-install discovery does the reverse. Reading either one
+      // alone prints "A universe was found at null" on the other branch.
+      const where = d.discovered_universe_path ?? d.universe.local_path
       hints.push(
-        `A universe was found at ${d.universe.local_path} but this app is not linked to it — offer to link it (/rsct-universe), then register it.`,
+        `A universe was found at ${where} but this app is not linked to it — offer to link it (/rsct-universe), then register it.`,
       )
       break
+    }
     case 'offer-create-universe': {
       const confirmed = d.siblings.filter((s) => s.matched_by === 'rsct_json').map((s) => s.dir)
       hints.push(
@@ -314,11 +337,13 @@ function buildHints(d: Omit<OnboardingDetection, 'hints'>): string[] {
       }
       break
   }
-  // Advisory: same-org repos found without RSCT (do not, alone, trigger create).
+  // Advisory: same-org repos found without RSCT. They never, alone, trigger the CREATE
+  // offer — and on the discovery branch no create suggestion is being made at all, so the
+  // wording stays neutral about which offer it is not counted toward.
   const advisory = d.siblings.filter((s) => s.matched_by === 'git_remote').map((s) => s.dir)
   if (advisory.length > 0) {
     hints.push(
-      `Possible same-org repos without RSCT (advisory, not counted toward the universe suggestion): ${advisory.join(', ')}.`,
+      `Possible same-org repos without RSCT (advisory only — never counted toward a universe offer): ${advisory.join(', ')}.`,
     )
   }
   return hints
@@ -357,6 +382,7 @@ export function detectOnboarding(
   const linked = uni.available && hasLocal
 
   let siblings: SiblingApp[] = []
+  let discoveredUniversePath: string | null = null
   let situation: Situation
   let route: Route
 
@@ -379,9 +405,21 @@ export function detectOnboarding(
     situation = 'universe-configured-missing'
     route = 'fix-universe-link'
   } else {
+    // The scan runs FIRST and unconditionally, so `siblings` stays populated even when the
+    // discovery below promotes the route — the caller loses no information either way.
     siblings = scanSiblings(root, selfKey)
+    // Discovery is deliberately NOT a byproduct of that scan. `scanSiblings` stops at
+    // MAX_SIBLINGS/MAX_ENTRIES before it would reach a universe that sorts late, sees only
+    // direct children of the parent (never the $HOME candidates), skips symlinks that
+    // `isUniverseDir` follows, and matches by marker where the resolver matches by name.
+    discoveredUniversePath = discoverUniverseCandidate(root, rawSelfOrg, opts)
     const confirmed = siblings.filter((s) => s.matched_by === 'rsct_json')
-    if (confirmed.length >= 1) {
+    if (discoveredUniversePath) {
+      // A universe exists and this project is not linked to it. Without this branch the
+      // detector recommends CREATING one — a second universe over apps already governed.
+      situation = 'has-universe-unlinked'
+      route = 'offer-link-existing'
+    } else if (confirmed.length >= 1) {
       situation = 'siblings-no-universe'
       route = 'offer-create-universe'
     } else {
@@ -400,6 +438,7 @@ export function detectOnboarding(
       linked,
       configured_missing: configuredMissing,
     },
+    discovered_universe_path: discoveredUniversePath,
     siblings,
     situation,
     recommended_route: route,

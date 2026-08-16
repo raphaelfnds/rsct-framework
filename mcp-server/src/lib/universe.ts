@@ -59,6 +59,12 @@ const NONE_BLOCK: UniverseBlock = {
 // Defensive cap: never read a multi-MB file into memory for a tiny index.
 const MAX_UNIVERSE_JSON_BYTES = 1_000_000
 
+// Case-insensitive filesystems (Windows, default macOS): a path equality test must be
+// case-folded or a case-variant of the repo's own path compares as different.
+// Declared here rather than imported from `onboarding-detect.ts` — that module imports
+// this one, and the reverse import would close a cycle.
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin'
+
 type Resolution =
   | { kind: 'found'; path: string }
   | { kind: 'configured-missing'; path: string }
@@ -84,6 +90,92 @@ export function isUniverseDir(dir: string): boolean {
  */
 export function normalizeOrg(org: string | null | undefined): string | null {
   return org ? org.replace(/-\d*$/, '') : null
+}
+
+/**
+ * The canonical candidate paths, in probe order (same list as 02-canonical-source.md
+ * Phase 1.2). Shared so the post-install resolver and the pre-install discovery cannot
+ * grow separate ideas of where a universe lives.
+ *
+ * ORDER IS LOAD-BEARING. `../universe` sits BETWEEN the sibling candidates and the
+ * `$HOME` ones — it outranks all four home candidates. Appending it instead would flip
+ * a shipped precedence: a project with both `../universe` and
+ * `$HOME/projetos/<org>-universe` resolves to the former today.
+ *
+ * `includeOrgBlind` is false for discovery: `../universe` carries no org in its name, so
+ * claiming it for a project whose identity is only *inferred* (pre-install, from a git
+ * remote) would let another org's shared directory be adopted as ours.
+ */
+export function universeCandidates(
+  projectRoot: string,
+  basenames: string[],
+  home: string,
+  includeOrgBlind: boolean,
+): string[] {
+  const candidates: string[] = []
+  for (const b of basenames) candidates.push(resolve(projectRoot, '..', `${b}-universe`))
+  if (includeOrgBlind) candidates.push(resolve(projectRoot, '..', 'universe'))
+  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) {
+    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`))
+  }
+  return candidates
+}
+
+/**
+ * Pre-install universe discovery: "is one of the canonical candidates a universe?",
+ * answered WITHOUT a config. `resolveUniverseRoot` cannot serve this — `getUniverse`
+ * early-returns on a null config, which is the state every project is in before
+ * `/rsct-setup` writes `.rsct.json`.
+ *
+ * Both sides walk `universeCandidates`, so the *name-derived* candidate list has one
+ * definition. Three asymmetries are deliberate; do not "fix" them into symmetry:
+ *
+ *   1. `config.universe.local` bypasses candidates entirely in the resolver. Discovery has
+ *      no config to read it from — and the branch that calls this is unreachable when
+ *      `local` is set anyway.
+ *   2. The resolver has a `config.universe.name` basename. Discovery does not.
+ *   3. The resolver probes `../universe`. Discovery must not (see `includeOrgBlind`).
+ *
+ * Basenames mirror the resolver's order — inferred, then raw — because an org carrying a
+ * `-<digits>` suffix (`acme-23`) may sit beside either `acme-universe` or
+ * `acme-23-universe`, and dropping the raw form misses the second. Lower-cased variants
+ * are appended last: the resolver builds names case-exact by design (see `normalizeOrg`),
+ * while every org compare in the onboarding detector is case-folded — without them an
+ * `Acme` org finds its universe on Windows and macOS and misses it on Linux.
+ *
+ * Never throws. Returns null when no org can be derived.
+ */
+export function discoverUniverseCandidate(
+  projectRoot: string,
+  orgKey: string | null | undefined,
+  opts: UniverseOptions = {},
+): string | null {
+  try {
+    const raw = orgKey?.trim() || null
+    if (!raw) return null
+    const inferred = normalizeOrg(raw)
+    const basenames = [
+      ...new Set(
+        [inferred, raw, inferred?.toLowerCase(), raw.toLowerCase()].filter(
+          (x): x is string => !!x && x.trim().length > 0,
+        ),
+      ),
+    ]
+    if (basenames.length === 0) return null
+    const home = opts.home ?? process.env.HOME ?? homedir()
+    const self = resolve(projectRoot)
+    const selfKey = CASE_INSENSITIVE_FS ? self.toLowerCase() : self
+    for (const c of universeCandidates(projectRoot, basenames, home, false)) {
+      // A repo named `<org>-universe` must not discover ITSELF as its own universe;
+      // the `is_universe_repo` guard owns that case.
+      const cKey = CASE_INSENSITIVE_FS ? resolve(c).toLowerCase() : resolve(c)
+      if (cKey === selfKey) continue
+      if (isUniverseDir(c)) return c
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -116,12 +208,7 @@ export function resolveUniverseRoot(
   const org = config?.app?.org ?? null
   const inferred = normalizeOrg(org)
   const basenames = [...new Set([name, inferred, org].filter((x): x is string => !!x))]
-  const candidates: string[] = []
-  for (const b of basenames) candidates.push(resolve(projectRoot, '..', `${b}-universe`))
-  candidates.push(resolve(projectRoot, '..', 'universe'))
-  for (const sub of ['projetos', 'projects', 'dev', 'workspace']) {
-    for (const b of basenames) candidates.push(join(home, sub, `${b}-universe`))
-  }
+  const candidates = universeCandidates(projectRoot, basenames, home, true)
 
   for (const c of candidates) {
     if (c && isUniverseDir(c)) return { kind: 'found', path: c }
