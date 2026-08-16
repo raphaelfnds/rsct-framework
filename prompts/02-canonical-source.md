@@ -3,8 +3,8 @@
 You are operating inside a software project repository belonging to an organization
 that maintains a central **universe repository** with canonical architectural artifacts.
 
-Your task: create or update the `## Canonical architectural source` section in
-`CLAUDE.md` at the root of this repository.
+Your task: create or update the `## 0. Canonical architectural source` section
+in `CLAUDE.md` at the root of this repository.
 
 Read this entire file before executing any action.
 
@@ -13,7 +13,7 @@ Read this entire file before executing any action.
 ## Absolute rules
 
 - No `git commit`, `git push` without explicit OK from the user.
-- Do not modify any section of CLAUDE.md other than `## Canonical architectural source`.
+- Do not modify any section of CLAUDE.md other than `## 0. Canonical architectural source`.
 - If the repo already has `AGENTS.md`, ask the user which file to update.
 - Never copy content from the universe repository — only reference via canonical URL.
 
@@ -27,7 +27,7 @@ Same contract as `prompts/01-setup.md`'s execution mandate:
    to Node / Python / PowerShell / TS, do NOT consolidate Phase
    blocks into a single helper script.
 2. **The Phase 4 `markdown` block is the canonical content** of the
-   `## Canonical architectural source` section. Insert it into
+   `## 0. Canonical architectural source` section. Insert it into
    `CLAUDE.md` **byte-for-byte** with only the explicit
    `[PLACEHOLDER]` substitutions named in Phase 4 (`[APP_NAME]`,
    `[UNIVERSE_NAME]`, `[UNIVERSE_LOCAL_PATH]`, `[UNIVERSE_GITHUB_BASE]`,
@@ -105,10 +105,36 @@ If found locally, read these files directly (no remote authorization needed):
 ### 1.3 — Current CLAUDE.md canonical source section
 ```bash
 echo "  CHECKPOINT: Phase 1.3 executing canonical CLAUDE.md section detection"
-grep -n "## Canonical architectural source" CLAUDE.md 2>/dev/null \
-  && awk '/## Canonical architectural source/,/^## [^#]/' CLAUDE.md 2>/dev/null \
-  || echo "SECTION_NOT_FOUND"
+# Four-way resolution. Every match is byte-literal (-F) and unanchored, so it is
+# CRLF-safe (anti-pattern #4) and immune to the `.` in "## 0." (anti-pattern #2).
+# Never -i with -F (anti-pattern #7 — SIGABRT on Git Bash grep 3.0).
+#
+# CLAUDE_MD is assigned HERE: each fenced block runs in its own shell, so a value
+# set in another Phase does not exist in this one (anti-pattern #6).
+CLAUDE_MD="$(pwd)/CLAUDE.md"
+CS_MODE="create-append"
+if   grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN"      "$CLAUDE_MD" 2>/dev/null; then CS_MODE="update"
+elif grep -qF "<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" "$CLAUDE_MD" 2>/dev/null; then CS_MODE="create-slot"
+elif grep -qF "<TODO: run 02-canonical-source.md"     "$CLAUDE_MD" 2>/dev/null; then CS_MODE="create-legacy"
+fi
+echo "CS_MODE=$CS_MODE"
+
+# Context for the report, best-effort. `awk index()==1` is byte-literal and
+# column-anchored — the repo idiom for matching a heading without a regex.
+awk 'index($0,"## 0. Canonical architectural source")==1 || index($0,"## Canonical architectural source")==1 { print NR": "$0 }' \
+  "$CLAUDE_MD" 2>/dev/null || true
 ```
+
+`CS_MODE` resolves to one of four states. **It is not carried to Phase 4** — that
+block runs in its own shell *and* the Phase 4 preamble mutates the file in
+between, so Phase 4 re-derives it.
+
+| `CS_MODE` | State of `CLAUDE.md` | What Phase 4 does |
+|---|---|---|
+| `update` | a real `RSCT-CANONICAL-SOURCE` pair is present | the preamble excises it; the section is re-inserted at the canonical anchor |
+| `create-slot` | the template's `RSCT-CANONICAL-SOURCE-SLOT` pair is present | **replace** that block, BEGIN..END inclusive |
+| `create-legacy` | an unmarked placeholder from an install predating the SLOT marker | **replace** the legacy block: the `## 0.` heading line through the `<TODO ...>` line |
+| `create-append` | none of the above | insert at the canonical anchor |
 
 ### 1.4 — Remote base URL (normalized)
 ```bash
@@ -142,7 +168,8 @@ RSCT CANONICAL SOURCE — Discovery Report
   Universe name    : [UNIVERSE_NAME]
   Remote base URL  : [REMOTE_BASE_URL]
   Universe locally : [found at PATH | not found]
-  CLAUDE.md section: [exists — will update | not found — will create]
+  CLAUDE.md section: [exists — will update | placeholder slot — will fill
+                      | legacy placeholder — will migrate | not found — will create]
   .rsct.json       : [exists | not found]
 
 ❓ Could not discover — please answer:
@@ -217,10 +244,14 @@ If additional access is needed to confirm paths:
 
 ## Phase 4 — Generate section
 
-Insert into CLAUDE.md **only** the `## Canonical architectural source` section,
-**wrapped in RSCT markers** so `/rsct-uninstall` can identify and remove
-it cleanly later.
-If section already exists: replace it entirely (markers and content).
+Insert into CLAUDE.md **only** the `## 0. Canonical architectural source`
+section, **wrapped in RSCT markers** so `/rsct-uninstall` can identify and
+remove it cleanly later.
+
+Where it goes is decided by `CS_MODE`, re-derived at the top of the block
+below. In `update` mode the preamble excises the old section first; in
+`create-slot` and `create-legacy` the existing placeholder is **replaced in
+place**; in `create-append` the section is inserted at the canonical anchor.
 
 **Canonical bash — preamble (UPDATE-mode safety, CAP-18 hardening):**
 
@@ -235,11 +266,32 @@ answers).
 
 ```bash
 echo "  CHECKPOINT: Phase 4 executing canonical canonical-source UPDATE-mode excision preamble"
+# Assigned HERE — each fenced block runs in its own shell (anti-pattern #6).
 CLAUDE_MD="$(pwd)/CLAUDE.md"
 
-if grep -q "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD"; then
-  # Range-delete by BEGIN/END marker pair. Single `/` delimiter, no `|`
-  # alternation risk, mirror of `03-uninstall.md` Phase 4.3 excise pattern.
+# Re-derive CS_MODE: Phase 1.3 ran in another shell, and this block is about to
+# mutate the file. Byte-literal (-F), never -i with -F (anti-pattern #7).
+CS_MODE="create-append"
+if   grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN"      "$CLAUDE_MD" 2>/dev/null; then CS_MODE="update"
+elif grep -qF "<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" "$CLAUDE_MD" 2>/dev/null; then CS_MODE="create-slot"
+elif grep -qF "<TODO: run 02-canonical-source.md"     "$CLAUDE_MD" 2>/dev/null; then CS_MODE="create-legacy"
+fi
+echo "CS_MODE=$CS_MODE"
+
+if [ "$CS_MODE" = "update" ]; then
+  # Count-guard BEFORE the range delete. `sed '/A/,/B/d'` with an unmatched
+  # closing address deletes to END OF FILE — on a hand-edited CLAUDE.md with a
+  # lone BEGIN that silently destroys the developer's content, and the old
+  # "are the markers gone?" check reported success because they were.
+  # `grep -c` exits 1 on zero matches, hence `|| true`; compare as STRINGS,
+  # because a missing file yields an empty value and `-eq` would abort.
+  N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
+  N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD" 2>/dev/null || true)
+  if [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
+    echo "  ⚠ ERROR: malformed canonical-source block (${N_BEGIN} BEGIN / ${N_END} END, expected 1 each)." >&2
+    echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
+    exit 1
+  fi
   # CAP-22: BSD sed (macOS) requires an empty suffix after -i; GNU sed
   # (Git Bash / Linux) does not. Branch on uname -s to stay cross-OS.
   case "$(uname -s)" in
@@ -251,27 +303,41 @@ if grep -q "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD"; then
       ;;
   esac
   # Sanity: both markers must be gone after excision.
-  if grep -q "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" || \
-     grep -q "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD"; then
+  if grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" || \
+     grep -qF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD"; then
     echo "  ⚠ ERROR: existing canonical-source block did not excise cleanly — inspect $CLAUDE_MD manually" >&2
     exit 1
   fi
   echo "  existing canonical-source block removed (UPDATE mode)"
 else
-  echo "  no existing canonical-source block (CREATE mode)"
+  echo "  no existing canonical-source block (${CS_MODE})"
 fi
 ```
 
-After the preamble, insert the markdown block below into `CLAUDE.md`
-right after the `<!-- RSCT_APP: ... -->` header line (Phase 4.3 of
-`01-setup.md` is the canonical writer of that header). The block's
-placeholders are filled from Phase 1 discovery (`UNIVERSE_NAME`,
-`UNIVERSE_LOCAL_PATH`, `UNIVERSE_GITHUB_BASE`, `APP_NAME`) and
-Phase 3 dev answers (hosts, roles):
+After the preamble, write the markdown block below into `CLAUDE.md`
+according to `CS_MODE`. The block's placeholders are filled from Phase 1
+discovery (`UNIVERSE_NAME`, `UNIVERSE_LOCAL_PATH`, `UNIVERSE_GITHUB_BASE`,
+`APP_NAME`) and Phase 3 dev answers (hosts, roles).
+
+**The canonical anchor** — where the section goes when it is not replacing
+something in place: immediately after the `<!-- /RSCT-CONVENTIONS-REF -->`
+line if that line exists, else immediately after the `# CLAUDE.md` H1.
+Never above the H1.
+
+| `CS_MODE` | Where the block goes |
+|---|---|
+| `update` | at the canonical anchor (the preamble already removed the old section) |
+| `create-slot` | **replaces** `<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN ... -->` through `<!-- RSCT-CANONICAL-SOURCE-SLOT-END -->`, both markers included |
+| `create-legacy` | **replaces** the unmarked placeholder: from the `## 0. Canonical architectural source` heading line through the `<TODO ...>` line, inclusive |
+| `create-append` | at the canonical anchor |
+
+The `---` separators around the slot stay **outside** the replaced range, and
+the replacement ends with exactly one newline — so no doubled separator and no
+orphan blank run is left behind. Compare `examples/java-spring/CLAUDE.md`.
 
 ```markdown
 <!-- RSCT-CANONICAL-SOURCE-BEGIN v=1.0.0 -->
-## Canonical architectural source
+## 0. Canonical architectural source
 
 <!-- RSCT_UNIVERSE: [UNIVERSE_NAME] | updated: [YYYY-MM-DD] -->
 
@@ -348,6 +414,56 @@ Application:
 - **Cat. 4**: before proposing relevant architectural change. If the change
   affects a diagram, read `diagrams-refactoring-prompt.md` first.
 <!-- RSCT-CANONICAL-SOURCE-END -->
+```
+
+### 4.b — Post-mutation sanity check (canonical bash)
+
+Run this immediately after writing the block. It is the only mechanical proof
+that the splice landed: the write itself is an agent edit, so nothing else
+verifies it.
+
+```bash
+echo "  CHECKPOINT: Phase 4.b executing canonical canonical-source post-mutation sanity check"
+# `${VAR:-default}` per anti-pattern #6 — a safe fallback rather than a bare
+# assignment, so the check is also runnable against a fixture path in tests.
+CLAUDE_MD="${CLAUDE_MD:-$(pwd)/CLAUDE.md}"
+CS_FAIL=0
+
+# `grep -c` exits 1 on zero matches → `|| true`. Compare as STRINGS: a missing
+# file yields an empty value, and `-eq` would abort with a non-obvious error.
+cs_count() { grep -cF "$1" "$CLAUDE_MD" 2>/dev/null || true; }
+# `awk index($0,s)==1` is byte-literal AND column-anchored — a substring count
+# cannot tell "## 0. Canonical..." from "## Canonical...", because the first
+# CONTAINS the second. It never anchors on `$`, so it is CRLF-safe.
+cs_atcol1() { awk -v s="$1" 'index($0,s)==1 { n++ } END { print n+0 }' "$CLAUDE_MD" 2>/dev/null || echo 0; }
+cs_line()   { awk -v s="$1" 'index($0,s)==1 { print NR; exit }' "$CLAUDE_MD" 2>/dev/null; }
+cs_expect() {
+  if [ "${3:-}" != "$2" ]; then
+    echo "  ⚠ ERROR: sanity '$1' = ${3:-<none>}, expected $2 — inspect $CLAUDE_MD" >&2
+    CS_FAIL=$((CS_FAIL + 1))
+  fi
+}
+
+cs_expect "numbered heading"  1 "$(cs_atcol1 '## 0. Canonical architectural source')"
+cs_expect "no bare heading"   0 "$(cs_atcol1 '## Canonical architectural source')"
+cs_expect "no TODO"           0 "$(cs_count '<TODO')"
+cs_expect "one real BEGIN"    1 "$(cs_count '<!-- RSCT-CANONICAL-SOURCE-BEGIN')"
+cs_expect "one real END"      1 "$(cs_count '<!-- RSCT-CANONICAL-SOURCE-END')"
+cs_expect "no SLOT residue"   0 "$(cs_count 'RSCT-CANONICAL-SOURCE-SLOT')"
+
+H1_LINE="$(cs_line '# CLAUDE.md')"
+HD_LINE="$(cs_line '## 0. Canonical architectural source')"
+# The two -z guards must run BEFORE the numeric compare, or an empty value aborts.
+if [ -z "$H1_LINE" ] || [ -z "$HD_LINE" ] || [ "$HD_LINE" -le "$H1_LINE" ]; then
+  echo "  ⚠ ERROR: heading line (${HD_LINE:-<none>}) must be greater than the H1 line (${H1_LINE:-<none>})" >&2
+  CS_FAIL=$((CS_FAIL + 1))
+fi
+
+if [ "$CS_FAIL" -ne 0 ]; then
+  echo "  ⚠ ERROR: canonical-source sanity check failed (${CS_FAIL} assertion(s)) — do NOT commit" >&2
+  exit 1
+fi
+echo "  canonical-source sanity check OK (H1=${H1_LINE} heading=${HD_LINE})"
 ```
 
 ---
