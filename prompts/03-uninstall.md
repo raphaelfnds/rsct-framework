@@ -96,6 +96,13 @@ Identify, by marker:
 - §A–§H sections present (each has `<!-- RSCT-§X-BEGIN ... -->` and `<!-- RSCT-§X-END -->`)
 - For each: extract `source=inserted` vs `source=migrated-from-ptbr` from BEGIN marker
 - Canonical source section (`<!-- RSCT-CANONICAL-SOURCE-BEGIN -->` / `<!-- RSCT-CANONICAL-SOURCE-END -->`)
+- Canonical source **slot** (`<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN -->` /
+  `<!-- RSCT-CANONICAL-SOURCE-SLOT-END -->`) — the unfilled template placeholder of a
+  project that was never linked to a universe. Report it as a **placeholder**, never as a
+  canonical source section: `install.canonical_source_added` is `false` on such a project,
+  and calling the placeholder a section contradicts that flag. It is framework-authored
+  text either way and is removed with the CLAUDE.md sections, not behind the
+  canonical-source scope question.
 
 ### 1.4 — Scan documentation/ for RSCT-GENERATED files
 ```bash
@@ -261,6 +268,10 @@ Build the uninstall plan internally. Items fall into categories:
 - Memory entries with marker SHA matching current body
 - CLAUDE.md sections wrapped in markers (excised by markers, source code preserved around)
 - Canonical source section (excised by markers)
+- Canonical source slot — the unfilled placeholder; framework-authored, always safe,
+  and removed with the CLAUDE.md sections rather than behind the canonical-source
+  scope question (a dev who never linked a universe would rationally decline that
+  scope, and the placeholder would survive the uninstall)
 
 **Category B — Needs developer decision (file modified after install):**
 - Files in `documentation/` with marker SHA NOT matching
@@ -467,6 +478,39 @@ for SECTION in $SECTIONS_TO_REMOVE; do
     echo "  §${SECTION} not present — no-op"
   fi
 done
+
+# The unfilled canonical-source SLOT is framework-authored template text, so it
+# goes with the sections — NOT behind Phase 4.3's canonical-source scope question,
+# which a dev who never linked a universe would rationally decline, leaving the
+# placeholder behind. Removing it here also runs BEFORE the "only the header
+# remains" check below, so a CREATE-mode install that was never linked can now
+# actually qualify for full-file deletion.
+N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
+N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-SLOT-END" "$CLAUDE_MD" 2>/dev/null || true)
+if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
+  echo "  canonical-source slot not present — no-op"
+elif [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
+  # `sed '/A/,/B/d'` with an unmatched closing address deletes to END OF FILE.
+  # On a hand-edited CLAUDE.md that silently destroys the developer's content,
+  # so refuse and say why. `grep -c` exits 1 on zero matches → `|| true`; compare
+  # as STRINGS, because a missing file yields an empty value and `-eq` aborts.
+  echo "  ⚠ MALFORMED canonical-source slot: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
+  echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
+else
+  case "$(uname -s)" in
+    Darwin)
+      sed -i '' "/<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-SLOT-END/d" "$CLAUDE_MD"
+      ;;
+    *)
+      sed -i "/<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-SLOT-END/d" "$CLAUDE_MD"
+      ;;
+  esac
+  if grep -qF "RSCT-CANONICAL-SOURCE-SLOT" "$CLAUDE_MD"; then
+    echo "  ⚠ ERROR: canonical-source slot excision did not land — inspect $CLAUDE_MD manually" >&2
+    exit 1
+  fi
+  echo "  excised canonical-source slot (placeholder — project was never linked)"
+fi
 ```
 
 After excising: if `CLAUDE.md` now contains only the header
@@ -476,17 +520,45 @@ entire file. Otherwise leave the file with whatever content remains
 (dev-written or pre-existing).
 
 ### 4.3 — Excise canonical source section (if in scope)
+
+The **filled** section only — the unfilled slot was already removed in 4.2.
+Skip this block entirely when 4.2 deleted the file.
+
 ```bash
-# CAP-22: BSD sed (macOS) requires an empty suffix after -i; GNU sed
-# (Git Bash / Linux) does not. Branch on uname -s to stay cross-OS.
-case "$(uname -s)" in
-  Darwin)
-    sed -i '' '/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d' CLAUDE.md
-    ;;
-  *)
-    sed -i '/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d' CLAUDE.md
-    ;;
-esac
+CLAUDE_MD="${CLAUDE_MD:-$(pwd)/CLAUDE.md}"
+if [ ! -f "$CLAUDE_MD" ]; then
+  echo "  CLAUDE.md absent (removed in 4.2) — canonical-source excision skipped"
+else
+  # Count-guard BEFORE the range delete: an unmatched closing address deletes to
+  # END OF FILE, and the old post-check ("are the markers gone?") reported success
+  # afterwards because they were. `grep -c` exits 1 on zero matches → `|| true`;
+  # compare as STRINGS, since a missing file yields an empty value and `-eq` aborts.
+  N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
+  N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD" 2>/dev/null || true)
+  if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
+    echo "  canonical source section not present — no-op"
+  elif [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
+    echo "  ⚠ MALFORMED canonical source section: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
+    echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
+  else
+    # CAP-22: BSD sed (macOS) requires an empty suffix after -i; GNU sed
+    # (Git Bash / Linux) does not. Branch on uname -s to stay cross-OS.
+    case "$(uname -s)" in
+      Darwin)
+        sed -i '' "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
+        ;;
+      *)
+        sed -i "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
+        ;;
+    esac
+    if grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" || \
+       grep -qF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD"; then
+      echo "  ⚠ ERROR: canonical source excision did not land — inspect $CLAUDE_MD manually" >&2
+      exit 1
+    fi
+    echo "  excised canonical source section"
+  fi
+fi
 ```
 
 ### 4.4 — Remove documentation/ files

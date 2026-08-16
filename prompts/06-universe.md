@@ -141,7 +141,7 @@ and when a state is destructive-ish (creating a repo) confirm first.
 |---|---|---|
 | **A — Inside the universe** | `INSIDE_UNIVERSE=yes` | **Adjust/refresh** the universe skeleton: execute **`prompts/04-init-universe.md`** in its idempotent re-run/update mode (it never overwrites existing files; only adds what is missing). |
 | **B — No universe found** | `INSIDE_UNIVERSE=no` AND `UNIVERSE_PATH=<none>` | **Create the org universe AND link this project — both, in one run.** See "State B is a two-step chain" below. If `CREATE_DECLINED` is set, restate that the dev previously declined and ask whether to proceed anyway before creating. |
-| **C — Universe exists, project not linked** | `UNIVERSE_PATH` found AND `PROJECT_LINKED=no` | **Link** this project: execute **`prompts/02-canonical-source.md`** (it writes the `## Canonical architectural source` section into CLAUDE.md and the `.rsct.json` universe block, pointing at `UNIVERSE_PATH`). |
+| **C — Universe exists, project not linked** | `UNIVERSE_PATH` found AND `PROJECT_LINKED=no` | **Link** this project: execute **`prompts/02-canonical-source.md`** (it writes the `## 0. Canonical architectural source` section into CLAUDE.md and the `.rsct.json` universe block, pointing at `UNIVERSE_PATH`). |
 | **D — Exists and linked** | `UNIVERSE_PATH` found AND `PROJECT_LINKED=yes` | **Refresh** the link: re-run **`prompts/02-canonical-source.md`** in its UPDATE mode (idempotent marker re-write) so the canonical-source section reflects any path/name change. Report "already linked — refreshed" when nothing changed. |
 
 **How to "execute" an engine prompt:** READ the referenced prompt file

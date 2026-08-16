@@ -288,7 +288,7 @@ if [ "$CS_MODE" = "update" ]; then
   N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
   N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD" 2>/dev/null || true)
   if [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
-    echo "  ⚠ ERROR: malformed canonical-source block (${N_BEGIN} BEGIN / ${N_END} END, expected 1 each)." >&2
+    echo "  ⚠ MALFORMED canonical-source block: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
     echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
     exit 1
   fi

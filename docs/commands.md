@@ -126,8 +126,10 @@ detection), then routes by the detected state:
   you fill as the org grows. If creation is declined or fails, the run stops there
   and nothing is linked — you are never left pointing at a universe that is not
   on disk.
-- **Universe exists, project not linked** → adds the `## Canonical architectural
-  source` section to this repo's `CLAUDE.md` + the `.rsct.json` `universe` block.
+- **Universe exists, project not linked** → fills the `## 0. Canonical architectural
+  source` section in this repo's `CLAUDE.md` + the `.rsct.json` `universe` block.
+  `/rsct-setup` reserves that section as a marked, empty slot; linking replaces the
+  slot in place rather than adding a second heading.
 - **Inside the universe repo** → adjusts/refreshes the skeleton (adds only what's
   missing; never overwrites hand-edited governance).
 - **Already linked** → refreshes the link in place (marker-guarded, no duplication).
@@ -143,8 +145,8 @@ in the universe. Linking edits only this repo's `CLAUDE.md` + `.rsct.json`.
 **Re-run behavior.** Idempotent — every state is safe to re-run.
 
 **Recovery.** [`/rsct-uninstall`](#rsct-uninstall) removes the canonical-source
-section and the link from a project; a universe repo is an ordinary git repo you
-revert with git.
+section — filled or still an empty slot — and the link from a project; a universe
+repo is an ordinary git repo you revert with git.
 
 ---
 
