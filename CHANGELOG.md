@@ -10,7 +10,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.4] - 2026-08-16
+
+The onboarding detector's verdict on a project that is not set up yet. Patch: no new tool,
+no new phase, tool count unchanged at **39**, marker schema id still `v=1.0.0`.
+
+What changes for a user: installing RSCT in a project that sits next to its organization's
+universe now offers to **link** it, where it previously offered to create a second universe
+over applications the first already governed.
 
 ### Fixed
 
