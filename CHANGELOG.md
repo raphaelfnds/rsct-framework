@@ -10,7 +10,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.3] - 2026-08-15
+
+A slot the installer reserved and the linker never filled, and the two excisions that
+could delete the rest of the file while reporting success. Patch: no new tool, no new
+phase, tool count unchanged at **39**, marker schema id still `v=1.0.0`.
+
+What changes for a user: linking a project to a universe now fills the section
+`/rsct-setup` reserved, instead of adding a second one above the document's own title;
+uninstalling removes the placeholder instead of leaving it behind with an instruction to
+run a command that no longer exists; and no excision can truncate a `CLAUDE.md` whose
+markers were hand-edited.
 
 ### Fixed
 
