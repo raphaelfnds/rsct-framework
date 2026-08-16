@@ -334,7 +334,8 @@ Current branch: [CURRENT_BRANCH]
   CLAUDE.md sections (via markers):
     §A, §B, §C, §D, §E, §F, §G, §H (8 sections, all source=inserted)
     [or: §F, §G, §H (inserted); §A, §B (migrated from PT-BR)]
-  Canonical source section: [present | not present]
+  Canonical source section: [present | not present | unfilled placeholder —
+                             project was never linked, removed with the sections]
   .rsct.json
   documentation/README.md
   documentation/architecture.md (unmodified)
@@ -479,37 +480,57 @@ for SECTION in $SECTIONS_TO_REMOVE; do
   fi
 done
 
-# The unfilled canonical-source SLOT is framework-authored template text, so it
-# goes with the sections — NOT behind Phase 4.3's canonical-source scope question,
-# which a dev who never linked a universe would rationally decline, leaving the
-# placeholder behind. Removing it here also runs BEFORE the "only the header
-# remains" check below, so a CREATE-mode install that was never linked can now
-# actually qualify for full-file deletion.
-N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
-N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-SLOT-END" "$CLAUDE_MD" 2>/dev/null || true)
-if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
-  echo "  canonical-source slot not present — no-op"
-elif [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
-  # `sed '/A/,/B/d'` with an unmatched closing address deletes to END OF FILE.
-  # On a hand-edited CLAUDE.md that silently destroys the developer's content,
-  # so refuse and say why. `grep -c` exits 1 on zero matches → `|| true`; compare
-  # as STRINGS, because a missing file yields an empty value and `-eq` aborts.
-  echo "  ⚠ MALFORMED canonical-source slot: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
-  echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
+# The unfilled canonical-source placeholder is framework-authored template text,
+# so it goes with the sections — NOT behind Phase 4.3's canonical-source scope
+# question, which a dev who never linked a universe would rationally decline,
+# leaving the placeholder behind.
+#
+# Two shapes exist in the field: the MARKED slot (current template) and the
+# UNMARKED legacy block (installs predating the marker). Both are removed.
+if [ ! -f "$CLAUDE_MD" ]; then
+  echo "  CLAUDE.md absent — placeholder removal skipped"
 else
-  case "$(uname -s)" in
-    Darwin)
-      sed -i '' "/<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-SLOT-END/d" "$CLAUDE_MD"
-      ;;
-    *)
-      sed -i "/<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-SLOT-END/d" "$CLAUDE_MD"
-      ;;
+  # Marked slot. One portable awk pass; refuses on unpaired markers rather than
+  # range-deleting, because `sed '/B/,/E/d'` on a file whose END precedes its
+  # BEGIN runs to END OF FILE and destroys the developer's content — a count
+  # check does not catch that, since such a file counts 1 BEGIN / 1 END.
+  CS_SLOT=$(awk -v b="<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" -v e="<!-- RSCT-CANONICAL-SOURCE-SLOT-END" \
+                -v out="${CLAUDE_MD}.rsct.tmp" '
+    index($0, b) > 0 { if (inb) { bad = "nested-BEGIN-line-" NR; exit } inb = 1; next }
+    index($0, e) > 0 { if (!inb) { bad = "stray-END-line-" NR; exit } inb = 0; n++; next }
+    { if (!inb) print > out }
+    END {
+      if (bad == "" && inb) bad = "unterminated-BEGIN"
+      if (bad != "") print "MALFORMED " bad; else print "OK " n + 0
+    }
+  ' "$CLAUDE_MD" 2>/dev/null)
+  case "$CS_SLOT" in
+    "OK 0") rm -f "${CLAUDE_MD}.rsct.tmp"; echo "  canonical-source slot not present — no-op" ;;
+    "OK "*) mv "${CLAUDE_MD}.rsct.tmp" "$CLAUDE_MD"
+            echo "  excised canonical-source slot (placeholder — project was never linked)" ;;
+    *)      rm -f "${CLAUDE_MD}.rsct.tmp"
+            echo "  ⚠ ${CS_SLOT} canonical-source slot markers — NOT excising, fix $CLAUDE_MD by hand" >&2 ;;
   esac
-  if grep -qF "RSCT-CANONICAL-SOURCE-SLOT" "$CLAUDE_MD"; then
-    echo "  ⚠ ERROR: canonical-source slot excision did not land — inspect $CLAUDE_MD manually" >&2
-    exit 1
-  fi
-  echo "  excised canonical-source slot (placeholder — project was never linked)"
+
+  # Legacy UNMARKED placeholder: the heading line through the `<TODO>` line.
+  # Removed only when both are present, the TODO follows the heading, and they
+  # are close together — an unmarked range is deleted conservatively or not at all.
+  CS_LEG=$(awk -v h="## 0. Canonical architectural source" -v t="<TODO: run 02-canonical-source.md" \
+               -v out="${CLAUDE_MD}.rsct.tmp" '
+    { line[NR] = $0
+      if (index($0, h) == 1 && !hl) hl = NR
+      if (index($0, t) > 0 && !tl) tl = NR }
+    END {
+      if (!hl || !tl || tl <= hl || tl - hl > 6) { print "SKIP"; exit }
+      for (i = 1; i <= NR; i++) if (i < hl || i > tl) print line[i] > out
+      print "OK"
+    }
+  ' "$CLAUDE_MD" 2>/dev/null)
+  case "$CS_LEG" in
+    "OK") mv "${CLAUDE_MD}.rsct.tmp" "$CLAUDE_MD"
+          echo "  excised legacy canonical-source placeholder (pre-marker install)" ;;
+    *)    rm -f "${CLAUDE_MD}.rsct.tmp" ;;
+  esac
 fi
 ```
 
@@ -529,35 +550,27 @@ CLAUDE_MD="${CLAUDE_MD:-$(pwd)/CLAUDE.md}"
 if [ ! -f "$CLAUDE_MD" ]; then
   echo "  CLAUDE.md absent (removed in 4.2) — canonical-source excision skipped"
 else
-  # Count-guard BEFORE the range delete: an unmatched closing address deletes to
-  # END OF FILE, and the old post-check ("are the markers gone?") reported success
-  # afterwards because they were. `grep -c` exits 1 on zero matches → `|| true`;
-  # compare as STRINGS, since a missing file yields an empty value and `-eq` aborts.
-  N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
-  N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD" 2>/dev/null || true)
-  if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
-    echo "  canonical source section not present — no-op"
-  elif [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
-    echo "  ⚠ MALFORMED canonical source section: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
-    echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
-  else
-    # CAP-22: BSD sed (macOS) requires an empty suffix after -i; GNU sed
-    # (Git Bash / Linux) does not. Branch on uname -s to stay cross-OS.
-    case "$(uname -s)" in
-      Darwin)
-        sed -i '' "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
-        ;;
-      *)
-        sed -i "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
-        ;;
-    esac
-    if grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" || \
-       grep -qF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD"; then
-      echo "  ⚠ ERROR: canonical source excision did not land — inspect $CLAUDE_MD manually" >&2
-      exit 1
-    fi
-    echo "  excised canonical source section"
-  fi
+  # One portable awk pass, same contract as the placeholder removal in 4.2:
+  # excise every well-formed pair, refuse when the markers are not properly
+  # paired. A count check is NOT enough — a file whose END precedes its BEGIN
+  # counts 1 each, and `sed '/B/,/E/d'` then deletes to END OF FILE. Counting
+  # also wrongly rejects two well-formed pairs, which the old sed handled.
+  CS_SECT=$(awk -v b="<!-- RSCT-CANONICAL-SOURCE-BEGIN" -v e="<!-- RSCT-CANONICAL-SOURCE-END" \
+                -v out="${CLAUDE_MD}.rsct.tmp" '
+    index($0, b) > 0 { if (inb) { bad = "nested-BEGIN-line-" NR; exit } inb = 1; next }
+    index($0, e) > 0 { if (!inb) { bad = "stray-END-line-" NR; exit } inb = 0; n++; next }
+    { if (!inb) print > out }
+    END {
+      if (bad == "" && inb) bad = "unterminated-BEGIN"
+      if (bad != "") print "MALFORMED " bad; else print "OK " n + 0
+    }
+  ' "$CLAUDE_MD" 2>/dev/null)
+  case "$CS_SECT" in
+    "OK 0") rm -f "${CLAUDE_MD}.rsct.tmp"; echo "  canonical source section not present — no-op" ;;
+    "OK "*) mv "${CLAUDE_MD}.rsct.tmp" "$CLAUDE_MD"; echo "  excised canonical source section" ;;
+    *)      rm -f "${CLAUDE_MD}.rsct.tmp"
+            echo "  ⚠ ${CS_SECT} canonical-source markers — NOT excising, fix $CLAUDE_MD by hand" >&2 ;;
+  esac
 fi
 ```
 

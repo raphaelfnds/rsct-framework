@@ -101,8 +101,27 @@ describe('#66 — the four-way mode probe', () => {
   it('T16 — an absent CLAUDE.md resolves to create-append without crashing', () =>
     expect(modeOf(null)).toBe('create-append'))
 
-  it('T7b — both pairs present resolve to update, so the orphan slot is cleaned', () =>
+  it('T7b — both pairs present resolve to update', () =>
     expect(modeOf([...header, SLOT_BEGIN, SLOT_END, REAL_BEGIN, HEADING, REAL_END].join('\n'))).toBe('update'))
+})
+
+describe('#66 — update mode also clears the orphan placeholder', () => {
+  // The Rv caught this: the probe reports `update` and the preamble used to remove
+  // only the real pair, leaving the slot behind. The agent then wrote a second
+  // section and the sanity check rejected a run it had no way to get right.
+  it('removes an orphan SLOT alongside the old section', () => {
+    const r = runBlock(ROOT, {
+      promptBasename: '02-canonical-source.md',
+      anchor: PREAMBLE,
+      seedFiles: {
+        'CLAUDE.md': [...header, SLOT_BEGIN, HEADING, SLOT_END, REAL_BEGIN, 'old body', REAL_END, 'DEV TAIL'].join('\n'),
+      },
+    })
+    const body = read(r.dir)
+    expect(body).not.toContain('RSCT-CANONICAL-SOURCE-SLOT')
+    expect(body).not.toContain('RSCT-CANONICAL-SOURCE-BEGIN')
+    expect(body).toContain('DEV TAIL')
+  })
 })
 
 describe('#66 — the Phase 4 preamble never truncates CLAUDE.md', () => {
@@ -181,7 +200,7 @@ describe('#66 — the post-mutation sanity check can actually fail', () => {
 
   it('T4 — fails when the block landed above the H1 (the D1 bug)', () => {
     const r = sanity(['<!-- RSCT_VERSION: 1.0.0 -->', REAL_BEGIN, HEADING, REAL_END, '# CLAUDE.md — demo'].join('\n'))
-    expect(r.out).toMatch(/heading line/)
+    expect(r.out).toMatch(/must come after the first heading/)
     expect(r.out).not.toMatch(/sanity check OK/)
   })
 
@@ -193,6 +212,19 @@ describe('#66 — the post-mutation sanity check can actually fail', () => {
     const r = runBlock(ROOT, { promptBasename: '02-canonical-source.md', anchor: SANITY, seedFiles: {} })
     expect(r.out).not.toMatch(/sanity check OK/)
     expect(r.out).not.toMatch(/integer expression expected/)
+  })
+
+  // Two false rejections the Rv found. Both aborted the link AFTER the file had
+  // already been written, which is the worst possible moment to be wrong.
+  it("does not reject the dev's own <TODO: notes elsewhere in the file", () => {
+    const r = sanity([spliced, '', '## Deploy notes', '<TODO: describe the staging rollout>'].join('\n'))
+    expect(r.out).toMatch(/sanity check OK/)
+  })
+
+  it('does not require the H1 to be literally "# CLAUDE.md"', () => {
+    // An ADOPT-mode install keeps the project's own title; RSCT never rewrites it.
+    const r = sanity(spliced.replace('# CLAUDE.md — demo', '# Acme API — engineering protocol'))
+    expect(r.out).toMatch(/sanity check OK/)
   })
 })
 
@@ -239,5 +271,86 @@ describe('#66 — the uninstall reaches the placeholder and stops at the guard',
 
   it('skips cleanly when 4.2 already deleted the file', () => {
     expect(uninstall(null).out).toMatch(/absent/)
+  })
+
+  // The Rv found the count guard was both too strict and too weak. Too strict:
+  // it rejected two well-formed pairs, which the unguarded sed had handled. Too
+  // weak: a file whose END precedes its BEGIN counts 1 each, passes, and the
+  // range delete then runs to end of file. Both are pinned here.
+  it('T18 — removes two well-formed pairs and keeps the text between them', () => {
+    const r = uninstall(
+      [...header, REAL_BEGIN, 'A', REAL_END, 'DEV MIDDLE', REAL_BEGIN, 'B', REAL_END, 'DEV TAIL'].join('\n'),
+    )
+    const body = read(r.dir)
+    expect(body).not.toContain('RSCT-CANONICAL-SOURCE-BEGIN')
+    expect(body).toContain('DEV MIDDLE')
+    expect(body).toContain('DEV TAIL')
+  })
+
+  it('refuses a reversed pair instead of deleting to end of file', () => {
+    const r = uninstall([...header, REAL_END, 'stray', REAL_BEGIN, 'body', 'DEV TAIL', 'MORE DEV'].join('\n'))
+    const body = read(r.dir)
+    expect(body).toContain('DEV TAIL')
+    expect(body).toContain('MORE DEV')
+  })
+
+  // A CRLF checkout is the Windows default. The excision must be CORRECT there —
+  // the markers are matched unanchored, so `\r` cannot break the match. It does
+  // NOT preserve the line endings: awk on MSYS strips `\r` from input records and
+  // the file comes back LF, exactly as `sed -i` did before. Pinned as the measured
+  // behaviour so nobody re-adds a "preserves CRLF" claim without checking.
+  it('excises correctly on a CRLF file, normalising line endings as sed did', () => {
+    const r = uninstall([...header, REAL_BEGIN, 'body', REAL_END, 'DEV TAIL', ''].join('\n').replace(/\n/g, '\r\n'))
+    const body = read(r.dir)
+    expect(body).not.toContain('RSCT-CANONICAL-SOURCE-BEGIN')
+    expect(body).toContain('DEV TAIL')
+    expect(body).not.toContain('\r')
+  })
+})
+
+describe('#66 — the uninstall removes the placeholder, marked or legacy', () => {
+  // Phase 4.2. The Rv proved this block had zero coverage: deleting it outright
+  // left the whole suite green, because every uninstall test anchored on 4.3.
+  const phase42 = (claudeMd: string | null) =>
+    runBlock(ROOT, {
+      promptBasename: '03-uninstall.md',
+      anchor: 'placeholder removal skipped',
+      seedFiles: claudeMd === null ? {} : { 'CLAUDE.md': claudeMd },
+    })
+
+  it('T8 — removes the marked slot from a never-linked project', () => {
+    const r = phase42(freshRender)
+    const body = read(r.dir)
+    expect(body).not.toContain('RSCT-CANONICAL-SOURCE-SLOT')
+    expect(body).not.toContain('<TODO')
+    expect(body).toContain('DEV TAIL')
+  })
+
+  // T15 — the residue this whole block was opened for. Every project installed
+  // before the marker existed carries the UNMARKED form, which the first
+  // implementation of this fix did not touch at all.
+  it('T15 — removes the legacy unmarked placeholder of a pre-marker install', () => {
+    const r = phase42(legacyRender)
+    const body = read(r.dir)
+    expect(body).not.toContain('<TODO')
+    expect(body).not.toContain('Canonical architectural source')
+    expect(body).not.toContain('/rsct-canonical-source')
+    expect(body).toContain('DEV TAIL')
+  })
+
+  it('leaves a filled section alone — that is 4.3 work, behind its own scope question', () => {
+    const r = phase42(linkedRender)
+    expect(read(r.dir)).toContain('RSCT-CANONICAL-SOURCE-BEGIN')
+  })
+
+  it('refuses a reversed slot pair rather than truncating', () => {
+    const r = phase42([...header, SLOT_END, 'stray', SLOT_BEGIN, HEADING, 'DEV TAIL', 'MORE DEV'].join('\n'))
+    const body = read(r.dir)
+    expect(body).toContain('DEV TAIL')
+    expect(body).toContain('MORE DEV')
+  })
+
+  it('T16 — reports rather than warning about a file that is not there', () => {
+    expect(phase42(null).out).toMatch(/absent/)
   })
 })

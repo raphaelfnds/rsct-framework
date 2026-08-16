@@ -278,40 +278,62 @@ elif grep -qF "<TODO: run 02-canonical-source.md"     "$CLAUDE_MD" 2>/dev/null; 
 fi
 echo "CS_MODE=$CS_MODE"
 
+# Excise every well-formed BEGIN..END block in ONE portable awk pass, and refuse
+# to touch the file when the markers are not properly paired.
+#
+# Why not `sed '/B/,/E/d'` with a count guard: counting is not enough. A file
+# whose END precedes its BEGIN counts 1 BEGIN / 1 END, passes any count check,
+# and the range delete then runs from BEGIN to END OF FILE — destroying the
+# developer's content, after which "are the markers gone?" is trivially true.
+# Counting also wrongly rejects a file with two well-formed pairs, which the
+# old unguarded sed handled correctly.
+#
+# awk is POSIX and needs no `sed -i` suffix branch (no Darwin/* split), and one
+# pass can express pairing, which a sed range address cannot.
+#
+# Line endings: on a CRLF checkout the rewritten file comes back LF, because awk
+# on MSYS strips `\r` from input records. Measured, not assumed. That matches
+# what `sed -i` already did on this platform, so it is not a regression — but do
+# NOT claim this path preserves CRLF. It does not.
+cs_excise() { # $1 BEGIN literal, $2 END literal, $3 file → stdout: "OK <n>" | "MALFORMED <why>"
+  awk -v b="$1" -v e="$2" -v out="$3.rsct.tmp" '
+    index($0, b) > 0 { if (inb) { bad = "nested-BEGIN-line-" NR; exit } inb = 1; next }
+    index($0, e) > 0 { if (!inb) { bad = "stray-END-line-" NR; exit } inb = 0; n++; next }
+    { if (!inb) print > out }
+    END {
+      if (bad == "" && inb) bad = "unterminated-BEGIN"
+      if (bad != "") print "MALFORMED " bad; else print "OK " n + 0
+    }
+  ' "$3" 2>/dev/null
+}
+
 if [ "$CS_MODE" = "update" ]; then
-  # Count-guard BEFORE the range delete. `sed '/A/,/B/d'` with an unmatched
-  # closing address deletes to END OF FILE — on a hand-edited CLAUDE.md with a
-  # lone BEGIN that silently destroys the developer's content, and the old
-  # "are the markers gone?" check reported success because they were.
-  # `grep -c` exits 1 on zero matches, hence `|| true`; compare as STRINGS,
-  # because a missing file yields an empty value and `-eq` would abort.
-  N_BEGIN=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" 2>/dev/null || true)
-  N_END=$(grep -cF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD" 2>/dev/null || true)
-  if [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
-    echo "  ⚠ MALFORMED canonical-source block: ${N_BEGIN} BEGIN / ${N_END} END, expected 1 each" >&2
-    echo "    NOT excising — a range delete would run to end of file. Fix $CLAUDE_MD by hand." >&2
-    exit 1
-  fi
-  # CAP-22: BSD sed (macOS) requires an empty suffix after -i; GNU sed
-  # (Git Bash / Linux) does not. Branch on uname -s to stay cross-OS.
-  case "$(uname -s)" in
-    Darwin)
-      sed -i '' "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
+  CS_RESULT=$(cs_excise "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD")
+  case "$CS_RESULT" in
+    "OK "*)
+      mv "${CLAUDE_MD}.rsct.tmp" "$CLAUDE_MD"
+      echo "  existing canonical-source block removed (UPDATE mode)"
       ;;
     *)
-      sed -i "/<!-- RSCT-CANONICAL-SOURCE-BEGIN/,/<!-- RSCT-CANONICAL-SOURCE-END/d" "$CLAUDE_MD"
+      rm -f "${CLAUDE_MD}.rsct.tmp"
+      echo "  ⚠ ${CS_RESULT} canonical-source markers in $CLAUDE_MD" >&2
+      echo "    NOT excising — the markers are not properly paired. Fix them by hand." >&2
+      exit 1
       ;;
   esac
-  # Sanity: both markers must be gone after excision.
-  if grep -qF "<!-- RSCT-CANONICAL-SOURCE-BEGIN" "$CLAUDE_MD" || \
-     grep -qF "<!-- RSCT-CANONICAL-SOURCE-END" "$CLAUDE_MD"; then
-    echo "  ⚠ ERROR: existing canonical-source block did not excise cleanly — inspect $CLAUDE_MD manually" >&2
-    exit 1
-  fi
-  echo "  existing canonical-source block removed (UPDATE mode)"
 else
   echo "  no existing canonical-source block (${CS_MODE})"
 fi
+
+# An orphan placeholder can coexist with a real section (an old install that was
+# linked, then upgraded). Remove it here, or the sanity check below rejects the
+# run for a duplicate heading the agent never saw.
+CS_SLOT=$(cs_excise "<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN" "<!-- RSCT-CANONICAL-SOURCE-SLOT-END" "$CLAUDE_MD")
+case "$CS_SLOT" in
+  "OK 0") rm -f "${CLAUDE_MD}.rsct.tmp" ;;
+  "OK "*) mv "${CLAUDE_MD}.rsct.tmp" "$CLAUDE_MD"; echo "  removed orphan canonical-source slot" ;;
+  *)      rm -f "${CLAUDE_MD}.rsct.tmp"; echo "  ⚠ ${CS_SLOT} in the canonical-source slot markers — left as-is" >&2 ;;
+esac
 ```
 
 After the preamble, write the markdown block below into `CLAUDE.md`
@@ -432,11 +454,17 @@ CS_FAIL=0
 # `grep -c` exits 1 on zero matches → `|| true`. Compare as STRINGS: a missing
 # file yields an empty value, and `-eq` would abort with a non-obvious error.
 cs_count() { grep -cF "$1" "$CLAUDE_MD" 2>/dev/null || true; }
-# `awk index($0,s)==1` is byte-literal AND column-anchored — a substring count
-# cannot tell "## 0. Canonical..." from "## Canonical...", because the first
-# CONTAINS the second. It never anchors on `$`, so it is CRLF-safe.
+# `awk index($0,s)==1` is byte-literal AND anchored at column 1, so a heading
+# quoted mid-sentence in the dev's prose is not counted as the real one. It
+# never anchors on `$`, so it is CRLF-safe. (The two heading forms do NOT
+# contain one another once the `## ` prefix is included — that is why both are
+# asserted separately below rather than relying on a single count.)
 cs_atcol1() { awk -v s="$1" 'index($0,s)==1 { n++ } END { print n+0 }' "$CLAUDE_MD" 2>/dev/null || echo 0; }
 cs_line()   { awk -v s="$1" 'index($0,s)==1 { print NR; exit }' "$CLAUDE_MD" 2>/dev/null; }
+# First heading of any level — the H1 is `# CLAUDE.md` only in files RSCT
+# created. An ADOPT-mode install keeps the project's own title (`# Acme API`),
+# and asserting the literal would reject a correctly placed section.
+cs_first_h() { awk 'index($0,"# ")==1 { print NR; exit }' "$CLAUDE_MD" 2>/dev/null; }
 cs_expect() {
   if [ "${3:-}" != "$2" ]; then
     echo "  ⚠ ERROR: sanity '$1' = ${3:-<none>}, expected $2 — inspect $CLAUDE_MD" >&2
@@ -446,16 +474,25 @@ cs_expect() {
 
 cs_expect "numbered heading"  1 "$(cs_atcol1 '## 0. Canonical architectural source')"
 cs_expect "no bare heading"   0 "$(cs_atcol1 '## Canonical architectural source')"
-cs_expect "no TODO"           0 "$(cs_count '<TODO')"
 cs_expect "one real BEGIN"    1 "$(cs_count '<!-- RSCT-CANONICAL-SOURCE-BEGIN')"
 cs_expect "one real END"      1 "$(cs_count '<!-- RSCT-CANONICAL-SOURCE-END')"
 cs_expect "no SLOT residue"   0 "$(cs_count 'RSCT-CANONICAL-SOURCE-SLOT')"
+# Only OUR placeholders, never a bare `<TODO`. `01-setup.md` actively teaches the
+# dev to write `<TODO: describe X>` in their own sections; asserting on the generic
+# token would reject a perfectly good CLAUDE.md — after the file was already written.
+cs_expect "no slot TODO"      0 "$(cs_count '<TODO: run /rsct-universe')"
+cs_expect "no legacy TODO"    0 "$(cs_count '<TODO: run 02-canonical-source.md')"
 
-H1_LINE="$(cs_line '# CLAUDE.md')"
+H1_LINE="$(cs_first_h)"
 HD_LINE="$(cs_line '## 0. Canonical architectural source')"
-# The two -z guards must run BEFORE the numeric compare, or an empty value aborts.
-if [ -z "$H1_LINE" ] || [ -z "$HD_LINE" ] || [ "$HD_LINE" -le "$H1_LINE" ]; then
-  echo "  ⚠ ERROR: heading line (${HD_LINE:-<none>}) must be greater than the H1 line (${H1_LINE:-<none>})" >&2
+# The section must sit below the document's first heading, whatever that heading
+# is. A file with no heading at all cannot be ordered, so the check is skipped
+# rather than failed — the placement rule has the same fallback.
+if [ -n "$H1_LINE" ] && [ -n "$HD_LINE" ] && [ "$HD_LINE" -le "$H1_LINE" ]; then
+  echo "  ⚠ ERROR: the section (line ${HD_LINE}) must come after the first heading (line ${H1_LINE})" >&2
+  CS_FAIL=$((CS_FAIL + 1))
+elif [ -z "$HD_LINE" ]; then
+  echo "  ⚠ ERROR: no '## 0. Canonical architectural source' heading at column 1 — the block did not land" >&2
   CS_FAIL=$((CS_FAIL + 1))
 fi
 
