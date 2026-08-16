@@ -17,7 +17,7 @@ governance, application inventory, host inventory.
 
 When working on any project of [ORG_SLUG]:
 1. Run `/rsct-setup` in that project (installs governance protocol)
-2. Run `/rsct-canonical-source` (wires the project's CLAUDE.md to this universe)
+2. Run `/rsct-universe` (wires the project's CLAUDE.md to this universe)
 
 ## How to use as an AI agent
 

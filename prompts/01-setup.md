@@ -974,7 +974,7 @@ Insertion order when creating new sections:
 ```
 §0 → section 1   (Session bootstrap — rsct-mcp entry point; MUST be the first
                   rule-marker section, BEFORE §B; placed AFTER section 0
-                  "Canonical architectural source" if present)
+                  "0. Canonical architectural source" if present)
 §B → section 2   (Plan before editing code)
 §A → section 2.1 (Bug mode — directly under §B)
 §C → section 3.1 (Explicit authorization)
@@ -1223,8 +1223,13 @@ After the header is in place, insert the rule sections into the
    ```
    For §0, the marker is `<!-- RSCT-§0-BEGIN ... -->` / `<!-- RSCT-§0-END -->`.
 2. The CLAUDE.md `## 0. Canonical architectural source` placeholder block
-   (lines 11–16 of the template) is left untouched — it is filled later
-   by `prompts/02-canonical-source.md` (the link step of `/rsct-universe`).
+   (lines 20–24 of the template, wrapped in a
+   `<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN -->` / `-END` pair) is left
+   untouched — it is filled later by `prompts/02-canonical-source.md`
+   (the link step of `/rsct-universe`), which replaces the slot in place.
+   The SLOT marker is deliberately **not** a substring of the real
+   `RSCT-CANONICAL-SOURCE-BEGIN`, so an unfilled placeholder never reads as
+   a linked project to `06-universe.md`'s probe.
 
 Phase 4.2 Step D will rotate the `updated:` date on every future
 re-run; the header line itself is preserved as-is.

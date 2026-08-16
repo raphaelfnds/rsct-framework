@@ -55,7 +55,7 @@ describing what runs there, ports, env vars, monitoring.
 
 ## How this universe is maintained
 
-Bootstrapped by `/rsct-init-universe` of the RSCT framework.
+Bootstrapped by `/rsct-universe` of the RSCT framework.
 Subsequent `/rsct-setup` runs on projects of [ORG_SLUG] register their apps
 under `applications/`.
 
@@ -63,4 +63,4 @@ Most artifacts (LGPD matrix, DNS survey, diagrams) require human curation —
 the framework creates placeholders; you fill them as the organization grows.
 
 To re-run the bootstrap (idempotent — preserves existing content):
-`/rsct-init-universe` from anywhere on the machine.
+`/rsct-universe` from anywhere on the machine.

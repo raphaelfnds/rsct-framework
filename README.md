@@ -299,7 +299,7 @@ One idempotent command that detects the current state and does the right thing:
   you from nothing to linked. Templates carry TODO placeholders you fill as the
   org grows.
 - **Universe exists but this project isn't linked** → adds the
-  `## Canonical architectural source` section to `CLAUDE.md`, pointing at it.
+  `## 0. Canonical architectural source` section to `CLAUDE.md`, pointing at it.
 - **Inside the universe repo** → adjusts/refreshes the skeleton (adds only
   what's missing).
 - **Already linked** → refreshes the link.
@@ -411,6 +411,7 @@ Every artifact created or modified by RSCT is marked, so it can be removed clean
 |---|---|---|
 | Sections in `CLAUDE.md` | `<!-- RSCT-§X-BEGIN v=1.0.0 source=... sha256-body=... -->` ... `<!-- RSCT-§X-END -->` | Excises by marker pair, preserves surrounding content. The body hash lets `/rsct-setup` refresh a section whose rule changed while provably preserving one you edited |
 | Canonical source section | `<!-- RSCT-CANONICAL-SOURCE-BEGIN ... -->` ... `<!-- RSCT-CANONICAL-SOURCE-END -->` | Same — clean excision |
+| Canonical source slot (unfilled placeholder) | `<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN ... -->` ... `<!-- RSCT-CANONICAL-SOURCE-SLOT-END -->` | Excised with the sections. Present only while the project is not linked to a universe; `/rsct-universe` replaces it in place |
 | Files in `documentation/` | First line: `<!-- RSCT-GENERATED v=1.0.0 created=<date> sha256-body=<hex> -->` | Computes SHA of current body; if matches → safe delete; if differs → asks dev |
 | Memory entries | Same marker format | Same SHA256-based protection |
 | `.rsct.json` | The `install` block itself is the marker | Always safe to delete |

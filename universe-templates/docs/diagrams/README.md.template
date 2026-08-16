@@ -27,5 +27,5 @@ PNG/SVG exports may be alongside but the source of truth is the `.drawio`.
 
 ## Bootstrap state
 
-`/rsct-init-universe` does not create `.drawio` files (they are binary).
+`/rsct-universe` does not create `.drawio` files (they are binary).
 Create empty ones manually with draw.io and place here as the org grows.

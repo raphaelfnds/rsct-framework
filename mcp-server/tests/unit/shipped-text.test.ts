@@ -10,7 +10,14 @@ import { join, resolve } from 'node:path'
 //
 // Path note: from mcp-server/tests/unit/ the repo root is THREE levels up.
 const ROOT = resolve(__dirname, '..', '..', '..')
-const SHIPPED_DIRS = ['rules', 'memory-templates', 'doc-templates', 'examples']
+// `universe-templates` joined in #66: its files are rendered into every universe
+// repo by prompts/04-init-universe.md, which makes them shipped text by the same
+// definition as the rest — and four of them still named commands install.sh deletes.
+const SHIPPED_DIRS = ['rules', 'memory-templates', 'doc-templates', 'examples', 'universe-templates']
+
+// Commands `scripts/install.sh` removes on upgrade. A shipped file naming one of
+// these hands the reader an instruction that cannot be followed.
+const LEGACY_COMMANDS = ['/rsct-init-universe', '/rsct-canonical-source']
 
 interface ShippedFile {
   path: string
@@ -44,6 +51,26 @@ describe('shipped rule text — invariants', () => {
     expect(FILES.length).toBeGreaterThan(20)
     expect(FILES.some((f) => f.path === 'rules/B-architect-plan.md')).toBe(true)
     expect(FILES.some((f) => f.path === 'doc-templates/plan_slug.md.template')).toBe(true)
+    // #66: the guard below is only honest if the directory it was filed against is
+    // actually walked. Without this line, dropping `universe-templates` from
+    // SHIPPED_DIRS would turn that test green instead of red.
+    expect(FILES.some((f) => f.path === 'universe-templates/CLAUDE.md.template')).toBe(true)
+  })
+
+  it('#66 — no shipped surface names a command install.sh deletes', () => {
+    // D4. `doc-templates/CLAUDE.md.template` told every freshly installed project to
+    // run `/rsct-canonical-source`; three `universe-templates/` files named
+    // `/rsct-init-universe`, and they are rendered into every universe repo. Both
+    // commands are removed by `scripts/install.sh` on upgrade, so the instruction
+    // could never be followed. The v2.6.1 sweep of 27 legacy references reached the
+    // prompts and the docs but not the text the framework writes into a project.
+    const offenders: string[] = []
+    for (const file of FILES) {
+      for (const cmd of LEGACY_COMMANDS) {
+        if (file.body.includes(cmd)) offenders.push(`${file.path} → ${cmd}`)
+      }
+    }
+    expect(offenders).toEqual([])
   })
 
   it('#51 — no shipped surface teaches `git add --force`', () => {

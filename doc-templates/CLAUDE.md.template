@@ -17,12 +17,11 @@ Read this file at the start of every session.
 
 ---
 
+<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN v=1.0.0 -->
 ## 0. Canonical architectural source
 
-<!-- Populated by prompts/02-canonical-source.md -->
-<!-- Run: /rsct-canonical-source -->
-
-<TODO: run 02-canonical-source.md to generate this section>
+<TODO: run /rsct-universe to link this project and generate this section>
+<!-- RSCT-CANONICAL-SOURCE-SLOT-END -->
 
 ---
 
