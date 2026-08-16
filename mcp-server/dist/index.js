@@ -23541,8 +23541,16 @@ function discoverUniverseCandidate(projectRoot, orgKey, opts = {}) {
     const inferred = normalizeOrg(raw);
     const basenames = [
       ...new Set(
-        [inferred, raw, inferred?.toLowerCase(), raw.toLowerCase()].filter(
-          (x) => !!x && x.trim().length > 0
+        [inferred, raw].filter(
+          // `!!x` drops the empty string `normalizeOrg` returns for a digits-only org
+          // (`-9` → ''), which would otherwise probe `../-universe`.
+          //
+          // The rest is a path-traversal guard: a basename becomes a path component, and
+          // `rawSelfOrg` can come from a git remote (`parseGitRemoteOrg` returns the first
+          // URL segment verbatim). That is untrusted input reaching `resolve()` for the
+          // first time here — on Windows a `\` in it is a separator and walks out of the
+          // scanned parent.
+          (x) => !!x && !/[\\/]/.test(x) && x !== "." && x !== ".."
         )
       )
     ];
@@ -26330,7 +26338,7 @@ var detectOnboardingInputSchema = external_exports.object({
 }).strict();
 var detectOnboardingTool = {
   name: "rsct_detect_onboarding",
-  description: "Onboarding orchestrator brain for /rsct-setup: classifies the SITUATION (is-universe / has-universe-linked / has-universe-unlinked / universe-configured-missing / offer-register / siblings-no-universe / solo) and the recommended ROUTE (guard-universe-repo / offer-link-existing / offer-create-universe / fix-universe-link / none). Reports is_universe_repo (the deterministic universe\u2260app guard \u2014 if true, STOP setup: this is a governance repo, not an app) and same-org SIBLING apps found one level up (read-only `../` scan; rsct_json matches drive the 'create a universe?' suggestion, git_remote matches are advisory). Also reports discovered_universe_path: a universe found at a canonical candidate path (`../<org>-universe` or `$HOME/{projetos,projects,dev,workspace}/<org>-universe`) that has NOT been resolved through .rsct.json \u2014 the first-install case, where universe.available is still false because nothing has resolved it yet. Use it as the path to show when the route is offer-link-existing; universe.available and universe.local_path keep meaning strictly 'what the resolver returned'. Read-only throughout. /rsct-setup calls this once at discovery, then narrates + consent-gates the guided flow. Always succeeds; degrades to 'solo' when nothing applies.",
+  description: "Onboarding orchestrator brain for /rsct-setup: classifies the SITUATION (is-universe / has-universe-linked / has-universe-unlinked / universe-configured-missing / offer-register / siblings-no-universe / solo) and the recommended ROUTE (guard-universe-repo / offer-link-existing / offer-create-universe / fix-universe-link / none). Reports is_universe_repo (the deterministic universe\u2260app guard \u2014 if true, STOP setup: this is a governance repo, not an app) and same-org SIBLING apps found one level up (read-only `../` scan; rsct_json matches drive the 'create a universe?' suggestion, git_remote matches are advisory). Also reports discovered_universe_path: a universe found at a canonical candidate path (`../<org>-universe` or `$HOME/{projetos,projects,dev,workspace}/<org>-universe`) that has NOT been resolved through .rsct.json \u2014 typically before the project is set up, though it also covers a config carrying no app.org. On that branch universe.available is still false, because nothing has resolved it yet. Use it as the path to show when the route is offer-link-existing; universe.available and universe.local_path keep meaning strictly 'what the resolver returned'. Read-only throughout. /rsct-setup calls this once at discovery, then narrates + consent-gates the guided flow. Always succeeds; degrades to 'solo' when nothing applies.",
   inputSchema: {
     type: "object",
     properties: {

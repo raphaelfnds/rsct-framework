@@ -78,8 +78,9 @@ export interface OnboardingDetection {
   }
   /**
    * A universe directory found at a canonical candidate path but NOT resolved through
-   * `getUniverse` — the pre-install case, where there is no `.rsct.json` for the resolver
-   * to key on. Reported on its own field, never folded into `universe.available` or
+   * `getUniverse` — typically, though not only, before `.rsct.json` exists. The branch is
+   * reached whenever the resolver returned nothing, which also covers a config carrying
+   * no `app.org`. Reported on its own field, never folded into `universe.available` or
    * `universe.local_path`: those keep meaning exactly what `getUniverse` returned, or the
    * two would mean different things depending on which branch produced them.
    *

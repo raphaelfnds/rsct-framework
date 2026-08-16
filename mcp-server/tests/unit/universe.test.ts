@@ -106,13 +106,32 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
     )
   })
 
-  it('T1c — finds the universe when the org differs only in case', () => {
-    // Can only fail on a case-SENSITIVE filesystem: `resolveUniverseRoot` builds candidate
-    // names case-exact by design, so an `Acme` org probes `Acme-universe`. On Windows and
-    // macOS that hits anyway; on Linux it misses, and the reported bug survives on one OS.
+  it('builds candidates case-exact, matching the resolver and the bash probes', () => {
+    // Deliberately NOT case-folded. Discovering a universe that `02-canonical-source.md`
+    // cannot re-find (it probes case-exact in bash and accepts no path from the caller)
+    // ends in "not found locally — create one?", which is #65's own failure one prompt
+    // later. A case-variant org misses here, consistently with every other layer.
     const parent = tmp()
     mkUni(parent, 'acme-universe')
-    expect(discoverUniverseCandidate(projectIn(parent), 'Acme', { home: tmp() })).not.toBeNull()
+    const root = projectIn(parent)
+    expect(discoverUniverseCandidate(root, 'acme', { home: tmp() })).not.toBeNull()
+    // Only meaningful on a case-sensitive filesystem; on Windows/macOS the FS folds for us.
+    const variant = discoverUniverseCandidate(root, 'Acme', { home: tmp() })
+    expect(variant === null || variant.endsWith('Acme-universe')).toBe(true)
+  })
+
+  it('never lets an org escape the scanned directory', () => {
+    // `rawSelfOrg` can come from a git remote — untrusted input, and this is the first
+    // place it becomes a path component. On Windows a `\` in it is a separator.
+    const parent = tmp()
+    mkUni(parent, 'EVIL-universe')
+    const nested = join(parent, 'workspace')
+    mkdirSync(nested, { recursive: true })
+    const root = join(nested, 'proj')
+    mkdirSync(root, { recursive: true })
+    for (const org of ['..\\EVIL', '../EVIL', '..', '.', 'a/b']) {
+      expect(discoverUniverseCandidate(root, org, { home: tmp() })).toBeNull()
+    }
   })
 
   it('T5 — never claims the org-blind `../universe`', () => {
@@ -131,13 +150,17 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
     )
   })
 
-  it('T11 — returns null for blank, degenerate and absent orgs', () => {
+  it('T11 — never probes a bare `-universe` for a blank or digits-only org', () => {
+    // Two distinct guards, and the fixture must contain the directory each would wrongly
+    // hit or the assertions pass with the guard removed:
+    //   - `orgKey?.trim() || null` catches null / '' / '   ' before any basename is built;
+    //   - `!!x` in the filter drops the '' that `normalizeOrg('-9')` returns.
     const parent = tmp()
     mkUni(parent, 'acme-universe')
+    mkUni(parent, '-universe')
     const root = projectIn(parent)
-    // `normalizeOrg('-9')` is '' — an unguarded empty basename would probe `../-universe`.
     for (const org of [null, undefined, '', '   ', '-9']) {
-      expect(discoverUniverseCandidate(root, org, { home: tmp() })).toBeNull()
+      expect(discoverUniverseCandidate(root, org, { home: tmp() }), `org=${String(org)}`).toBeNull()
     }
   })
 

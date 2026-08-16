@@ -138,10 +138,16 @@ export function universeCandidates(
  *
  * Basenames mirror the resolver's order — inferred, then raw — because an org carrying a
  * `-<digits>` suffix (`acme-23`) may sit beside either `acme-universe` or
- * `acme-23-universe`, and dropping the raw form misses the second. Lower-cased variants
- * are appended last: the resolver builds names case-exact by design (see `normalizeOrg`),
- * while every org compare in the onboarding detector is case-folded — without them an
- * `Acme` org finds its universe on Windows and macOS and misses it on Linux.
+ * `acme-23-universe`, and dropping the raw form misses the second.
+ *
+ * They are built CASE-EXACT, matching the resolver and the bash probes in
+ * `01-setup.md` Phase 1.9 and `02-canonical-source.md` Phase 1.2. An earlier revision
+ * also probed lower-cased variants so an `Acme` org would find `acme-universe` on a
+ * case-sensitive filesystem — that was withdrawn. `02-canonical-source.md` re-probes
+ * case-exact when the developer accepts the link and cannot be handed a path, so
+ * discovering a universe it cannot find leads to "not found locally — create one?":
+ * issue #65's own failure, relocated one prompt later and made OS-dependent. A
+ * case-variant org therefore still misses, consistently, on every layer.
  *
  * Never throws. Returns null when no org can be derived.
  */
@@ -156,8 +162,16 @@ export function discoverUniverseCandidate(
     const inferred = normalizeOrg(raw)
     const basenames = [
       ...new Set(
-        [inferred, raw, inferred?.toLowerCase(), raw.toLowerCase()].filter(
-          (x): x is string => !!x && x.trim().length > 0,
+        [inferred, raw].filter(
+          // `!!x` drops the empty string `normalizeOrg` returns for a digits-only org
+          // (`-9` → ''), which would otherwise probe `../-universe`.
+          //
+          // The rest is a path-traversal guard: a basename becomes a path component, and
+          // `rawSelfOrg` can come from a git remote (`parseGitRemoteOrg` returns the first
+          // URL segment verbatim). That is untrusted input reaching `resolve()` for the
+          // first time here — on Windows a `\` in it is a separator and walks out of the
+          // scanned parent.
+          (x): x is string => !!x && !/[\\/]/.test(x) && x !== '.' && x !== '..',
         ),
       ),
     ]

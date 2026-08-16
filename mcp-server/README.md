@@ -486,7 +486,7 @@ follow. The same-org sibling scan reads `../` one level (origin-pinned, CRLF-saf
 self-skip); universe discovery additionally probes the canonical candidate paths, which include
 `$HOME/{projetos,projects,dev,workspace}/<org>-universe`. It never writes.
 
-Before `.rsct.json` exists there is nothing for the resolver to key on, so a fresh project
+When the resolver returns nothing — typically before `.rsct.json` exists — a fresh project
 sitting beside its org's universe used to be told to **create a second one**. Discovery closes
 that: `discovered_universe_path` reports a universe found at a canonical path but not yet
 resolved, and `universe.available` / `universe.local_path` keep meaning strictly what the

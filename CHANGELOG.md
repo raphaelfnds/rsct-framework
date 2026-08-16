@@ -10,6 +10,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **A fresh project sitting beside its org's universe was told to create a second one (#65).**
+  `getUniverse` early-returns on a null config, so before `/rsct-setup` writes `.rsct.json`
+  there is nothing for the resolver to key on and `universe.available` is false by
+  construction — which made `offer-link-existing` unreachable exactly when it was needed.
+  The detector inferred the org correctly and listed the sibling apps, then walked past the
+  universe next to them and recommended creating another one over apps the first already
+  governed.
+
+  `resolveUniverseRoot`'s candidate list is now shared with a new discovery primitive, so
+  the name-derived paths have one definition instead of two that can drift. The result is
+  reported on `discovered_universe_path`; `universe.available` and `universe.local_path`
+  keep meaning strictly "what the resolver returned", so no existing field changes meaning.
+
+  Two things the review changed: the org-blind `../universe` is excluded from discovery,
+  because claiming it for a project whose identity is only inferred would adopt another
+  org's directory; and discovery keeps the resolver's raw-org basename, without which an
+  `acme-23` org beside `acme-23-universe` was still missed — the reported bug, unfixed.
+
 ## [2.7.3] - 2026-08-15
 
 A slot the installer reserved and the linker never filled, and the two excisions that

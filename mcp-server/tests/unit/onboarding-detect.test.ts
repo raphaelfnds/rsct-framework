@@ -156,12 +156,15 @@ describe('onboarding-detect — universe discovery before install (#65)', () => 
     expect(d.discovered_universe_path).toBeNull()
   })
 
-  it('T10 — a repo that IS a universe still short-circuits, even with one discoverable', () => {
+  it('T10 — a repo that IS a universe short-circuits even when one IS discoverable', () => {
+    // The root must not itself be a candidate basename, or the sibling is never the thing
+    // being raced against and the guard wins by default — the test would then pass with
+    // the guard demoted below discovery, which is the mutation it exists to catch.
     const parent = tmp()
-    const root = mkUniverse(parent, 'acme-universe', [])
-    mkUniverse(parent, 'acme-governance-universe', []) // discoverable? no — wrong basename
+    const root = mkUniverse(parent, 'acme-governance', [])
+    mkUniverse(parent, 'acme-universe', []) // genuinely discoverable for org `acme`
     mkApp(parent, 'acme-01', 'acme')
-    const d = detectOnboarding(cfg({ app: { name: 'acme-universe', org: 'acme' } }), root, opts())
+    const d = detectOnboarding(cfg({ app: { name: 'acme-governance', org: 'acme' } }), root, opts())
     expect(d.recommended_route).toBe('guard-universe-repo')
     expect(d.discovered_universe_path).toBeNull()
   })
