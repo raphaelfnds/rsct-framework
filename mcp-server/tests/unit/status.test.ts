@@ -204,13 +204,24 @@ describe('rsct_status', () => {
     expect(process.env.RSCT_UPDATE_CHECK).toBe('off')
   })
 
-  // T3: status always reports a worktree block; a plain fixture (or subdir of
-  // the main worktree) is NOT a linked worktree, so no linked-worktree hint.
-  it('includes a worktree block and emits no linked-worktree hint outside one', async () => {
+  // T3: status always reports a worktree block, and the linked-worktree hint
+  // must track the ACTUAL state.
+  //
+  // Asserting a literal `false` here made the whole suite unrunnable from a
+  // linked worktree — the fixture lives inside the repo, so it genuinely IS in
+  // one — while the framework's own rules recommend worktrees for parallel work
+  // (rules/C-reauthorize.md:196, rules/B-architect-plan.md:130). Tying hint to
+  // state is also STRICTLY STRONGER than the old pair: it catches a hint that
+  // fires outside a worktree AND one that fails to fire inside one.
+  // `lib/git — readWorktreeInfo` (tests/unit/git.test.ts) pins the detection
+  // itself against purpose-built tmpdir repos, both directions.
+  it('includes a worktree block and ties the linked-worktree hint to it', async () => {
     const out = (await statusHandler({ project_root: SAMPLE_RSCT })) as StatusOutput
     expect(out.worktree).toBeDefined()
-    expect(out.worktree.is_worktree).toBe(false)
-    expect(out.hints.some((h) => h.includes('linked git worktree'))).toBe(false)
+    expect(typeof out.worktree.is_worktree).toBe('boolean')
+    expect(out.hints.some((h) => h.includes('linked git worktree'))).toBe(
+      out.worktree.is_worktree,
+    )
   })
 
   // Install-drift: local compare of project rsct_version vs the running binary.

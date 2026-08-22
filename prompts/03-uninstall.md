@@ -975,10 +975,13 @@ Skipped (Category E):
   - .claude/settings.json: SETTINGS_MALFORMED — manual fix required before re-uninstall.
 
 Not touched (machine-global RSCT install, shared by every project):
-  - ~/.rsct/            incl. update-check.json, which records YOUR choices:
-                        whether the release check is on, and which releases you
-                        declined. Kept on purpose — reinstalling should not
-                        re-ask what you already answered.
+  - ~/.rsct/            incl. update-check.json and mcp-scope, which record YOUR
+                        choices: whether the release check is on, which releases
+                        you declined, and where rsct-mcp is registered. Kept on
+                        purpose — reinstalling should not re-ask what you already
+                        answered. Re-running the installer now OFFERS the recorded
+                        mcp-scope as the menu default (#71); to start clean,
+                        rm -f ~/.rsct/mcp-scope first.
   - ~/.claude/commands/rsct-*.md
   - the globally installed rsct-mcp package
   → Removing RSCT from this MACHINE (not just this project):
@@ -991,9 +994,11 @@ Branch: chore/rsct-uninstall ready for review / merge.
 This uninstall is **project-scoped**. It never touches `$HOME/.rsct/` — that is the
 machine-wide installation, shared by every rsct-managed project on the box, and
 removing it here would silently uninstall RSCT from all of them. `update-check.json`
-in particular holds a record of dev *decisions* (release-check consent, declined
-releases), so it is treated like `.rsct/audit.log`: preserved by default, removed
-only by the dev, deliberately.
+and `mcp-scope` in particular hold a record of dev *decisions* (release-check
+consent, declined releases, and where rsct-mcp is registered), so they are treated
+like `.rsct/audit.log`: preserved by default, removed only by the dev, deliberately.
+Note that since #71 a preserved `mcp-scope` also becomes the menu default the next
+time `scripts/install.sh` runs — `rm -f ~/.rsct/mcp-scope` to start clean.
 
 ---
 
