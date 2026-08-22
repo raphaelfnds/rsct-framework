@@ -4,9 +4,11 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   requestRebaseHandler,
+  requestRebaseTool,
   type RequestRebaseOutput,
   type RequestRebaseInternal,
 } from '../../src/tools/request-rebase.js'
+import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
 import type { GitExecutor, GitState } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
@@ -38,13 +40,35 @@ function approval(over: Record<string, unknown> = {}) {
   return { timestamp: VALID_TS, action_scope: 'rebase:feat/x', reason: 'rebase feat/x onto main for a clean history', ...over }
 }
 function ack(over: Record<string, unknown> = {}) {
-  return { plan_complete: true, adr_confirmed: true, issues_resolved: true, note: 'ADR-1; issue #2 closed', ...over }
+  return { plan_complete: true, adr_confirmed: true, issues_resolved: true, hygiene_swept: true, note: 'ADR-1; issue #2 closed; swept', ...over }
 }
 function internal(over: Partial<RequestRebaseInternal> = {}): RequestRebaseInternal {
   return { gitStateOverride: gitState('feat/x'), gitExecutor: okExec, promptFn: alwaysYes(), now: FIXED_NOW, ...over }
 }
 
 describe('rsct_request_rebase', () => {
+  // #62 — request-rebase had NO parity test at all, while merge and push each had
+  // one that iterated a hardcoded key list. Derived from the Zod shape: a field
+  // added to preMergeAckSchema and not mirrored into preMergeAckJsonSchema leaves
+  // the exposed schema additionalProperties:false without it, so the agent can
+  // never supply it, evaluatePreMergeAck pushes it into `failing` on every call,
+  // and every rebase/squash is permanently blocked behind a green suite.
+  // Breaks on: adding a field to preMergeAckSchema without mirroring it.
+  it('exposes pre_merge_ack in inputSchema at parity with the Zod schema', () => {
+    const schema = requestRebaseTool.inputSchema as {
+      properties: Record<string, { additionalProperties?: boolean; properties?: Record<string, unknown>; required?: unknown }>
+      required?: string[]
+    }
+    const ackProp = schema.properties.pre_merge_ack
+    expect(ackProp).toBeDefined()
+    expect(ackProp.additionalProperties).toBe(false)
+    const zodKeys = Object.keys(preMergeAckSchema.shape)
+    expect(zodKeys.length).toBeGreaterThan(0)
+    expect(Object.keys(ackProp.properties ?? {}).sort()).toEqual([...zodKeys].sort())
+    expect(schema.required ?? []).not.toContain('pre_merge_ack')
+    expect(ackProp.required).toBeUndefined()
+  })
+
   it('rejects (in chat) when the pre_merge_ack is missing', async () => {
     const out = (await requestRebaseHandler(
       { project_root: tmpRoot, ref: 'main', dev_approval: approval() },

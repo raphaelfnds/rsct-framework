@@ -198,7 +198,9 @@ export async function requestPushHandler(
     const progressOpen = pushingPlan
       ? progressHasOpenItems(projectRoot, pushingPlan.slug)
       : undefined
-    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen)
+    const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
+      progressHasOpenItems: progressOpen,
+    })
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision)
       const audit = appendAudit(

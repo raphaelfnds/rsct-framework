@@ -150,7 +150,9 @@ export async function requestRebaseHandler(
   // plan_complete check the boolean for the plan on the current branch.
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null
   const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : undefined
-  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, progressOpen)
+  const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
+    progressHasOpenItems: progressOpen,
+  })
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision)
     const audit = appendAudit(

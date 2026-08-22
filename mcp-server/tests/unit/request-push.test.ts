@@ -13,6 +13,7 @@ import type {
   GitExecutor,
   GitState,
 } from '../../src/lib/git.js'
+import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
 let tmpRoot: string
@@ -42,7 +43,8 @@ function ack(overrides: Record<string, unknown> = {}) {
     plan_complete: true,
     adr_confirmed: true,
     issues_resolved: true,
-    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed (unit test)',
+    hygiene_swept: true,
+    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed, files swept (unit test)',
     ...overrides,
   }
 }
@@ -305,9 +307,13 @@ describe('rsct_request_push — schema', () => {
     const ackProp = schema.properties.pre_merge_ack
     expect(ackProp).toBeDefined()
     expect(ackProp.additionalProperties).toBe(false)
-    for (const k of ['plan_complete', 'adr_confirmed', 'issues_resolved', 'note']) {
-      expect(ackProp.properties?.[k]).toBeDefined()
-    }
+    // DERIVED from the Zod shape — see the same assertion in request-merge.test.ts
+    // for why a hardcoded key list here would permanently block every protected
+    // push behind a green suite.
+    // Breaks on: adding a field to preMergeAckSchema without mirroring it.
+    const zodKeys = Object.keys(preMergeAckSchema.shape)
+    expect(zodKeys.length).toBeGreaterThan(0)
+    expect(Object.keys(ackProp.properties ?? {}).sort()).toEqual([...zodKeys].sort())
     expect(schema.required ?? []).not.toContain('pre_merge_ack')
     expect(ackProp.required).toBeUndefined()
   })

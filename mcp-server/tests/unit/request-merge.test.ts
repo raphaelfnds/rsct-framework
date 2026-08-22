@@ -14,6 +14,7 @@ import type {
   GitState,
 } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
 
 let tmpRoot: string
 
@@ -43,7 +44,8 @@ function ack(overrides: Record<string, unknown> = {}) {
     plan_complete: true,
     adr_confirmed: true,
     issues_resolved: true,
-    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed (unit test)',
+    hygiene_swept: true,
+    note: 'PH-5 hygiene: plan done, ADRs recorded, issues closed, files swept (unit test)',
     ...overrides,
   }
 }
@@ -435,9 +437,18 @@ describe('rsct_request_merge — schema', () => {
     const ackProp = schema.properties.pre_merge_ack
     expect(ackProp).toBeDefined()
     expect(ackProp.additionalProperties).toBe(false)
-    for (const k of ['plan_complete', 'adr_confirmed', 'issues_resolved', 'note']) {
-      expect(ackProp.properties?.[k]).toBeDefined()
-    }
+    // DERIVED from the Zod shape, never a hardcoded list. This test was named
+    // "parity with the Zod schema" while iterating four literal key names, so
+    // adding a key to preMergeAckSchema and forgetting preMergeAckJsonSchema
+    // passed green — and because the exposed schema is additionalProperties:false,
+    // the agent could then never supply that key, evaluatePreMergeAck would push
+    // it into `failing` on every call, and EVERY merge, protected push and rebase
+    // would be permanently blocked by a fully green suite. typecheck cannot catch
+    // it: the JSON mirror is an unrelated object literal.
+    // Breaks on: adding a field to preMergeAckSchema without mirroring it.
+    const zodKeys = Object.keys(preMergeAckSchema.shape)
+    expect(zodKeys.length).toBeGreaterThan(0)
+    expect(Object.keys(ackProp.properties ?? {}).sort()).toEqual([...zodKeys].sort())
     // parity: neither the outer key nor any inner key is required
     expect(schema.required ?? []).not.toContain('pre_merge_ack')
     expect(ackProp.required).toBeUndefined()
