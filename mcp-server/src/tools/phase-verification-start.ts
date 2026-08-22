@@ -99,9 +99,8 @@ export interface PhaseVerificationStartOutput {
   walk_stats: ReverseDepStats
   /**
    * #54. How much of `declared_paths` the reverse-dep walk was able to look at.
-   * A FACT about the walk, so it travels on every return path exactly as
-   * `walk_stats` does — unlike `discovered_importers`, which is zeroed where no
-   * phase started. The matching advisory is gated: see the hints block.
+   * Travels on every return path as `walk_stats` does — unlike
+   * `discovered_importers`, which is zeroed where no phase started.
    */
   walk_coverage: WalkCoverage
   checklist_stats: ChecklistStats
@@ -204,10 +203,7 @@ export async function phaseVerificationStartHandler(
         spec_ref: input.spec_ref,
         spec_tier: input.spec_tier,
         requested_persona: requestedPersona,
-        // The verdict is recorded even here: this is the ONLY artifact a
-        // trivial/small run leaves behind, and a data field charges nobody an
-        // action. What must not appear on this path is the advisory — a phase
-        // that verified nothing does not get to give verification advice.
+        // Recorded here too: the only artifact a trivial/small run leaves.
         walk_coverage: walk.coverage,
       },
       config?.audit,
@@ -400,16 +396,12 @@ export async function phaseVerificationStartHandler(
       `⚠ phase-state.json write failed: ${writeResult.error}. Verification ran but state was not persisted; rsct_phase_verification_complete will not find an active block.`,
     )
   }
-  // #54. Placed HERE — after the write/action hint, before the walk's and the
-  // checklist's — for two reasons. It is the correction to whatever the other
-  // two say, and appended last it would be read after the checklist's "found no
-  // findings to surface against the available corpus", i.e. after the sentence
-  // it exists to qualify. And prepending an advisory is this codebase's own
-  // convention (`lib/install-advisory.ts`, the three request tools).
-  //
-  // Reached only on the `verified` / `state_write_failed` paths: the walk runs
-  // before the tier branch, so emitting from the `skipped_tier` return would
-  // have a V phase that verified nothing announce what it could not verify.
+  // #54. Before the walk's and the checklist's hints, not after: this is the
+  // correction to the checklist's "found no findings to surface against the
+  // available corpus", and appended last it would be read after the sentence it
+  // exists to qualify. Prepending an advisory is the convention here
+  // (`lib/install-advisory.ts`, the three request tools). Emitted only on the
+  // non-skipped paths — see `coverageHints`.
   hints.push(...coverageHints(walk))
   hints.push(...walk.hints)
   hints.push(...checklist.hints)
