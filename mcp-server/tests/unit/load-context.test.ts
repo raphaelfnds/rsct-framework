@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -351,5 +352,171 @@ describe.skipIf(!hasGit())('rsct_load_context — protected-branch hint (#50)', 
     expect(out.next_action_hints.some((h) => h.includes("On the protected branch 'main'"))).toBe(
       true,
     )
+  })
+})
+
+// #53: the twin of the rsct_status block. Both tools stamp the same marker and both
+// discarded the result, so fixing one would have left the two reporting differently
+// about the same file. Fresh mkdtemp projects only — the sample fixture's phase-state
+// is written by the suite itself and has no stable verdict to assert.
+describe('rsct_load_context — the §0 bootstrap report (#53)', () => {
+  const roots: string[] = []
+  const BOOTSTRAP = /§0|bootstrap/i
+
+  function project(state?: Record<string, unknown>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-lc-bs-'))
+    roots.push(dir)
+    writeFileSync(
+      join(dir, '.rsct.json'),
+      JSON.stringify({ rsct_version: '1.0.0', app: { name: 't', org: 't' } }),
+      'utf8',
+    )
+    mkdirSync(join(dir, '.rsct'), { recursive: true })
+    if (state !== undefined) {
+      writeFileSync(
+        join(dir, '.rsct', 'phase-state.json'),
+        JSON.stringify(state),
+        'utf8',
+      )
+    }
+    return dir
+  }
+
+  afterEach(() => {
+    while (roots.length > 0) {
+      rmSync(roots.pop()!, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a MISSING marker on the first call, having established the baseline', async () => {
+    // Mutation: evaluate after the stamp — load_context reads its own write and
+    // reports fresh, on every call, forever.
+    const root = project()
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(
+      out.next_action_hints.some((h) =>
+        h.includes('No §0 bootstrap marker was on record'),
+      ),
+    ).toBe(true)
+    const stamped = JSON.parse(
+      readFileSync(join(root, '.rsct', 'phase-state.json'), 'utf8'),
+    ).bootstrap_at
+    // Mutation (separate): delete the stampBootstrapMarker call.
+    expect(Date.now() - new Date(stamped).getTime()).toBeLessThan(60_000)
+  })
+
+  it('reports a STALE marker with its age, and stays silent on a fresh one', async () => {
+    // Two arms in one test: the silent arm is worthless without a live positive
+    // control beside it — deleting the feature outright would satisfy it alone.
+    const stale = project({
+      bootstrap_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    })
+    const staleOut = (await loadContextHandler({
+      project_root: stale,
+    })) as LoadContextOutput
+    const line = staleOut.next_action_hints.find((h) =>
+      h.includes('§0 was last recorded'),
+    )
+    expect(line).toBeDefined()
+    expect(line).toContain('re-read plan, decisions and knowledge')
+
+    const fresh = project({ bootstrap_at: new Date().toISOString() })
+    const freshOut = (await loadContextHandler({
+      project_root: fresh,
+    })) as LoadContextOutput
+    expect(freshOut.next_action_hints.some((h) => BOOTSTRAP.test(h))).toBe(false)
+  })
+
+  it('does NOT write over an unparseable phase-state.json, and says the flag stayed', async () => {
+    // Mutation: stamp anyway on parse_error — the file is replaced by a lone
+    // bootstrap_at and everything it held is gone. Assert the surviving bytes: a
+    // hint-only assertion passes even when the write lands.
+    const root = project()
+    const corrupt = '{"plan_authorization": {"plan_slug": "feat-x"}, '
+    writeFileSync(join(root, '.rsct', 'phase-state.json'), corrupt, 'utf8')
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(readFileSync(join(root, '.rsct', 'phase-state.json'), 'utf8')).toBe(corrupt)
+    expect(
+      out.next_action_hints.some(
+        (h) =>
+          h.includes('could not be parsed') && h.includes('was NOT cleared'),
+      ),
+    ).toBe(true)
+  })
+
+  it('says context_stale was NOT cleared when the write does not land', async () => {
+    // Mutation: drop the context_stale branch from the write-failure path.
+    // D4: `clearStale` rides in the SAME write as the marker, so a failed write
+    // leaves the re-bootstrap obligation undischarged while the rest of the report
+    // reads exactly like a successful re-load. The dev is then told context was
+    // reloaded while every managed edit stays blocked.
+    //
+    // The lock PATH as a directory is the portable forced write failure (EEXIST on
+    // 'wx', then EISDIR on the stale-lock overwrite) — on all three OSes.
+    const root = project({
+      context_stale: { since: '2026-06-07T12:00:00.000Z', reason: 'plan_closed' },
+    })
+    mkdirSync(join(root, '.rsct', 'phase-state.lock'), { recursive: true })
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(
+      out.next_action_hints.some(
+        (h) =>
+          h.includes('re-bootstrap flag (context_stale) was NOT cleared') &&
+          h.includes('managed edits stay blocked'),
+      ),
+    ).toBe(true)
+    // Control: the flag really is still on disk, so the hint is true.
+    const after = JSON.parse(
+      readFileSync(join(root, '.rsct', 'phase-state.json'), 'utf8'),
+    )
+    expect(after.context_stale).toBeDefined()
+  })
+
+  it('says nothing about §0 in a project that is not rsct-managed', async () => {
+    // Mutation: drop the rsct_installed guard around the evaluate.
+    //
+    // A FRESH directory, not the shared no-rsct fixture: earlier tests in this file
+    // already call loadContextHandler on it, so an unguarded evaluate stamps the
+    // fixture on the first of those calls and this one reads a fresh marker and
+    // stays silent — the test would pass under its own mutation. Measured on the
+    // status.ts twin, which did exactly that.
+    const root = mkdtempSync(join(tmpdir(), 'rsct-lc-nofile-'))
+    roots.push(root)
+    const out = (await loadContextHandler({
+      project_root: root,
+    })) as LoadContextOutput
+    expect(out.rsct_installed).toBe(false) // control: the negative isn't vacuous
+    expect(out.next_action_hints.some((h) => BOOTSTRAP.test(h))).toBe(false)
+    expect(existsSync(join(root, '.rsct', 'phase-state.json'))).toBe(false)
+  })
+
+  it('agrees with rsct_status on the same state — same verdict, different voice', async () => {
+    // The parity the dev asked for, and the only shape it can take: both tools stamp,
+    // so running them against ONE project means the second always reads the first's
+    // write and reports fresh. Two identical projects, one handler each.
+    //
+    // Compares the VERDICT (both report stale, at the same age), never the text —
+    // the wording is deliberately per-call-site, so a byte-for-byte comparison would
+    // fail for the wrong reason.
+    // Mutation: change the order or the threshold in one tool only.
+    const seed = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+    const a = project({ bootstrap_at: seed })
+    const b = project({ bootstrap_at: seed })
+
+    const statusOut = (await statusHandler({ project_root: a })) as StatusOutput
+    const loadOut = (await loadContextHandler({ project_root: b })) as LoadContextOutput
+
+    const age = (hints: string[]): number => {
+      const line = hints.find((h) => h.includes('§0 was last recorded'))
+      expect(line, 'both tools must report the stale marker').toBeDefined()
+      return Number(/last recorded (\d+) min ago/.exec(line ?? '')?.[1])
+    }
+    const statusAge = age(statusOut.hints)
+    const loadAge = age(loadOut.next_action_hints)
+    expect(statusAge).toBeGreaterThanOrEqual(298)
+    expect(statusAge).toBeLessThanOrEqual(302)
+    expect(Math.abs(statusAge - loadAge)).toBeLessThanOrEqual(1)
   })
 })

@@ -8,9 +8,11 @@ import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { corpusMiss } from '../lib/corpus-health.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import {
+  BOOTSTRAP_STALE_MS,
   readPhaseState,
   readPlanDisposition,
-  stampBootstrapMarker,
+  readThenStampBootstrap,
+  type BootstrapRefresh,
 } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
@@ -138,12 +140,14 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const knowledge = readKnowledgeIndex(resolution.root)
 
   // CAP-31: stamp bootstrap marker — load_context is the §0 entry
-  // point. Best-effort write; failures swallowed. plan-lifecycle-v2 (D4):
+  // point. Best-effort write; the call never fails on it. plan-lifecycle-v2 (D4):
   // load_context is the ONLY caller that actually re-reads plan/decisions/
   // knowledge, so it (and only it) clears the context_stale re-bootstrap flag.
-  if (resolution.rsct_installed) {
-    stampBootstrapMarker(resolution.root, { clearStale: true })
-  }
+  // #53: evaluated BEFORE the stamp (a post-stamp read describes what this call
+  // just wrote), and the outcome is reported instead of swallowed.
+  const bootstrap: BootstrapRefresh | null = resolution.rsct_installed
+    ? readThenStampBootstrap(resolution.root, { clearStale: true })
+    : null
 
   const excerptCount = input.decisions_excerpt_count
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse()
@@ -162,6 +166,7 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
     knowledge,
     decisions: decisionsSnapshot,
   })
+  if (bootstrap) next_action_hints.push(...bootstrapHints(bootstrap))
   if (universe.hint) next_action_hints.push(universe.hint)
   if (topology.hint) next_action_hints.push(topology.hint)
   // plan-lifecycle-v2 (Bloco 2.4): retroactive reconciliation. If the active
@@ -254,6 +259,73 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
     topology: topology.block,
     next_action_hints,
   }
+}
+
+/** Values read off disk land in the hints array — bound them. */
+function truncate(value: string, max = 80): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
+const BOOTSTRAP_STALE_MIN = Math.round(BOOTSTRAP_STALE_MS / 60000)
+
+/**
+ * #53: the §0 bootstrap report, in `rsct_load_context`'s own voice — the twin of
+ * `bootstrapHints` in tools/status.ts. Two reasons the text is not shared: the
+ * library's own marker hints instruct the reader to run both stamping tools
+ * (self-referential from inside either), and this tool is the one that really
+ * re-loads context, so it can say so where `rsct_status` cannot.
+ *
+ * The extra branch is D4: `clearStale` rides in the SAME write as the marker
+ * (lib/phase-scope stampBootstrapMarker), so a write that does not land leaves
+ * the re-bootstrap obligation undischarged while this report otherwise reads
+ * like context was reloaded. When that happens, say it.
+ */
+function bootstrapHints(refresh: BootstrapRefresh): string[] {
+  const { marker, read, write } = refresh
+
+  if (write === null) {
+    return [
+      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncate(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
+    ]
+  }
+
+  const hints: string[] = []
+  const recorded = write.ok
+
+  if (marker.status === 'missing' && marker.bootstrap_at !== null) {
+    hints.push(
+      `⚠ The recorded bootstrap_at value ('${truncate(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_load_context call replaced it' : ', and this call could not replace it (see below)'}.`,
+    )
+  } else if (marker.status === 'missing') {
+    hints.push(
+      recorded
+        ? `ℹ No §0 bootstrap marker was on record for this project — this rsct_load_context call established the session baseline and re-read plan, decisions and knowledge.`
+        : `ℹ No §0 bootstrap marker is on record for this project, and this call could not record one (see below).`,
+    )
+  } else if (marker.status === 'stale') {
+    const min = Math.round((marker.age_ms ?? 0) / 60000)
+    hints.push(
+      recorded
+        ? `ℹ §0 was last recorded ${min} min ago (stale window ${BOOTSTRAP_STALE_MIN} min) — this rsct_load_context call refreshed it and re-read plan, decisions and knowledge.`
+        : `ℹ §0 was last recorded ${min} min ago (stale window ${BOOTSTRAP_STALE_MIN} min) and this call could not refresh it (see below).`,
+    )
+  }
+
+  if (!write.ok) {
+    hints.push(
+      write.reason === 'locked'
+        ? `ℹ Another session holds .rsct/phase-state.lock (acquired ${write.lock_age_ms}ms ago) — the §0 marker for this call was not recorded. Harmless when two sessions share one worktree; the next rsct_load_context records it.`
+        : `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncate(write.error)}. Until a write succeeds, rsct_phase_code_start and the rsct_request_* gates keep reporting bootstrap as missing or stale.`,
+    )
+    // D4: the clear rides in that same failed write.
+    if (read.state?.context_stale !== undefined) {
+      hints.push(
+        `⚠ The re-bootstrap flag (context_stale) was NOT cleared, because the phase-state write did not land — rsct_check_edit_scope keeps reporting 'stale_context' and managed edits stay blocked. Re-run rsct_load_context once the write can succeed.`,
+      )
+    }
+  }
+
+  return hints
 }
 
 interface HintArgs {

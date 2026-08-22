@@ -304,6 +304,62 @@ export interface PhaseState {
   bootstrap_at?: string
 }
 
+/**
+ * #53: the keys `rsct_phase_abandon` PRESERVES. The rule this list encodes:
+ * abandon clears everything that describes the work being discarded — the phase,
+ * its spec, and every plan- or spec-scoped token, budget or recorded decision —
+ * and preserves only what describes the SESSION or the PROJECT, never the work.
+ *
+ * Consumed as an ALLOWLIST by {@link preserveAcrossAbandon}, never as a wipe-list.
+ * A key added to {@link PhaseState} later is therefore dropped by an abandon
+ * unless its author deliberately adds it here — fail-closed, and the reason this
+ * is a list rather than a sequence of `delete` calls: written the other way
+ * round, forgetting `plan_authorization` would leave a live §C batch token alive
+ * across an abandon and the whole suite would stay green.
+ *
+ * `context_stale` is on the list because it is an OBLIGATION on the session, not
+ * state of the work: while it is set the edit guard blocks every managed edit
+ * (lib/edit-guard.ts), and the only legitimate clear is a real re-load through
+ * `rsct_load_context` (D4 — see {@link stampBootstrapMarker}'s `clearStale`).
+ * Wiping it here let an agent the guard had blocked unblock itself by discarding
+ * an unrelated phase: a mechanical gate defeated by a call that never satisfied
+ * it. Note abandon only ever PRESERVES the flag, never arms one —
+ * `completePhaseGeneric` is its sole producer today and {@link stampContextStale}
+ * has no production caller, so the `'pivot'` reason is currently unreachable.
+ */
+export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
+  'bootstrap_at',
+  'context_stale',
+]
+
+/** Copy one key when the source actually carries it (exactOptionalPropertyTypes). */
+function copyIfPresent<K extends keyof PhaseState>(
+  from: PhaseState,
+  to: PhaseState,
+  key: K,
+): void {
+  const value = from[key]
+  if (value !== undefined) to[key] = value
+}
+
+/**
+ * Build the post-abandon phase-state: an allowlist copy of
+ * {@link PHASE_STATE_PRESERVED_ON_ABANDON} and nothing else. Everything the
+ * abandoned work owned is dropped, including the four blocks whose docstrings
+ * already declare themselves "wiped by phase_abandon" (`plan_authorization`,
+ * `free_commit_budget`, `review`, `disposition`).
+ */
+export function preserveAcrossAbandon(
+  state: PhaseState | null | undefined,
+): PhaseState {
+  const next: PhaseState = {}
+  if (!state) return next
+  for (const key of PHASE_STATE_PRESERVED_ON_ABANDON) {
+    copyIfPresent(state, next, key)
+  }
+  return next
+}
+
 const PHASE_STATE_RELATIVE = '.rsct/phase-state.json'
 
 export function phaseStatePath(projectRoot: string): string {
@@ -655,6 +711,53 @@ export function evaluateBootstrapMarker(args: {
     age_ms: age,
     hint: null,
   }
+}
+
+/**
+ * #53: what a §0 bootstrap call learned about the marker BEFORE it touched it.
+ *
+ * `marker` is the pre-stamp verdict, `read` the pre-stamp read it was computed
+ * over, and `write` the stamp — or `null` when the stamp was deliberately
+ * skipped (see {@link readThenStampBootstrap}).
+ */
+export interface BootstrapRefresh {
+  marker: BootstrapMarker
+  read: PhaseStateReadResult
+  write: WritePhaseStateResult | null
+}
+
+/**
+ * #53: evaluate the bootstrap marker, THEN stamp it. The ordering is the whole
+ * point and it is centralised here for exactly one reason: `rsct_status` and
+ * `rsct_load_context` both stamp before anything else runs, so a report built
+ * from a post-stamp read is vacuously "fresh" on every single call — a report
+ * that can never fire. Both tools call this instead of pairing the two library
+ * functions themselves.
+ *
+ * On an UNPARSEABLE phase-state.json the stamp is SKIPPED (`write: null`) rather
+ * than attempted. {@link stampBootstrapMarker} builds its write from
+ * `existing.state ?? {}`, which makes an unreadable file indistinguishable from
+ * an empty one: the write would land carrying `bootstrap_at` and nothing else,
+ * destroying whatever `plan_authorization`, `free_commit_budget`, `last_classify`
+ * or `context_stale` the file still held. A corrupt file is the moment the
+ * framework most needs to preserve what it cannot read. Skipping is fail-closed:
+ * downstream tools then report bootstrap as missing, which is the truth.
+ *
+ * Callers surface the outcome as hints; nothing here throws or gates.
+ */
+export function readThenStampBootstrap(
+  projectRoot: string,
+  opts: { now?: Date; clearStale?: boolean } = {},
+): BootstrapRefresh {
+  const read = readPhaseState(projectRoot)
+  const marker = evaluateBootstrapMarker({
+    projectRoot,
+    ...(opts.now !== undefined && { now: opts.now }),
+  })
+  if (read.parse_error !== undefined) {
+    return { marker, read, write: null }
+  }
+  return { marker, read, write: stampBootstrapMarker(projectRoot, opts) }
 }
 
 /**

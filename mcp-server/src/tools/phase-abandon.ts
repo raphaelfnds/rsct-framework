@@ -18,8 +18,10 @@ import {
 } from '../lib/dev-approval.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
+  preserveAcrossAbandon,
   readPhaseState,
   writePhaseState,
+  PHASE_STATE_PRESERVED_ON_ABANDON,
   type PhaseState,
 } from '../lib/phase-scope.js'
 
@@ -77,7 +79,7 @@ export interface PhaseAbandonInternal {
 export const phaseAbandonTool: Tool = {
   name: 'rsct_phase_abandon',
   description:
-    '§C-gated abandon — discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared. NOT for ending a phase cleanly — use rsct_phase_<phase>_complete for that.',
+    '§C-gated abandon — discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared, along with every plan- or spec-scoped token, budget and recorded decision; session markers (the §0 bootstrap timestamp, and the re-bootstrap flag if set) are PRESERVED — an abandon is not a re-load, so a set re-bootstrap flag keeps blocking managed edits until rsct_load_context runs. NOT for ending a phase cleanly — use rsct_phase_<phase>_complete for that.',
   inputSchema: {
     type: 'object',
     required: ['reason', 'dev_approval'],
@@ -185,7 +187,13 @@ export async function phaseAbandonHandler(
     }
   }
 
-  const newState: PhaseState = {}
+  // #53: an ALLOWLIST copy, not the `{}` full replace this used to be. The rule
+  // (and why it must never be re-written as a wipe-list) lives with
+  // PHASE_STATE_PRESERVED_ON_ABANDON in lib/phase-scope.
+  const newState: PhaseState = preserveAcrossAbandon(state)
+  const preservedKeys = PHASE_STATE_PRESERVED_ON_ABANDON.filter(
+    (key) => newState[key] !== undefined,
+  )
   const writeResult = writePhaseState(projectRoot, newState)
   const record = recordApproval(gate.approval, { projectRoot, now })
 
@@ -202,6 +210,9 @@ export async function phaseAbandonHandler(
       reason: input.reason,
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
+      // #53: what survived, so a forensic reader can tell a preserved session
+      // marker from a key the allowlist silently stopped carrying.
+      preserved_keys: preservedKeys,
     },
     config?.audit,
   )
@@ -210,8 +221,15 @@ export async function phaseAbandonHandler(
   const hints: string[] = []
   if (writeResult.ok) {
     hints.push(
-      `Phase '${phase}' abandoned${specSlug ? ` for spec '${specSlug}'` : ''}. State cleared. Next: call rsct_classify_task or rsct_phase_<phase>_start to restart.`,
+      `Phase '${phase}' abandoned${specSlug ? ` for spec '${specSlug}'` : ''}. Phase and spec state cleared; session markers preserved${preservedKeys.length > 0 ? ` (${preservedKeys.join(', ')})` : ''}. Next: call rsct_classify_task or rsct_phase_<phase>_start to restart.`,
     )
+    // #53: the flag survives the abandon on purpose — say so at the call site,
+    // rather than letting the dev discover it at the next blocked edit.
+    if (newState.context_stale !== undefined) {
+      hints.push(
+        `ℹ The re-bootstrap flag (context_stale, set when the previous plan closed) was already set and is PRESERVED across this abandon — rsct_check_edit_scope keeps reporting 'stale_context' and managed edits stay blocked until rsct_load_context actually re-reads plan, decisions and knowledge. Abandoning a phase is not a re-load.`,
+      )
+    }
   } else if (writeResult.reason === 'locked') {
     hints.push(
       `⚠ Abandon approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). Retry; state may be inconsistent until then.`,
