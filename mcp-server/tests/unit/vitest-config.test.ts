@@ -1,47 +1,36 @@
 import { describe, it, expect } from 'vitest'
 
+import config from '../../vitest.config.js'
+
 /**
- * A tripwire for `vitest.config.ts`, because a wrong config here is SILENT.
+ * A tripwire for `vitest.config.ts`, because a wrong config here is SILENT:
+ * `tsc --noEmit` never sees the file (`tsconfig.json` includes only `src/**\/*`,
+ * verified by inserting a bogus key and watching typecheck stay clean), and
+ * vitest 4.1.8 accepts unknown keys without a warning. So a misspelled or
+ * mis-nested `testTimeout` ships inert, on all three OSes, with no signal until
+ * an unrelated flake resurfaces.
  *
- * Two facts, both measured on this repo rather than assumed:
- *
- *  1. `tsc --noEmit` passes with a bogus key inside `vitest.config.ts`. The
- *     typecheck script never sees the file — `tsconfig.json` includes only
- *     `src/**\/*`. Verified by inserting `testTimoutTypo: 12345` and watching
- *     `npm run typecheck` come back clean.
- *  2. Vitest 4.1.8 accepts unknown config keys without a warning, and silently
- *     ignores options written at the wrong nesting level.
- *
- * So a `testTimeout` that is misspelled, misplaced, or dropped by a merge ships
- * completely inert, identically on all three target OSes, with no signal at all
- * until an unrelated flake resurfaces weeks later. That is the silent-failure
- * class `CLAUDE.md` calls the most dangerous, arriving through configuration
- * instead of through a shell pattern.
- *
- * This asserts the RESOLVED value the runner actually applied — never the
- * presence of the key in the file, which is what a config the runner ignored
- * would still satisfy.
- *
- * If you deliberately change the timeout, change the number here too. The test
- * is a tripwire, not a ceiling.
+ * Two assertions, because either one alone has a hole:
+ *  - the RESOLVED value catches a config the runner ignored, but goes green if
+ *    someone annotates the guard itself with `}, 60_000)` — the very syntax 107
+ *    tests in `tests/bash/` use;
+ *  - the DECLARED value catches a broken key even then, but goes green if the
+ *    runner never read the file.
+ * Together they close both. If you change the timeout deliberately, change the
+ * constant too — that is the tripwire, not a bug.
  */
-const EXPECTED_DEFAULT_TIMEOUT_MS = 30_000
+const EXPECTED_TEST_TIMEOUT_MS = 60_000
 
 describe('vitest.config.ts — the configured timeout is actually applied', () => {
-  it('resolves the suite-wide default testTimeout onto a test that declares none', (ctx) => {
-    // Mutation that turns this red: delete `testTimeout` from vitest.config.ts,
-    // misspell it, or nest it outside the `test` block — each leaves the runner
-    // on its 5000 ms built-in default.
-    expect(ctx.task.timeout).toBe(EXPECTED_DEFAULT_TIMEOUT_MS)
+  it('resolves the configured default onto a test that declares none', (ctx) => {
+    // Mutation: delete `testTimeout` from vitest.config.ts, misspell it, or
+    // nest it outside the `test` block — each leaves the runner on 5000 ms.
+    expect(ctx.task.timeout).toBe(EXPECTED_TEST_TIMEOUT_MS)
   })
 
-  it('still lets an explicit per-test timeout win over the default', (ctx) => {
-    // `tests/bash/` annotates individual tests with a 60/90/120 s ladder. Those
-    // must keep overriding the default, or raising the default would quietly
-    // LOWER the budget of the 107 tests that carry a bigger one.
-    //
-    // Mutation that turns this red: any change making the config default
-    // outrank a declared per-test timeout.
-    expect(ctx.task.timeout).toBe(45_000)
-  }, 45_000)
+  it('declares that same default in the config file itself', () => {
+    // Mutation: the same three, and this one still fails if the guard above is
+    // neutered by its own per-test annotation.
+    expect(config.test?.testTimeout).toBe(EXPECTED_TEST_TIMEOUT_MS)
+  })
 })
