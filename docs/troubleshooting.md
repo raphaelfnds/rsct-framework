@@ -15,12 +15,24 @@ The companion server isn't registered or connected.
 
 1. Confirm it's registered: `claude mcp list` from inside the project — expect a
    line like `rsct: rsct-mcp - ✓ Connected`.
-2. If it's missing, register it: `claude mcp add rsct rsct-mcp --scope user` (or
-   `--scope project` for a committable `.mcp.json`). Then **restart**.
-3. Confirm the binary is on PATH: `which rsct-mcp` (macOS/Linux/Git Bash) or
+2. **`⏸ Pending approval`?** The entry is registered but the project has not
+   approved it — a `.mcp.json` never spawns until it does. `/rsct-setup` writes
+   the approval into `<project>/.claude/settings.local.json`
+   (`"enabledMcpjsonServers": ["rsct"]`); so does answering the prompt Claude
+   Code shows when you first open the project. That file is per-developer and
+   gitignored — each teammate approves on their own machine.
+   If you once answered *no*, the refusal sits in `disabledMcpjsonServers` and
+   **wins** over any approval; remove it there yourself.
+3. If it's missing entirely, re-run the installer and pick a scope. Beware the
+   manual shortcut: `claude mcp add rsct rsct-mcp --scope user` registers at
+   **user scope**, which *masks* any project `.mcp.json` on the whole machine —
+   on a team setup that silently disables the registration your repo shares.
+   Use `--scope project` inside the project instead, or let `/rsct-setup` do it.
+   Then **restart**.
+4. Confirm the binary is on PATH: `which rsct-mcp` (macOS/Linux/Git Bash) or
    `where rsct-mcp` (Windows). If it prints nothing, re-run the installer (or
    `cd mcp-server && npm install -g .`).
-4. Confirm it boots: `rsct-mcp < /dev/null` (Git Bash/macOS/Linux) or
+5. Confirm it boots: `rsct-mcp < /dev/null` (Git Bash/macOS/Linux) or
    `cmd /c "rsct-mcp < NUL"` (PowerShell) should print a one-line ready log on
    stderr and exit cleanly.
 

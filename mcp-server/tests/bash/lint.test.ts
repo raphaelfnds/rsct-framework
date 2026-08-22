@@ -42,6 +42,27 @@ describe('bash lint — corpus sanity', () => {
     expect(SCRIPT_BLOCKS.length).toBe(2)
   })
 
+  it('no scripts/*.sh is ever skipped by the illustrative-sentinel heuristic (#73)', () => {
+    // The heuristic exists for PROMPT blocks, which legitimately show a "❌ NÃO
+    // usar" example next to the correct form. A whole script is never
+    // illustrative — but `loadScriptBlocks` runs the same `skipState` over the
+    // entire file, so ONE comment containing ❌, PROIBIDO or "NÃO usar"
+    // silently switches off every detector AND the `bash -n` gate
+    // (`lint.test.ts` skips `b.skip` blocks) for that file. The skip is only
+    // `console.log`ged below, never asserted — a guard that stops guarding and
+    // still reads green.
+    //
+    // This is a live hazard, not a hypothetical: the #73 comments in
+    // scripts/install.sh cite anti-pattern #5 and the removal consent rules by
+    // name, and "PROIBIDO" is exactly the word CLAUDE.md uses for them.
+    const skipped = SCRIPT_BLOCKS.filter((b) => b.skip).map((b) => `${b.source} (${b.skipReason})`)
+    expect(
+      skipped,
+      'a script was skipped wholesale — its detectors AND its bash -n gate did not run. ' +
+        'Reword the comment: do not put ❌ / PROIBIDO / "NÃO usar" in scripts/*.sh.',
+    ).toEqual([])
+  })
+
   it('reports skipped (illustrative / opted-out) blocks explicitly — no silent skips', () => {
     const skipped = ALL.filter((b) => b.skip)
     // Not an assertion on count; surfaces what the lint chose NOT to check.
