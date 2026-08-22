@@ -10,7 +10,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.7.5] - 2026-08-21
+
+Four things that were quietly wrong on every run. Patch: no new tool, no new phase,
+tool count unchanged at **39**, marker schema id still `v=1.0.0`.
+
+What changes for a user: re-installing no longer resets the MCP scope you chose.
+Press Enter — or run `RSCT_ASSUME_YES=1` — and a recorded `project` or `skip` now
+survives, where it previously became `user` with nothing on screen and nothing in
+`git status`, because the state lives in `~/.rsct/`. Reset deliberately with
+`rm -f ~/.rsct/mcp-scope`.
+
+The other three are smaller and equally silent: the installer stopped calling
+`docs/` an unfamiliar directory on every run, the test suite can now run from a
+linked git worktree (the workflow `rules/` recommends for parallel work), and the
+one populated example stopped teaching an inverted documentation layout.
 
 ### Fixed
 
