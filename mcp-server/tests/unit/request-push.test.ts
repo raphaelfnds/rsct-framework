@@ -77,6 +77,10 @@ function gitExec(spec: Record<string, GitExecResult> = {}, fallback?: GitExecRes
   return (_root, args) => {
     const key = args.join(' ')
     if (key in spec) return spec[key]!
+    // #62 B5: model a repo that HAS remotes. Without this the allow-list is built
+    // from the empty fallback below and even 'origin' is refused — the reject is
+    // then an artifact of the fake, not of the input under test.
+    if (key === 'remote') return { ok: true, stdout: 'origin\nupstream\n', stderr: '', exitCode: 0 }
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   }
@@ -111,7 +115,7 @@ describe('rsct_request_push — happy path', () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestPushInternal = {
       gitStateOverride: gitState('feat/foo'),
-      gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+      gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
@@ -132,7 +136,7 @@ describe('rsct_request_push — happy path', () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestPushInternal = {
       gitStateOverride: gitState('feat/cap33-push'),
-      gitExecutor: gitExec({ 'push origin feat/cap33-push': PUSH_OK }),
+      gitExecutor: gitExec({ 'push -- origin feat/cap33-push': PUSH_OK }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
@@ -170,7 +174,7 @@ describe('rsct_request_push — happy path', () => {
       },
       {
         gitStateOverride: gitState('feat/foo'),
-        gitExecutor: gitExec({ 'push upstream release/2.0': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- upstream release/2.0': PUSH_OK }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
@@ -212,7 +216,7 @@ describe('rsct_request_push — branch protection', () => {
       },
       {
         gitStateOverride: gitState('main'),
-        gitExecutor: gitExec({ 'push origin main': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
@@ -251,7 +255,7 @@ describe('rsct_request_push — failure surfaces', () => {
     }
     const internal: RequestPushInternal = {
       gitStateOverride: gitState('feat/foo'),
-      gitExecutor: gitExec({ 'push origin feat/foo': pushFail }),
+      gitExecutor: gitExec({ 'push -- origin feat/foo': pushFail }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
@@ -266,7 +270,7 @@ describe('rsct_request_push — failure surfaces', () => {
     // Retry with the SAME approval (success this time) — must NOT be 'reused'.
     const out2 = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval() },
-      { ...internal, gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }) },
+      { ...internal, gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }) },
     )) as RequestPushOutput
     expect(out2.status).toBe('pushed')
   })
@@ -383,7 +387,7 @@ describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branc
       { project_root: tmpRoot, dev_approval: approval() },
       {
         gitStateOverride: gitState('feat/foo'),
-        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
@@ -434,7 +438,7 @@ describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branc
         dev_approval: approval({ override_protected_branch: { reason: 'release tag push' } }),
         pre_merge_ack: ack(),
       },
-      { gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+      { gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
     )) as RequestPushOutput
     expect(out.status).toBe('pushed')
   })
@@ -466,7 +470,7 @@ describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branc
     const appr = approval({ override_protected_branch: { reason: 'release tag push' } })
     const internal: RequestPushInternal = {
       gitStateOverride: gitState('main'),
-      gitExecutor: gitExec({ 'push origin main': PUSH_OK }),
+      gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
@@ -497,7 +501,7 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
       { project_root: tmpRoot, dev_approval: approval() },
       {
         gitStateOverride: gitState('feat/foo'),
-        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
@@ -544,7 +548,7 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
       { project_root: tmpRoot, dev_approval: approval() },
       {
         gitStateOverride: gitState('feat/foo'),
-        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }),
         promptFn: async (opts: DialogOptions) => {
           seen = opts.message
           return { response: 'yes', channel: 'windows' }
@@ -564,11 +568,252 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
       { project_root: tmpRoot, dev_approval: approval() },
       {
         gitStateOverride: gitState('feat/foo'),
-        gitExecutor: gitExec({ 'push origin feat/foo': PUSH_OK }),
+        gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
     )) as RequestPushOutput
     expect(out.hints.join(' ')).not.toMatch(SECURITY)
+  })
+})
+
+// ============================================================================
+// #62 B5 — the ref/remote injection class.
+//
+// Every shape below was measured against a real bare remote on git
+// 2.45.1.windows.1: each lands on the remote's protected `main` while
+// `isProtectedBranch` (an exact string compare over the raw agent input)
+// returns false, so the whole protected block — ack AND override — is skipped.
+// ============================================================================
+
+/** A fake that THROWS on an argv it does not model, naming the argv it saw.
+ *  The permissive `gitExec` above answers everything, which is how 21 of 22
+ *  push argv sites went stale without one test noticing. Where the argv itself
+ *  is the thing under test, silence is not an acceptable answer. */
+function strictGitExec(spec: Record<string, GitExecResult>): GitExecutor {
+  return (_root, args) => {
+    const key = args.join(' ')
+    if (key in spec) return spec[key]!
+    throw new Error(`strictGitExec: unmodelled argv ${JSON.stringify(args)}`)
+  }
+}
+
+describe('rsct_request_push — B5 destination resolution', () => {
+  const attempt = (branch: string, over: Record<string, unknown> = {}) =>
+    requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch, ...over },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec({}, PUSH_OK),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    ) as Promise<RequestPushOutput>
+
+  beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
+
+  // Breaks on: comparing the raw agent string against the protected list, i.e.
+  // reverting to `isProtectedBranch(input.branch)`. Each of these was measured
+  // rc=0 onto the remote's main with no ack and no override.
+  it.each([
+    ['+main', 'the force marker hides it from an exact compare'],
+    ['HEAD:main', 'a src:dst refspec puts the destination after the colon'],
+    ['HEAD:a:refs/heads/main', 'git splits on the LAST colon, not the first'],
+    ['refs/heads/main', 'the fully-qualified form'],
+    ['heads/main', 'the half-qualified form'],
+  ])('treats %s as protected — %s', async (branch) => {
+    const out = await attempt(branch)
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+    expect(out.branch_check.protected).toBe(true)
+  })
+
+  // Breaks on: dropping the second leading-'-' check, the one applied to the
+  // DERIVED destination. Also asserts the poisoned value never reaches git:
+  // `rev-parse --symbolic-full-name --all` returns rc=0 and a list of every ref.
+  it('refuses +main:--all and never hands --all to git', async () => {
+    const seen: string[][] = []
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch: '+main:--all' },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        // Must answer `remote` honestly: the remote allow-list runs first, so a
+        // fake that garbles it would reject as unknown_remote and this test would
+        // pass for the wrong reason.
+        gitExecutor: (_r, args) => {
+          seen.push(args)
+          return args[0] === 'remote'
+            ? { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
+            : PUSH_OK
+        },
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('unsafe_push_target')
+    expect(seen.some((a) => a.includes('--all'))).toBe(false)
+  })
+
+  // Breaks on: removing the glob reject. Measured rc=0 force-updating protected
+  // main while the plain push of the same state was refused.
+  it('refuses a glob refspec', async () => {
+    const out = await attempt('+refs/heads/main*:refs/heads/main*')
+    expect(out.reject_kind).toBe('unsafe_push_target')
+  })
+
+  // Breaks on: removing the empty-destination reject.
+  it('refuses the bare-colon matching refspec', async () => {
+    expect((await attempt(':')).reject_kind).toBe('unsafe_push_target')
+  })
+
+  // VACUITY CONTROL. A reject-everything validator passes every test above.
+  // This is what it cannot pass.
+  it('VACUITY: an ordinary branch still pushes', async () => {
+    const out = await attempt('release/2.0')
+    expect(out.status).toBe('pushed')
+  })
+
+  // VACUITY CONTROL. Protection must still be overridable, or the new resolution
+  // has quietly turned every protected push into a hard stop.
+  it('VACUITY: a protected destination still pushes WITH the override', async () => {
+    const out = await attempt('main', {
+      dev_approval: approval({ override_protected_branch: { reason: 'shipping the release' } }),
+    })
+    expect(out.status).toBe('pushed')
+    expect(out.branch_check.override_used).toBe(true)
+  })
+})
+
+describe('rsct_request_push — B5 remote allow-list', () => {
+  beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
+  const withRemote = (remote: string, exec?: GitExecutor) =>
+    requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), remote, branch: 'feat/foo' },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: exec ?? gitExec({}, PUSH_OK),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    ) as Promise<RequestPushOutput>
+
+  // Breaks on: omitting the allow-list, or implementing it as "reject
+  // option-shaped remotes" instead of "must be a configured remote". Measured:
+  // `git push <arbitrary-bare-path> main` lands the repo in a foreign
+  // repository, and `--` does NOT protect that slot.
+  it('refuses a path or URL remote — this is the exfiltration vector', async () => {
+    const out = await withRemote('/tmp/anywhere.git')
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('unknown_remote')
+    expect(out.reason).toContain('NAMED remotes')
+  })
+
+  // Breaks on: relying on `--` alone for the remote slot. Measured:
+  // `git push --mirror -- origin` is rc=0 and DELETES remote branches.
+  it('refuses an option-shaped remote before git is ever run', async () => {
+    const seen: string[][] = []
+    const out = await withRemote('--mirror', (_r, args) => { seen.push(args); return PUSH_OK })
+    expect(out.reject_kind).toBe('unknown_remote')
+    expect(seen.some((a) => a[0] === 'push')).toBe(false)
+  })
+
+  // Breaks on: SKIPPING the check when the list comes back empty. That was the
+  // tempting reading of "degrade gracefully", and it is wrong: a repo with no
+  // configured remotes is exactly the shape a path remote exploits. Only an
+  // UNREADABLE list (ok:false) may skip.
+  it('an EMPTY remote list rejects; an UNREADABLE one skips the check', async () => {
+    const empty = await withRemote('origin', (_r, args) =>
+      args[0] === 'remote' ? { ok: true, stdout: '', stderr: '', exitCode: 0 } : PUSH_OK)
+    expect(empty.reject_kind).toBe('unknown_remote')
+
+    const unreadable = await withRemote('origin', (_r, args) =>
+      args[0] === 'remote'
+        ? { ok: false, stdout: '', stderr: 'not a git repository', exitCode: 128 }
+        : PUSH_OK)
+    expect(unreadable.status).toBe('pushed')
+  })
+
+  // VACUITY CONTROL: a configured non-default remote still works.
+  it('VACUITY: a configured remote still pushes', async () => {
+    expect((await withRemote('upstream')).status).toBe('pushed')
+  })
+})
+
+describe('rsct_request_push — B5 argv shape', () => {
+  beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
+
+  // Breaks on: moving `--` after the remote, i.e. ['push', remote, '--', branch].
+  // That was the first authorized form and it does NOT close the hole: measured,
+  // `git push --exec=<program> -- main` RUNS THE PROGRAM, because the remote is
+  // an agent slot too and still sits in an option position.
+  // The strict fake is what makes this assertion real — under the permissive one
+  // a wrong argv is answered ok and the test passes.
+  it('runs git push with -- BEFORE the remote', async () => {
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch: 'feat/foo' },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: strictGitExec({
+          remote: { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 },
+          'rev-parse --symbolic-full-name -- feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
+          'push -- origin feat/foo': PUSH_OK,
+        }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+    expect(out.status).toBe('pushed')
+  })
+})
+
+describe('rsct_request_push — B5 ref-store resolution arm', () => {
+  beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
+  /** rev-parse answers `resolved`; everything else succeeds. */
+  const withResolver = (branch: string, resolved: string) =>
+    requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: (_r, args) => {
+          if (args[0] === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
+          if (args[0] === 'rev-parse') return { ok: true, stdout: resolved, stderr: '', exitCode: 0 }
+          return PUSH_OK
+        },
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    ) as Promise<RequestPushOutput>
+
+  // Breaks on: removing the ref-store resolution arm.
+  // This is the ONLY shape resolution catches on its own: the string candidates
+  // for 'HEAD' are just ['HEAD'], which is in no protected list. `git push origin
+  // HEAD` while standing on main is an ordinary thing to type, and without this
+  // arm it reaches the remote's main with no ack and no override.
+  // The mutation harness caught that every other destination test passed through
+  // the STRING candidates, leaving this arm entirely unexercised.
+  it('catches a destination only the ref store can resolve', async () => {
+    const out = await withResolver('HEAD', 'refs/heads/main\n')
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('protected_branch')
+  })
+
+  // Breaks on: guarding the resolution on `rp.ok` instead of on the output
+  // starting with 'refs/'. rc=0 does NOT mean "canonicalised" — measured,
+  // `rev-parse --symbolic-full-name` returns rc=0 with EMPTY stdout for
+  // 'main@{0}', rc=0 echoing 'HEAD' on a detached HEAD, rc=0 echoing '--mirror'
+  // unchanged, and on FAILURE it still echoes its argument. Feeding any of that
+  // into the candidate set is how a NON-protected branch becomes protected — a
+  // hard stop on legitimate work, with no override path.
+  it('ignores an rc=0 answer that is not a ref', async () => {
+    const out = await withResolver('feat/foo', 'main\n')
+    expect(out.status).toBe('pushed')
+  })
+
+  // VACUITY CONTROL for this arm: resolution that DOES return a ref, for an
+  // ordinary branch, must still push.
+  it('VACUITY: a resolved non-protected ref still pushes', async () => {
+    const out = await withResolver('feat/foo', 'refs/heads/feat/foo\n')
+    expect(out.status).toBe('pushed')
   })
 })

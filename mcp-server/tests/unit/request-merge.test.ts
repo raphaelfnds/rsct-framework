@@ -115,7 +115,7 @@ describe('rsct_request_merge — happy path', () => {
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff feat/foo': MERGE_OK,
+        'merge --no-ff -- feat/foo': MERGE_OK,
       }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -143,7 +143,7 @@ describe('rsct_request_merge — happy path', () => {
       gitStateOverride: gitState('feat/cap33-int'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff feat/foo': MERGE_OK,
+        'merge --no-ff -- feat/foo': MERGE_OK,
       }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -198,7 +198,7 @@ describe('rsct_request_merge — happy path', () => {
       },
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
-    expect(mergeArgs).toBe('merge feat/foo')
+    expect(mergeArgs).toBe('merge -- feat/foo')
     expect(mergeArgs).not.toContain('--no-ff')
   })
 })
@@ -375,7 +375,7 @@ describe('rsct_request_merge — failure surfaces', () => {
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff feat/foo': conflict,
+        'merge --no-ff -- feat/foo': conflict,
       }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -528,7 +528,7 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
     gitExecutor: gitExec(
       {
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff feat/foo': MERGE_OK,
+        'merge --no-ff -- feat/foo': MERGE_OK,
       },
       { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
     ),
@@ -750,7 +750,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-          'merge --no-ff feat/foo': MERGE_OK,
+          'merge --no-ff -- feat/foo': MERGE_OK,
         }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -801,7 +801,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-          'merge --no-ff feat/foo': MERGE_OK,
+          'merge --no-ff -- feat/foo': MERGE_OK,
         }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
         promptFn: async (opts: DialogOptions) => {
           seen = opts.message

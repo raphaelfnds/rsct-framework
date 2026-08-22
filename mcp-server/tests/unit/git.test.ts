@@ -3,7 +3,16 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readWorktreeInfo, getRangePaths, isSafeRevisionToken } from '../../src/lib/git.js'
+import {
+  readWorktreeInfo,
+  getRangePaths,
+  isSafeRevisionToken,
+  gitPush,
+  gitMerge,
+  gitRebase,
+  gitSquash,
+  type GitExecutor,
+} from '../../src/lib/git.js'
 
 function hasGit(): boolean {
   try {
@@ -140,6 +149,11 @@ describe('lib/git — isSafeRevisionToken (injection guard)', () => {
   })
 })
 
+/** Each test below builds a real git repo — roughly a dozen process spawns.
+ *  Windows spawn is slow enough that vitest's 5 s default has no headroom, so
+ *  these declare their own budget instead of depending on a global default. */
+const GIT_TEST_TIMEOUT = 30_000
+
 describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
   /** Build `base` -> `head` with one rename, one deletion and one addition. */
   function seedRange(): void {
@@ -170,7 +184,7 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
     const p = paths(getRangePaths(main, 'HEAD', 'feat'))
     expect(p).not.toContain('deleted-me.txt')
     expect(p).toContain('added.txt')
-  })
+  }, GIT_TEST_TIMEOUT)
 
   // Breaks on: dropping `--diff-filter=d` (the SAME flag, a second reason it is
   // load-bearing). Measured: under diff.renames=false git reports the old side
@@ -183,7 +197,7 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
     const p = paths(getRangePaths(main, 'HEAD', 'feat'))
     expect(p).toContain('now-named.txt')
     expect(p).not.toContain('renamed-me.txt')
-  })
+  }, GIT_TEST_TIMEOUT)
 
   // Breaks on: removing the isSafeRevisionToken loop from getRangePaths.
   // Without it this exact call writes a file into the repo (measured, git 2.45.1).
@@ -192,7 +206,7 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
     const r = getRangePaths(main, `--output=${join(main, 'PWNED')}`, 'feat')
     expect(r.status).toBe('unsafe_revision')
     expect(existsSync(join(main, 'PWNED...feat'))).toBe(false)
-  })
+  }, GIT_TEST_TIMEOUT)
 
   // Breaks on: collapsing 'unsafe_revision' and 'unavailable' into one status
   // (e.g. returning { status: 'unavailable' } from the guard). Merge and rebase
@@ -204,7 +218,7 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
     const unreadable = getRangePaths(main, 'HEAD', 'no-such-branch')
     expect(rejected.status).toBe('unsafe_revision')
     expect(unreadable.status).toBe('unavailable')
-  })
+  }, GIT_TEST_TIMEOUT)
 
   // Breaks on: returning { status: 'ok', paths: [] } from the `raw === null`
   // branch of getRangePaths. The three tools branch on the status to pick their
@@ -221,6 +235,80 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
     expect(getRangePaths(mkdtempSync(join(tmpdir(), 'rsct-nogit-')), 'HEAD', 'feat').status).toBe(
       'unavailable',
     )
-  })
+  }, GIT_TEST_TIMEOUT)
 })
 
+// ============================================================================
+// #62 B5 — the four mutating exec sites.
+//
+// Measured on git 2.45.1.windows.1: `git rebase "--exec=<program>" main` RUNS
+// THE PROGRAM. execFileSync removes the shell, but git itself executes it, so
+// "no shell means no injection" is false here. Two independent barriers ship:
+// the `--` sentinel (a git-side control whose behaviour differs per subcommand)
+// and the operand predicate (a process-side control that holds on every git
+// version — and this project declares no minimum one).
+// ============================================================================
+describe('lib/git — mutating helpers guard their operands', () => {
+  const seen: string[][] = []
+  const spy: GitExecutor = (_root, args) => {
+    seen.push(args)
+    return { ok: true, stdout: 'aaaa111', stderr: '', exitCode: 0 }
+  }
+  beforeEach(() => { seen.length = 0 })
+  const lastOf = (verb: string): string[] | undefined =>
+    [...seen].reverse().find((a) => a[0] === verb)
+
+  // Breaks on: moving `--` after the remote — ['push', remote, '--', branch].
+  // That was the first form proposed and it leaves the execution vector open:
+  // `git push --exec=X -- main` still runs the program, because `remote` is an
+  // agent slot sitting in an option position. The sentinel must come first.
+  it('gitPush puts -- BEFORE the remote', () => {
+    gitPush('/tmp/x', 'origin', 'main', spy)
+    expect(lastOf('push')).toEqual(['push', '--', 'origin', 'main'])
+  })
+
+  // Breaks on: dropping `--` from gitMerge. Flags there are built from booleans,
+  // so nothing agent-controlled precedes the sentinel and it can sit last.
+  it('gitMerge puts -- after its flags and before the branch', () => {
+    gitMerge('/tmp/x', 'feat/x', { no_ff: true, allow_unrelated_histories: false }, spy)
+    expect(lastOf('merge')).toEqual(['merge', '--no-ff', '--', 'feat/x'])
+  })
+
+  // Breaks on: dropping `--` from gitRebase — the sharpest of the four.
+  it('gitRebase puts -- before the upstream', () => {
+    gitRebase('/tmp/x', 'main', spy)
+    expect(lastOf('rebase')).toEqual(['rebase', '--', 'main'])
+  })
+
+  // Breaks on: dropping `--` from gitSquash.
+  it('gitSquash puts -- before the source branch', () => {
+    gitSquash('/tmp/x', 'feat/x', spy)
+    expect(lastOf('merge')).toEqual(['merge', '--squash', '--', 'feat/x'])
+  })
+
+  // Breaks on: removing the unsafeOperand call from any of the four. The
+  // assertion that the executor was NEVER REACHED is the load-bearing half: `--`
+  // alone also makes these fail, so a weaker "the call failed" check would pass
+  // with the predicate deleted and the second barrier silently gone.
+  it.each([
+    ['gitPush/remote', () => gitPush('/tmp/x', '--exec=/tmp/pwn.sh', 'main', spy)],
+    ['gitPush/branch', () => gitPush('/tmp/x', 'origin', '--exec=/tmp/pwn.sh', spy)],
+    ['gitRebase', () => gitRebase('/tmp/x', '--exec=/tmp/pwn.sh', spy)],
+    ['gitMerge', () => gitMerge('/tmp/x', '--exec=/tmp/pwn.sh', { no_ff: true, allow_unrelated_histories: false }, spy)],
+    ['gitSquash', () => gitSquash('/tmp/x', '--exec=/tmp/pwn.sh', spy)],
+  ])('%s refuses an option-shaped operand WITHOUT invoking git', (_label, call) => {
+    const r = call()
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('not a safe operand')
+    expect(seen).toEqual([])
+  })
+
+  // VACUITY CONTROL. Every assertion above is satisfied by a helper that refuses
+  // everything. This is the one that is not.
+  it('VACUITY: ordinary operands still reach git', () => {
+    expect(gitPush('/tmp/x', 'origin', 'release/2.0', spy).ok).toBe(true)
+    expect(gitRebase('/tmp/x', 'origin/main', spy).ok).toBe(true)
+    expect(gitMerge('/tmp/x', 'feat/café', { no_ff: false, allow_unrelated_histories: false }, spy).ok).toBe(true)
+    expect(seen.length).toBeGreaterThan(0)
+  })
+})

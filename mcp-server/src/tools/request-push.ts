@@ -48,6 +48,11 @@ import {
   preMergeAckJsonSchema,
   PRE_MERGE_ACK_ITEMS,
 } from '../lib/pre-merge-ack.js'
+import {
+  parsePushRefspec,
+  pushRefspecRejectReason,
+  stripRefsPrefix,
+} from '../lib/push-refspec.js'
 
 export const requestPushInputSchema = z
   .object({
@@ -58,11 +63,20 @@ export const requestPushInputSchema = z
     remote: z
       .string()
       .optional()
-      .describe('Remote name (default: origin).'),
+      .describe(
+        'Configured remote NAME (default: origin). A URL or filesystem path is refused — ' +
+          'it would send the repository somewhere branch protection cannot see. Add it with ' +
+          '`git remote add` first.',
+      ),
     branch: z
       .string()
       .optional()
-      .describe('Branch name to push (default: current HEAD).'),
+      .describe(
+        'Branch to push (default: current HEAD). Branch protection compares the resolved push ' +
+          'DESTINATION, so +main, HEAD:main, feat/x:main, refs/heads/main and heads/main are all ' +
+          'recognised as main. Refused outright: a value starting with "-", a "*" glob refspec, ' +
+          'and an empty destination (a bare ":" pushes every matching ref).',
+      ),
     dev_approval: z
       .unknown()
       .describe(
@@ -88,6 +102,10 @@ export type RequestPushRejectKind =
   | 'protected_branch'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
+  /** #62 B5: the branch/refspec is option-shaped, a glob, or has no destination. */
+  | 'unsafe_push_target'
+  /** #62 B5: the remote is not a configured remote of this repository. */
+  | 'unknown_remote'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -127,7 +145,7 @@ export interface RequestPushInternal {
 export const requestPushTool: Tool = {
   name: 'rsct_request_push',
   description:
-    "§C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote> <branch>`. No secrets scan — the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry.",
+    "§C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote> <branch>`. No secrets scan — the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -135,8 +153,16 @@ export const requestPushTool: Tool = {
         type: 'string',
         description: 'Optional absolute path to override project root detection.',
       },
-      remote: { type: 'string', description: 'Remote name (default: origin).' },
-      branch: { type: 'string', description: 'Branch to push (default: current HEAD).' },
+      remote: {
+        type: 'string',
+        description:
+          'Configured remote NAME (default: origin). A URL or path is refused — add it with `git remote add` first.',
+      },
+      branch: {
+        type: 'string',
+        description:
+          'Branch to push (default: current HEAD). Protection compares the resolved DESTINATION, so +main / HEAD:main / refs/heads/main are all recognised as main. A leading "-", a "*" glob, and an empty destination are refused.',
+      },
       dev_approval: {
         type: 'object',
         description: 'dev_approval payload.',
@@ -167,11 +193,10 @@ export async function requestPushHandler(
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
   const { list: protectedList } = effectiveProtectedList(config)
-  const branchProtected = isProtectedBranch(branch, protectedList)
 
   // #25. Push is outward-facing and hard to reverse, so degraded enforcement
   // matters MORE here than at commit — and this is exactly where the warning used
-  // to be silent. Evaluated before the pre-gate ack check so it reaches the dev on
+  // to be silent. Evaluated before every pre-gate check so it reaches the dev on
   // rejected attempts too, and drained through `withAdvisories` on every return
   // path. Prepended: it outranks the routine hint tail.
   const advisories: string[] = []
@@ -185,6 +210,126 @@ export async function requestPushHandler(
     auditWriter: appendAudit,
   })
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
+
+  // #62 B5: the remote is an agent slot that nothing validated, and it feeds the
+  // same argv. Measured: `git push <arbitrary-bare-path> main` lands the repo's
+  // contents in a foreign repository, and `--` does NOT protect that slot —
+  // `git push -- <path> main` is still rc=0. So the operand sentinel in `gitPush`
+  // is necessary and not sufficient; this is the other half.
+  //
+  // STRICT by decision: only an UNREADABLE list (`ok === false`, e.g. outside a
+  // repo) skips the check. An EMPTY list REJECTS. The two are different failures:
+  // skipping on empty would leave a repo with no configured remotes — exactly the
+  // shape an attacker-controlled path exploits — with no protection at all.
+  //
+  // BREAKING, deliberately: pushing straight to a URL or filesystem path stops
+  // working. That capability IS the exfiltration vector, and the tool's own
+  // schema has always documented this field as "Remote name (default: origin)".
+  const remoteList = gitExecutor(projectRoot, ['remote'])
+  if (remoteList.ok) {
+    const names = remoteList.stdout
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    if (!names.includes(remote)) {
+      const reason =
+        `remote ${JSON.stringify(remote)} is not a configured remote of this repository` +
+        `${names.length > 0 ? ` (configured: ${names.join(', ')})` : ' (none configured)'}` +
+        '. RSCT pushes only to NAMED remotes — a URL or path here would send the ' +
+        'repository somewhere branch protection cannot see. Add it with `git remote add` first.'
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_push.rejected',
+          tool: 'rsct_request_push',
+          reject_kind: 'unknown_remote',
+          reason,
+          branch,
+          remote,
+          configured_remotes: names,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch,
+        remote,
+        channel: null,
+        reject_kind: 'unknown_remote',
+        reason,
+        fabrication_signals: [],
+        branch_check: { protected: false, override_used: false },
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
+  }
+
+  // #62 B5: resolve what this push actually WRITES TO before asking whether it is
+  // protected. `isProtectedBranch` is an exact compare, so `+main`, `HEAD:main`,
+  // `refs/heads/main`, `heads/main` and `@` all missed it while landing on the
+  // remote's `main` — no ack, no override. The parse is pure; the ref-store
+  // resolution below adds what only git can answer.
+  const refspec = parsePushRefspec(branch ?? '')
+  if (branch !== null && !refspec.ok) {
+    const reason = pushRefspecRejectReason(refspec.reason, branch)
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_push.rejected',
+        tool: 'rsct_request_push',
+        reject_kind: 'unsafe_push_target',
+        refspec_reject: refspec.reason,
+        reason,
+        branch,
+        remote,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch,
+      remote,
+      channel: null,
+      reject_kind: 'unsafe_push_target',
+      reason,
+      fabrication_signals: [],
+      branch_check: { protected: false, override_used: false },
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason]),
+    }
+  }
+
+  // Ask the ref store what the destination canonicalises to, and add that to the
+  // candidate set. Guarded on `startsWith('refs/')`, NEVER on the exit code:
+  // measured, `rev-parse --symbolic-full-name` returns rc=0 with EMPTY stdout for
+  // `main@{0}`, rc=0 echoing `HEAD` on a detached HEAD, rc=0 echoing `--mirror`
+  // unchanged, and on FAILURE it still echoes its argument to stdout.
+  //
+  // It answers about the LOCAL ref store while the push writes the REMOTE, so it
+  // is an addition to the string candidates, never a replacement: in a
+  // `clone --single-branch` with no local `main`, resolution fails while
+  // `HEAD:refs/heads/main` still moves the protected branch. The prefix-stripped
+  // string arm is what closes that, and it cannot fail.
+  const candidates = new Set(refspec.ok ? refspec.candidates : [])
+  if (refspec.ok) {
+    const rp = gitExecutor(projectRoot, [
+      'rev-parse',
+      '--symbolic-full-name',
+      '--',
+      refspec.destination,
+    ])
+    const resolved = rp.stdout.trim()
+    if (resolved.startsWith('refs/')) {
+      candidates.add(resolved)
+      candidates.add(stripRefsPrefix(resolved))
+    }
+  }
+  const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList))
 
   // PH-5: pre-integration hygiene gate. Scoped to PROTECTED-branch pushes only
   // (MCP-P1-D) — a feature/WIP push to a non-protected branch (e.g. to trigger CI

@@ -494,6 +494,33 @@ export function getHeadSha(
   return r.stdout.trim() || null
 }
 
+/**
+ * Guard every agent-controlled operand a mutating helper is about to place in
+ * git's argv. Returns a reason string when one is unsafe, `null` when all are.
+ *
+ * This is the SECOND barrier, deliberately independent of the `--` sentinel each
+ * helper also passes. Neither relies on the other: `--` is a git-side control
+ * whose exact behaviour differs per subcommand (measured: at `git diff` it
+ * reclassifies the token as a PATHSPEC and returns rc=0 with empty output — a
+ * silent pass — which is why the range reader validates instead), while this is
+ * a process-side control that holds regardless of git version. The project
+ * declares no minimum git version, so a control that depends on one is not
+ * something to lean the whole fix on.
+ *
+ * Reuses {@link isSafeRevisionToken}: its two rules — no leading `-`, no control
+ * characters — are operand rules, not revision rules, and apply equally to a
+ * remote name. Anything beyond them was measured to cost availability without
+ * buying safety; see that function's docblock.
+ */
+function unsafeOperand(operands: Record<string, string>): string | null {
+  for (const [name, value] of Object.entries(operands)) {
+    if (!isSafeRevisionToken(value)) {
+      return `refusing to run git: ${name} is not a safe operand (${JSON.stringify(value)}) — a value starting with '-' is read by git as an OPTION, not a name`
+    }
+  }
+  return null
+}
+
 export interface GitCommitResult {
   ok: boolean
   sha_before: string | null
@@ -543,7 +570,15 @@ export function gitPush(
   branch: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitPushResult {
-  const exec = executor(projectRoot, ['push', remote, branch])
+  const bad = unsafeOperand({ remote, branch })
+  if (bad) return { ok: false, error: bad }
+  // `--` goes BEFORE the remote, not after it. `remote` is an agent-controlled
+  // slot too, and `git push --exec=<program> -- <branch>` RUNS THE PROGRAM
+  // (measured, git 2.45.1) — putting the sentinel after the remote guards the
+  // refspec while leaving the execution vector wide open. With it first,
+  // `git push -- --exec=X main` is refused ("strange hostname blocked") and
+  // `git push -- origin release/2.0` is unaffected. See {@link unsafeOperand}.
+  const exec = executor(projectRoot, ['push', '--', remote, branch])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()
@@ -585,10 +620,16 @@ export function gitMerge(
   options: GitMergeOptions,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ sourceBranch })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const args = ['merge']
   if (options.no_ff) args.push('--no-ff')
   if (options.allow_unrelated_histories) args.push('--allow-unrelated-histories')
-  args.push(sourceBranch)
+  // Every flag above comes from a boolean, so nothing agent-controlled precedes
+  // the sentinel. `--` makes git read what follows as an operand: measured,
+  // `merge -m x -- --no-verify` is refused ("not something we can merge") while
+  // `merge --no-ff -m x -- feat` merges normally.
+  args.push('--', sourceBranch)
 
   const sha_before = getHeadSha(projectRoot, executor)
   const exec = executor(projectRoot, args)
@@ -614,8 +655,13 @@ export function gitRebase(
   upstream: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ upstream })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const sha_before = getHeadSha(projectRoot, executor)
-  const exec = executor(projectRoot, ['rebase', upstream])
+  // The sharpest of the four: measured, `git rebase "--exec=<program>" main`
+  // EXECUTES the program. `git rebase -- "--exec=..."` is refused as an invalid
+  // upstream, and `git rebase -- main` is unaffected.
+  const exec = executor(projectRoot, ['rebase', '--', upstream])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
     if (exec.stderr) result.stderr = exec.stderr.trim()
@@ -638,8 +684,10 @@ export function gitSquash(
   sourceBranch: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ sourceBranch })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const sha_before = getHeadSha(projectRoot, executor)
-  const exec = executor(projectRoot, ['merge', '--squash', sourceBranch])
+  const exec = executor(projectRoot, ['merge', '--squash', '--', sourceBranch])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
     if (exec.stderr) result.stderr = exec.stderr.trim()
