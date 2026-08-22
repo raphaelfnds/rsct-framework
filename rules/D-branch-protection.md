@@ -50,13 +50,32 @@ checklist and confirm it with the dev:
 2. Are the pertinent **ADRs recorded** (→ §H)? (Confirm the ones already
    surfaced this session are written — this is not a new proposal round.)
 3. Are the associated **issues resolved**?
+4. Have the files this integration carries been **swept** for dead code and for
+   comments that no longer match the code? List them.
+
+Item 4 applies at **every tier** — there is no `trivial`/`small` exemption. An
+agent produces residue at every size of task, and residue that reaches the
+codebase is paid for by every task after it.
+
+Where the sweep is **practised** and where it is **enforced** are different
+points, deliberately. Practise it at the refactor moment, right after the code
+works and while the context is still warm. It is enforced later, at the
+integration boundary, because that is where residue would otherwise become
+permanent.
 
 When `rsct-mcp` is installed, `rsct_request_merge` (always), `rsct_request_push`
 (when the branch is protected), and `rsct_request_rebase` (local rebase/squash,
 plan-lifecycle-v2) enforce this mechanically via `pre_merge_ack` (§C) — the ack
-is a self-attestation (except `plan_complete`, now cross-checked against open
-`- [ ]` items in the plan's progress), so answer it honestly; marking any item
-false is honored as a stop. **A local rebase/squash now has a §C-gated tool**
+is a self-attestation (except `plan_complete`, cross-checked against open `- [ ]`
+items in the plan's progress), so answer it honestly; marking any item false is
+honored as a stop.
+
+Item 4 additionally carries **`files_swept[]`**, and that one is not a
+self-attestation: RSCT reads the paths the integration really carries out of git
+and rejects when one of them is missing from your list, **whatever the booleans
+say**. Get the list with `git diff --name-only <base>...<head>`. It checks
+**coverage** — that the carried paths were claimed as swept — not that a sweep
+happened or found anything. **A local rebase/squash now has a §C-gated tool**
 (`rsct_request_rebase`, which requires its own `pre_merge_ack`); **only PR merges
 via `gh`/the web UI still have no MCP tool** — there the checklist is **yours to
 run as prose** before the outward-facing action. A push to a non-protected

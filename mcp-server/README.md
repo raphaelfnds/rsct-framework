@@ -567,21 +567,38 @@ regex metachar escape; `{a,b}` and `[abc]` are deferred to v2.
 
 ### §C-gated mutating ops
 
-These three tools require a valid `dev_approval` payload on every call
-(INV-2 anti-reuse) AND pop an OS dialog for explicit dev confirmation
-(INV-2.1 out-of-band channel) unless the tool's own name is listed in
-`approval_modes.trust_allowed_for[]` (e.g. `["rsct_request_commit"]`).
-Fabrication signals (INV-2.2) auto-elevate to forced-dialog mode
-regardless of trust.
+There are **four** §C-gated mutating ops: `rsct_request_commit`,
+`rsct_request_push`, `rsct_request_merge` and `rsct_request_rebase`. All four pop
+an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel) unless
+the tool's own name is listed in `approval_modes.trust_allowed_for[]` (e.g.
+`["rsct_request_commit"]`), and fabrication signals (INV-2.2) auto-elevate to
+forced-dialog mode regardless of trust.
 
-**Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always) and
-`rsct_request_push` (only when the target branch is protected) additionally
-require a `pre_merge_ack` hygiene checklist. It is checked **before** the OS
-dialog — a missing/incomplete ack rejects **in chat with no dialog**. The three
-items (`plan_complete` / `adr_confirmed` / `issues_resolved`, plus a `note` when
-ADRs/issues are attested) are honest **self-attestations**, not machine-verified;
-the mechanical teeth are that you cannot integrate without the checklist and that
-a declared `false` is honored as a stop.
+**Three of them require a `dev_approval` payload on every call** (INV-2
+anti-reuse): push, merge and rebase. `rsct_request_commit` is the exception — its
+authorization is EITHER a per-action `dev_approval` OR a plan-scoped batch token
+OR the free-commit lane, as described under its own heading below.
+
+**Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always),
+`rsct_request_rebase` (always — a rebase/squash rewrites history, which is an
+integration event) and `rsct_request_push` (only when the target branch is
+protected) additionally require a `pre_merge_ack` hygiene checklist. It is checked
+**before** the OS dialog — a missing/incomplete ack rejects **in chat with no
+dialog**, so a rejected ack never spends an approval.
+
+The four items — `plan_complete` / `adr_confirmed` / `issues_resolved` /
+`hygiene_swept`, plus a `note` whenever ADRs, issues or the sweep are attested —
+are honest **self-attestations**, not machine-verified. Two mechanical teeth back
+them: you cannot integrate without assembling the checklist, and a declared
+`false` is honored as a stop.
+
+A fifth field, **`files_swept[]`**, is evidence rather than an attestation. RSCT
+reads the paths the integration actually carries out of git (never a
+caller-supplied value) and rejects when one of them is absent from your list —
+**regardless of the four booleans**. Obtain it with `git diff --name-only
+<base>...<head>`. Be precise about what this buys: it verifies **coverage**, that
+the carried paths were *claimed* as swept. It does not verify that a sweep
+happened, nor that one found anything.
 
 The `dev_approval` shape (validated by `lib/dev-approval.ts`):
 
@@ -628,8 +645,24 @@ consumed by design).
 Pushes the current branch if `dev_approval` is valid + branch is not
 protected (or `override_protected_branch` is set with reason).
 
-- Input: `project_root?`, `remote?` (default `origin`), `branch?` (default HEAD), `dev_approval`, `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
-- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Input: `project_root?`, `remote?` (default `origin` — must be a **configured remote name**; see below), `branch?` (default HEAD), `dev_approval`, `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
+- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'unsafe_push_target' | 'unknown_remote'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+
+**Branch protection compares the push DESTINATION, not the string you passed.**
+`branch` accepts a refspec, and several forms write to a protected branch while
+comparing unequal to its name: `+main` (the force marker), `HEAD:main` and
+`feat/x:main` (the destination is after the colon — git splits on the LAST one),
+`refs/heads/main` and `heads/main` (qualified forms). RSCT resolves the
+destination first and compares that. Refused outright, before git runs:
+a value starting with `-` (git would read it as an option), a `*` glob refspec
+(it can rewrite branches the protection check never sees), and an empty
+destination (a bare `:` is git's "matching" refspec and pushes everything).
+
+**`remote` must be a configured remote name — pushing straight to a URL or a
+filesystem path is refused.** That capability sends the repository somewhere
+branch protection cannot see, so it is not available through this tool. Add the
+destination with `git remote add` first. Only an *unreadable* remote list (e.g.
+outside a git repo) skips the check; an *empty* one rejects.
 
 #### `rsct_request_merge`
 
@@ -642,6 +675,23 @@ force-pushy patterns by default).
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
 don't accidentally pass the flag without the override.
+
+#### `rsct_request_rebase`
+
+The history-rewriting integration paths. `mode:'rebase'` runs `git rebase <ref>`;
+`mode:'squash'` runs `git merge --squash <ref>`, which STAGES the combined change
+without committing it — commit it afterwards through `rsct_request_commit`.
+
+**Always per-action**: never covered by a plan token or the free-commit lane, and
+it always requires a `pre_merge_ack`. Runs INV-5 on the CURRENT branch, since
+rewriting a protected branch's history needs `override_protected_branch`.
+
+- Input: `project_root?`, `mode?` (`'rebase' | 'squash'`, default `'rebase'`), `ref`, `dev_approval`, `pre_merge_ack` (REQUIRED)
+- Output: `status: 'rebased' | 'squashed' | 'rejected' | 'mutation_failed'`, `mode`, `ref`, `current_branch`, `sha_before`, `sha_after`, `reject_kind?` (incl. `'detached_head' | 'same_ref' | 'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`
+
+Conflicts surface as `mutation_failed` carrying git's stderr; the working tree is
+left as git leaves it and nothing is force-pushed. `ref` is refused before git
+runs if it would be read as an option rather than a name.
 
 #### `rsct_plan_authorize` (T3 — plan execution mode: batch)
 

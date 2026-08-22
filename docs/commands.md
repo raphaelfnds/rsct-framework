@@ -196,6 +196,25 @@ phase** is a *post-Code* audit of a **diff inside** an open cycle.
 + anti-patterns). Three distinct tools; this one is the "should we open a cycle to
 clean this up?" entry point.
 
+**Where the cleanup sweep is practised, recorded and enforced — three different
+points.** Do not collapse them:
+
+- **Practised** at the refactor moment, right after the code works and while the
+  context is still warm. That is where a sweep is cheap and where the literature
+  puts it; nothing about the machinery below changes that.
+- **Recorded** in `findings_actions[]` on `rsct_phase_review_complete`, where a
+  record already exists.
+- **Enforced** at the **integration boundary**, by the `hygiene_swept` item of
+  `pre_merge_ack` — on a merge, a rebase/squash, and a push to a protected
+  branch. Not inside a phase: no phase always runs, and a `trivial` task may
+  legitimately skip the phase machine entirely, so an obligation created there
+  binds only the agents that opted in. Residue is paid for by every task after
+  it, so the obligation applies at **every tier**, with no exemption.
+
+The enforcement checks **coverage** — that the paths the integration carries were
+*claimed* as swept. It does not verify that a sweep happened, or that one found
+anything.
+
 **When to use it.** In any repo, when you want a structured pass for duplication,
 scalability, or stale/loose dependencies — before committing to a refactor. Works
 whether or not RSCT is installed in the target repo (it falls back to the
