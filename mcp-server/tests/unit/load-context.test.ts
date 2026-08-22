@@ -419,6 +419,13 @@ describe('rsct_load_context — the §0 bootstrap report (#53)', () => {
     )
     expect(line).toBeDefined()
     expect(line).toContain('re-read plan, decisions and knowledge')
+    // Mutation: `bootstrap_at: baseState.bootstrap_at ?? now.toISOString()` in
+    // stampBootstrapMarker. The marker never moves and "refreshed it" is false
+    // forever, while every hint assertion stays green.
+    const stamped = JSON.parse(
+      readFileSync(join(stale, '.rsct', 'phase-state.json'), 'utf8'),
+    ).bootstrap_at
+    expect(Date.now() - new Date(stamped).getTime()).toBeLessThan(60_000)
 
     const fresh = project({ bootstrap_at: new Date().toISOString() })
     const freshOut = (await loadContextHandler({
@@ -472,6 +479,62 @@ describe('rsct_load_context — the §0 bootstrap report (#53)', () => {
       readFileSync(join(root, '.rsct', 'phase-state.json'), 'utf8'),
     )
     expect(after.context_stale).toBeDefined()
+  })
+
+  it('clears context_stale on a successful load — the D4 obligation is discharged', async () => {
+    // The positive control for the whole #53 story, and it was missing.
+    // Mutation: `stampBootstrapMarker(projectRoot)` inside readThenStampBootstrap,
+    // dropping `opts`. `clearStale` is then lost and NOTHING clears the flag —
+    // while #53 has just made abandon preserve it — so every managed edit is
+    // blocked permanently. 83 tests across four files stayed green under it.
+    // This is also what makes the commit's "it cannot deadlock" claim checkable.
+    const root = project({
+      phase: 'code',
+      context_stale: { since: '2026-06-07T12:00:00.000Z', reason: 'plan_closed' },
+    })
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    const after = JSON.parse(
+      readFileSync(join(root, '.rsct', 'phase-state.json'), 'utf8'),
+    )
+    expect(after.context_stale).toBeUndefined()
+    expect(after.phase).toBe('code') // control: the rest of the state survived
+    expect(
+      out.next_action_hints.some((h) => h.includes('re-bootstrap flag')),
+    ).toBe(false)
+  })
+
+  it('does NOT claim a re-bootstrap block when no flag was set', async () => {
+    // Mutation: `if (true)` on the context_stale sub-hint. The existing test only
+    // proves it fires when the flag IS set; a false "managed edits stay blocked"
+    // is as damaging as a missed one, and would fire on every failed write.
+    const root = project()
+    mkdirSync(join(root, '.rsct', 'phase-state.lock'), { recursive: true })
+
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    expect(
+      out.next_action_hints.some((h) => h.includes('could not be written')),
+    ).toBe(true) // control: the write really failed, so the branch was reached
+    expect(
+      out.next_action_hints.some((h) => h.includes('re-bootstrap flag')),
+    ).toBe(false)
+  })
+
+  it('reports a locked phase-state in its own voice', async () => {
+    // The load-context twin of the status locked test. Mutation: copy-paste the
+    // status wording (it names the retry tool), or drop the branch. Untested,
+    // the two copies could name the wrong tool and nothing would notice.
+    const root = project({ bootstrap_at: new Date().toISOString() })
+    writeFileSync(
+      join(root, '.rsct', 'phase-state.lock'),
+      JSON.stringify({ session_id: 'peer', locked_at: new Date().toISOString() }),
+      'utf8',
+    )
+    const out = (await loadContextHandler({ project_root: root })) as LoadContextOutput
+    const line = out.next_action_hints.find((h) =>
+      h.includes('holds .rsct/phase-state.lock'),
+    )
+    expect(line).toBeDefined()
+    expect(line).toContain('the next rsct_load_context records it')
   })
 
   it('says nothing about §0 in a project that is not rsct-managed', async () => {

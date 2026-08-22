@@ -9,9 +9,12 @@ import { corpusMiss } from '../lib/corpus-health.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import {
   BOOTSTRAP_STALE_MS,
+  bootstrapWriteFailureHint,
+  readContextStale,
   readPhaseState,
   readPlanDisposition,
   readThenStampBootstrap,
+  truncateForHint,
   type BootstrapRefresh,
 } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
@@ -261,31 +264,24 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   }
 }
 
-/** Values read off disk land in the hints array — bound them. */
-function truncate(value: string, max = 80): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value
-}
-
 const BOOTSTRAP_STALE_MIN = Math.round(BOOTSTRAP_STALE_MS / 60000)
 
 /**
- * #53: the §0 bootstrap report, in `rsct_load_context`'s own voice — the twin of
- * `bootstrapHints` in tools/status.ts. Two reasons the text is not shared: the
- * library's own marker hints instruct the reader to run both stamping tools
- * (self-referential from inside either), and this tool is the one that really
- * re-loads context, so it can say so where `rsct_status` cannot.
+ * #53: the §0 bootstrap report, in `rsct_load_context`'s own voice — twin of the
+ * one in tools/status.ts, which carries the note on why the verdict strings are
+ * per-call-site rather than shared. This tool is the one that really re-loads
+ * context, so it can say so where `rsct_status` cannot.
  *
- * The extra branch is D4: `clearStale` rides in the SAME write as the marker
- * (lib/phase-scope stampBootstrapMarker), so a write that does not land leaves
- * the re-bootstrap obligation undischarged while this report otherwise reads
- * like context was reloaded. When that happens, say it.
+ * The extra branch is D4: `clearStale` rides in the SAME write as the marker, so
+ * a write that does not land leaves the re-bootstrap obligation undischarged
+ * while the rest of this report reads like context was reloaded. Say it.
  */
 function bootstrapHints(refresh: BootstrapRefresh): string[] {
   const { marker, read, write } = refresh
 
   if (write === null) {
     return [
-      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncate(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
+      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
     ]
   }
 
@@ -294,7 +290,7 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
 
   if (marker.status === 'missing' && marker.bootstrap_at !== null) {
     hints.push(
-      `⚠ The recorded bootstrap_at value ('${truncate(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_load_context call replaced it' : ', and this call could not replace it (see below)'}.`,
+      `⚠ The recorded bootstrap_at value ('${truncateForHint(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_load_context call replaced it' : ', and this call could not replace it (see below)'}.`,
     )
   } else if (marker.status === 'missing') {
     hints.push(
@@ -311,14 +307,17 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
     )
   }
 
-  if (!write.ok) {
-    hints.push(
-      write.reason === 'locked'
-        ? `ℹ Another session holds .rsct/phase-state.lock (acquired ${write.lock_age_ms}ms ago) — the §0 marker for this call was not recorded. Harmless when two sessions share one worktree; the next rsct_load_context records it.`
-        : `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncate(write.error)}. Until a write succeeds, rsct_phase_code_start and the rsct_request_* gates keep reporting bootstrap as missing or stale.`,
-    )
-    // D4: the clear rides in that same failed write.
-    if (read.state?.context_stale !== undefined) {
+  const writeHint = bootstrapWriteFailureHint(
+    write,
+    'rsct_load_context',
+    marker.status === 'fresh',
+  )
+  if (writeHint) {
+    hints.push(writeHint)
+    // D4: the clear rides in that same failed write. Truthiness, not
+    // `!== undefined` — that is the predicate the edit guard itself uses, so a
+    // `context_stale: null` on disk must not produce a "still blocked" claim.
+    if (readContextStale(read.state) !== null) {
       hints.push(
         `⚠ The re-bootstrap flag (context_stale) was NOT cleared, because the phase-state write did not land — rsct_check_edit_scope keeps reporting 'stale_context' and managed edits stay blocked. Re-run rsct_load_context once the write can succeed.`,
       )

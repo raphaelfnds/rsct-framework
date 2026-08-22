@@ -5,7 +5,9 @@ import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js
 import { effectiveProtectedList } from '../lib/branch-protection.js'
 import {
   BOOTSTRAP_STALE_MS,
+  bootstrapWriteFailureHint,
   readThenStampBootstrap,
+  truncateForHint,
   type BootstrapRefresh,
 } from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
@@ -102,14 +104,11 @@ export async function statusHandler(
   const resolution = resolveProjectRoot(input.project_root)
   const git = readGitState(resolution.root)
 
-  // CAP-31: stamp bootstrap marker so downstream mutating tools can
-  // detect whether §0 was performed in this session window. Stamping is
-  // best-effort — a write failure never fails the call (status itself is a
-  // read-only diagnostic). #53: it is no longer swallowed SILENTLY, and the
-  // marker is evaluated BEFORE the stamp — reading it after would describe
-  // the state this very call just wrote, making the report vacuously "fresh"
-  // on every call. Guarded on rsct_installed: an unmanaged project has no §0
-  // to report on, and buildStatusHints already tells it to run /rsct-setup.
+  // CAP-31: stamp bootstrap marker so downstream mutating tools can detect
+  // whether §0 was performed in this session window. #53: read-then-stamp (see
+  // readThenStampBootstrap), and the write outcome is reported rather than
+  // swallowed. Guarded on rsct_installed: an unmanaged project has no §0 to
+  // report on, and buildStatusHints already tells it to run /rsct-setup.
   const bootstrap: BootstrapRefresh | null = resolution.rsct_installed
     ? readThenStampBootstrap(resolution.root)
     : null
@@ -257,34 +256,26 @@ function applyUpdateMutations(input: StatusInput, opts: UpdateOptions | undefine
   }
 }
 
-/** Values read off disk land in hints[], the agent's control channel — bound them. */
-function truncate(value: string, max = 80): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value
-}
-
 const BOOTSTRAP_STALE_MIN = Math.round(BOOTSTRAP_STALE_MS / 60000)
 
 /**
- * #53: the §0 bootstrap report, in `rsct_status`'s own voice.
+ * #53: the §0 bootstrap report, in `rsct_status`'s own voice — twin of the one in
+ * tools/load-context.ts. The verdict strings are deliberately not shared:
+ * `evaluateBootstrapMarker`'s own hints tell the reader to run rsct_status AND
+ * rsct_load_context, which is self-referential from inside either, and its
+ * `missing` branch fires on the first call in every freshly installed project.
+ * What IS shared sits in lib/phase-scope (`truncateForHint`,
+ * `bootstrapWriteFailureHint`).
  *
- * Deliberately NOT `evaluateBootstrapMarker`'s own `missing` / `stale` strings:
- * both instruct the reader to run rsct_status and rsct_load_context, which is
- * self-referential emitted from inside one of them — and the `missing` branch is
- * taken on the FIRST call in every freshly installed project, so it would fire
- * constantly and say nothing usable. `rsct_load_context` carries its own copy
- * for the same reason (see the note there); keep the two in step.
- *
- * Every "this call recorded/refreshed it" claim is conditional on the write
- * having landed — a report that says it refreshed a marker it failed to write is
- * the same vacuity one layer up.
+ * Every "recorded/refreshed it" claim hangs off `recorded`: a report that claims
+ * a refresh it failed to write is the same vacuity one layer up.
  */
 function bootstrapHints(refresh: BootstrapRefresh): string[] {
   const { marker, read, write } = refresh
 
-  // Stamp deliberately skipped: the file exists but could not be parsed.
   if (write === null) {
     return [
-      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncate(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
+      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
     ]
   }
 
@@ -292,9 +283,9 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
   const recorded = write.ok
 
   if (marker.status === 'missing' && marker.bootstrap_at !== null) {
-    // The file parsed, the VALUE did not.
+    // The file parsed; the VALUE did not.
     hints.push(
-      `⚠ The recorded bootstrap_at value ('${truncate(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_status call replaced it' : ', and this call could not replace it (see below)'}.`,
+      `⚠ The recorded bootstrap_at value ('${truncateForHint(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_status call replaced it' : ', and this call could not replace it (see below)'}.`,
     )
   } else if (marker.status === 'missing') {
     hints.push(
@@ -312,13 +303,12 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
   }
   // `fresh` says nothing — matching evaluateBootstrapMarker's own `hint: null`.
 
-  if (!write.ok) {
-    hints.push(
-      write.reason === 'locked'
-        ? `ℹ Another session holds .rsct/phase-state.lock (acquired ${write.lock_age_ms}ms ago) — the §0 marker for this call was not recorded. Harmless when two sessions share one worktree; the next rsct_status records it.`
-        : `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncate(write.error)}. Until a write succeeds, rsct_phase_code_start and the rsct_request_* gates keep reporting bootstrap as missing or stale.`,
-    )
-  }
+  const writeHint = bootstrapWriteFailureHint(
+    write,
+    'rsct_status',
+    marker.status === 'fresh',
+  )
+  if (writeHint) hints.push(writeHint)
 
   return hints
 }

@@ -604,13 +604,14 @@ export function tierRank(tier: string | undefined | null): number {
 export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
 
 /**
- * CAP-31: stamp `bootstrap_at` on the current phase-state. Called by
- * `rsct_status` and `rsct_load_context` so downstream mutating tools
- * can detect when §0 was skipped or stale.
+ * CAP-31: stamp `bootstrap_at` on the current phase-state, so downstream
+ * mutating tools can detect when §0 was skipped or stale.
  *
- * Failures are swallowed — bootstrap stamping is best-effort metadata,
- * never the reason a status/load_context call fails. Callers may
- * inspect the returned `WritePhaseStateResult` for diagnostics.
+ * Do NOT call this directly from a §0 tool — go through
+ * {@link readThenStampBootstrap}, the only production caller, which evaluates
+ * the marker first and refuses to stamp over an unparseable file. Stamping is
+ * still best-effort (never the reason a status/load_context call fails), but
+ * #53 stopped the result being DISCARDED: both tools now report it.
  */
 export function stampBootstrapMarker(
   projectRoot: string,
@@ -661,7 +662,12 @@ export function readContextStale(
  * CAP-31 / CAP-33 bootstrap marker reader. Returns whether §0 was
  * performed and how recently. Soft signal — callers surface a hint
  * and audit entry but do NOT reject. Shared across `phase_code_start`
- * (CAP-31) and `request_commit/_push/_merge` (CAP-33).
+ * (CAP-31), `request_commit/_push/_merge/_rebase` (CAP-33) and — via
+ * {@link readThenStampBootstrap} — `rsct_status` / `rsct_load_context` (#53).
+ *
+ * `bootstrap_at` is whatever the JSON held: the schema is deliberately
+ * forgiving and nothing validates the type, so a caller interpolating it into
+ * a hint must treat it as `unknown` ({@link truncateForHint}).
  */
 export type BootstrapStatus = 'fresh' | 'stale' | 'missing'
 
@@ -758,6 +764,46 @@ export function readThenStampBootstrap(
     return { marker, read, write: null }
   }
   return { marker, read, write: stampBootstrapMarker(projectRoot, opts) }
+}
+
+/**
+ * #53: bound an untrusted value before it is interpolated into `hints[]`, the
+ * agent's control channel. Takes `unknown` on purpose: `bootstrap_at` and
+ * `parse_error` come straight out of a JSON file nothing validates, so a
+ * `{"bootstrap_at": {"length": 999}}` would otherwise reach `.slice()` and throw
+ * out of a tool documented "always succeeds", and an array would slip the length
+ * check entirely and interpolate in full.
+ */
+export function truncateForHint(value: unknown, max = 80): string {
+  const s = typeof value === 'string' ? value : String(value)
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+/**
+ * #53: the "the stamp did not land" hint, shared by both §0 tools because it is
+ * the same fact about the same file — only the retry tool differs. The verdict
+ * lines around it are per-call-site on purpose (the library's own marker hints
+ * name both tools, which is self-referential from inside either); this one names
+ * neither except through `toolName`.
+ *
+ * `markerFresh` exists because the consequence clause is FALSE without it: when
+ * a still-fresh marker is already on disk, a failed write changes nothing that
+ * `phase_code_start` or the `request_*` gates can see — they read the same
+ * marker and report `fresh`. Only a missing or stale marker leaves them warning.
+ */
+export function bootstrapWriteFailureHint(
+  write: WritePhaseStateResult,
+  toolName: string,
+  markerFresh: boolean,
+): string | null {
+  if (write.ok) return null
+  if (write.reason === 'locked') {
+    return `ℹ Another session holds .rsct/phase-state.lock (acquired ${write.lock_age_ms}ms ago) — the §0 marker for this call was not recorded. Harmless when two sessions share one worktree; the next ${toolName} records it.`
+  }
+  const consequence = markerFresh
+    ? 'The marker already on record still stands and will go stale at the usual window.'
+    : `Until a write succeeds, rsct_phase_code_start and the rsct_request_* gates keep reporting bootstrap as missing or stale.`
+  return `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncateForHint(write.error)}. ${consequence}`
 }
 
 /**

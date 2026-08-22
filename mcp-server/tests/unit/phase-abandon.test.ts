@@ -204,6 +204,14 @@ describe('rsct_phase_abandon — §C-gated path', () => {
 describe('rsct_phase_abandon — the preserve-list (#53)', () => {
   const STAMP = '2026-06-07T14:00:00.000Z'
 
+  /** The phase_abandon.complete entry from the audit log. */
+  const completeAudit = (): Record<string, unknown> =>
+    readFileSync(join(tmpRoot, '.rsct/audit.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'phase_abandon.complete')!
+
   it('preserves bootstrap_at — the §0 session marker, not state of the work', async () => {
     // Mutation: remove 'bootstrap_at' from PHASE_STATE_PRESERVED_ON_ABANDON.
     writePhaseState({
@@ -228,6 +236,10 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     // toBe, not toBeDefined: nothing in phase-abandon re-stamps, so the exact
     // value is free to assert and it guards a future writer that does.
     expect(state.bootstrap_at).toBe(STAMP)
+
+    // The audit says what survived. Mutation: compute preserved_keys from the
+    // constant instead of from the state actually written, or drop the field.
+    expect(completeAudit().preserved_keys).toEqual(['bootstrap_at'])
   })
 
   it('clears every key that describes the abandoned work', async () => {
@@ -302,6 +314,7 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     ]) {
       expect(state[key], `${key} must not survive an abandon`).toBeUndefined()
     }
+    expect(completeAudit().preserved_keys).toEqual([])
   })
 
   it('drops a key the preserve-list does not name — allowlist, never wipe-list', async () => {
@@ -328,6 +341,11 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     ) as Record<string, unknown>
     expect(state.phase).toBeUndefined()
     expect(state.future_key_not_yet_invented).toBeUndefined()
+    // Nothing was preserved here, so the hint must not say anything was.
+    // Mutation: make the "session markers preserved" clause unconditional — it
+    // then asserts preservation on the common case, a phase abandoned with no
+    // bootstrap marker and no re-bootstrap flag.
+    expect(r.hints.some((h) => h.includes('session markers preserved'))).toBe(false)
   })
 
   it('no longer claims "State cleared" when a session marker survived', async () => {
@@ -342,7 +360,11 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as PhaseAbandonOutput
     expect(r.status).toBe('abandoned')
-    expect(r.hints.some((h) => h.includes('State cleared.'))).toBe(false)
+    // Asserts what the hint RENDERS (preservedKeys), not the absence of the old
+    // sentence: a negative on deleted wording goes red the day someone writes
+    // "State cleared." in a correct implementation, and stays green under any
+    // reworded-but-broken one. Restoring the old hint drops this clause, so this
+    // positive assertion catches it anyway.
     expect(
       r.hints.some((h) => h.includes('session markers preserved (bootstrap_at)')),
     ).toBe(true)

@@ -374,6 +374,13 @@ describe('rsct_status — the §0 bootstrap report (#53)', () => {
     const minutes = Number(/last recorded (\d+) min ago/.exec(line ?? '')?.[1])
     expect(minutes).toBeGreaterThanOrEqual(298)
     expect(minutes).toBeLessThanOrEqual(302)
+    // "refreshed it" must be a behavioural claim, not a copy-edit tripwire.
+    // Mutation: `bootstrap_at: baseState.bootstrap_at ?? now.toISOString()` in
+    // stampBootstrapMarker — a plausible "don't clobber what's there" edit. The
+    // marker then never moves, the stale report never clears, and the hint above
+    // says "refreshed it" forever. Every other assertion in this file survives it.
+    expect(Date.now() - new Date(readState(stale).bootstrap_at as string).getTime())
+      .toBeLessThan(60_000)
 
     const fresh = project({ bootstrap_at: new Date().toISOString() })
     const freshOut = (await statusHandler({ project_root: fresh })) as StatusOutput
@@ -393,6 +400,27 @@ describe('rsct_status — the §0 bootstrap report (#53)', () => {
           h.includes('is not a parseable timestamp') && h.includes('not-a-timestamp'),
       ),
     ).toBe(true)
+    // …and the corrupt value really was replaced. Without this the hint claims a
+    // replacement that the same "don't clobber" mutation would never perform.
+    expect(readState(root).bootstrap_at).not.toBe('not-a-timestamp')
+  })
+
+  it('never throws or floods hints on a junk bootstrap_at value', async () => {
+    // Mutation: `truncateForHint(value: string)` taking a string and calling
+    // .slice() directly. The phase-state schema is deliberately forgiving and
+    // nothing validates this field, so an object with a numeric `length` reaches
+    // .slice() and throws out of a tool documented "always succeeds"; an array
+    // slips the length check and interpolates in full. Deleting the truncation
+    // altogether also passes every other test in this file.
+    const throws = project({ bootstrap_at: { length: 100 } })
+    const out = (await statusHandler({ project_root: throws })) as StatusOutput
+    expect(out.rsct_installed).toBe(true) // control: it really got that far
+
+    const flood = project({ bootstrap_at: 'x'.repeat(5000) })
+    const floodOut = (await statusHandler({ project_root: flood })) as StatusOutput
+    const line = floodOut.hints.find((h) => h.includes('not a parseable timestamp'))
+    expect(line).toBeDefined()
+    expect(line!.length).toBeLessThan(300)
   })
 
   it('does NOT write over an unparseable phase-state.json, and says why', async () => {
@@ -462,6 +490,31 @@ describe('rsct_status — the §0 bootstrap report (#53)', () => {
     expect(out.hints.some((h) => h.includes('recorded one, so the session'))).toBe(
       false,
     )
+    // The write really failed: nothing was created. (Not readState() — there is
+    // no file to parse, which is the point.)
+    expect(existsSync(join(root, '.rsct', 'phase-state.json'))).toBe(false)
+  })
+
+  it('does not claim downstream gates will warn when the marker is still fresh', async () => {
+    // Mutation: make the consequence clause unconditional (drop `markerFresh`).
+    // A failed write over a FRESH marker changes nothing the gates can see —
+    // phase_code_start and the request_* gates read the same marker and report
+    // fresh — so "they keep reporting bootstrap as missing or stale" is false,
+    // and it is the ONLY bootstrap hint in that report (a fresh verdict is
+    // silent). The write-failure test above covers the missing-marker arm, where
+    // the same sentence is true.
+    const root = project({ bootstrap_at: new Date().toISOString() })
+    mkdirSync(join(root, '.rsct', 'phase-state.lock'), { recursive: true })
+
+    const out = (await statusHandler({ project_root: root })) as StatusOutput
+    const line = out.hints.find((h) => h.includes('could not be written'))
+    expect(line).toBeDefined()
+    expect(line).toContain('still stands')
+    expect(
+      out.hints.some((h) =>
+        h.includes('keep reporting bootstrap as missing or stale'),
+      ),
+    ).toBe(false)
   })
 
   it('says nothing about §0 in a project that is not rsct-managed', async () => {
