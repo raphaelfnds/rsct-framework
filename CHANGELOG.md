@@ -10,6 +10,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.7.5] - 2026-08-21
+
+Four things that were quietly wrong on every run. Patch: no new tool, no new phase,
+tool count unchanged at **39**, marker schema id still `v=1.0.0`.
+
+What changes for a user: re-installing no longer resets the MCP scope you chose.
+Press Enter — or run `RSCT_ASSUME_YES=1` — and a recorded `project` or `skip` now
+survives, where it previously became `user` with nothing on screen and nothing in
+`git status`, because the state lives in `~/.rsct/`. Reset deliberately with
+`rm -f ~/.rsct/mcp-scope`.
+
+The other three are smaller and equally silent: the installer stopped calling
+`docs/` an unfamiliar directory on every run, the test suite can now run from a
+linked git worktree (the workflow `rules/` recommends for parallel work), and the
+one populated example stopped teaching an inverted documentation layout.
+
+### Fixed
+
+- **A re-install silently reset a recorded MCP scope to `user` (#71).**
+  `scripts/install.sh` wrote `~/.rsct/mcp-scope` in three branches and never read
+  it back — the menu default was the literal `1`. Pressing Enter, or any
+  `RSCT_ASSUME_YES=1` run, rewrote a recorded `project`/`skip` to `user`, with no
+  warning and nothing in `git status` to notice: the state lives in `~/.rsct/`.
+  A repo could then sit for weeks with its committable `.mcp.json` unmaintained
+  by `/rsct-setup` while everything reported healthy.
+
+  The menu now derives its default from the recorded value, an empty reply
+  resolves to that default instead of falling through to `user`, and the
+  branch verdicts say "kept" rather than "selected" when nothing was chosen this
+  run. A marker the mapping does not recognize (a stray space, a different case,
+  a UTF-8 BOM — the #29 class) is announced as unrecognized instead of being
+  offered for "keep", and a mistyped reply that replaces a recorded scope now
+  says so instead of overwriting in silence. Reset with
+  `rm -f ~/.rsct/mcp-scope`.
+
+- **The test suite could not run green from a linked git worktree.**
+  `status.test.ts` asserted a literal `is_worktree === false` over a fixture that
+  lives inside the repo, so the assertion inverted as soon as the suite ran from
+  a worktree — which `rules/C-reauthorize.md` and `rules/B-architect-plan.md`
+  actively recommend for parallel work. The hint is now tied to the actual state,
+  which is also strictly stronger: it catches a hint firing outside a worktree
+  and one failing to fire inside one.
+
+- **`install.sh` warned that `docs/` was "unfamiliar" on every install**, asking
+  the dev to edit the installer. `docs/` is read on GitHub, not shipped to
+  `~/.rsct/`, so it joins the known non-runtime list.
+
+- **The `java-spring` example had its `auth` module and impact docs swapped** —
+  `modules/auth.md` held `# Impact: auth` and vice versa, and the cross-link
+  pointed at itself. The `tenant` pair beside it was already correct. It is the
+  only populated example, so it was teaching the inverted layout.
+
 ## [2.7.4] - 2026-08-16
 
 The onboarding detector's verdict on a project that is not set up yet. Patch: no new tool,

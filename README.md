@@ -115,8 +115,21 @@ RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
 
 - `RSCT_ASSUME_YES=1` (or `--yes` / `-y`) — answer every prompt with its default.
 - `RSCT_SKIP_MCP=1` (or `--skip-mcp`) — skip the rsct-mcp companion entirely
-  (no global `npm install -g`, no `claude mcp add`). Omit it to install and
-  register the companion non-interactively too (user scope by default).
+  (no global `npm install -g`, no `claude mcp add`). Omit it and the companion is
+  always **installed** globally without prompting; whether it is also
+  **registered** depends on `~/.rsct/mcp-scope` (#71):
+
+  | Recorded scope | What an unattended run does |
+  |---|---|
+  | `user`, or no marker at all | runs `claude mcp add rsct rsct-mcp --scope user` |
+  | `project` | records the scope only — `/rsct-setup` writes the `.mcp.json` in each project later |
+  | `skip`, or an unreadable marker | registers nothing |
+
+  Because `~/.rsct/` survives `/rsct-uninstall` and gets copied between machines,
+  an imaged or inherited home carries its scope with it — and an inherited
+  `project` marker now also means `/rsct-setup` will create a `.mcp.json` in
+  every project you run it in. To force a deterministic first-install default in
+  a provisioning script, delete the marker first: `rm -f ~/.rsct/mcp-scope`.
 
 The same flags work for `uninstall-framework.sh` (`--skip-mcp` there leaves the
 global companion and any user-scope registration untouched).
@@ -129,8 +142,12 @@ MCP server during the install run. Three choices:
 | Choice | Command run for you | Where to use |
 |---|---|---|
 | **1. User scope** *(recommended for solo dev)* | `claude mcp add rsct rsct-mcp --scope user` | One-time per machine. `rsct__*` tools become available in every project after IDE restart. |
-| **2. Project scope** *(for teams committing `.mcp.json`)* | nothing — you run it manually per project | `cd <each-project> && claude mcp add rsct rsct-mcp --scope project`. The `.mcp.json` commits to git so teammates pick it up. |
+| **2. Project scope** *(for teams committing `.mcp.json`)* | `/rsct-setup` writes the `.mcp.json` for you (CAP-48) | Run `/rsct-setup` in each project and commit the `.mcp.json` so teammates pick it up. Manual equivalent: `cd <project> && claude mcp add rsct rsct-mcp --scope project`. |
 | **3. Skip** | nothing | Run either of the above commands manually whenever you want. |
+
+Your choice is recorded in `~/.rsct/mcp-scope`. Pressing **Enter** takes **[1]** on a
+first install, or **whatever the marker records** on any later run (#71) — so
+re-installing no longer silently resets a `project` or `skip` choice to user scope.
 
 ### Manual steps the install can never automate
 
@@ -148,7 +165,10 @@ Three steps, one restart.
 When you pick **Project scope** during install, the installer records the
 choice in `~/.rsct/mcp-scope`. The next time you run **`/rsct-setup` in a
 project**, it AUTOMATICALLY creates / updates a committable `.mcp.json` in that
-project root (CAP-48) — no manual step needed. You can still register manually
+project root (CAP-48) — no manual step needed. The installer also **reads** the
+marker on every later run and offers it as the menu default, so re-installing
+and pressing Enter keeps the scope you chose instead of resetting it to
+user scope (#71). You can still register manually
 with `claude mcp add rsct rsct-mcp --scope project`. Either path writes:
 
 1. **`.mcp.json` in the project root**:
@@ -481,7 +501,9 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ├── VERSION-CODE                   # rsct-mcp code version — the second axis the
 │                                  #   installer reports, so a code-only change
 │                                  #   cannot hide behind an unchanged protocol version
-├── mcp-scope                      # user | project — chosen at install, read by /rsct-setup
+├── mcp-scope                      # user | project | skip — chosen at install, read by
+│                                  #   /rsct-setup AND by install.sh on every later run,
+│                                  #   which offers it as the menu default (#71)
 ├── update-check.json              # release-check cache: consent, declined releases,
 │                                  #   last check. Machine-global; NOT removed by
 │                                  #   /rsct-uninstall (it records your choices)
