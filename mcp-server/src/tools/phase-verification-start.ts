@@ -3,9 +3,11 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
 import {
+  coverageHints,
   walkReverseDeps,
   type DiscoveredImporter,
   type ReverseDepStats,
+  type WalkCoverage,
 } from '../lib/reverse-dep-walk.js'
 import {
   runVerificationChecklist,
@@ -95,6 +97,12 @@ export interface PhaseVerificationStartOutput {
    */
   findings_run_id: string | null
   walk_stats: ReverseDepStats
+  /**
+   * #54. How much of `declared_paths` the reverse-dep walk was able to look at.
+   * Travels on every return path as `walk_stats` does — unlike
+   * `discovered_importers`, which is zeroed where no phase started.
+   */
+  walk_coverage: WalkCoverage
   checklist_stats: ChecklistStats
   phase_state_path: string
   phase_state_written: boolean
@@ -195,6 +203,8 @@ export async function phaseVerificationStartHandler(
         spec_ref: input.spec_ref,
         spec_tier: input.spec_tier,
         requested_persona: requestedPersona,
+        // Recorded here too: the only artifact a trivial/small run leaves.
+        walk_coverage: walk.coverage,
       },
       config?.audit,
     )
@@ -210,6 +220,7 @@ export async function phaseVerificationStartHandler(
       discovered_importers: [],
       findings: [],
       walk_stats: walk.stats,
+      walk_coverage: walk.coverage,
       checklist_stats: checklist.stats,
       phase_state_path: phaseStatePathStr,
       phase_state_written: false,
@@ -271,6 +282,7 @@ export async function phaseVerificationStartHandler(
       discovered_importers: [],
       findings: [],
       walk_stats: walk.stats,
+      walk_coverage: walk.coverage,
       checklist_stats: checklist.stats,
       phase_state_path: phaseStatePathStr,
       phase_state_written: false,
@@ -338,6 +350,14 @@ export async function phaseVerificationStartHandler(
       requested_persona: requestedPersona,
       declared_count: walk.declared.length,
       discovered_count: walk.discovered.length,
+      // #54. Hints are not audited, so a V that ran blind used to leave no
+      // queryable trace — `discovered_count: 0` reads identically whether the
+      // graph was empty, unavailable, or merely incomplete. All three of these
+      // are needed to tell them apart: the seed counts do not capture a
+      // resolver that dropped every edge while every seed was analyzable.
+      walk_coverage: walk.coverage,
+      uncovered_seed_count: walk.uncovered_seeds.length,
+      unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
       findings_count: checklist.findings.length,
       phase_state_written: writeResult.ok,
     },
@@ -376,6 +396,13 @@ export async function phaseVerificationStartHandler(
       `⚠ phase-state.json write failed: ${writeResult.error}. Verification ran but state was not persisted; rsct_phase_verification_complete will not find an active block.`,
     )
   }
+  // #54. Before the walk's and the checklist's hints, not after: this is the
+  // correction to the checklist's "found no findings to surface against the
+  // available corpus", and appended last it would be read after the sentence it
+  // exists to qualify. Prepending an advisory is the convention here
+  // (`lib/install-advisory.ts`, the three request tools). Emitted only on the
+  // non-skipped paths — see `coverageHints`.
+  hints.push(...coverageHints(walk))
   hints.push(...walk.hints)
   hints.push(...checklist.hints)
   if (fields.audit_error !== null) {
@@ -395,6 +422,7 @@ export async function phaseVerificationStartHandler(
     discovered_importers: walk.discovered,
     findings: checklist.findings,
     walk_stats: walk.stats,
+    walk_coverage: walk.coverage,
     checklist_stats: checklist.stats,
     phase_state_path: phaseStatePathStr,
     phase_state_written: writeResult.ok,
