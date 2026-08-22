@@ -265,7 +265,7 @@ RUNTIME_DIRS="prompts rules doc-templates memory-templates universe-templates"
 # KNOWN_NON_RUNTIME is everything else we expect at source root. The
 # WARN below catches anything outside both lists so unfamiliar dirs
 # don't silently skip a planned install (MED-10 in the post-M2 audit).
-KNOWN_NON_RUNTIME="scripts mcp-server examples .git .github .claude node_modules dist coverage .vscode"
+KNOWN_NON_RUNTIME="scripts mcp-server examples docs .git .github .claude node_modules dist coverage .vscode"
 
 for dir in $RUNTIME_DIRS; do
   echo "  copying $dir/"
