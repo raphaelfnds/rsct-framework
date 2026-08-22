@@ -80,6 +80,36 @@ read_or_default() {
 RSCT_HOME="$HOME/.rsct"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 
+# --- Read the MCP scope recorded by a previous run (#71) ---
+# The three menu branches below write this file, and until #71 nothing ever
+# read it back: the menu default was the literal "1", so pressing Enter — or
+# any RSCT_ASSUME_YES run — rewrote a recorded `project`/`skip` to `user`
+# with no warning, and /rsct-setup silently stopped maintaining the project
+# .mcp.json (prompts/01-setup.md:3683 gates on this value).
+#
+# `if` form, not `[ -f … ] && VAR=…`: this script runs under `set -e` (:12),
+# where an `&&` chain as the LAST statement of a FUNCTION OR SCRIPT BODY aborts
+# the installer (measured: as the last statement of an `if` block it does not).
+# Safe here either way, but the `if` cannot be broken by a later move, and it
+# matches the two existing marker reads at :139-146.
+# `tr -d '\r'` for a hand-edited CRLF file; `head -1` bounds a corrupt one.
+MCP_SCOPE_RECORDED=""
+MCP_SCOPE_KNOWN=""
+if [ -f "$RSCT_HOME/mcp-scope" ]; then
+  MCP_SCOPE_RECORDED=$(tr -d '\r' < "$RSCT_HOME/mcp-scope" | head -1)
+fi
+# MCP_SCOPE_KNOWN is set ONLY on an exact match, and it — never
+# MCP_SCOPE_RECORDED — gates the "press Enter to keep it" line. A marker with
+# a stray space, different case or a UTF-8 BOM (the #29 class) is non-empty
+# but unmapped: offering to "keep" it would promise exactly the silent
+# rewrite #71 reports.
+case "$MCP_SCOPE_RECORDED" in
+  project) MCP_SCOPE_DEFAULT="2"; MCP_SCOPE_KNOWN="project" ;;
+  skip)    MCP_SCOPE_DEFAULT="3"; MCP_SCOPE_KNOWN="skip" ;;
+  user)    MCP_SCOPE_DEFAULT="1"; MCP_SCOPE_KNOWN="user" ;;
+  *)       MCP_SCOPE_DEFAULT="1" ;;
+esac
+
 # --- Compute path that Claude Code @ references will resolve correctly ---
 OS_NAME=$(uname -s 2>/dev/null || echo "")
 if echo "$OS_NAME" | grep -qiE "MINGW|MSYS|CYGWIN"; then
@@ -406,7 +436,28 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             echo "      → must be added per project; instructions printed."
             echo "  [3] Skip — I'll register manually later."
             echo ""
-            read_or_default mcp_scope "Choice [1/2/3] (default: 1): " "1"
+            # #71: the default is DERIVED from the recorded scope, so Enter and
+            # RSCT_ASSUME_YES both mean "keep what I chose last time".
+            # The suffix is mode-aware: an unattended run has no Enter to press,
+            # and two adjacent lines saying "press Enter" then "(RSCT
+            # non-interactive default)" contradict each other.
+            if [ -n "$MCP_SCOPE_KNOWN" ]; then
+              if [ -n "$ASSUME_YES" ]; then
+                echo "  (current: $MCP_SCOPE_KNOWN — kept unless overridden)"
+              else
+                echo "  (current: $MCP_SCOPE_KNOWN — press Enter to keep it)"
+              fi
+            elif [ -n "$MCP_SCOPE_RECORDED" ]; then
+              echo "  (recorded scope unrecognized — the documented default [1] applies)"
+            fi
+            read_or_default mcp_scope "Choice [1/2/3] (default: $MCP_SCOPE_DEFAULT): " "$MCP_SCOPE_DEFAULT"
+            # read_or_default assigns the RAW reply on the interactive branch
+            # (:75), so an empty line lands as "" and falls through `case` to
+            # *) → user. That is the Enter half of #71. Resolved at the CALL
+            # SITE deliberately: fixing it inside read_or_default would flip
+            # "Proceed? [y/N]" (:279) to proceed-on-Enter, contradicting its
+            # own prompt.
+            [ -n "$mcp_scope" ] || mcp_scope="$MCP_SCOPE_DEFAULT"
 
             case "$mcp_scope" in
               2)
@@ -440,7 +491,13 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                   fi
                 fi
                 echo ""
-                echo "→ Project scope selected (saved to $RSCT_HOME/mcp-scope)."
+                # #71: under RSCT_ASSUME_YES nothing was "selected" this run —
+                # the recorded value was kept. Say which actually happened.
+                if [ "$MCP_SCOPE_KNOWN" = "project" ]; then
+                  echo "→ Project scope kept (recorded in $RSCT_HOME/mcp-scope)."
+                else
+                  echo "→ Project scope selected (saved to $RSCT_HOME/mcp-scope)."
+                fi
                 echo "  /rsct-setup will AUTOMATICALLY create/update a committable"
                 echo "  '.mcp.json' in each project where you run it — no manual"
                 echo "  'claude mcp add' needed. Just run /rsct-setup in the project."
@@ -461,12 +518,28 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
               3)
                 printf 'skip\n' > "$RSCT_HOME/mcp-scope"
                 echo ""
-                echo "→ Skipped. To register later:"
+                # #71: same distinction as the project branch above.
+                if [ "$MCP_SCOPE_KNOWN" = "skip" ]; then
+                  echo "→ Skip kept. To register later:"
+                else
+                  echo "→ Skipped. To register later:"
+                fi
                 echo "    User scope (1x per machine):   claude mcp add rsct rsct-mcp --scope user"
                 echo "    OR project scope (per project): cd <project> && claude mcp add rsct rsct-mcp --scope project"
                 ;;
               *)
                 # Default: user scope.
+                # #71: this arm is reached by an explicit `1` AND by a typo. Both
+                # write `user` — but a typo that REPLACES a recorded scope must
+                # not be silent, because the menu just offered to keep it. One
+                # mistyped key was otherwise enough to turn `project` into `user`
+                # with nothing on screen. No warning on a fresh install: there is
+                # nothing to lose, and `user` is the documented default.
+                if [ "$mcp_scope" != "1" ] && [ -n "$MCP_SCOPE_KNOWN" ]; then
+                  echo ""
+                  echo "⚠ '$mcp_scope' is not 1/2/3 — applying the documented default (user scope),"
+                  echo "  REPLACING the recorded '$MCP_SCOPE_KNOWN'. Re-run and pick again to undo."
+                fi
                 # CAP-48: record the chosen scope so /rsct-setup does NOT
                 # materialize a project .mcp.json for a user-scope install.
                 printf 'user\n' > "$RSCT_HOME/mcp-scope"
