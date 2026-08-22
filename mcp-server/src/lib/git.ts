@@ -57,10 +57,149 @@ export function getStagedPaths(projectRoot: string): string[] | null {
   if (!isGitRepo(projectRoot)) return null
   const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
   if (raw === null) return null
+  return splitNulPaths(raw)
+}
+
+/**
+ * Split a `-z` (NUL-separated) git path list into forward-slash-normalized
+ * entries. Shared by {@link getStagedPaths} and {@link getRangePaths} so the two
+ * readers cannot drift apart in how they parse the same wire format.
+ *
+ * The `\` → `/` replace is inherited from the original `getStagedPaths` body and
+ * kept for symmetry. Be aware of what it is: git emits `/` as the separator on
+ * every OS (including Windows) for `-z` output, so as a SEPARATOR fix it never
+ * fires. It only fires on a legal Linux/macOS filename containing a literal
+ * backslash, where it is lossy. Divergence between the two readers would be the
+ * worse defect, so it stays — documented rather than silently inherited.
+ */
+function splitNulPaths(raw: string): string[] {
   return raw
     .split('\0')
     .map((p) => p.replace(/\\/g, '/'))
     .filter((p) => p.length > 0)
+}
+
+/**
+ * Is `rev` safe to place in a git REVISION position?
+ *
+ * An injection guard, NOT a validity check — git still decides whether the ref
+ * resolves. It exists because {@link getRangePaths} builds a single
+ * `<base>...<head>` argv token out of caller-supplied strings, and a token
+ * beginning with `-` is read by git as an OPTION rather than an operand.
+ *
+ * Why that matters more here than elsewhere: the `pre_merge_ack` gate runs
+ * BEFORE `gateRequest` at all three call sites, deliberately, so a rejected ack
+ * never spends a §C approval. An unguarded revision would therefore reach
+ * `execFileSync` with no OS dialog shown and no `dev_approval` validated.
+ * `execFileSync` passes argv directly (no shell), so this is not command
+ * execution — it is an unapproved arbitrary-path WRITE, which is enough:
+ *
+ *     git diff --name-only -z --diff-filter=d "--output=SIDEEFFECT...HEAD"
+ *       -> rc=0, and a file named `SIDEEFFECT...HEAD` is created
+ *
+ * **The rule set is deliberately tiny, and that is a measured result, not
+ * minimalism.** A 30-token battery was run through the real argv above. Exactly
+ * one shape did anything other than resolve-or-fail: the option-shaped one.
+ * Every other candidate either resolved legitimately or exited 128/129 with no
+ * side effect — including `feat:main`, `main..feat`, `+feat`, `a b`,
+ * `feat.lock` and `feat/`. Rejecting those buys nothing the `unavailable`
+ * path does not already give, and each extra rule costs real availability.
+ *
+ * An earlier draft of this predicate also rejected `~ ^ : ? * [ .. @{` and a
+ * bare `@`. The battery refuted it: `HEAD~1`, `HEAD^`, `HEAD^1`,
+ * `HEAD@{0}` and `@` all RESOLVE, and `git rebase HEAD~3` is a canonical
+ * call. Because merge and rebase fail CLOSED on an unreadable range, a false
+ * reject here is a hard stop on a legitimate integration — raised before any
+ * dialog, with no override path. Over-restriction is the expensive error.
+ *
+ * Rejected alternatives, both measured:
+ * - `--end-of-options` works (rc=128, nothing written) but landed in git 2.24,
+ *   and this project declares no minimum git version; on older git it would fail
+ *   EVERY read, which for merge/rebase means a blocked merge. Depth only.
+ * - `--` is worse than nothing: it reclassifies the token as a pathspec and
+ *   returns rc=0 with empty output, which this module's caller would read as an
+ *   empty range — turning an attack into a silent pass.
+ *
+ * Exported for unit testing; NOT an MCP input.
+ */
+export function isSafeRevisionToken(rev: string): boolean {
+  if (typeof rev !== 'string' || rev.length === 0) return false
+  // THE rule — the only shape measured to have a side effect.
+  if (rev.startsWith('-')) return false
+  // Control characters, NUL and newline included. Not a git-parsing concern (git
+  // forbids them in refnames anyway): a NUL makes Node's execFileSync throw, and
+  // a newline would split the JSONL audit record that echoes the rejected
+  // revision. Fails here rather than somewhere worse.
+  if (/[\u0000-\u001f\u007f]/.test(rev)) return false
+  return true
+}
+
+/**
+ * Outcome of {@link getRangePaths}. Deliberately a three-way result rather than
+ * `string[] | null` (the shape {@link getStagedPaths} uses), because the caller
+ * must tell a REJECTED revision apart from an UNREADABLE range:
+ *
+ * - `unsafe_revision` means the caller handed us something option-shaped or
+ *   otherwise not a refname. That is an input-validation event and it is
+ *   audited as such.
+ * - `unavailable` means git could not answer — not a repo, a ref that does not
+ *   resolve, no merge base, an exec failure.
+ *
+ * Collapsing the two would make a crafted ref and an unfetched remote branch
+ * indistinguishable in `.rsct/audit.log`, which is precisely the case a
+ * forensic reader needs to separate.
+ */
+export type RangePathsResult =
+  | { status: 'ok'; paths: string[] }
+  | { status: 'unsafe_revision'; revision: string }
+  | { status: 'unavailable' }
+
+/**
+ * Return the paths a branch-scoped integration CARRIES — the three-dot range
+ * `git diff --name-only -z --diff-filter=d <base>...<head>` —
+ * forward-slash-normalized. `status:'ok'` with an empty `paths` means the range
+ * is genuinely empty (an already-merged source branch, or nothing to push);
+ * that is NOT the same as being unable to read it.
+ *
+ * Used by the `pre_merge_ack` hygiene cross-check (#62) at `rsct_request_merge`,
+ * `rsct_request_push` and `rsct_request_rebase`. Deliberately the REAL range —
+ * there is NO MCP-substitutable override (the A2/INV-6 lesson: a public diff
+ * override is an enforcement bypass). The tools carry a test-only READER seam on
+ * their `Internal` interface instead, which is not reachable from a tool call.
+ *
+ * **`--diff-filter=d` is load-bearing and does more than it looks like.**
+ * Measured against real git, not assumed:
+ *
+ * - It drops DELETIONS, which `--name-only` lists by default. A hygiene sweep of
+ *   a file the integration removes is incoherent — there is nothing left to
+ *   sweep and no honest way to attest it.
+ * - It also, as a consequence, drops the OLD side of a rename that git did not
+ *   detect as one. Under a user's `diff.renames=false` — or the silent
+ *   `diff.renameLimit` fallback, whose warning goes to stderr and is discarded
+ *   by `safeGitRaw` — the range would otherwise carry a path that does not exist
+ *   at `head`, an unsatisfiable demand. An explicit `-M` was tried here first and
+ *   REMOVED after measurement: git reports that old side as a deletion, so
+ *   `--diff-filter=d` already excludes it and the two flags produce byte-identical
+ *   output. Adding `-M` back would be dead weight, not defense.
+ */
+export function getRangePaths(
+  projectRoot: string,
+  base: string,
+  head: string,
+): RangePathsResult {
+  for (const rev of [base, head]) {
+    if (!isSafeRevisionToken(rev)) return { status: 'unsafe_revision', revision: rev }
+  }
+  if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
+  const raw = safeGitRaw(projectRoot, [
+    'diff',
+    '--name-only',
+    '-z',
+    '--diff-filter=d',
+    `${base}...${head}`,
+  ])
+  if (raw === null) return { status: 'unavailable' }
+  return { status: 'ok', paths: splitNulPaths(raw) }
 }
 
 export interface StagedStats {
