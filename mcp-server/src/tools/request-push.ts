@@ -313,14 +313,32 @@ export async function requestPushHandler(
   // Ask the ref store what the destination canonicalises to, and add that to the
   // candidate set. Guarded on `startsWith('refs/')`, NEVER on the exit code:
   // measured, `rev-parse --symbolic-full-name` returns rc=0 with EMPTY stdout for
-  // `main@{0}`, rc=0 echoing `HEAD` on a detached HEAD, rc=0 echoing `--mirror`
-  // unchanged, and on FAILURE it still echoes its argument to stdout.
+  // `HEAD@{0}`, and on FAILURE it still echoes its argument to stdout (`a.txt`
+  // comes back as `a.txt`, a nonexistent ref comes back with a `fatal:` line).
+  //
+  // NO `--` HERE, and that is load-bearing rather than an omission (Rv-A). The
+  // sentinel puts rev-parse into ECHO-THE-OPERANDS mode: measured,
+  // `rev-parse --symbolic-full-name -- main` returns `--` then `main`, never
+  // `refs/heads/main`. With it, this whole arm was DEAD — `startsWith('refs/')`
+  // could not be true for any input — and `git push origin HEAD` from a
+  // protected branch skipped the ack, the coverage check and the override, with
+  // the audit recording `protected: false`. `HEAD` and `@` are exactly the two
+  // spellings only the ref store can resolve; every other spelling is caught by
+  // the pure-string arm below.
+  //
+  // What makes dropping `--` safe is `parsePushRefspec`, which refuses a
+  // destination starting with `-` BEFORE this call — so `--all` and friends
+  // cannot reach it. Do NOT add a "reject multi-line output" guard as a second
+  // line of defence: measured, `rev-parse --symbolic-full-name --all` returns a
+  // SINGLE line in a repo with one ref, so it would not catch the very thing it
+  // appears to. The parse is the barrier; a weak guard beside it would only
+  // suggest otherwise.
   //
   // It answers about the LOCAL ref store while the push writes the REMOTE, so it
-  // is an addition to the string candidates, never a replacement: in a
-  // `clone --single-branch` with no local `main`, resolution fails while
-  // `HEAD:refs/heads/main` still moves the protected branch. The prefix-stripped
-  // string arm is what closes that, and it cannot fail.
+  // is an addition to the string candidates, never a replacement: in a clone
+  // with no local `main`, resolution fails while `HEAD:refs/heads/main` still
+  // moves the protected branch. The prefix-stripped string arm closes that, and
+  // it cannot fail.
   const candidates = new Set(refspec.ok ? refspec.candidates : [])
   // #62: the endpoints of the coverage cross-check, composed HERE because this is
   // the only point where the parsed refspec and the ref store's answer are both
@@ -334,7 +352,6 @@ export async function requestPushHandler(
     const rp = gitExecutor(projectRoot, [
       'rev-parse',
       '--symbolic-full-name',
-      '--',
       refspec.destination,
     ])
     const resolved = rp.stdout.trim()

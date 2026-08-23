@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -8,6 +9,7 @@ import {
   type RequestPushInternal,
   type RequestPushOutput,
 } from '../../src/tools/request-push.js'
+import { defaultGitExecutor } from '../../src/lib/git.js'
 import type {
   GitExecResult,
   GitExecutor,
@@ -757,7 +759,7 @@ describe('rsct_request_push — B5 argv shape', () => {
         gitStateOverride: gitState('feat/foo'),
         gitExecutor: strictGitExec({
           remote: { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 },
-          'rev-parse --symbolic-full-name -- feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
+          'rev-parse --symbolic-full-name feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
           'push -- origin feat/foo': PUSH_OK,
         }),
         promptFn: alwaysYes(),
@@ -948,5 +950,86 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     const pushed = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
       .trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.event === 'request_push.pushed')
     expect(pushed.path_crosscheck).toBeUndefined()
+  })
+})
+
+
+// Rv-A. Everything above this block resolves `rev-parse` through a FAKE, and a
+// fake cannot see a wrong argv. The B5 arm shipped with a `--` in the call, which
+// puts rev-parse into echo-the-operands mode — it returned `--` then the operand
+// for every input, so `startsWith('refs/')` was never true and the arm was DEAD in
+// production. The stub fed it a newline-terminated `refs/heads/main` — output real
+// git cannot produce for that argv — so the arm's mutant died honestly against a fixture
+// modelling a reality that does not exist. No harness control catches that: not a
+// broken runner, not a stale anchor — a wrong fixture.
+//
+// So this block uses a REAL repository and the REAL executor. Only `push` is
+// intercepted, and only so the test cannot write to anything.
+describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () => {
+  let realRoot: string
+  const attempted: string[][] = []
+  // Real for every read; `push` recorded and refused so nothing leaves the box.
+  const realExceptPush: GitExecutor = (r, args) => {
+    if (args[0] === 'push') {
+      attempted.push(args)
+      return { ok: false, stdout: '', stderr: 'intercepted by test', exitCode: 1 }
+    }
+    return defaultGitExecutor(r, args)
+  }
+  const g = (args: string[]) => execFileSync('git', args, { cwd: realRoot, encoding: 'utf8', stdio: 'pipe' })
+
+  beforeEach(() => {
+    attempted.length = 0
+    realRoot = mkdtempSync(join(tmpdir(), 'rsct-rp-real-'))
+    g(['init', '-q', '-b', 'main', '.'])
+    g(['config', 'user.email', 't@t'])
+    g(['config', 'user.name', 't'])
+    writeFileSync(join(realRoot, 'a.txt'), 'x')
+    g(['add', 'a.txt'])
+    g(['commit', '-qm', 'init'])
+    g(['remote', 'add', 'origin', 'https://example.invalid/r.git'])
+    writeConfig(realRoot, { ...BASE_CONFIG, protected_branches: ['main'] })
+  })
+  afterEach(() => {
+    if (existsSync(realRoot)) rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  const push = (branch: string) =>
+    requestPushHandler(
+      { project_root: realRoot, branch, dev_approval: approval(), pre_merge_ack: ack() },
+      { gitStateOverride: gitState('main'), gitExecutor: realExceptPush, promptFn: alwaysYes(), now: FIXED_NOW },
+    ) as Promise<RequestPushOutput>
+
+  // THE regression test. Breaks on: re-adding `--` to the rev-parse argv.
+  // Measured against git 2.45.1: with `--` the answer is "--" then "HEAD", so the
+  // arm never fires, `isProtectedBranch('HEAD', ['main'])` is false, and the push
+  // reaches the remote's main with no ack, no coverage check and no override — with
+  // the audit recording `protected: false`.
+  it.each([['HEAD'], ['@']])(
+    'recognises %s as the protected branch it actually resolves to',
+    async (spelling) => {
+      const out = await push(spelling)
+      expect(out.branch_check.protected).toBe(true)
+      expect(out.reject_kind).toBe('protected_branch')
+      expect(attempted).toEqual([])
+    },
+  )
+
+  // VACUITY CONTROL. A version that called every destination protected would pass
+  // the two rows above and prove nothing.
+  it('still pushes an ordinary branch that resolves to a non-protected ref', async () => {
+    g(['checkout', '-qb', 'feat/real'])
+    const out = await push('HEAD')
+    expect(out.branch_check.protected).toBe(false)
+    expect(attempted).toEqual([['push', '--', 'origin', 'HEAD']])
+  })
+
+  // The string arm, against real git rather than a stub — it must keep working
+  // for the spellings that never needed the ref store.
+  it('recognises refs/heads/main and heads/main through the string arm', async () => {
+    for (const spelling of ['refs/heads/main', 'heads/main', '+main']) {
+      const out = await push(spelling)
+      expect(out.branch_check.protected).toBe(true)
+    }
   })
 })

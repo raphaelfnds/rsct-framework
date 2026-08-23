@@ -97,10 +97,19 @@ export function stripRefsPrefix(ref: string): string {
  *    `git push origin 'main:--all'` is rc=0 and creates a branch literally named
  *    `refs/heads/--all` on the remote. So this is defence in depth against
  *    writing a garbage ref that is then awkward to remove — the exec vectors are
- *    all PRE-colon and step 1 is what addresses those. The resolution step is
- *    separately safe: `request-push` passes `--` to `rev-parse`, and
- *    `rev-parse --symbolic-full-name -- --all` returns the operands rather than
- *    the all-refs listing it returns without `--`.
+ *    all PRE-colon and step 1 is what addresses those.
+ *
+ *    This reject is ALSO what keeps `request-push`'s `rev-parse` call safe, and
+ *    that dependency runs the opposite way from what this docblock first claimed
+ *    (Rv-A). The original text said the resolver was protected by passing `--`
+ *    to `rev-parse`. Measured: `--` puts rev-parse into echo-the-operands mode,
+ *    so it returned `--` and the operand for EVERY input and the caller's
+ *    canonicalization arm never ran at all. The `--` has been removed there, and
+ *    the reason that is safe is THIS step — `--all`, `--branches` and every
+ *    other selector start with `-` and never reach the call. A "reject
+ *    multi-line output" guard at the call site would not substitute for it:
+ *    `rev-parse --symbolic-full-name --all` returns a single line in a
+ *    single-ref repo.
  * 6. **Reject `*` in the DESTINATION.** `git push origin
  *    '+refs/heads/main*:refs/heads/main*'` is rc=0 and force-updates a protected
  *    branch while the plain push of the same state is refused rc=1; `rev-parse`
