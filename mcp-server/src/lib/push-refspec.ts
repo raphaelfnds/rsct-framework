@@ -39,6 +39,17 @@ export type PushRefspecParse =
       candidates: string[]
       /** The destination exactly as written, after the `+` strip and `:` split. */
       destination: string
+      /**
+       * The LOCAL side of the refspec — what is being pushed FROM — after the
+       * `+` strip and the same last-colon split. Equal to `destination` when the
+       * refspec carries no colon, and `''` for a delete refspec (`:main`).
+       *
+       * Exposed rather than recomputed by the caller (#62 B3 reads
+       * `<remote>/<destination>...<source>` for the coverage cross-check): the
+       * last-colon split is subtle enough that it was verified twice against git,
+       * and a second copy of it in `request-push.ts` is how the two drift.
+       */
+      source: string
       /** True when a leading `+` was stripped — i.e. this push is a FORCE. */
       forced: boolean
     }
@@ -62,10 +73,13 @@ export function stripRefsPrefix(ref: string): string {
  *
  * The step ORDER is forced by measurement and must not be rearranged:
  *
- * 1. **Reject a leading `-` first.** `rev-parse --symbolic-full-name --all`
- *    returns rc=0 and a LIST of every ref, and `--mirror` is echoed back rc=0
- *    unchanged — so anything option-shaped that reaches the resolution step
- *    poisons it rather than failing.
+ * 1. **Reject a leading `-` first.** This is the layer that catches an
+ *    option-shaped SOURCE with a clean destination — `--all:main` parses to
+ *    destination `main`, so nothing later in this function sees it. Be exact
+ *    about what it buys: it is an EARLIER and clearer reject, not the sole
+ *    closure of the exec vector. `unsafeOperand` in `lib/git.ts` is the backstop
+ *    and would refuse the same value at the exec site; this one stops it before
+ *    two more git calls are made.
  * 2. Strip a leading `+` (git's force marker; it strips it too).
  * 3. Split on the LAST `:`. Verified twice: `push origin 'main:refs/heads/zz:qq'`
  *    reports src `main:refs/heads/zz`, and `'HEAD:a:refs/heads/main'` parses dst
@@ -76,8 +90,17 @@ export function stripRefsPrefix(ref: string): string {
  *    it pushes every matching ref, protected ones included, and an empty
  *    destination matches nothing in the list, so the gate would pass.
  * 5. **Re-apply the `-` reject to the DESTINATION.** `+main:--all` survives step
- *    1 (it starts with `+`), strips to `main:--all`, and hands `--all` to the
- *    resolver. The rule has to run on the derived value, not only the input.
+ *    1 (it starts with `+`) and strips to `main:--all`. The rule has to run on
+ *    the derived value, not only on the input.
+ *
+ *    What this actually prevents was measured, and it is NOT option injection:
+ *    `git push origin 'main:--all'` is rc=0 and creates a branch literally named
+ *    `refs/heads/--all` on the remote. So this is defence in depth against
+ *    writing a garbage ref that is then awkward to remove — the exec vectors are
+ *    all PRE-colon and step 1 is what addresses those. The resolution step is
+ *    separately safe: `request-push` passes `--` to `rev-parse`, and
+ *    `rev-parse --symbolic-full-name -- --all` returns the operands rather than
+ *    the all-refs listing it returns without `--`.
  * 6. **Reject `*` in the DESTINATION.** `git push origin
  *    '+refs/heads/main*:refs/heads/main*'` is rc=0 and force-updates a protected
  *    branch while the plain push of the same state is refused rc=1; `rev-parse`
@@ -99,13 +122,14 @@ export function parsePushRefspec(refspec: string): PushRefspecParse {
 
   const lastColon = body.lastIndexOf(':')
   const destination = lastColon >= 0 ? body.slice(lastColon + 1) : body
+  const source = lastColon >= 0 ? body.slice(0, lastColon) : body
 
   if (destination.length === 0) return { ok: false, reason: 'empty_destination' }
   if (destination.startsWith('-')) return { ok: false, reason: 'option_shaped' }
   if (destination.includes('*')) return { ok: false, reason: 'glob' }
 
   const candidates = [...new Set([destination, stripRefsPrefix(destination)])]
-  return { ok: true, candidates, destination, forced }
+  return { ok: true, candidates, destination, source, forced }
 }
 
 /** Human-readable reason for a refused refspec, for the reject envelope. */

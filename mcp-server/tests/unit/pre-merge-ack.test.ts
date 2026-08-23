@@ -5,6 +5,8 @@ import {
   PRE_MERGE_ACK_ITEMS,
   MAX_UNSWEPT_LISTED,
   MAX_FILES_SWEPT,
+  describeCrossCheck,
+  crossCheckBlockedReason,
 } from '../../src/lib/pre-merge-ack.js'
 
 const full = () => ({
@@ -237,5 +239,46 @@ describe('preMergeAckHint', () => {
   it('incomplete hint lists the failing items', () => {
     const h = preMergeAckHint({ kind: 'pre_merge_ack_incomplete', failing: ['plan_complete', 'note (…)'] })
     expect(h).toContain('plan_complete')
+  })
+})
+
+describe('#62 — describeCrossCheck / crossCheckBlockedReason', () => {
+  // FOUR states, not two. Collapsing any pair loses information a forensic
+  // reader needs: 'empty_range' must not read as 'enforced' (nothing was
+  // checked), and 'rejected_revision' must not read as 'degraded' (a crafted
+  // input and an unfetched ref are different events).
+  // Breaks on: returning 'enforced' for an empty path list.
+  it('labels a readable range with paths as enforced', () => {
+    expect(describeCrossCheck({ status: 'ok', paths: ['a.ts'] })).toBe('enforced')
+  })
+  // Breaks on: treating an empty range as enforced, i.e. over-claiming.
+  it('labels a readable but EMPTY range as empty_range, never enforced', () => {
+    expect(describeCrossCheck({ status: 'ok', paths: [] })).toBe('empty_range')
+  })
+  // Breaks on: mapping 'unavailable' to anything else.
+  it('labels an unreadable range as degraded', () => {
+    expect(describeCrossCheck({ status: 'unavailable' })).toBe('degraded')
+  })
+  // Breaks on: folding rejected_revision into degraded — the two must stay
+  // distinguishable, because one is an attack shape and one is bookkeeping.
+  it('labels a refused revision as rejected_revision, NOT degraded', () => {
+    expect(describeCrossCheck({ status: 'unsafe_revision', revision: '--exec=x' })).toBe(
+      'rejected_revision',
+    )
+  })
+
+  // Breaks on: dropping the revision from the message. The agent cannot fix what
+  // it is not shown, and this reject has no override.
+  it('names the offending revision in the blocked reason', () => {
+    const r = crossCheckBlockedReason({ status: 'unsafe_revision', revision: '--exec=x' }, 'rebase')
+    expect(r).toContain('--exec=x')
+    expect(r).toContain('rebase')
+    expect(r).toContain('OPTION')
+  })
+  // Breaks on: wording the unavailable case as if the operation had run.
+  it('states that an unreadable range fails CLOSED and nothing ran', () => {
+    const r = crossCheckBlockedReason({ status: 'unavailable' }, 'merge')
+    expect(r).toContain('CLOSED')
+    expect(r).toContain('No OS dialog was shown')
   })
 })

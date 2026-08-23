@@ -36,6 +36,7 @@
  */
 
 import { z } from 'zod'
+import type { RangePathsResult } from './git.js'
 
 /** Zod shape of `pre_merge_ack` — EVERY field optional at the schema layer so a
  * missing/partial ack yields a clean `rejected` envelope instead of a ZodError
@@ -257,6 +258,44 @@ export function evaluatePreMergeAck(
     failing,
     ...(unswept !== undefined && { unswept }),
   }
+}
+
+/**
+ * What the coverage cross-check actually did, for the audit entry. Four states,
+ * not two: `empty_range` must not be filed as `enforced` (nothing was checked,
+ * and D7 forbids over-claiming), and `rejected_revision` must not be filed as
+ * `degraded` (a crafted input and an unfetched remote branch are different
+ * events and a forensic reader has to tell them apart).
+ */
+export type PathCrossCheck = 'enforced' | 'empty_range' | 'degraded' | 'rejected_revision'
+
+/** Label a {@link RangePathsResult} for the audit. Pure. */
+export function describeCrossCheck(range: RangePathsResult): PathCrossCheck {
+  if (range.status === 'unsafe_revision') return 'rejected_revision'
+  if (range.status === 'unavailable') return 'degraded'
+  return range.paths.length > 0 ? 'enforced' : 'empty_range'
+}
+
+/**
+ * Reject prose for an operation that fails CLOSED on an unreadable range —
+ * merge and rebase, where the mutation can still succeed while the range read
+ * cannot (measured: an unrelated-histories merge, and a rebase onto an orphan
+ * ref). Push is the exception and fails open; see its call site.
+ */
+export function crossCheckBlockedReason(range: RangePathsResult, op: string): string {
+  if (range.status === 'unsafe_revision') {
+    return (
+      `refusing to ${op}: ${JSON.stringify(range.revision)} is not a safe revision — a value ` +
+      "starting with '-' is read by git as an OPTION, not a name. No OS dialog was shown."
+    )
+  }
+  return (
+    `refusing to ${op}: the paths this integration carries could not be read from git, so the ` +
+    'pre_merge_ack coverage check cannot run. This fails CLOSED because the mutation can ' +
+    'succeed where the read cannot — an unrelated-histories merge, or a rebase onto an ' +
+    'unrelated ref, would otherwise skip the check entirely. Fetch the refs involved (or fix ' +
+    'the ref name) and retry. No OS dialog was shown — nothing ran.'
+  )
 }
 
 /** Human-readable hint listing what the agent must supply. Shared by both tools. */

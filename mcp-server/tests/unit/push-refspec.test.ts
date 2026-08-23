@@ -122,3 +122,35 @@ describe('lib/push-refspec — parsePushRefspec', () => {
     }
   })
 })
+
+describe('#62 B3 — the SOURCE half of the refspec', () => {
+  // request-push reads <remote>/<destination>...<source>. The source is produced
+  // by the same last-colon split as the destination and was previously computed
+  // and discarded; a second copy of that split in the caller is how the two drift.
+  // Breaks on: returning the whole body as the source when a colon is present.
+  it.each([
+    ['main', 'main', 'main'],
+    ['feat/x:main', 'feat/x', 'main'],
+    ['+feat/x:main', 'feat/x', 'main'],
+    ['HEAD:main', 'HEAD', 'main'],
+    ['HEAD:a:refs/heads/main', 'HEAD:a', 'refs/heads/main'],
+  ])('%s splits into source %s / destination %s', (spec, source, destination) => {
+    const r = parsePushRefspec(spec)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.source).toBe(source)
+    expect(r.destination).toBe(destination)
+  })
+
+  // A DELETE refspec carries no files, so it must yield an EMPTY source rather
+  // than the destination — the caller uses that emptiness to skip the coverage
+  // check instead of composing a meaningless range.
+  // Breaks on: falling back to the destination when the source side is empty.
+  it('gives a delete refspec an empty source, not the destination', () => {
+    const r = parsePushRefspec(':main')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.source).toBe('')
+    expect(r.destination).toBe('main')
+  })
+})

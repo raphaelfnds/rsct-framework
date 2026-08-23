@@ -9,6 +9,7 @@ import {
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
+  getRangePaths,
   gitMerge,
   readGitState,
   type GitExecutor,
@@ -47,6 +48,8 @@ import {
   preMergeAckSchema,
   preMergeAckJsonSchema,
   PRE_MERGE_ACK_ITEMS,
+  describeCrossCheck,
+  crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
 
 export const requestMergeInputSchema = z
@@ -97,6 +100,8 @@ export type RequestMergeRejectKind =
   | 'unrelated_histories_without_override'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
+  /** #62: the carried-path read failed, and merge fails CLOSED on that. */
+  | 'hygiene_range_unreadable'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
@@ -133,6 +138,17 @@ export interface RequestMergeInternal {
   auditWriter?: typeof appendAuditEntry
   /** Test-only seam — see `RequestCommitInternal.approvalRecorder`. */
   approvalRecorder?: typeof recordConsumedApproval
+  /**
+   * Test-only seam: substitute the carried-path READER (`lib/git.getRangePaths`)
+   * so the #62 coverage cross-check can be exercised without a real repo. NOT an
+   * MCP input — the dispatch calls the handler with no `internal`, so a caller
+   * can never substitute the real range (the A2/INV-6 lesson).
+   *
+   * A READER, not a path list, on purpose: only a reader lets a test assert the
+   * base and head that were actually passed, and a swapped range is a real
+   * defect class here — every tool composes a different one.
+   */
+  rangeReader?: typeof getRangePaths
 }
 
 export const requestMergeTool: Tool = {
@@ -218,9 +234,91 @@ export async function requestMergeHandler(
   const progressOpen = integratingPlan
     ? progressHasOpenItems(projectRoot, integratingPlan.slug)
     : undefined
+  // #62: the paths this merge CARRIES, read from git and never caller-supplied.
+  // `HEAD` rather than `targetBranch`: this runs before the detached-HEAD reject,
+  // and `rev-parse --abbrev-ref HEAD` returns the literal string 'HEAD' when
+  // detached, so `targetBranch` is not the reliable spelling here.
+  const range = (internal.rangeReader ?? getRangePaths)(projectRoot, 'HEAD', input.source_branch)
+  const crossCheck = describeCrossCheck(range)
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
     progressHasOpenItems: progressOpen,
+    carriedPaths: range.status === 'ok' ? range.paths : null,
   })
+  // FAIL-CLOSED on merge. The rationale that fail-open was safe here — "the merge
+  // cannot succeed if the range is unreadable" — is FALSE, measured:
+  // `git diff HEAD...<orphan>` is rc=128 while
+  // `git merge --no-ff --allow-unrelated-histories <orphan>` is rc=0 and lands.
+  // `allow_unrelated_histories` is an agent input, so the merge shape most likely
+  // to carry unswept residue was the one shape that skipped the check. The near
+  // precedents both fail closed for the same reason: `gitIsTracked` ("a real git
+  // failure can never green-light deleting something") and `gitBranchMerged`
+  // ("never falsely claims merged").
+  //
+  // Rv-B — ONE exemption, and the same measurement that justifies fail-closed is
+  // what forces it. `git diff HEAD...<orphan>` is rc=128 because unrelated
+  // histories have NO MERGE BASE, not because anything is unfetched. So for the
+  // exact input `allow_unrelated_histories` exists to serve, the read can never
+  // succeed: without this exemption the flag was permanently unusable, rejected
+  // with advice ("fetch the refs involved") that no fetch can satisfy.
+  //
+  // Why this is not a hole an agent can drive:
+  //  - the flag is force-like and is REFUSED below without
+  //    `dev_approval.override_protected_branch`, so reaching for it to skip the
+  //    coverage check costs a dev-approved override — a §C decision, not an
+  //    agent one;
+  //  - on a merge whose histories ARE related the read succeeds, so the
+  //    exemption never fires and the check runs exactly as before;
+  //  - it is scoped to `unavailable`. A `unsafe_revision` result still fails
+  //    CLOSED whatever the flag says — otherwise declaring unrelated histories
+  //    would become a way to launder a crafted revision past the predicate.
+  const unreadableIsInherent =
+    allow_unrelated_histories && range.status === 'unavailable'
+  if (unreadableIsInherent && ackDecision.ok) {
+    appendAudit(
+      projectRoot,
+      {
+        event: 'request_merge.pre_merge_ack_degraded',
+        tool: 'rsct_request_merge',
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        path_crosscheck: crossCheck,
+        reason: 'allow_unrelated_histories: the range has no merge base to read',
+      },
+      config?.audit,
+    )
+  }
+  if (ackDecision.ok && range.status !== 'ok' && !unreadableIsInherent) {
+    const reason = crossCheckBlockedReason(range, 'merge')
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_merge.rejected',
+        tool: 'rsct_request_merge',
+        reject_kind: 'hygiene_range_unreadable',
+        reason,
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        path_crosscheck: crossCheck,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      source_branch: input.source_branch,
+      target_branch: targetBranch,
+      channel: null,
+      reject_kind: 'hygiene_range_unreadable',
+      reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason]),
+    }
+  }
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision)
     const audit = appendAudit(
@@ -234,7 +332,10 @@ export async function requestMergeHandler(
         target_branch: targetBranch,
         pre_merge_ack: input.pre_merge_ack ?? null,
         pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        path_crosscheck: crossCheck,
         ...(ackDecision.kind === 'pre_merge_ack_incomplete' && { failing: ackDecision.failing }),
+        ...(ackDecision.kind === 'pre_merge_ack_incomplete' &&
+          ackDecision.unswept !== undefined && { files_unswept: ackDecision.unswept }),
       },
       config?.audit,
     )
@@ -513,6 +614,11 @@ export async function requestMergeHandler(
       no_ff,
       allow_unrelated_histories,
       fabrication_signals: gate.fabrication_signals,
+      // #62: what the coverage check actually did on the merge that LANDED.
+      // Auditing it only on rejects would leave the successful path — the one
+      // that matters forensically — silent about whether anything was checked.
+      path_crosscheck: crossCheck,
+      ...(range.status === 'ok' && { carried_paths: range.paths.length }),
     },
     config?.audit,
   )
@@ -520,6 +626,17 @@ export async function requestMergeHandler(
   const hints: string[] = [
     `Merged '${input.source_branch}' into '${targetLabel}' (${merge.sha_after ?? '<unknown sha>'}).`,
   ]
+  // Rv-B: say out loud that the coverage check did not run. The exemption is
+  // legitimate and the merge landed, but files_swept was never verified against
+  // what was actually carried, and a silent skip is the thing D7 forbids.
+  if (unreadableIsInherent) {
+    hints.push(
+      '⚠ pre_merge_ack coverage check SKIPPED: unrelated histories have no merge base, so the ' +
+        'paths this merge carries cannot be read from git. The merge was allowed because you ' +
+        'declared allow_unrelated_histories and the dev approved the override — but files_swept ' +
+        'was NOT verified against what was actually carried. Sweep the merged tree by hand.',
+    )
+  }
   if (!record.ok) {
     hints.push(
       `⚠ merge landed, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,

@@ -12,6 +12,7 @@ import type {
   GitExecResult,
   GitExecutor,
   GitState,
+  RangePathsResult,
 } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
@@ -103,6 +104,15 @@ const MERGE_OK: GitExecResult = {
   exitCode: 0,
 }
 
+// #62: the tool now READS the paths this merge carries and fails CLOSED when
+// that read is unavailable — which it always is here, because `tmpRoot` is a
+// bare mkdtemp directory, not a git repo. These tests are not about coverage,
+// so they inject an EMPTY but READABLE range: the cross-check is skipped and
+// the audit records `empty_range`. Returning `ok` rather than `unavailable` is
+// deliberate — the fail-closed path has its own test, and this default must
+// never be mistaken for one. Tests that DO exercise coverage pass their own.
+const emptyRange: RequestMergeInternal['rangeReader'] = () => ({ status: 'ok', paths: [] })
+
 const BASE_CONFIG = {
   rsct_version: '1.0.0',
   app: { name: 'test-app', org: 'test-org' },
@@ -112,6 +122,7 @@ describe('rsct_request_merge — happy path', () => {
   it('merges feature into integration with --no-ff by default', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestMergeInternal = {
+      rangeReader: emptyRange,
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
@@ -140,6 +151,7 @@ describe('rsct_request_merge — happy path', () => {
   it('CAP-33: emits bootstrap warning audit when bootstrap_at is missing', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestMergeInternal = {
+      rangeReader: emptyRange,
       gitStateOverride: gitState('feat/cap33-int'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
@@ -188,6 +200,7 @@ describe('rsct_request_merge — happy path', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
@@ -214,6 +227,7 @@ describe('rsct_request_merge — branch protection on the TARGET', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('main'),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: alwaysYes(),
@@ -237,6 +251,7 @@ describe('rsct_request_merge — branch protection on the TARGET', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('main'),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: alwaysYes(),
@@ -263,6 +278,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/foo'),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: alwaysYes(),
@@ -283,6 +299,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState(null),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: alwaysYes(),
@@ -304,6 +321,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: alwaysYes(),
@@ -328,6 +346,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
@@ -353,6 +372,7 @@ describe('rsct_request_merge — failure surfaces', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({}, MERGE_OK),
         promptFn: dialog({ response: 'no', channel: 'windows' }),
@@ -372,6 +392,7 @@ describe('rsct_request_merge — failure surfaces', () => {
       exitCode: 1,
     }
     const internal: RequestMergeInternal = {
+      rangeReader: emptyRange,
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
@@ -459,6 +480,7 @@ describe('rsct_request_merge — post-mutation write failures (HIGH-2 / HIGH-3)'
   it('surfaces anti_replay_error + warning hint when approvals-seen write fails after a successful merge', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestMergeInternal = {
+      rangeReader: emptyRange,
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({}, MERGE_OK),
       promptFn: alwaysYes(),
@@ -490,6 +512,7 @@ describe('rsct_request_merge — post-mutation write failures (HIGH-2 / HIGH-3)'
   it('surfaces audit_error + warning hint when audit append fails after a successful merge', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const internal: RequestMergeInternal = {
+      rangeReader: emptyRange,
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({}, MERGE_OK),
       promptFn: alwaysYes(),
@@ -524,6 +547,7 @@ describe('rsct_request_merge — post-mutation write failures (HIGH-2 / HIGH-3)'
 
 describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
   const mergeInternal = (): RequestMergeInternal => ({
+    rangeReader: emptyRange,
     gitStateOverride: gitState('feat/integration'),
     gitExecutor: gitExec(
       {
@@ -571,6 +595,7 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
 
 describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
   const okInternal = (branch = 'feat/integration'): RequestMergeInternal => ({
+    rangeReader: emptyRange,
     gitStateOverride: gitState(branch),
     gitExecutor: gitExec({}, MERGE_OK),
     promptFn: alwaysYes(),
@@ -582,7 +607,7 @@ describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
     const prompt = countingPrompt()
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
-      { gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
+      { rangeReader: emptyRange, gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
     )) as RequestMergeOutput
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('pre_merge_ack_missing')
@@ -677,7 +702,7 @@ describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
-      { gitStateOverride: gitState(null), gitExecutor: gitExec({}, MERGE_OK), promptFn: alwaysYes(), now: FIXED_NOW },
+      { rangeReader: emptyRange, gitStateOverride: gitState(null), gitExecutor: gitExec({}, MERGE_OK), promptFn: alwaysYes(), now: FIXED_NOW },
     )) as RequestMergeOutput
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('pre_merge_ack_missing')
@@ -727,7 +752,7 @@ describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
     const prompt = countingPrompt()
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
-      { gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
+      { rangeReader: emptyRange, gitStateOverride: gitState('feat/integration'), gitExecutor: gitExec({}, MERGE_OK), promptFn: prompt.fn, now: FIXED_NOW },
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
     expect(prompt.calls()).toBe(1)
@@ -747,6 +772,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
@@ -776,6 +802,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({}),
         promptFn: alwaysYes(),
@@ -798,6 +825,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         pre_merge_ack: ack(),
       },
       {
+        rangeReader: emptyRange,
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
@@ -813,5 +841,253 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
     expect(seen).toContain('Approve merge')
     expect(seen).toContain('RSCT enforcement is NOT running')
     expect(seen.split('\n')).toHaveLength(2)
+  })
+})
+
+describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
+  // A READER spy, not a path list. Only a reader can assert WHICH range was
+  // asked for, and a swapped base/head is a real defect class here — each of the
+  // four ranges in #62 points a different way.
+  function rangeSpy(result: RangePathsResult): {
+    fn: NonNullable<RequestMergeInternal['rangeReader']>
+    seen: Array<[string, string]>
+  } {
+    const seen: Array<[string, string]> = []
+    return {
+      fn: (_root, base, head) => {
+        seen.push([base, head])
+        return result
+      },
+      seen,
+    }
+  }
+  const mergeExec = () =>
+    gitExec(
+      {
+        'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+        'merge --no-ff -- feat/foo': MERGE_OK,
+      },
+      { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
+    )
+
+  // 'HEAD' literal, not targetBranch: this runs BEFORE the detached-HEAD reject,
+  // and rev-parse --abbrev-ref returns the string 'HEAD' when detached, so the
+  // branch name is not the reliable spelling at this point.
+  // Breaks on: swapping the arguments, or passing targetBranch as the base.
+  it('reads the range as HEAD...<source_branch>', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const spy = rangeSpy({ status: 'ok', paths: [] })
+    await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    expect(spy.seen).toEqual([['HEAD', 'feat/foo']])
+  })
+
+  // Breaks on: dropping carriedPaths from the evaluator call — the merge would
+  // land with an ack that never mentioned the file it carries.
+  it('rejects when a carried path was never attested in files_swept', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const prompt = countingPrompt()
+    const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts', 'src/b.ts'] })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ files_swept: ['src/a.ts'] }) },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: prompt.fn, now: FIXED_NOW },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('src/b.ts')
+    // The ack gate is a PRE-gate: no OS dialog, so no §C approval is spent.
+    expect(prompt.calls()).toBe(0)
+  })
+
+  // VACUITY control. A version that rejected every merge would pass the test
+  // above and every other reject test in this file.
+  // Breaks on: making the cross-check reject regardless of coverage.
+  it('merges when every carried path was attested', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ files_swept: ['src/a.ts'] }) },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('merged')
+  })
+
+  // The chat message caps the list; the AUDIT must carry the whole gap, or a
+  // 400-file merge leaves no record of what was actually missed.
+  // Breaks on: omitting files_unswept, or sourcing it from the capped string.
+  it('records the FULL unswept list on the audit entry', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const paths = Array.from({ length: 14 }, (_, i) => `src/f${i}.ts`)
+    const spy = rangeSpy({ status: 'ok', paths })
+    await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ files_swept: [] }) },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    const entry = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8').trim().split('\n').pop() as string,
+    )
+    expect(entry.files_unswept).toHaveLength(14)
+    expect(entry.path_crosscheck).toBe('enforced')
+  })
+
+  // FAIL-CLOSED. Measured: git diff HEAD...<orphan> is rc=128 while
+  // git merge --no-ff --allow-unrelated-histories <orphan> is rc=0 and LANDS, and
+  // allow_unrelated_histories is an agent input — so fail-open would skip the
+  // check on exactly the shape most likely to carry unswept residue.
+  // Breaks on: letting an unreadable range pass (the tempting "it was green
+  // before" repair).
+  it('fails CLOSED when the range cannot be read, without popping the dialog', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const prompt = countingPrompt()
+    const spy = rangeSpy({ status: 'unavailable' })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: prompt.fn, now: FIXED_NOW },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('hygiene_range_unreadable')
+    expect(prompt.calls()).toBe(0)
+    const entry = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8').trim().split('\n').pop() as string,
+    )
+    expect(entry.path_crosscheck).toBe('degraded')
+  })
+
+  // Breaks on: collapsing rejected_revision into degraded in the audit.
+  it('audits a refused revision as rejected_revision, not degraded', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const spy = rangeSpy({ status: 'unsafe_revision', revision: '--exec=touch PWNED' })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestMergeOutput
+
+    expect(out.reject_kind).toBe('hygiene_range_unreadable')
+    expect(out.reason).toContain('--exec=touch PWNED')
+    const entry = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8').trim().split('\n').pop() as string,
+    )
+    expect(entry.path_crosscheck).toBe('rejected_revision')
+  })
+
+  // Auditing the check only on rejects would leave the path that matters most
+  // forensically — the merge that LANDED — silent about whether anything ran.
+  // Breaks on: dropping path_crosscheck from the request_merge.done entry.
+  it('audits path_crosscheck on the merge that LANDED', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
+    await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack({ files_swept: ['src/a.ts'] }) },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    const done = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.event === 'request_merge.merged')
+    expect(done.path_crosscheck).toBe('enforced')
+    expect(done.carried_paths).toBe(1)
+  })
+
+  // A missing ack is the actionable failure and the one the agent can fix without
+  // touching refs, so it must be reported ahead of an unreadable range.
+  // Breaks on: ordering the range reject before the ack evaluation.
+  it('reports a MISSING ack ahead of an unreadable range', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const spy = rangeSpy({ status: 'unavailable' })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/integration'), gitExecutor: mergeExec(), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestMergeOutput
+    expect(out.reject_kind).toBe('pre_merge_ack_missing')
+  })
+
+  // Rv-B. The measurement that JUSTIFIES fail-closed is the same one that made
+  // this input dead: `git diff HEAD...<orphan>` is rc=128 because unrelated
+  // histories have NO MERGE BASE, so for the exact case the flag exists to serve
+  // the range read can never succeed. Before the exemption, every
+  // allow_unrelated_histories merge returned hygiene_range_unreadable — with
+  // advice ("fetch the refs involved") that no fetch can satisfy.
+  // Breaks on: dropping the `!unreadableIsInherent` guard from the fail-closed
+  // condition, which restores the permanent rejection.
+  it('Rv-B: allow_unrelated_histories reaches the merge despite an unreadable range', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      {
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        allow_unrelated_histories: true,
+        dev_approval: approval({ override_protected_branch: { reason: 'monorepo import of unrelated history' } }),
+        pre_merge_ack: ack(),
+      },
+      {
+        rangeReader: () => ({ status: 'unavailable' }),
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: gitExec({
+          'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+          'merge --no-ff --allow-unrelated-histories -- feat/foo': MERGE_OK,
+        }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('merged')
+    // The skip must be SAID, not silent — D7 forbids the quiet version.
+    // Breaks on: dropping the hint from the merged path.
+    expect(out.hints.some((h) => h.includes('coverage check SKIPPED'))).toBe(true)
+    const degraded = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+      .find((e) => e.event === 'request_merge.pre_merge_ack_degraded')
+    expect(degraded.path_crosscheck).toBe('degraded')
+  })
+
+  // The exemption is scoped to `unavailable` ONLY. If it covered
+  // `unsafe_revision` too, declaring unrelated histories would become a way to
+  // launder a crafted revision past isSafeRevisionToken — trading one dead input
+  // for a live bypass.
+  // Breaks on: widening the exemption to `range.status !== 'ok'`.
+  it('Rv-B: the exemption does NOT cover a refused revision', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      {
+        project_root: tmpRoot,
+        source_branch: 'feat/foo',
+        allow_unrelated_histories: true,
+        dev_approval: approval({ override_protected_branch: { reason: 'monorepo import of unrelated history' } }),
+        pre_merge_ack: ack(),
+      },
+      {
+        rangeReader: () => ({ status: 'unsafe_revision', revision: '--exec=touch PWNED' }),
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: mergeExec(),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('hygiene_range_unreadable')
+    expect(out.reason).toContain('--exec=touch PWNED')
+  })
+
+  // VACUITY CONTROL for the exemption: WITHOUT the flag, an unreadable range
+  // must still fail closed. A version that exempted everything would pass both
+  // tests above.
+  // Breaks on: making the exemption unconditional.
+  it('Rv-B: an unreadable range without the flag still fails CLOSED', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      {
+        rangeReader: () => ({ status: 'unavailable' }),
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: mergeExec(),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+    expect(out.reject_kind).toBe('hygiene_range_unreadable')
   })
 })

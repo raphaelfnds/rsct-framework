@@ -12,6 +12,7 @@ import type {
   GitExecResult,
   GitExecutor,
   GitState,
+  RangePathsResult,
 } from '../../src/lib/git.js'
 import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
@@ -815,5 +816,137 @@ describe('rsct_request_push — B5 ref-store resolution arm', () => {
   it('VACUITY: a resolved non-protected ref still pushes', async () => {
     const out = await withResolver('feat/foo', 'refs/heads/feat/foo\n')
     expect(out.status).toBe('pushed')
+  })
+})
+
+describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
+  const PROTECTED = { ...BASE_CONFIG, protected_branches: ['main'] }
+  const override = () =>
+    approval({ override_protected_branch: { reason: 'release push, unit test coverage' } })
+  function rangeSpy(result: RangePathsResult): {
+    fn: NonNullable<RequestPushInternal['rangeReader']>
+    seen: Array<[string, string]>
+  } {
+    const seen: Array<[string, string]> = []
+    return { fn: (_r, base, head) => { seen.push([base, head]); return result }, seen }
+  }
+
+  // A push carries <remote>/<destination>...<source>. Using the raw `branch` for
+  // both — as the first design did — composes `origin/feat/x:main` for a refspec,
+  // which is git's <rev>:<path> TREE syntax, not a range at all.
+  // Breaks on: composing the range from the raw branch input.
+  it('reads <remote>/<destination>...<source> for a refspec push', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const spy = rangeSpy({ status: 'ok', paths: [] })
+    await requestPushHandler(
+      { project_root: tmpRoot, branch: 'feat/x:main', dev_approval: override(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/x'), gitExecutor: gitExec({ 'push -- origin feat/x:main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    expect(spy.seen).toEqual([['origin/main', 'feat/x']])
+  })
+
+  // Breaks on: dropping the remote from the base, which would compare against a
+  // LOCAL ref and silently report an empty delta on an unpushed branch.
+  it('reads <remote>/<branch>...<branch> for a plain protected push', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const spy = rangeSpy({ status: 'ok', paths: [] })
+    await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: override(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    expect(spy.seen).toEqual([['origin/main', 'main']])
+  })
+
+  // FAIL-OPEN, and push is the ONLY one of the three. Measured: git push origin
+  // main succeeds even when origin/main was never fetched, so an unfetched
+  // remote-tracking ref is the ORDINARY state here, not the adversarial one.
+  // Breaks on: making push fail closed like merge and rebase.
+  it('fails OPEN — pushes, warns, and audits the degradation', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: override(), pre_merge_ack: ack() },
+      { rangeReader: () => ({ status: 'unavailable' }), gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+
+    expect(out.status).toBe('pushed')
+    // NAMES the range, so the agent knows which refs to fetch. A generic
+    // "could not be read" leaves it with no action it can take.
+    // Breaks on: dropping the range from the named-cause hint.
+    const hint = out.hints.find((h) => h.includes('DEGRADED')) as string
+    expect(hint).toContain('origin/main...main')
+    expect(hint).toContain('git fetch origin')
+    const events = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const degraded = events.find((e) => e.event === 'request_push.pre_merge_ack_degraded')
+    expect(degraded.path_crosscheck).toBe('degraded')
+  })
+
+  // Fail-open must not mean "never enforce". When the range IS readable the
+  // coverage check has teeth on push too.
+  // Breaks on: skipping carriedPaths for push because it fails open.
+  it('still rejects an unattested carried path when the range IS readable', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: override(), pre_merge_ack: ack({ files_swept: [] }) },
+      { rangeReader: () => ({ status: 'ok', paths: ['src/q.ts'] }), gitStateOverride: gitState('main'), gitExecutor: gitExec({}), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+    expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
+    expect(out.reason).toContain('src/q.ts')
+  })
+
+  // A DELETE refspec (`:main`) carries no files. Composing a range from an empty
+  // source would ask git for `origin/main...` — which is a DIFFERENT range, not
+  // an empty one. Reachable with the DEFAULT protected list, no unusual config.
+  // Breaks on: dropping the source.length > 0 guard.
+  it('degrades rather than composing a range for a delete refspec', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const spy = rangeSpy({ status: 'ok', paths: [] })
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, branch: ':main', dev_approval: override(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin :main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )) as RequestPushOutput
+
+    expect(spy.seen).toEqual([])
+    expect(out.status).toBe('pushed')
+    // An UNNAMEABLE range is not a fetch problem, and saying so would be advice
+    // the agent cannot act on: no number of fetched refs gives a delete refspec
+    // a file list. The two causes reach the same branch and must not share prose.
+    // Breaks on: using the named-cause wording for both.
+    const hint = out.hints.find((h) => h.includes('DEGRADED')) as string
+    expect(hint).toContain('names no readable range')
+    expect(hint).toContain('Fetching will not change this')
+    expect(hint).not.toContain('git fetch')
+  })
+
+  // `origin/HEAD` is the remote's DEFAULT-branch symref, not the branch being
+  // pushed — reading it would be confidently WRONG rather than degraded. Fires
+  // only when the ref store declines to canonicalise the destination AND 'HEAD'
+  // is in the effective protected list, which .rsct.json permits.
+  // Breaks on: dropping the destBare !== 'HEAD' guard.
+  it('degrades rather than reading origin/HEAD when the destination stays HEAD', async () => {
+    writeConfig(tmpRoot, { ...BASE_CONFIG, protected_branches: ['HEAD'] })
+    const spy = rangeSpy({ status: 'ok', paths: [] })
+    await requestPushHandler(
+      { project_root: tmpRoot, branch: 'HEAD', dev_approval: override(), pre_merge_ack: ack() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin HEAD': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    expect(spy.seen).toEqual([])
+  })
+
+  // The check is scoped to PROTECTED pushes (MCP-P1-D). On a feature push it must
+  // not run AND must not claim a result — an absent field says "not applicable"
+  // without over-claiming, which a placeholder label would not.
+  // Breaks on: labelling a non-protected push 'degraded', or running the read.
+  it('does not run the check, or record a label, on a non-protected push', async () => {
+    writeConfig(tmpRoot, PROTECTED)
+    const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
+    await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      { rangeReader: spy.fn, gitStateOverride: gitState('feat/foo'), gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
+    )
+    expect(spy.seen).toEqual([])
+    const pushed = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.event === 'request_push.pushed')
+    expect(pushed.path_crosscheck).toBeUndefined()
   })
 })

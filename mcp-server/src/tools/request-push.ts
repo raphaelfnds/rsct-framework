@@ -9,10 +9,12 @@ import {
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
+  getRangePaths,
   gitPush,
   readGitState,
   type GitExecutor,
   type GitState,
+  type RangePathsResult,
 } from '../lib/git.js'
 import {
   effectiveProtectedList,
@@ -47,6 +49,8 @@ import {
   preMergeAckSchema,
   preMergeAckJsonSchema,
   PRE_MERGE_ACK_ITEMS,
+  describeCrossCheck,
+  type PathCrossCheck,
 } from '../lib/pre-merge-ack.js'
 import {
   parsePushRefspec,
@@ -140,6 +144,8 @@ export interface RequestPushInternal {
   auditWriter?: typeof appendAuditEntry
   /** Test-only seam — see `RequestCommitInternal.approvalRecorder`. */
   approvalRecorder?: typeof recordConsumedApproval
+  /** Test-only seam — see `RequestMergeInternal.rangeReader`. */
+  rangeReader?: typeof getRangePaths
 }
 
 export const requestPushTool: Tool = {
@@ -316,6 +322,14 @@ export async function requestPushHandler(
   // `HEAD:refs/heads/main` still moves the protected branch. The prefix-stripped
   // string arm is what closes that, and it cannot fail.
   const candidates = new Set(refspec.ok ? refspec.candidates : [])
+  // #62: the endpoints of the coverage cross-check, composed HERE because this is
+  // the only point where the parsed refspec and the ref store's answer are both
+  // in scope. A push CARRIES `<remote>/<destination>`...`<source>` — the local
+  // side is what is being sent, the remote-tracking side is what is already
+  // there. Both stay null when the range cannot be named, and a null range is
+  // treated as degraded (see the protected block below).
+  let rangeBase: string | null = null
+  let rangeHead: string | null = null
   if (refspec.ok) {
     const rp = gitExecutor(projectRoot, [
       'rev-parse',
@@ -324,12 +338,31 @@ export async function requestPushHandler(
       refspec.destination,
     ])
     const resolved = rp.stdout.trim()
+    let destBare = stripRefsPrefix(refspec.destination)
     if (resolved.startsWith('refs/')) {
       candidates.add(resolved)
-      candidates.add(stripRefsPrefix(resolved))
+      destBare = stripRefsPrefix(resolved)
+      candidates.add(destBare)
+    }
+    // Two shapes name no readable range, and both DEGRADE rather than guess:
+    //  - an empty source is a DELETE refspec (`:main`) — it carries no files at
+    //    all, so there is nothing to cross-check;
+    //  - a destination still spelled `HEAD` means the ref store declined to
+    //    canonicalise it (a detached HEAD echoes `HEAD` back at rc=0). Composing
+    //    `<remote>/HEAD` there would silently read the remote's DEFAULT-branch
+    //    symref instead of the branch being pushed — wrong, not degraded, and
+    //    wrong is the worse of the two because it produces confident output.
+    if (refspec.source.length > 0 && destBare !== 'HEAD') {
+      rangeBase = `${remote}/${destBare}`
+      rangeHead = refspec.source
     }
   }
   const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList))
+  // `null` = not applicable (this push is not to a protected branch, so the check
+  // never ran). Deliberately not `'degraded'`: that label claims an attempt was
+  // made, and the audit must not over-claim what was checked.
+  let crossCheck: PathCrossCheck | null = null
+  let degradedHint: string | null = null
 
   // PH-5: pre-integration hygiene gate. Scoped to PROTECTED-branch pushes only
   // (MCP-P1-D) — a feature/WIP push to a non-protected branch (e.g. to trigger CI
@@ -343,9 +376,58 @@ export async function requestPushHandler(
     const progressOpen = pushingPlan
       ? progressHasOpenItems(projectRoot, pushingPlan.slug)
       : undefined
+    const range: RangePathsResult =
+      rangeBase !== null && rangeHead !== null
+        ? (internal.rangeReader ?? getRangePaths)(projectRoot, rangeBase, rangeHead)
+        : { status: 'unavailable' }
+    crossCheck = describeCrossCheck(range)
     const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
       progressHasOpenItems: progressOpen,
+      carriedPaths: range.status === 'ok' ? range.paths : null,
     })
+    // FAIL-OPEN — and push is the ONLY one of the three that does. Merge and
+    // rebase fail closed because the mutation can succeed where the range read
+    // cannot; push inverts that. Measured: `git push origin main` succeeds even
+    // when `origin/main` was never fetched, so `origin/main...main` is rc=128 on
+    // a perfectly ordinary first push of a clone made with `--single-branch`.
+    // Failing closed there would block a legitimate push on a purely local
+    // bookkeeping gap, and an unfetched remote-tracking ref is the NORMAL state,
+    // not the adversarial one. The push's own protection is elsewhere and
+    // independent of this: the remote allow-list, the refspec parse, INV-5 on the
+    // resolved destination, and `override_protected_branch`.
+    if (ackDecision.ok && range.status !== 'ok') {
+      // Two DIFFERENT causes reach this branch and they need different advice.
+      // A named range that would not read is a fetch problem; an unnameable range
+      // is not, and telling the agent to `git fetch` there would be wrong advice
+      // it cannot act on — a delete refspec carries no files however many refs
+      // are fetched. The audit distinguishes them by `range_base: null`, which is
+      // also why `crossCheck` stays a four-way label instead of growing a fifth
+      // variant for merge and rebase to carry but never use.
+      const named = rangeBase !== null && rangeHead !== null
+      degradedHint = named
+        ? `⚠ pre_merge_ack coverage check DEGRADED (${crossCheck}): the paths this push carries ` +
+          `could not be read from git (${rangeBase}...${rangeHead}). The push proceeds — an ` +
+          'unfetched remote-tracking ref is an ordinary state, not a fault — but files_swept was ' +
+          `NOT verified against what is actually being sent. Run \`git fetch ${remote}\` and ` +
+          're-check if that matters here.'
+        : `⚠ pre_merge_ack coverage check DEGRADED (${crossCheck}): this push names no readable ` +
+          'range — either it deletes a ref (which carries no files) or its destination could not ' +
+          'be resolved to a branch. The push proceeds and files_swept was not verified. Fetching ' +
+          'will not change this; name the branch explicitly if you expected a coverage check.'
+      appendAudit(
+        projectRoot,
+        {
+          event: 'request_push.pre_merge_ack_degraded',
+          tool: 'rsct_request_push',
+          branch,
+          remote,
+          path_crosscheck: crossCheck,
+          range_base: rangeBase,
+          range_head: rangeHead,
+        },
+        config?.audit,
+      )
+    }
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision)
       const audit = appendAudit(
@@ -359,7 +441,10 @@ export async function requestPushHandler(
           remote,
           pre_merge_ack: input.pre_merge_ack ?? null,
           pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+          path_crosscheck: crossCheck,
           ...(ackDecision.kind === 'pre_merge_ack_incomplete' && { failing: ackDecision.failing }),
+          ...(ackDecision.kind === 'pre_merge_ack_incomplete' &&
+            ackDecision.unswept !== undefined && { files_unswept: ackDecision.unswept }),
         },
         config?.audit,
       )
@@ -550,11 +635,17 @@ export async function requestPushHandler(
       remote,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
+      // #62: what the coverage check did on the push that LANDED. Omitted
+      // entirely (rather than sent as a placeholder) when the push was not to a
+      // protected branch — the check does not apply there, and an absent field
+      // says that without claiming a result.
+      ...(crossCheck !== null && { path_crosscheck: crossCheck }),
     },
     config?.audit,
   )
 
   const hints: string[] = [`Pushed '${branch}' to '${remote}'.`]
+  if (degradedHint !== null) hints.push(degradedHint)
   if (!record.ok) {
     hints.push(
       `⚠ push landed, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,

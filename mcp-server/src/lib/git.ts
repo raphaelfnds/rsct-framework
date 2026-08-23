@@ -410,6 +410,23 @@ function safeGit(cwd: string, args: string[]): string | null {
   return raw !== null ? raw.trim() : null
 }
 
+/**
+ * Wall-clock bound for the READ helpers below.
+ *
+ * `execFileSync` blocks the event loop, so a wedged git child holds the whole
+ * MCP server. A test-level timeout is no substitute: a synchronous body is never
+ * interrupted, only failed retroactively, so the process stays alive either way.
+ * On expiry Node kills the child and throws, the `catch` returns `null`, and the
+ * caller takes its normal degraded path — a hang becomes a degrade.
+ *
+ * Deliberately NOT applied to {@link defaultGitExecutor}. That one carries the
+ * MUTATING ops, and `git push` to a slow remote is legitimately long; a bound
+ * there would abort real work rather than a stall. These callers are all LOCAL
+ * reads (`rev-parse`, `status`, `diff`, `show`), where 30s is far past any
+ * honest duration and only a genuine stall reaches it.
+ */
+const GIT_READ_TIMEOUT_MS = 30_000
+
 function safeGitRaw(cwd: string, args: string[]): string | null {
   try {
     return execFileSync('git', args, {
@@ -417,6 +434,7 @@ function safeGitRaw(cwd: string, args: string[]): string | null {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 16 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS,
     })
   } catch {
     return null

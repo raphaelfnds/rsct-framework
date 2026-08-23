@@ -9,6 +9,7 @@ import {
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
+  getRangePaths,
   gitRebase,
   gitSquash,
   readGitState,
@@ -27,6 +28,8 @@ import {
   preMergeAckSchema,
   preMergeAckJsonSchema,
   PRE_MERGE_ACK_ITEMS,
+  describeCrossCheck,
+  crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
 
 export const requestRebaseInputSchema = z
@@ -59,6 +62,8 @@ export type RequestRebaseRejectKind =
   | 'same_ref'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
+  /** #62: the carried-path read failed, and rebase/squash fails CLOSED on that. */
+  | 'hygiene_range_unreadable'
 
 export interface RequestRebaseOutput {
   status: RequestRebaseStatus
@@ -87,6 +92,8 @@ export interface RequestRebaseInternal {
   gitStateOverride?: GitState
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
+  /** Test-only seam — see `RequestMergeInternal.rangeReader`. */
+  rangeReader?: typeof getRangePaths
 }
 
 export const requestRebaseTool: Tool = {
@@ -150,9 +157,53 @@ export async function requestRebaseHandler(
   // plan_complete check the boolean for the plan on the current branch.
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null
   const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : undefined
+  // #62: the paths this integration CARRIES. The two modes move in OPPOSITE
+  // directions and the range must follow, or the check reads the wrong side:
+  //   rebase — replays THIS branch's commits onto `ref`, so `ref`...HEAD;
+  //   squash — stages `ref`'s changes into THIS branch, so HEAD...`ref`.
+  // `ref` is agent-controlled and LEADS the composed token in the rebase case —
+  // the only one of the four ranges in #62 where that is true, since the other
+  // three are disarmed by a `HEAD`/`<remote>/` prefix. `getRangePaths` runs
+  // `isSafeRevisionToken` on both endpoints BEFORE composing the range string,
+  // which is what makes that safe; do not inline the composition here.
+  const range =
+    mode === 'rebase'
+      ? (internal.rangeReader ?? getRangePaths)(projectRoot, input.ref, 'HEAD')
+      : (internal.rangeReader ?? getRangePaths)(projectRoot, 'HEAD', input.ref)
+  const crossCheck = describeCrossCheck(range)
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
     progressHasOpenItems: progressOpen,
+    carriedPaths: range.status === 'ok' ? range.paths : null,
   })
+  // FAIL-CLOSED, for the same measured reason as merge: the mutation can succeed
+  // where the range read cannot. `git diff HEAD...<orphan>` is rc=128 while an
+  // unrelated-histories integration is rc=0 and lands, so fail-open would skip
+  // the check on exactly the shape most likely to carry unswept residue.
+  // Ordered AFTER the ack evaluation so an agent that supplied no ack at all is
+  // told THAT first — it is the actionable failure, and it is the one the agent
+  // can fix without touching the repository's refs.
+  if (ackDecision.ok && range.status !== 'ok') {
+    const reason = crossCheckBlockedReason(range, mode)
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_rebase.rejected',
+        tool: 'rsct_request_rebase',
+        reject_kind: 'hygiene_range_unreadable',
+        reason,
+        mode,
+        ref: input.ref,
+        path_crosscheck: crossCheck,
+      },
+      config?.audit,
+    )
+    return base({
+      reject_kind: 'hygiene_range_unreadable',
+      reason,
+      ...auditFields(audit),
+      hints: [reason],
+    })
+  }
   if (!ackDecision.ok) {
     const hint = preMergeAckHint(ackDecision)
     const audit = appendAudit(
@@ -166,7 +217,10 @@ export async function requestRebaseHandler(
         ref: input.ref,
         pre_merge_ack: input.pre_merge_ack ?? null,
         pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
+        path_crosscheck: crossCheck,
         ...(ackDecision.kind === 'pre_merge_ack_incomplete' && { failing: ackDecision.failing }),
+        ...(ackDecision.kind === 'pre_merge_ack_incomplete' &&
+          ackDecision.unswept !== undefined && { files_unswept: ackDecision.unswept }),
       },
       config?.audit,
     )
@@ -287,6 +341,11 @@ export async function requestRebaseHandler(
       sha_before: result.sha_before,
       sha_after: result.sha_after,
       fabrication_signals: gate.fabrication_signals,
+      // #62: what the coverage check did on the rewrite that LANDED. Auditing it
+      // only on rejects would leave the successful path — the one that matters
+      // forensically — silent about whether anything was checked at all.
+      path_crosscheck: crossCheck,
+      ...(range.status === 'ok' && { carried_paths: range.paths.length }),
     },
     config?.audit,
   )
