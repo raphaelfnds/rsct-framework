@@ -263,6 +263,13 @@ when the key is absent. A project with no `.rsct.json` reports none.
 - Input: `project_root?`, `update_check?` (`"on"|"off"`), `decline_update?` (a release tag)
 - Output: identity, git, `worktree`, `universe`, `topology`, hints
 
+The bootstrap marker is **evaluated before it is stamped**, so the report describes the
+session as it was on entry, not the state this call just wrote. `hints[]` carries one line
+when §0 had never been recorded, when the recorded marker was older than the stale window,
+or when the marker could not be written (another session holds the phase-state lock, or the
+write failed) — and stays silent when it was already fresh. Stamping is still best-effort:
+`rsct_status` never fails on a metadata write.
+
 The two update-check parameters are the response channel for the release hint this
 tool emits (the check consults by default since v2.6.0 — see
 [README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off)).
@@ -327,6 +334,11 @@ Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, k
 - Input: `project_root?`, `decisions_excerpt_count?` (default 3, max 20)
 - Output: structured snapshot for session priming (identity, git, active plan,
   decisions, knowledge, `universe`, `next_action_hints`)
+
+Same pre-stamp evaluation as `rsct_status`, reported in `next_action_hints[]`. One
+difference: this tool also clears the `context_stale` re-bootstrap flag, and that clear
+rides in the **same write** as the marker — so when the write does not land, the hint says
+the flag was NOT cleared and the edit guard is still blocking.
 
 ### The `universe` block
 

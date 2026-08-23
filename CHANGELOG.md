@@ -10,6 +10,95 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.8.0] - 2026-08-22
+
+Four issues, all of them the same shape: a gate, a report or a menu that **looked**
+like it was working. No new tool — the count stays at **39** — and the marker schema
+id is still `v=1.0.0`.
+
+What changes for a user: choosing **project** scope in the installer now actually
+produces project scope. The `[3] Skip` option is gone, so the menu is a real binary.
+A `§0` bootstrap report no longer describes state the same call just wrote, and a
+corrupt `phase-state.json` stops being silently overwritten. The hygiene sweep the
+rules have always instructed is now **required** by `pre_merge_ack` rather than
+suggested. And the git-exec sites reject option-shaped values instead of handing
+them to git.
+
+### Security
+
+- **The ref/remote injection class is closed on the git exec sites.**
+  `execFileSync` removes the shell, but **git itself executes** the program named by
+  `--exec=` and `--receive-pack=`, so removing the shell was never sufficient.
+  Agent-controlled operands — including the **remote**, not only the branch — now go
+  through a predicate that rejects an empty value, a leading `-`, and control
+  characters, and the push argv places `--` **before** the remote rather than after
+  it. A push destination is parsed as a refspec: `+` is stripped, the split is on the
+  **last** colon (matching git, measured), and the resolved candidates are compared
+  against the protected list.
+
+  Precision, because an overstated security note ages badly: `+main`,
+  `refs/heads/main`, `heads/main`, `main:main` and `HEAD:main` are **recognised as
+  protected** — they reject without `override_protected_branch` and proceed with it.
+  They were never "blocked". And the destination check defends against a
+  **garbage ref** (`main:--all` creates a branch literally named `--all`, rc=0); the
+  execution vectors are all *pre*-colon and it is the leading-`-` reject that closes
+  those.
+
+- **A repair to unreleased work, not a disclosure.** While reviewing the above, the
+  ref-store resolution arm was found dead: `git rev-parse --symbolic-full-name --
+  <x>` puts rev-parse into **echo-the-operands** mode, so the answer never starts
+  with `refs/`. `branch: 'HEAD'` therefore reported `protected: false`, skipping the
+  ack, the coverage check and the override — while the audit recorded it as
+  unprotected. **Both the flaw and its repair were introduced and fixed inside this
+  unreleased cycle; no published version ever carried it.**
+
+### Added
+
+- **`pre_merge_ack` gains a fourth item, `hygiene_swept`**, with a coverage check
+  that cross-references the paths a merge, rebase or push actually carries. Dead
+  code, leftover scaffolding and comments that no longer match the code were
+  instructed by the rules and required by no phase; now they are required at the
+  gate. Applies at every tier — there is no exemption.
+
+### Fixed
+
+- **The MCP scope menu recorded a choice it never applied (#73).** Only `[1]`
+  acted, so choosing **project** left user scope effective and masking it. Both
+  switch directions now take effect, installed projects are corrected
+  automatically, and the menu is a real binary — `[3] Skip` is gone, a typed `3` is
+  handled, and a legacy recorded `skip` is honoured rather than silently reinterpreted.
+  Uninstall now also scrubs the project MCP approval from
+  `.claude/settings.local.json` by value, dropping the key when the array empties and
+  the file only when nothing else remains — previously the approval survived,
+  un-ignored, and silently re-granted on the next install.
+
+- **A `§0` bootstrap report described state the call had just written (#53).** The
+  marker is now **evaluated before it is stamped**, so the report describes the
+  session on entry. `rsct_phase_abandon` and the `§0` stamp no longer discard
+  unrelated state — **on the bootstrap stamp path**; four other writers in
+  `phase-scope.ts` still rebuild an empty object from an unreadable state and are
+  tracked in [#77](https://github.com/raphaelfnds/rsct-framework/issues/77).
+  A consequence worth knowing: a project with a corrupt `phase-state.json` now
+  **stops refreshing** `bootstrap_at` until the file is repaired or deleted, and the
+  hint names the file and says deleting it is a safe recovery.
+
+- **The V phase reported a blast radius without saying what it could not analyse
+  (#54, stage 1).** The reverse-dependency walk now reports what it failed to
+  resolve. The remaining accuracy gaps — the NodeNext resolver, and a partial
+  under-report emitting no hint at all — are tracked in
+  [#77](https://github.com/raphaelfnds/rsct-framework/issues/77).
+
+- **One test file never adopted the suite's timeout convention**, so a varying
+  subset of it failed under load while every other bash-spawning file annotated
+  `60_000`. Measured: `T8` at **5,091 ms on an idle box inside a full suite** and
+  **11,018 ms under load**, against a 5,000 ms budget — the file did not need
+  contention to fail, only to run inside a suite. `testTimeout` is now suite-wide at
+  `60_000`, with `hookTimeout: 30_000` because hooks are budgeted separately and a
+  suite-wide `testTimeout` never reached them. Separately, both bash harnesses called
+  `execFileSync` with **no timeout at all**: a synchronous body is never interrupted,
+  only failed retroactively, so a child that never exits hung the run rather than
+  failing it — no value of `testTimeout` could have helped.
+
 ## [2.7.5] - 2026-08-21
 
 Four things that were quietly wrong on every run. Patch: no new tool, no new phase,
