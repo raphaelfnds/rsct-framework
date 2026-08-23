@@ -104,12 +104,12 @@ describe('lib/phase-scope — plan disposition (stamp-once + slug read guard)', 
 })
 
 describe('lib/pre-merge-ack — LIGHT plan_complete cross-check (pure)', () => {
-  const fullAck = { plan_complete: true, adr_confirmed: true, issues_resolved: true, note: 'ADR-1; issue #2 closed' }
+  const fullAck = { plan_complete: true, adr_confirmed: true, issues_resolved: true, hygiene_swept: true, note: 'ADR-1; issue #2 closed; swept' }
   it('passes when plan_complete attested and progress has no open items', () => {
-    expect(evaluatePreMergeAck(fullAck, false).ok).toBe(true)
+    expect(evaluatePreMergeAck(fullAck, { progressHasOpenItems: false }).ok).toBe(true)
   })
   it('rejects when plan_complete attested but progress still has open items', () => {
-    const d = evaluatePreMergeAck(fullAck, true)
+    const d = evaluatePreMergeAck(fullAck, { progressHasOpenItems: true })
     expect(d.ok).toBe(false)
     if (!d.ok && d.kind === 'pre_merge_ack_incomplete') {
       expect(d.failing.some((f) => f.startsWith('plan_complete'))).toBe(true)

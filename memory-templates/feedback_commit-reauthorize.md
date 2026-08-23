@@ -41,6 +41,20 @@ dialog + audit log entry per call):
 - `mcp__rsct__rsct_request_rebase` for rebases / `--squash` merges
   (history-rewriting; always per-action)
 
+Merge, rebase/squash, and a push to a protected branch also require a
+`pre_merge_ack` — four items (`plan_complete`, `adr_confirmed`,
+`issues_resolved`, `hygiene_swept`) plus `files_swept[]`, checked BEFORE the OS
+dialog so a bad ack costs nothing. `hygiene_swept` is the cleanup obligation:
+sweep the files the integration carries for dead code and for comments that no
+longer match the code, and list those paths. RSCT reads the carried paths from
+git itself and rejects when one is missing, regardless of the booleans. It
+applies at every tier. See feedback_branch-protection.md for the full checklist.
+
+`rsct_request_push` sends only to **configured remote names** — a URL or a
+filesystem path is refused, and branch protection compares the resolved push
+DESTINATION, so `+main`, `HEAD:main` and `refs/heads/main` are all recognised as
+`main`.
+
 The MCP layer + SessionStart sanitizer hook close the "trust-forever"
 bypass surface that pure prose cannot. Without `rsct-mcp` installed,
 this rule is enforced only by Claude's own compliance.

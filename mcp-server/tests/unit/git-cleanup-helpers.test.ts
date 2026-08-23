@@ -52,12 +52,12 @@ describe('lib/git — gitBranchMerged', () => {
 
 describe('lib/git — gitRebase / gitSquash envelopes', () => {
   it('gitRebase captures sha before/after on success', () => {
-    const e = exec({ 'rev-parse --short HEAD': OK('aaa'), 'rebase main': OK('rebased') }, OK('aaa'))
+    const e = exec({ 'rev-parse --short HEAD': OK('aaa'), 'rebase -- main': OK('rebased') }, OK('aaa'))
     const r = gitRebase('/r', 'main', e)
     expect(r.ok).toBe(true)
   })
   it('gitRebase surfaces failure without throwing', () => {
-    const e = exec({ 'rev-parse --short HEAD': OK('aaa'), 'rebase main': FAIL(1, 'CONFLICT') })
+    const e = exec({ 'rev-parse --short HEAD': OK('aaa'), 'rebase -- main': FAIL(1, 'CONFLICT') })
     const r = gitRebase('/r', 'main', e)
     expect(r.ok).toBe(false)
     expect(r.stderr).toMatch(/CONFLICT/)
@@ -70,7 +70,7 @@ describe('lib/git — gitRebase / gitSquash envelopes', () => {
     }
     const r = gitSquash('/r', 'feat/x', e)
     expect(r.ok).toBe(true)
-    expect(called).toBe('merge --squash feat/x')
+    expect(called).toBe('merge --squash -- feat/x')
   })
 })
 
