@@ -172,7 +172,20 @@ files are kept. The pre-setup git SHA recorded in `.rsct.json` is the backup —
 no separate backup files are created.
 
 **Consent gates.** Acts only on this repo. It removes the project-scope `.mcp.json`
-`rsct` entry by key (preserving any other servers) when present.
+`rsct` entry by key (preserving any other servers) when present, and scrubs the
+matching approval — the `rsct` entry in `enabledMcpjsonServers` in
+`.claude/settings.local.json`, which setup wrote because a project `.mcp.json`
+does not start until the project has approved it. Both are removed by value, never
+by rewriting the file: `.claude/settings.local.json` also holds your own
+permission grants and any other servers' approvals, so it is deleted only when the
+`rsct` approval was the single thing in it. A refusal you recorded in
+`disabledMcpjsonServers` is left untouched — that decision is yours, and setup
+already declines to override it.
+
+Leaving the approval behind is why this matters: uninstall also removes the
+`.gitignore` line that was keeping that file out of the repo, so a stale approval
+would become a tracked file pre-granting a server that no longer exists, and it
+would silently re-grant on the next install.
 
 **Re-run behavior.** Safe to re-run; already-removed artifacts are skipped.
 
