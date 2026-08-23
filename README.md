@@ -121,9 +121,11 @@ RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
 
   | Recorded scope | What an unattended run does |
   |---|---|
-  | `user`, or no marker at all | runs `claude mcp add rsct rsct-mcp --scope user` |
-  | `project` | records the scope only — `/rsct-setup` writes the `.mcp.json` in each project later |
-  | `skip`, or an unreadable marker | registers nothing |
+  | `user`, or no marker at all | runs `claude mcp add rsct rsct-mcp --scope user`, verifies it landed, and records `user` only if it did |
+  | `project`, **no** user-scope entry present | records `project` — `/rsct-setup` writes and approves the `.mcp.json` in each project later |
+  | `project`, **with** a user-scope entry present | **removes nothing and rewrites nothing.** Removing it would de-register every project on the machine unattended; recording `user` would destroy a deliberate `project`. Re-run interactively to switch. |
+  | `skip` (legacy) | registers nothing, marker left as `skip` |
+  | an unreadable marker | registers nothing until you pick from the menu |
 
   Because `~/.rsct/` survives `/rsct-uninstall` and gets copied between machines,
   an imaged or inherited home carries its scope with it — and an inherited
@@ -137,17 +139,25 @@ global companion and any user-scope registration untouched).
 ### Registering rsct-mcp with Claude Code
 
 The install script (`scripts/install.sh`) asks where to register the
-MCP server during the install run. Three choices:
+MCP server during the install run. It is a **binary** choice:
 
-| Choice | Command run for you | Where to use |
+| Choice | What actually happens | Where to use |
 |---|---|---|
-| **1. User scope** *(recommended for solo dev)* | `claude mcp add rsct rsct-mcp --scope user` | One-time per machine. `rsct__*` tools become available in every project after IDE restart. |
-| **2. Project scope** *(for teams committing `.mcp.json`)* | `/rsct-setup` writes the `.mcp.json` for you (CAP-48) | Run `/rsct-setup` in each project and commit the `.mcp.json` so teammates pick it up. Manual equivalent: `cd <project> && claude mcp add rsct rsct-mcp --scope project`. |
-| **3. Skip** | nothing | Run either of the above commands manually whenever you want. |
+| **1. Solo developer — user scope** *(recommended)* | `claude mcp add rsct rsct-mcp --scope user`, then **verified** in the host config before the choice is recorded | One-time per machine. `rsct__*` tools become available in every project after IDE restart. |
+| **2. Team — project scope** | asks to remove the user-scope entry (it would mask project scope everywhere), then `/rsct-setup` writes **and approves** a `.mcp.json` in each project | Commit the `.mcp.json` so teammates pick it up. Teammates should pick **[2]** as well. |
 
-Your choice is recorded in `~/.rsct/mcp-scope`. Pressing **Enter** takes **[1]** on a
-first install, or **whatever the marker records** on any later run (#71) — so
-re-installing no longer silently resets a `project` or `skip` choice to user scope.
+**`[3] Skip` was removed in #73.** A scope you never register is not a scope,
+and the old menu recorded a `[2]` choice that never took effect. A `skip`
+already written to `~/.rsct/mcp-scope` by an older release is **still read**: it
+resolves to the documented default **[1]** for the menu, and an unattended run
+(`RSCT_ASSUME_YES`) registers **nothing** and leaves the marker alone.
+
+Your choice is recorded in `~/.rsct/mcp-scope`, and since #73 it records what is
+**true on the machine**, not what was asked for — if the user-scope entry
+survives (you declined the removal, or the CLI failed), the marker says `user`.
+Pressing **Enter** takes **[1]** on a first install, or **whatever the marker
+records** on any later run (#71), so re-installing never silently resets a
+`project` choice.
 
 ### Manual steps the install can never automate
 
@@ -205,7 +215,24 @@ with `claude mcp add rsct rsct-mcp --scope project`. Either path writes:
    uncommitted (or `.gitignore` it), the registration is local to
    your clone only.
 
-3. **Verify the registration:**
+3. **Approval — the step that used to be missing from these docs.** A project
+   `.mcp.json` does **not** spawn until that project has approved it. Until
+   then `claude mcp list` reports:
+   ```
+   rsct: rsct-mcp - ⏸ Pending approval (run `claude` to approve)
+   ```
+   `/rsct-setup` now does this for you: it writes
+   `<project>/.claude/settings.local.json` with
+   `"enabledMcpjsonServers": ["rsct"]`. That file is **per-developer** — the
+   RSCT `.gitignore` block ignores it, so the approval never travels with the
+   repo. Each teammate approves on their own machine, either by running
+   `/rsct-setup` or by answering the prompt Claude Code shows on first open.
+
+   If you previously answered **no** to that prompt, the refusal is recorded in
+   `disabledMcpjsonServers` and **wins** over any approval. `/rsct-setup` will
+   not override it — remove the entry yourself if you change your mind.
+
+4. **Verify the registration:**
    ```bash
    claude mcp list
    # Expect a line like:
@@ -213,27 +240,44 @@ with `claude mcp add rsct rsct-mcp --scope project`. Either path writes:
    ```
    Run this from inside the project directory (so the project scope
    is picked up). If `rsct` does not appear, the `.mcp.json` is
-   missing, malformed, or the `rsct-mcp` binary is not on PATH.
+   missing, malformed, or the `rsct-mcp` binary is not on PATH. If it appears
+   as **⏸ Pending approval**, see step 3.
 
-4. **Coexists with User scope without conflict.** If you have both
+5. **User scope MASKS project scope — they do not coexist.** If you have both
    `~/.claude.json` `mcpServers.rsct` (user scope) AND
-   `<project>/.mcp.json` `mcpServers.rsct` (project scope), Claude
-   Code uses the project-scope entry **for that project only** —
-   user scope still applies to other projects. Only one `rsct-mcp`
-   instance runs per Claude Code session.
+   `<project>/.mcp.json` `mcpServers.rsct` (project scope), the **user-scope
+   entry wins**, in that project too. Measured with two distinguishable
+   processes: only the user-scope one is ever spawned, and the project entry
+   never executes. Approving the project entry does not change it.
 
-5. **Remove project scope later:** `/rsct-uninstall` scrubs the `rsct`
-   entry from `.mcp.json` automatically (by key, preserving any other
-   servers; removes the file if it held only rsct). Or do it manually:
+   > Earlier releases of this README claimed the opposite ("Claude Code uses
+   > the project-scope entry for that project only"). That was wrong, and it
+   > contradicted both the `CHANGELOG.md` CAP-47 entry and the installer's own
+   > warning. Corrected in #73.
+
+   So project scope is only *effective* on a machine with **no** user-scope
+   `rsct` entry. Choosing **[2]** in the installer now offers to remove it for
+   you — see [Installation](#installation).
+
+6. **Remove project scope later:** `/rsct-uninstall` scrubs **both** halves
+   automatically — the `rsct` entry from `.mcp.json`, and the `rsct` approval
+   from `.claude/settings.local.json`. Both by key/value, preserving anything
+   else in either file, and each file is removed only if it held nothing but
+   the RSCT entry. A refusal you recorded in `disabledMcpjsonServers` is left
+   alone. Or do it manually:
    ```bash
    claude mcp remove rsct --scope project
    # then commit the removed .mcp.json change if it was tracked
+   # (the approval is local and gitignored — nothing to commit there)
    ```
 
-6. **Troubleshooting** — if `rsct_*` tools do not appear after IDE
+7. **Troubleshooting** — if `rsct_*` tools do not appear after IDE
    restart:
    - Check `~/.claude.json` and `<project>/.mcp.json` for the `rsct`
      entry (both are JSON, editable by hand if needed).
+   - If `claude mcp list` says **⏸ Pending approval**, the project has not
+     approved the entry — see step 3. Re-run `/rsct-setup`, or answer the
+     prompt Claude Code shows on first open.
    - Confirm the binary: `where rsct-mcp` (Windows) or `which rsct-mcp`
      (macOS/Linux) should print a path.
    - Confirm the boot smoke: `cmd /c "rsct-mcp < NUL"` (PowerShell)
@@ -246,16 +290,25 @@ with `claude mcp add rsct rsct-mcp --scope project`. Either path writes:
 *binary*.** The committed `.mcp.json` only points Claude Code at the `rsct-mcp`
 command; the binary itself must exist on each machine's PATH. So:
 
-- **First dev (owner):** install with **[2] Project scope**, run `/rsct-setup`,
-  commit `.mcp.json` (plus `CLAUDE.md`, `documentation/`).
+- **First dev (owner):** install with **[2] Team — project scope**, run
+  `/rsct-setup`, commit `.mcp.json` (plus `CLAUDE.md`, `documentation/`).
 - **Every other teammate:** clone (they get `.mcp.json` from git), then run the
-  installer **just to get the `rsct-mcp` binary** — they can pick **[3] Skip**
-  at the scope prompt, since the registration already arrived via git (the
-  binary is installed *before* the scope menu, regardless of the choice).
-  Restart Claude Code → connected.
+  installer to get the `rsct-mcp` binary and pick **[2]** as well.
 
-So: the binary is per-machine (everyone installs it); choosing scope [2] and
-running `/rsct-setup` is a one-time job for the owner.
+  > **This changed in #73.** The old advice was to pick `[3] Skip`, on the
+  > reasoning that the registration had already arrived via git. That was
+  > wrong twice over: `[3]` no longer exists, and picking `[1]` instead would
+  > add a **user-scope** entry that *masks* the committed `.mcp.json` in every
+  > repo — the team's shared registration would silently never run. `[2]` is
+  > the only correct answer on a teammate's machine.
+
+  Picking `[2]` also lets the installer offer to remove a user-scope entry they
+  may already have from a solo install. Then **restart Claude Code**, and the
+  project's `.mcp.json` is approved either by `/rsct-setup` or by the prompt
+  Claude Code shows on first open → connected.
+
+So: the binary is per-machine (everyone installs it), the **registration** is
+shared via git, and the **approval** is per-developer and never committed.
 
 To uninstall the framework from the machine (different from removing RSCT
 from a project):
@@ -501,9 +554,10 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ├── VERSION-CODE                   # rsct-mcp code version — the second axis the
 │                                  #   installer reports, so a code-only change
 │                                  #   cannot hide behind an unchanged protocol version
-├── mcp-scope                      # user | project | skip — chosen at install, read by
-│                                  #   /rsct-setup AND by install.sh on every later run,
-│                                  #   which offers it as the menu default (#71)
+├── mcp-scope                      # user | project (skip = legacy, still read) — records what is
+│                                  #   EFFECTIVE on the machine (#73), not what was asked
+│                                  #   for. Read by /rsct-setup AND by install.sh on every
+│                                  #   later run, which offers it as the menu default (#71)
 ├── update-check.json              # release-check cache: consent, declined releases,
 │                                  #   last check. Machine-global; NOT removed by
 │                                  #   /rsct-uninstall (it records your choices)

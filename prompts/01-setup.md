@@ -2093,6 +2093,13 @@ spec_*.md
 # so it never travels with the project repo. Root-anchored: a clone living
 # elsewhere (e.g. under your home dir) is untouched.
 /rsct-framework/
+
+# Per-developer Claude Code settings. Phase 4.V.c2 writes the project's MCP
+# approval here (enabledMcpjsonServers), and the host writes its own choices to
+# the same file. It is machine-local by definition — approving a server on YOUR
+# machine is not a decision to share — so it must never travel with the repo.
+# The shared .claude/settings.json (the RSCT hooks) stays trackable.
+.claude/settings.local.json
 $END_MARKER
 EOF
 )
@@ -2266,6 +2273,72 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  backfill: added /rsct-framework/ (framework clone) to existing RSCT .gitignore block"
     else
       echo "  ⚠ backfill: /rsct-framework/ insertion did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # #73 backfill: .claude/settings.local.json. Phase 4.V.c2 now writes the
+  # project's MCP approval into that file, so a project whose block predates
+  # this release would show it as an untracked file in `git status` on the
+  # first project-scope run — the exact git-visible mutation this issue
+  # refuses to make.
+  #
+  # ASYMMETRIC ON PURPOSE: the guard is WHOLE-FILE, the splice is BLOCK-SCOPED.
+  # They answer two different questions and scoping both the same way is wrong
+  # in one direction or the other.
+  #
+  #   guard  — "is this path already ignored?" That is a property of the FILE.
+  #            Block-scoped, it answers "no" for a dev who wrote the line in
+  #            their own section, and we then add a SECOND copy: git dedups it
+  #            silently, so nothing breaks and nobody notices, but we mutated a
+  #            tracked file to no effect. This clause exists precisely to avoid
+  #            git-visible churn, so producing some is self-defeating.
+  #   splice — "where must OUR line go?" That is a property of the BLOCK. It
+  #            must land between the markers or /rsct-uninstall, which excises
+  #            only that range, can never remove it. The anchor is
+  #            `/rsct-framework/`, and unlike `.rsct/phase-state.lock` that is a
+  #            line the README actively tells developers to add by hand — so an
+  #            UNSCOPED anchor would splice into the dev's own section on
+  #            exactly the projects this clause is meant to repair.
+  #
+  # Exact-line match (`$0==`), not `grep -qF`: a substring test also matches a
+  # commented-out `# .claude/settings.local.json`, and would skip the insert for
+  # a path that is not actually ignored.
+  #
+  # Consequence, and it is the correct one: when the dev already ignores it
+  # themselves, the RSCT block does NOT get the line and /rsct-uninstall leaves
+  # theirs alone. Their rule, their file.
+  #
+  # `!done` makes a duplicated anchor insert once instead of twice.
+  #
+  # CRLF: `tr -d '\r'` on the way in, LF on the way out — the same normalising
+  # behaviour as the five sibling clauses. An attempt to PRESERVE the endings
+  # here (strip the CR for the comparison, re-append it to the inserted lines)
+  # was written and then removed, because it cannot work:
+  #
+  #   $ printf 'a\r\nb\r\n' | awk '{print}' | od -c   ->   a \n b \n
+  #   $ awk '{print length($0)}'                      ->   1
+  #
+  # MSYS gawk (and sed) on Git Bash open files in TEXT MODE and drop the CR
+  # before the script ever sees `$0`, so the CR is gone with or without the
+  # `tr`. On Linux/macOS awk reads binary and would see it — which makes a
+  # preserve-the-CR script behave DIFFERENTLY per platform, the exact class
+  # CLAUDE.md's cross-OS section exists to prevent. Normalising explicitly is
+  # uniform on all three. Recorded here so nobody re-attempts it.
+  if ! tr -d '\r' < "$GITIGNORE" \
+       | awk '$0==".claude/settings.local.json"{f=1} END{exit f?0:1}'; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+          '$0==b{inblk=1} $0==e{inblk=0} {print}
+           inblk && $0=="/rsct-framework/" && !done {print ""; print ".claude/settings.local.json"; done=1}' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+
+    # Block-scoped sanity: the line must be INSIDE the markers, not merely
+    # somewhere in the file (anti-pattern: a post-check weaker than the splice).
+    if tr -d '\r' < "$GITIGNORE" \
+       | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+           '$0==b{inblk=1} inblk && $0==".claude/settings.local.json"{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
+      echo "  #73 backfill: added .claude/settings.local.json to existing RSCT .gitignore block"
+    else
+      echo "  ⚠ #73 backfill: .claude/settings.local.json insertion did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
 elif [ "$HAS_LEGACY_BLOCK" = "yes" ]; then
@@ -3727,9 +3800,99 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
       console.log("  registered rsct in .mcp.json (project scope) — commit it to share with your team.");
     }
   ' "$MCP_JSON"
-  echo "    Note: each teammate still needs rsct-mcp installed (binary on PATH)."
-  echo "    If you ALSO have a user-scope rsct registration, it already resolves"
-  echo "    locally — the committed .mcp.json is what makes it portable to the team."
+  # --- #73: approve the entry for THIS project --------------------------------
+  # A project .mcp.json does NOT spawn until the project has approved it —
+  # measured: `claude mcp list` reports "⏸ Pending approval" until then, and the
+  # server never runs. So the file written above is inert on its own, and the
+  # old "restart Claude Code → connected" promise skipped a step that does not
+  # exist anywhere in the docs.
+  #
+  # The approval lives in <project>/.claude/settings.local.json. That is the
+  # host's OWN location: measured, the host migrates any legacy
+  # `projects[...].enabledMcpjsonServers` out of ~/.claude.json INTO this file
+  # and then deletes the legacy key (migrateEnableAllProjectMcpServersToSettings).
+  # Writing the host's global config instead would therefore be undone at the
+  # next host boot, would re-run forever because the idempotency check stops
+  # matching, and would make the host materialise this very file inside the
+  # dev's repo anyway. Measured end to end with the real binary:
+  #     no approval                      -> rsct: rsct-mcp - ⏸ Pending approval
+  #     + enabledMcpjsonServers:["rsct"] -> rsct: rsct-mcp - ✔ Connected
+  #     second boot                      -> still Connected, file byte-identical
+  #
+  # EXCEPTION: structured merge required — same rationale as the
+  # .claude/settings.json hook block (4.V.c). The key nests under a JSON object
+  # the dev may already own, so a text splice cannot guarantee shape. This file
+  # is small, local and RSCT-adjacent — NOT the host's 70 KB global config.
+  #
+  # NARROW: only the "rsct" name, and never over an explicit refusal — the host
+  # checks disabledMcpjsonServers FIRST and it wins, so a dev who answered "no"
+  # here keeps that answer and is told why.
+  SETTINGS_LOCAL="$(pwd)/.claude/settings.local.json"
+  mkdir -p "$(pwd)/.claude"
+  # `if node -e`, not a bare statement: the refusal arms below exit 1, and the
+  # follow-up notes must not tell the developer their teammates are all set when
+  # nothing was approved. (The notes are also the only stdout evidence a test
+  # has that this succeeded — the refusals go to stderr, as errors should.)
+  if node -e '
+    const fs = require("fs");
+    const target = process.argv[1];
+    let cfg = {};
+    if (fs.existsSync(target)) {
+      try {
+        var raw = fs.readFileSync(target, "utf8");
+        if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+        cfg = raw.trim() ? JSON.parse(raw) : {};
+      }
+      catch (e) { console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup."); process.exit(1); }
+    }
+    // `null`, `[]`, `"x"` and `42` are all VALID JSON that survive the parse
+    // above. Without this guard: null threw a raw TypeError (aborting the phase
+    // with a stack trace instead of the friendly message), and the other three
+    // silently dropped the assignment in sloppy mode, wrote the primitive back
+    // unchanged, and printed "approved rsct for this project" for an approval
+    // that never landed — the report-success-for-nothing class this whole issue
+    // is about.
+    if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
+      console.error("ERROR: " + target + " is valid JSON but not an object — fix manually then re-run /rsct-setup.");
+      process.exit(1);
+    }
+    const disabled = Array.isArray(cfg.disabledMcpjsonServers) ? cfg.disabledMcpjsonServers : [];
+    if (disabled.indexOf("rsct") !== -1) {
+      console.log("  .claude/settings.local.json records that you REJECTED rsct here — left as is.");
+      console.log("    The rejection wins over any approval. Remove it from disabledMcpjsonServers to enable.");
+      process.exit(0);
+    }
+    const enabled = Array.isArray(cfg.enabledMcpjsonServers) ? cfg.enabledMcpjsonServers : [];
+    if (enabled.indexOf("rsct") !== -1) {
+      console.log("  .mcp.json already approved for this project — no change.");
+      process.exit(0);
+    }
+    cfg.enabledMcpjsonServers = enabled.concat(["rsct"]);
+    fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+    // Post-mutation sanity check (CLAUDE.md regra-mae #3). This block is the one
+    // new WRITE that #73 adds, and it was also the only one not reading its own
+    // result back. A read-only .claude/, an EPERM, or a Windows AV lock would
+    // otherwise print success for a file that never changed.
+    // DELIBERATELY UNTESTED — provoking a write failure portably (read-only dir
+    // on three OSes, EPERM, an AV lock) is not something a fixture can do
+    // honestly, so no case turns red if these four lines are deleted. They are
+    // the only thing standing between a silent write failure and the installer
+    // telling the developer their project is approved when it is not.
+    const back = JSON.parse(fs.readFileSync(target, "utf8"));
+    if (!Array.isArray(back.enabledMcpjsonServers) || back.enabledMcpjsonServers.indexOf("rsct") === -1) {
+      console.error("ERROR: wrote " + target + " but rsct is not in enabledMcpjsonServers — inspect it manually.");
+      process.exit(1);
+    }
+    console.log("  approved rsct for this project (.claude/settings.local.json).");
+  ' "$SETTINGS_LOCAL"; then
+    echo "    Note: each teammate still needs rsct-mcp installed (binary on PATH),"
+    echo "    and each approves it once on their own machine — .claude/settings.local.json"
+    echo "    is per-developer and gitignored, so the approval never travels with the repo."
+  else
+    echo "    ⚠ rsct was NOT approved for this project — see the error above."
+    echo "      The committed .mcp.json is written, but the server will show as"
+    echo "      '⏸ Pending approval' until you fix that file or approve it in the IDE."
+  fi
 elif [ -n "$SANITIZER_SRC" ]; then
   # CAP-50 (audit #3): scope is not 'project'. If a committed project .mcp.json
   # already registers rsct (a teammate set it up, or this dev switched scope),
@@ -3752,6 +3915,20 @@ The `.mcp.json` is meant to be **committed** (team sharing). The RSCT
 `.gitignore` block (Phase 4.4b) does NOT list `.mcp.json`, so it stays
 trackable. (The framework repo's own `.gitignore` ignores its dev `.mcp.json`,
 but that is the framework repo — not a target project.)
+
+The **approval** is the opposite: `.claude/settings.local.json` is per-developer
+and Phase 4.4b now gitignores it (with a backfill for blocks written before
+#73). Registration is shared via git; approving a server to run on your own
+machine is not a decision to share.
+
+**What this does NOT do (#73).** Approval happens *here*, when setup runs — so
+a project that was set up **before** the machine switched to project scope is
+corrected on its **next `/rsct-setup`**, not by the installer. In practice that
+run is required anyway: `.mcp.json` is only written when the marker reads
+`project` (the gate at the top of this phase), so a machine that was in `user`
+scope has no `.mcp.json` in any project to approve in the first place. The
+installer says so on screen and lists the projects that need it. Do not describe
+the switch as fully automatic for existing projects — it is not.
 
 **4.V.d — Verify**
 
