@@ -729,7 +729,7 @@ quiet for good.
   accepted alias of `plan_<slug>.md` (same gitignore rule, same template)
   when the dev prefers the M3 "spec" wording
 - **`rsct-mcp` companion MCP server** (in [`mcp-server/`](mcp-server/README.md)) —
-  the mechanical recall + enforcement layer: **39 tools + 5 resources** spanning
+  the mechanical recall + enforcement layer: **40 tools + 5 resources** spanning
   Recall (M1), Enforcement (M2: §C-gated commit/push/merge + the SessionStart
   sanitizer hook + the append-only `.rsct/audit.log`), the
   **R→S→V→C→REVIEW→T** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
@@ -777,11 +777,13 @@ walk the surface end-to-end:
 - **M3 — Phase machine + V phase + personas + Tutor + issue capture:**
   17 tools across the RSCT cycle.
 - **Post-M3 — multi-repo, onboarding, REVIEW & plan-lifecycle-v2 (T1c/T2/T3 + DX):**
-  8 more — `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
-  `rsct_plan_authorize`/`_revoke`, `rsct_phase_review_start`/`_complete`, and
-  `rsct_plan_dispose` (keep|delete disposition for a plan's artifacts).
+  9 more — `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
+  `rsct_plan_authorize`/`_revoke`, `rsct_phase_review_start`/`_complete`,
+  `rsct_plan_dispose` (keep|delete disposition for a plan's artifacts), and
+  `rsct_audit` (read-only report: install drift, free-commit-lane eligibility,
+  open-phase age, and every plan at the project root).
 
-That's **7 + 7 + 17 + 8 = 39 tools**. Smoke: ask Claude to call
+That's **7 + 7 + 17 + 9 = 40 tools**. Smoke: ask Claude to call
 `rsct_classify_task` with any task description and confirm the returned tier +
 `recommended_phases[]` is sensible.
 

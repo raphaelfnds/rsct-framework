@@ -447,7 +447,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp (Model Context Protocol server)"
   echo "────────────────────────────────────────────────────────"
-  echo "Adds 39 tools + 5 resources to Claude Code — §C-gated"
+  echo "Adds 40 tools + 5 resources to Claude Code — §C-gated"
   echo "commit/push/merge, SessionStart sanitizer hook, audit log,"
   echo "and structured project recall. Strongly recommended."
   echo ""

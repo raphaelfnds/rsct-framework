@@ -89,7 +89,7 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**39 tools · 5 resources · tsc strict · ESM ~1.2 MB
+**40 tools · 5 resources · tsc strict · ESM ~1.2 MB
 (server) + ~13 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
 cross-platform (Windows / macOS / Linux)**
 
@@ -139,7 +139,7 @@ Expect on stderr (single JSON line, then clean exit 0):
           "rsct_phase_review_complete","rsct_phase_test_start",
           "rsct_phase_test_complete","rsct_phase_abandon",
           "rsct_capture_issue","rsct_persona_review",
-          "rsct_auto_persona","rsct_tutor_step"],
+          "rsct_auto_persona","rsct_tutor_step","rsct_audit"],
  "resources":["rsct://decisions","rsct://architecture",
               "rsct://plan","rsct://progress"],
  "resource_templates":["rsct://knowledge/{category}"],
@@ -532,8 +532,12 @@ tool can give.
 
 ## M2 features — Enforcement layer
 
-M2 adds **6 new tools** (3 pure queries + 3 §C-gated mutating ops) plus a
-SessionStart sanitizer hook. Together they materialize §C/§D/§E from
+M2 adds **7 new tools** (3 pure queries + 4 §C-gated mutating ops — commit,
+push, merge and `rsct_request_rebase`) plus a SessionStart sanitizer hook.
+Counting note, because the headings below invite the wrong answer: the
+`§C-gated mutating ops` section documents **six** ops, since `rsct_plan_authorize`
+and `rsct_plan_revoke` are filed there by subject while belonging to the post-M3
+group. M2 is four. `README.md`'s group breakdown is the arithmetic of record. Together they materialize §C/§D/§E from
 [CLAUDE.md governance rules](../rules/) as enforceable contracts: an "always
 allow" entry in `permissions.allow[]` no longer bypasses commit/push/merge
 on a protected branch or with secrets in the diff.
@@ -919,7 +923,7 @@ src/
 │   ├── update-check.ts      # opt-OUT GitHub release check + per-release declines (#38)
 │   ├── version-drift.ts     # install drift: LOCAL compare only, never network
 │   ├── git.ts               # minimal git state + GitExecutor + commit/push/merge
-│   ├── plan.ts              # find active plan_<slug>.md + progress_<slug>.md
+│   ├── plan.ts              # find active / list all plan_<slug>.md + progress_<slug>.md
 │   ├── decisions.ts         # parse documentation/decisions.md
 │   ├── anti-decisions.ts    # parse documentation/knowledge/anti-decisions.md (AD-NNN)
 │   ├── knowledge.ts         # detect + read documentation/knowledge/<category>.md
@@ -955,7 +959,12 @@ src/
 
 Each tool: zod schema for input, structured output type, pure handler.
 Adding a new tool — create `src/tools/<name>.ts` and register it in
-`src/index.ts` (`TOOLS` array + `HANDLERS` map).
+`src/catalog.ts` (`TOOLS` array + `HANDLERS` map). The catalog lives apart from
+`src/index.ts` because `index.ts` ends in a module-scope `main()` that connects a
+stdio transport, so importing it from a test would boot a server;
+`tests/unit/tool-count.test.ts` imports the catalog to cross-check the documented
+tool count and the boot-log tool list above against the live one. Update those
+docs in the same change — the test will tell you which.
 
 `tsup` builds three ESM entry points:
 - `dist/index.js` — the MCP server (registered via `bin: { "rsct-mcp": ... }`).
@@ -998,7 +1007,7 @@ companion install (`npm run build && npm install -g .`) and after
 
 - [ ] M1 validation gate signed off (per progress_rsct-mcp-v1.md).
 - [ ] `rsct-mcp` on PATH and `node dist/index.js < /dev/null` prints the
-      ready log including all 13 M1+M2 tool names (the full catalog is 39 now).
+      ready log including all 13 M1+M2 tool names (the full catalog is 40 now).
 - [ ] `/rsct-setup` re-run in the test project; Phase 4.V reports either
       "Installed RSCT SessionStart sanitizer hook" (fresh) or "already
       present — no change" (idempotent).

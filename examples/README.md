@@ -15,7 +15,7 @@ For a tour of the companion MCP server, see
 [`../mcp-server/README.md`](../mcp-server/README.md) — the M1
 (Recall), M2 (Enforcement), and M3 (V phase + L4 phase machine +
 L3 personas + Tutor + issue capture) surfaces all live there. The
-server currently ships 39 tools and 5
+server currently ships 40 tools and 5
 resources, including the four §C-gated mutating ops (commit / push /
 merge + rebase/squash), the SessionStart sanitizer hook, the PreToolUse
 edit-scope guard, the full R→S→V→C→REVIEW→T phase cycle, the
