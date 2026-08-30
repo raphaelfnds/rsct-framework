@@ -25,6 +25,8 @@ import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel } from '../lib/phase-machine.js'
 import { getHeadShaFull } from '../lib/git.js'
+import { detectTopology } from '../lib/topology.js'
+import { readContracts } from '../lib/contracts.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -182,11 +184,20 @@ export async function phaseVerificationStartHandler(
     maxDepth: input.max_depth,
   })
 
+  // #75 Part B. Read here rather than inside the checklist: `detectTopology`
+  // needs the config, and the checklist deliberately takes a project root and
+  // nothing else. Degrades to the empty graph on every failure path.
+  const topology = detectTopology(config, projectRoot)
+  const contractGraph = readContracts(topology.universe_root)
+
   const checklistArgs: Parameters<typeof runVerificationChecklist>[0] = {
     projectRoot,
     declaredPaths: walk.declared,
     discoveredImporters: walk.discovered,
     specTier: input.spec_tier,
+    contractGraph,
+    appName: config?.app?.name ?? null,
+    universeLinked: topology.universe_root !== null,
   }
   if (input.spec_claims !== undefined) checklistArgs.specClaims = input.spec_claims
   if (input.existing_project_files !== undefined) {
@@ -366,6 +377,11 @@ export async function phaseVerificationStartHandler(
       // are needed to tell them apart: the seed counts do not capture a
       // resolver that dropped every edge while every seed was analyzable.
       walk_coverage: walk.coverage,
+      // #75 Part B. Which of the four contract-graph states this run saw — the
+      // difference between "no adjacent app depends on this" and "nobody has ever
+      // written the manifest that would say so" is invisible from a finding count.
+      contract_graph: checklist.stats.contract_graph,
+      contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
       findings_count: checklist.findings.length,

@@ -78,6 +78,25 @@ function runFull() {
     specClaims: ['Cascade delete propagates the stock record to every pedido registro'],
     specTier: 'complex',
     existingProjectFiles: ['src/stock.ts', 'legacy/stock.ts'],
+    // #75 Part B added `contract-surface`. Without a graph here the corpus would
+    // no longer reach every emittable source, and T21-self — the guard that
+    // exists to stop exactly that — would keep passing while covering less than
+    // it claims. Adding a source means extending this fixture, and T21-self is
+    // what makes forgetting it fail.
+    universeLinked: true,
+    appName: 'checkout',
+    contractGraph: {
+      available: true,
+      contracts: [
+        {
+          id: 'stock-api',
+          producer: 'checkout',
+          surface: ['src/stock.ts'],
+          consumers: ['billing'],
+        },
+      ],
+      note: null,
+    },
   })
 }
 
@@ -138,17 +157,12 @@ describe('evidenceForSource — a total table whose default is the weakest class
 })
 
 describe('runVerificationChecklist — every emitted source is classified', () => {
-  // MUTATION: delete any row from evidenceForSource (each falls to the default).
-  //
-  // The drift alarm. It does not hard-code the source list: it collects whatever
-  // the checklist actually emitted and asserts none of it reached the default
-  // arm, naming the offender when one does. A source literal added years from
-  // now fails this on the day it lands.
   // A SELF-TEST ON THE CHECKER. T21 below only proves what its corpus reaches, so
-  // this pins that the corpus reaches everything: all six fixed source literals
-  // plus the interpolated `knowledge-category:*` family. Measured — this fixture
-  // emits 15 findings across exactly these kinds. Without this assertion T21 could
-  // silently shrink to a partial guard the day an emission site stops firing.
+  // this pins that the corpus reaches everything: the six fixed source literals,
+  // the interpolated `knowledge-category:*` family, and `contract-surface` from
+  // #75 Part B. Without it, T21 shrinks to a partial guard the day an emission
+  // site stops firing or a new one is added — which already happened once, when
+  // Part B introduced a source this corpus did not reach.
   it('T21-self — the fixture exercises every source kind the checklist can emit', () => {
     const kinds = new Set(
       runFull().findings.map((f) =>
@@ -158,6 +172,7 @@ describe('runVerificationChecklist — every emitted source is classified', () =
     expect([...kinds].sort()).toEqual([
       'architecture-overview',
       'basename-overlap',
+      'contract-surface',
       'impact-doc',
       'knowledge-category:*',
       'premise-check',
@@ -165,6 +180,12 @@ describe('runVerificationChecklist — every emitted source is classified', () =
     ])
   })
 
+  // MUTATION: delete any row from evidenceForSource (each falls to the default).
+  //
+  // The drift alarm. It does not hard-code the source list: it collects whatever
+  // the checklist actually emitted and asserts none of it reached the default
+  // arm, naming the offender when one does. A source literal added years from
+  // now fails this on the day it lands.
   it('T21 — no source the checklist can emit falls through to the default arm', () => {
     const r = runFull()
     expect(r.findings.length).toBeGreaterThan(0)

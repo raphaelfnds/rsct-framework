@@ -11,6 +11,12 @@ import {
 import { checkPremise } from './premise-check.js'
 import { makeIdGenerator, type FindingEvidence, type FindingSeverity } from './findings.js'
 import type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
+import {
+  affectedConsumers,
+  contractsTouchingPaths,
+  EMPTY_CONTRACT_GRAPH,
+  type ContractGraph,
+} from './contracts.js'
 
 export type FindingCategory = 'gap' | 'breakage' | 'redundancy' | 'forgotten'
 
@@ -92,6 +98,15 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
       verified_against: 'working_tree',
     }
   }
+  if (f.source === 'contract-surface') {
+    return {
+      kind: 'measured',
+      command: 'contractsTouchingPaths(readContracts(universeRoot), app, declared_paths)',
+      output_excerpt: f.title,
+      also_explained_by:
+        'The consumers may not exercise the part of the surface that changed — a contract records a GLOB, not a call graph. And a consumer missing from contracts.json is invisible here, because that file is hand-written and no installer maintains it.',
+    }
+  }
   if (f.source === 'premise-check') {
     return {
       kind: 'hypothesis',
@@ -145,6 +160,19 @@ export interface ChecklistInput {
   specClaims?: string[]
   specTier?: 'trivial' | 'small' | 'standard' | 'complex'
   existingProjectFiles?: string[]
+  /**
+   * #75 Part B. The org contract graph, read by the caller (which holds the
+   * config `detectTopology` needs). Injected rather than read here so this module
+   * keeps taking a project root and nothing else, and so a test can hand it a
+   * graph without a universe on disk.
+   *
+   * Omitted or empty is a NO-OP, not a failure — see `contract_graph` in the stats.
+   */
+  contractGraph?: ContractGraph
+  /** This project's app name, the producer side of a contract. */
+  appName?: string | null
+  /** Whether a universe root resolved at all — distinguishes two of the no-op states. */
+  universeLinked?: boolean
 }
 
 export interface ChecklistStats {
@@ -155,6 +183,20 @@ export interface ChecklistStats {
   anti_decisions_scanned: number
   impact_docs_consulted: number
   architecture_overview_present: boolean
+  /**
+   * #75 Part B. Why the contract check did or did not produce anything. FOUR
+   * no-op states, reported rather than hidden:
+   *
+   *  - `no_universe`    — the project is not linked to an org universe
+   *  - `no_manifest`    — linked, but no readable `contracts.json`. This is the
+   *                       DEFAULT state of every universe: the file is
+   *                       hand-written and no installer creates it.
+   *  - `degraded`       — present but oversize / unreadable / malformed
+   *  - `available`      — a real graph was consulted
+   *  - `not_run`        — the tier skipped the checklist entirely
+   */
+  contract_graph: 'no_universe' | 'no_manifest' | 'degraded' | 'available' | 'not_run'
+  contracts_scanned: number
 }
 
 export interface ChecklistResult {
@@ -223,6 +265,8 @@ export function runVerificationChecklist(
     anti_decisions_scanned: 0,
     impact_docs_consulted: 0,
     architecture_overview_present: false,
+    contract_graph: 'not_run',
+    contracts_scanned: 0,
   }
 
   if (input.specTier === 'trivial' || input.specTier === 'small') {
@@ -382,6 +426,47 @@ export function runVerificationChecklist(
         source: 'impact-doc',
       })
     }
+  }
+
+  // #75 Part B. Graph-backed adjacency: does this change touch a surface another
+  // app declares a dependency on? Answered MECHANICALLY, from a manifest, instead
+  // of trusting an assertion that it was checked — which is the whole point.
+  //
+  // No dependency on #54: `contractsTouchingPaths` returns this shape in-process
+  // today. What #54 would add is persistence and a queryable tool, neither of
+  // which this needs.
+  //
+  // FOUR no-op states, each recorded rather than hidden. The second one is the
+  // common case, not an edge: `contracts.json` is hand-written and no installer
+  // creates it, so an empty graph is the DEFAULT state of every universe.
+  const graph = input.contractGraph ?? EMPTY_CONTRACT_GRAPH
+  if (!input.universeLinked) stats.contract_graph = 'no_universe'
+  else if (graph.available) stats.contract_graph = 'available'
+  else if (graph.note !== null) stats.contract_graph = 'degraded'
+  else stats.contract_graph = 'no_manifest'
+  stats.contracts_scanned = graph.contracts.length
+
+  if (graph.available) {
+    const touched = contractsTouchingPaths(graph, input.appName ?? null, input.declaredPaths)
+    for (const contract of touched) {
+      const consumers = affectedConsumers([contract])
+      // A contract with no consumers gates nothing — reporting it would charge a
+      // mandatory action for a dependency nobody declared.
+      if (consumers.length === 0) continue
+      findings.push({
+        id: nextId('breakage'),
+        category: 'breakage',
+        severity: 'address-now',
+        title: `Contract '${contract.id}' surface touched — ${consumers.length} consumer(s) declared`,
+        detail: `Declared paths match the surface of contract '${contract.id}', which ${consumers.join(', ')} depend${consumers.length === 1 ? 's' : ''} on. Surface globs: ${contract.surface.join(', ')}.${contract.description ? ` ${contract.description}` : ''}`,
+        affected_paths: [...input.declaredPaths],
+        source: 'contract-surface',
+      })
+    }
+  } else if (input.universeLinked && stats.contract_graph === 'degraded') {
+    hints.push(
+      `⚠ contract graph unavailable (${graph.note}) — the adjacency check did not run. This is a coverage GAP, not a clean pass.`,
+    )
   }
 
   stats.categories_run.push('redundancy')
