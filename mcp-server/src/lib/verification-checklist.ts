@@ -184,16 +184,17 @@ export interface ChecklistStats {
   impact_docs_consulted: number
   architecture_overview_present: boolean
   /**
-   * #75 Part B. Why the contract check did or did not produce anything. FOUR
-   * no-op states, reported rather than hidden:
+   * #75 Part B. Why the contract check did or did not produce anything. FOUR of
+   * these five are no-ops, and they are reported rather than collapsed into one
+   * silent "raised nothing":
    *
-   *  - `no_universe`    — the project is not linked to an org universe
-   *  - `no_manifest`    — linked, but no readable `contracts.json`. This is the
-   *                       DEFAULT state of every universe: the file is
+   *  - `no_universe`    — no-op: the project is not linked to an org universe
+   *  - `no_manifest`    — no-op: linked, but no readable `contracts.json`. This is
+   *                       the DEFAULT state of every universe — the file is
    *                       hand-written and no installer creates it.
-   *  - `degraded`       — present but oversize / unreadable / malformed
-   *  - `available`      — a real graph was consulted
-   *  - `not_run`        — the tier skipped the checklist entirely
+   *  - `degraded`       — no-op: present but oversize / unreadable / malformed
+   *  - `not_run`        — no-op: the tier skipped the checklist entirely
+   *  - `available`      — the only non-no-op: a real graph was consulted
    */
   contract_graph: 'no_universe' | 'no_manifest' | 'degraded' | 'available' | 'not_run'
   contracts_scanned: number
@@ -436,9 +437,10 @@ export function runVerificationChecklist(
   // today. What #54 would add is persistence and a queryable tool, neither of
   // which this needs.
   //
-  // FOUR no-op states, each recorded rather than hidden. The second one is the
-  // common case, not an edge: `contracts.json` is hand-written and no installer
-  // creates it, so an empty graph is the DEFAULT state of every universe.
+  // Four of the five `contract_graph` states are no-ops, each recorded rather
+  // than hidden — see `ChecklistStats`. `no_manifest` is the common case, not an
+  // edge: `contracts.json` is hand-written and no installer creates it, so an
+  // empty graph is the DEFAULT state of every universe.
   const graph = input.contractGraph ?? EMPTY_CONTRACT_GRAPH
   if (!input.universeLinked) stats.contract_graph = 'no_universe'
   else if (graph.available) stats.contract_graph = 'available'
@@ -545,7 +547,7 @@ export function runVerificationChecklist(
   }
 
   // #75. The ONE place a checklist finding acquires its class. Assigning here
-  // rather than at the eight emission sites is what makes the table total: a new
+  // rather than at the nine emission sites is what makes the table total: a new
   // site cannot forget to classify, because the type it builds has no such field.
   const classified: VerificationFinding[] = findings.map((f) => ({
     ...f,

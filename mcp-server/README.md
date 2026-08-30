@@ -327,6 +327,41 @@ because #33 established there is no viable mechanical producer for it. That clos
 "declared five, answered none" — it does not close an agent that declares nothing,
 and the tool descriptions say so rather than implying a stronger guarantee.
 
+#### How a finding is known (#75)
+
+The gate above could prove a finding was *answered* and never that it was *true*: a
+measured fact and an untested guess were stored, counted and gated identically. Each
+finding now carries an `evidence` class — `measured` (the command, an output excerpt,
+and **what else would produce that same output**), `reported` (the source, and whether
+it was checked against a commit or a working tree), or `hypothesis` (how to falsify
+it). The two phases get it from different places, because they are structurally
+different: **V** findings are machine-produced, so the framework classifies its own
+from a static `source` table; **REVIEW** findings are agent-declared, so the agent
+supplies it.
+
+- **Optional at the door, degraded when absent.** Omitting `evidence` is never a
+  rejection — the finding counts as an *unrecorded* hypothesis. What IS rejected is an
+  inconsistent claim: `measured` with no command. Absent, malformed or unrecognised
+  becomes `hypothesis`, never fact.
+- **`open_findings` carries it.** The recovery payload returns the class with the
+  finding, so a rejected or resumed session answers without re-deriving evidence it no
+  longer has — and a legacy finding stored before this still parses, still gates, and
+  reads as unrecorded.
+- **The mix is surfaced** in `rsct_phase_status`, `rsct_load_context`, both `_complete`
+  summaries, the approval dialog and the audit log — *"12 findings, 11 of them
+  hypotheses"* before the dev approves. Three surfaces rather than one, because the
+  `trust` channel renders no dialog at all.
+- **What it does not do.** Nothing here checks whether `also_explained_by` is honest;
+  the class separates *kinds* of knowing, not strengths within a kind, so two findings
+  from the same source stay indistinguishable from each other. `findings_run_id` still
+  hashes ids only, so re-declaring the same ids with weaker evidence does not read as a
+  stale set.
+
+Findings also record `head_sha` (full, never an abbreviation) and `observed_at` at the
+phase start; `_complete` compares against HEAD and reports `head_stale`. It **marks,
+never rejects** — committing the fixes a review found is the normal reason for HEAD to
+move. Unknown is `null`, never `true`.
+
 ### `rsct_load_context`
 
 Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, knowledge index, next-action hints.
