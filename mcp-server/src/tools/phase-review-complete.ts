@@ -8,11 +8,13 @@ import {
   type CompletePhaseResult,
 } from '../lib/phase-machine.js'
 import {
+  headStaleness,
   readPhaseState,
   stampReviewDecision,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
+import { getHeadSha } from '../lib/git.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   FINDING_ACTIONS,
@@ -81,6 +83,13 @@ export type PhaseReviewCompleteOutput = CompletePhaseResult & {
   actions_summary: ActionsSummary
   /** #75. How the declared findings are known, counted from the stored baseline. */
   evidence_mix: EvidenceMix
+  /**
+   * #75 Part C. `true` when HEAD moved since the findings were declared. Reported,
+   * NEVER a rejection: committing the fixes a review found is the normal reason
+   * for HEAD to move, and refusing to close the phase for it would punish the
+   * correct behaviour.
+   */
+  head_stale: boolean | null
   /** #40: on a findings-gate rejection, every finding still awaiting an action. */
   open_findings?: StoredFinding[]
 }
@@ -147,6 +156,7 @@ export async function phaseReviewCompleteHandler(
   // #75. From the stored baseline, not from findings_actions — an action is a
   // decision, never the evidence under it. `null` reads as unmeasurable.
   const evidence_mix = summarizeEvidence(baseline)
+  const staleness = headStaleness(stored?.head_sha, getHeadSha(projectRoot))
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: stored?.run_id ?? null,
@@ -186,6 +196,7 @@ export async function phaseReviewCompleteHandler(
       anti_replay_error: null,
       actions_summary,
       evidence_mix,
+      head_stale: staleness.head_stale,
       next_recommended_phase: 'review',
       open_findings: findingsGate.open_findings ?? [],
       hints: [
@@ -228,6 +239,7 @@ export async function phaseReviewCompleteHandler(
       ],
       actions_summary,
       evidence_mix,
+      head_stale: staleness.head_stale,
     }
   }
 
@@ -294,6 +306,9 @@ export async function phaseReviewCompleteHandler(
         tool: 'rsct_phase_review_complete',
         spec_ref: input.spec_ref,
         evidence_mix,
+        head_stale: staleness.head_stale,
+        head_sha_at_start: staleness.head_sha_at_start,
+        head_sha_now: staleness.head_sha_now,
       },
       config?.audit,
     )
@@ -320,5 +335,10 @@ export async function phaseReviewCompleteHandler(
 
   // The leg that survives a headless run, where the dialog never renders.
   result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
-  return { ...result, actions_summary, evidence_mix }
+  if (staleness.head_stale === true) {
+    result.hints.push(
+      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found — but any finding anchored to a line number was read against the earlier tree.`,
+    )
+  }
+  return { ...result, actions_summary, evidence_mix, head_stale: staleness.head_stale }
 }

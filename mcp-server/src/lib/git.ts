@@ -500,14 +500,30 @@ function bufferOrStringToString(v: string | Buffer | undefined): string {
 }
 
 /**
- * Read the current HEAD short SHA via the injectable executor.
+ * Read the current HEAD SHA (FULL, 40 chars) via the injectable executor.
  * Returns `null` outside a git repo or on any git error.
+ *
+ * #75 changed this from `rev-parse --short HEAD`. A short sha is an ABBREVIATION,
+ * not an identifier: its length grows with the repository's object count and is
+ * configurable per-clone via `core.abbrev`, so it is not stable across machines —
+ * and the staleness stamp it now feeds exists precisely because "only a commit is
+ * immutable". Equality comparison inside one repo worked either way; anything
+ * carried between repos or written into a record did not.
+ *
+ * Safe to change rather than duplicate: at the time of the change this function
+ * had ZERO callers in `src/` or `tests/`, so no behaviour depended on the old
+ * width. Adding a near-duplicate `getHeadShaFull` would have re-created exactly
+ * the drift #10 consolidated away.
+ *
+ * ONE git spawn (measured ~64 ms warm on Windows, a floor rather than a ceiling),
+ * against `readGitState`'s four — which is why the staleness stamp calls this and
+ * not that.
  */
 export function getHeadSha(
   projectRoot: string,
   executor: GitExecutor = defaultGitExecutor,
 ): string | null {
-  const r = executor(projectRoot, ['rev-parse', '--short', 'HEAD'])
+  const r = executor(projectRoot, ['rev-parse', 'HEAD'])
   if (!r.ok) return null
   return r.stdout.trim() || null
 }

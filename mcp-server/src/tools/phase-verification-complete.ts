@@ -30,10 +30,12 @@ import {
   type StoredFinding,
 } from '../lib/findings.js'
 import {
+  headStaleness,
   readPhaseState,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
+import { getHeadSha } from '../lib/git.js'
 
 
 const findingActionSchema = z
@@ -115,6 +117,12 @@ export interface PhaseVerificationCompleteOutput {
    * silently absent field on the one path nobody looked at.
    */
   evidence_mix: EvidenceMix
+  /**
+   * #75 Part C. `true` when HEAD moved since the V phase started, `false` when it
+   * did not, `null` when it cannot be told (no stamp, or no git). Reported, never
+   * acted on — see `headStaleness`.
+   */
+  head_stale: boolean | null
   /**
    * #40: on a findings-gate rejection, every finding still awaiting an action.
    * Present only on those rejections — nothing else in the framework surfaces the
@@ -224,6 +232,7 @@ export async function phaseVerificationCompleteHandler(
       actions_summary: summary,
       // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
       evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: null,
       audit_error: null,
       anti_replay_persisted: null,
@@ -261,6 +270,7 @@ export async function phaseVerificationCompleteHandler(
       // The stored block belongs to another spec; weighing its evidence here
       // would describe a set this caller is not completing.
       evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -286,6 +296,10 @@ export async function phaseVerificationCompleteHandler(
   // row of zeros — the difference between "nothing was found" and "nothing can
   // be counted" is exactly the confusion this issue was opened over.
   const evidence_mix = summarizeEvidence(baseline)
+  const staleness = headStaleness(
+    existing.state.verification.head_sha,
+    getHeadSha(projectRoot),
+  )
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: existing.state.verification.findings_run_id ?? null,
@@ -320,6 +334,7 @@ export async function phaseVerificationCompleteHandler(
       cleared_phase: false,
       actions_summary: summary,
       evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -356,6 +371,7 @@ export async function phaseVerificationCompleteHandler(
       cleared_phase: false,
       actions_summary: summary,
       evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -411,6 +427,7 @@ export async function phaseVerificationCompleteHandler(
       cleared_phase: false,
       actions_summary: summary,
       evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -456,6 +473,12 @@ export async function phaseVerificationCompleteHandler(
   if (prevV?.spec_tier !== undefined) completedV.spec_tier = prevV.spec_tier
   if (prevV?.started_at !== undefined) completedV.started_at = prevV.started_at
   if (prevV?.persona !== undefined) completedV.persona = prevV.persona
+  // #75 Part C / V-3. This prune is an ALLOWLIST — a fresh object with explicit
+  // copies — so a field not named here is dropped by construction. The stamp has
+  // to be named or the record of WHICH commit the findings described disappears
+  // at exactly the moment the phase becomes evidence for `rsct_phase_code_start`.
+  if (prevV?.head_sha !== undefined) completedV.head_sha = prevV.head_sha
+  if (prevV?.observed_at !== undefined) completedV.observed_at = prevV.observed_at
   // findings + discovered_importers + declared_paths intentionally dropped
   // (their content already lives in the audit log as per-finding entries).
   newState.verification = completedV
@@ -480,6 +503,7 @@ export async function phaseVerificationCompleteHandler(
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
       evidence_mix,
+    head_stale: staleness.head_stale,
       cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok,
@@ -531,6 +555,7 @@ export async function phaseVerificationCompleteHandler(
     cleared_phase: writeResult.ok,
     actions_summary: summary,
     evidence_mix,
+    head_stale: staleness.head_stale,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     anti_replay_persisted: record.ok,
