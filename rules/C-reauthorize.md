@@ -112,8 +112,12 @@ it is:
   and for **comments that no longer match the code**, then list those paths in
   `files_swept`. RSCT reads the carried paths out of git itself and **rejects when
   one is missing from your list, regardless of the four booleans** — that is the
-  one part of the checklist you cannot assert your way past. Get the list with
-  `git diff --name-only <base>...<head>`.
+  one part of the checklist you cannot assert your way past. Get the SAME list it
+  reads with `git diff --name-only --diff-filter=d <base>...<head>` — the filter
+  matters, because a sweep of a file the integration DELETES is incoherent and the
+  tool excludes it. The range differs per operation, and guessing it is the common
+  mistake: merge → `HEAD...<source_branch>` · rebase → `<ref>...HEAD` ·
+  squash → `HEAD...<ref>` · push → `<remote>/<dest_branch>...<source_ref>`.
   It checks **coverage** — that the carried paths were *claimed* as swept — not
   that a sweep happened or that it found anything. There is no `trivial`/`small`
   exemption: residue reaches the codebase at every task size and is paid for by

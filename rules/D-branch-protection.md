@@ -66,14 +66,18 @@ permanent.
 When `rsct-mcp` is installed, `rsct_request_merge` (always), `rsct_request_push`
 (when the branch is protected), and `rsct_request_rebase` (local rebase/squash,
 plan-lifecycle-v2) enforce this mechanically via `pre_merge_ack` (§C) — the ack
-is a self-attestation (except `plan_complete`, cross-checked against open `- [ ]`
-items in the plan's progress), so answer it honestly; marking any item false is
-honored as a stop.
+is a self-attestation except for two items, which RSCT cross-checks against the
+repository: `plan_complete` (against open `- [ ]` items in the plan's progress)
+and `hygiene_swept` (against `files_swept[]`, see below). Answer it honestly;
+marking any item false is honored as a stop.
 
 Item 4 additionally carries **`files_swept[]`**, and that one is not a
 self-attestation: RSCT reads the paths the integration really carries out of git
 and rejects when one of them is missing from your list, **whatever the booleans
-say**. Get the list with `git diff --name-only <base>...<head>`. It checks
+say**. Get the same list it reads with
+`git diff --name-only --diff-filter=d <base>...<head>`, and use the range for your
+operation: merge → `HEAD...<source_branch>` · rebase → `<ref>...HEAD` ·
+squash → `HEAD...<ref>` · push → `<remote>/<dest_branch>...<source_ref>`. It checks
 **coverage** — that the carried paths were claimed as swept — not that a sweep
 happened or found anything. **A local rebase/squash now has a §C-gated tool**
 (`rsct_request_rebase`, which requires its own `pre_merge_ack`); **only PR merges

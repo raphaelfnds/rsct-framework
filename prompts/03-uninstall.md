@@ -302,6 +302,7 @@ For each Category B item, the dev will choose:
 | `.rsct/scripts/sanitize-permissions.js` | **remove** | yes | none — pure framework code |
 | `.rsct/scripts/edit-scope-guard.js` | **remove** | yes (with `.rsct/scripts/`) | none — pure framework code |
 | `.rsct/audit.log` | **keep** | no | dev may choose to delete for full clean removal |
+| The `rsct` entry in `enabledMcpjsonServers` of `.claude/settings.local.json` (#73) | **remove** | yes (4.V.a3 — by value; the key is dropped when its array empties, and the file only when nothing else remains) | none — a stale approval silently re-grants on the next install |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
 | `.rsct/phase-state.json` | **remove** | yes (silent — no question raised) | none — M3 phase-machine state with no post-uninstall value |
 | Any other file under `.rsct/` not listed above | **keep** | no | preserved unconditionally — never delete unknowns |
@@ -593,6 +594,17 @@ The install side wraps the plan-tracking patterns in
 uninstall can find and remove them cleanly without disturbing the rest
 of the file. Skip this step if `.gitignore` is absent or holds no RSCT
 markers.
+
+> **Asymmetry to tell the developer about, when Category E is OUT of scope.**
+> This block also carries the `.claude/settings.local.json` ignore line, and this
+> step is **not** gated on Category E while the approval scrub (4.V.a3) **is**. So
+> on a Custom uninstall that keeps M2 enforcement state, the ignore line is removed
+> while the approval file remains — leaving a machine-local file trackable by git,
+> which is exactly what that line existed to prevent.
+> **In that case, say so and tell the developer to re-add `.claude/settings.local.json`
+> to `.gitignore` by hand.** Do not silently leave it: the file records a
+> per-developer MCP approval, and approving a server on YOUR machine is not a
+> decision to share with the repository.
 
 ```bash
 GITIGNORE="$(pwd)/.gitignore"

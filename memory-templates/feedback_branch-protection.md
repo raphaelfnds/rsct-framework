@@ -55,7 +55,11 @@ non-empty `note` must say what.
 The fourth item also carries `files_swept[]`, the paths you swept. When
 `rsct-mcp` is installed it reads the paths the integration really carries out of
 git and rejects when one is missing from your list — **whatever the booleans
-say**. Get it with `git diff --name-only <base>...<head>`. It checks **coverage**,
+say**. Get the same list it reads with
+`git diff --name-only --diff-filter=d <base>...<head>`, using the range for your
+operation: merge → `HEAD...<source_branch>` · rebase → `<ref>...HEAD` ·
+squash → `HEAD...<ref>` · push → `<remote>/<dest_branch>...<source_ref>`.
+It checks **coverage**,
 that the carried paths were claimed as swept; not that a sweep happened or found
 anything. No tier exemption: residue reaches the codebase at every task size.
 

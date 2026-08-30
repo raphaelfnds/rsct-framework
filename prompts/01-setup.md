@@ -3828,7 +3828,11 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
   # checks disabledMcpjsonServers FIRST and it wins, so a dev who answered "no"
   # here keeps that answer and is told why.
   SETTINGS_LOCAL="$(pwd)/.claude/settings.local.json"
-  mkdir -p "$(pwd)/.claude"
+  # B1 (field-report), same rule as :3602 and :3692: RELATIVE mkdir, because
+  # `mkdir -p` walking a UNC mount root (//wsl.localhost/...) is hostile while
+  # node reads and writes the absolute path fine. Guarded, so a failure stops
+  # here instead of surfacing as a confusing node error two lines down.
+  mkdir -p ".claude" || { echo "  ⚠ ERROR: cannot create .claude" >&2; exit 1; }
   # `if node -e`, not a bare statement: the refusal arms below exit 1, and the
   # follow-up notes must not tell the developer their teammates are all set when
   # nothing was approved. (The notes are also the only stdout evidence a test
