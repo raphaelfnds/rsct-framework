@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, appendFileSync, writeFileSync, renameSync, statSync, readdirSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, readdirSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 import { homedir } from 'os';
@@ -8938,7 +8938,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join26 } = __require("path");
+    var { join: join27 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8981,7 +8981,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join26(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join27(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9384,7 +9384,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join26, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join27, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9447,7 +9447,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join27(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9465,7 +9465,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join26(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join27(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9487,7 +9487,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join26(__dirname$1, "..", "file.js");
+          return join27(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10477,7 +10477,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join26 = ",";
+            let join27 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10491,7 +10491,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join26 = `,
+                join27 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10499,13 +10499,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join26;
+                res += join27;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10526,7 +10526,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join26 = `,
+              join27 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10540,13 +10540,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join26;
+                separator = join27;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join26;
+              separator = join27;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10587,7 +10587,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join26 = ",";
+            let join27 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10600,7 +10600,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join26 = `,
+                join27 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10608,13 +10608,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join26;
+                res += join27;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join26}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10627,7 +10627,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join26 = `,
+              join27 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10636,7 +10636,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join26;
+                separator = join27;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10694,20 +10694,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join27 = `,
+              const join28 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join27;
+                res2 += join28;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join28}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10723,16 +10723,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join26 = `,
+            const join27 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join26, maximumBreadth);
+              res += stringifyTypedArray(value, join27, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join26;
+              separator = join27;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10743,13 +10743,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join26;
+                separator = join27;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join26;
+              separator = join27;
             }
             if (separator !== "") {
               res = `
@@ -22579,6 +22579,9 @@ var StdioServerTransport = class {
 // src/index.ts
 var import_pino = __toESM(require_pino());
 
+// src/catalog.ts
+init_esm_shims();
+
 // src/tools/status.ts
 init_esm_shims();
 
@@ -23027,6 +23030,11 @@ function getHeadSha(projectRoot, executor = defaultGitExecutor) {
   if (!r.ok) return null;
   return r.stdout.trim() || null;
 }
+function getHeadShaFull(projectRoot, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["rev-parse", "HEAD"]);
+  if (!r.ok) return null;
+  return r.stdout.trim() || null;
+}
 function unsafeOperand(operands) {
   for (const [name, value] of Object.entries(operands)) {
     if (!isSafeRevisionToken(value)) {
@@ -23202,6 +23210,14 @@ function releaseLock(lockPath) {
     unlinkSync(lockPath);
   } catch {
   }
+}
+function headStaleness(stampedSha, currentSha) {
+  const at_start = stampedSha ?? null;
+  return {
+    head_stale: at_start === null || currentSha === null ? null : at_start !== currentSha,
+    head_sha_at_start: at_start,
+    head_sha_now: currentSha
+  };
 }
 var PHASE_STATE_PRESERVED_ON_ABANDON = [
   "bootstrap_at",
@@ -24566,18 +24582,71 @@ function safeMtime(path2) {
     return null;
   }
 }
+function enumeratePlanFiles(projectRoot) {
+  let entries;
+  try {
+    entries = readdirSync(projectRoot);
+  } catch {
+    return [];
+  }
+  return entries.filter((name) => /^(?:plan|spec)_.+\.md$/.test(name)).map((name) => {
+    const path2 = join(projectRoot, name);
+    return {
+      name,
+      path: path2,
+      slug: name.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, ""),
+      mtime: safeMtime(path2)
+    };
+  }).filter((e) => e.mtime !== null).sort((a, b) => b.mtime - a.mtime);
+}
+function listPlans(projectRoot, opts = {}) {
+  const now = (opts.now ?? /* @__PURE__ */ new Date()).getTime();
+  const DAY_MS2 = 864e5;
+  return enumeratePlanFiles(projectRoot).map((entry) => {
+    const metadata = extractPlanMetadata(entry.path);
+    const progressPath = join(projectRoot, `progress_${entry.slug}.md`);
+    const progressMtime = safeMtime(progressPath);
+    return {
+      slug: entry.slug,
+      plan_path: entry.path,
+      plan_mtime: new Date(entry.mtime).toISOString(),
+      status: metadata.status,
+      branch: metadata.branch,
+      created: metadata.created,
+      declared_slug: metadata.declared_slug,
+      last_update: metadata.last_update,
+      progress_path: progressMtime !== null ? progressPath : null,
+      progress_mtime: progressMtime !== null ? new Date(progressMtime).toISOString() : null,
+      progress_state: progressCompletionState(projectRoot, entry.slug),
+      progress_idle_days: progressMtime !== null ? Math.floor((now - progressMtime) / DAY_MS2) : null
+    };
+  });
+}
 function extractPlanMetadata(path2) {
   let body;
   try {
     body = readFileSync(path2, "utf8");
   } catch {
-    return { status: null, branch: null, created: null };
+    return {
+      status: null,
+      branch: null,
+      created: null,
+      declared_slug: null,
+      last_update: null
+    };
   }
   const head = body.split("\n").slice(0, 60).join("\n");
   return {
     status: extractTableField(head, "Status"),
     branch: extractTableField(head, "Branch"),
-    created: extractTableField(head, "Created")
+    created: extractTableField(head, "Created"),
+    // #57: the template writes these two rows
+    // (`doc-templates/plan_slug.md.template:12` and `:16`) and nothing read them
+    // — a metadata table with dead rows. Surfaced through `listPlans` only; the
+    // `ActivePlan` shape the resolvers return is deliberately unchanged, so no
+    // existing tool's output moves.
+    declared_slug: extractTableField(head, "Slug"),
+    last_update: extractTableField(head, "Last update")
   };
 }
 function extractTableField(text, field) {
@@ -24788,6 +24857,230 @@ function readKnowledgeFile(projectRoot, category) {
   return { exists: true, path: path2, sections: parseSections(body) };
 }
 
+// src/lib/findings.ts
+init_esm_shims();
+var FINDING_ACTIONS = [
+  "block",
+  "address-now",
+  "capture-as-issue",
+  "defer",
+  "accept"
+];
+function emptyActionsSummary() {
+  return Object.fromEntries(FINDING_ACTIONS.map((a) => [a, 0]));
+}
+function makeIdGenerator(prefix) {
+  let counter = 0;
+  return (category) => `${prefix}-${category}-${++counter}`;
+}
+var EVIDENCE_KINDS = ["measured", "reported", "hypothesis"];
+var VERIFIED_AGAINST = ["commit", "working_tree", "unverified"];
+var evidenceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("measured"),
+    command: external_exports.string().min(1, "measured evidence needs the command that was run"),
+    output_excerpt: external_exports.string().min(1, "measured evidence needs an excerpt of the output"),
+    also_explained_by: external_exports.string().min(1, "measured evidence needs what ELSE would produce that same output")
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("reported"),
+    source: external_exports.string().min(1, "reported evidence needs a source"),
+    verified_against: external_exports.enum(VERIFIED_AGAINST),
+    commit_sha: external_exports.string().min(1).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("hypothesis"),
+    how_to_falsify: external_exports.string().min(1, "a hypothesis needs a way to falsify it")
+  }).strict()
+]);
+var evidenceJsonSchema = {
+  type: "object",
+  // Flat, not `oneOf`: no schema in this catalog uses a JSON-Schema combinator,
+  // and introducing one in release week trades a real client-compatibility risk
+  // for a presentational gain. The cost is that the property list alone cannot
+  // express "these three groups are mutually exclusive" — so the description says
+  // it outright, and `phase-schema-parity` pins that the rejection is real rather
+  // than merely claimed here.
+  required: ["kind"],
+  description: "How this finding is known. OPTIONAL \u2014 omitting it is allowed and is not a rejection: the finding counts as an UNRECORDED hypothesis, and the dev sees that in the evidence mix before approving. Send ONLY the fields belonging to your chosen kind: measured -> command + output_excerpt + also_explained_by; reported -> source + verified_against (+ commit_sha); hypothesis -> how_to_falsify. Mixing fields across kinds is REJECTED, and so is a kind whose own fields are missing (e.g. measured with no command). NOTE: nothing here can check whether also_explained_by is honest \u2014 only that you wrote one.",
+  properties: {
+    kind: { type: "string", enum: [...EVIDENCE_KINDS] },
+    command: { type: "string", description: "measured: the command actually run." },
+    output_excerpt: { type: "string", description: "measured: an excerpt of its output." },
+    also_explained_by: {
+      type: "string",
+      description: "measured: what ELSE would produce that same output. The load-bearing field \u2014 a test that ran but did not discriminate is the most expensive failure this class exists to catch."
+    },
+    source: { type: "string", description: "reported: doc path, issue, or session." },
+    verified_against: { type: "string", enum: [...VERIFIED_AGAINST] },
+    commit_sha: { type: "string", description: "reported: the full sha, when checked against a commit." },
+    how_to_falsify: { type: "string", description: "hypothesis: how someone would prove it wrong." }
+  }
+};
+var ABSENT_FALSIFIER = "<not recorded \u2014 no evidence class was supplied, so this finding is treated as a hypothesis>";
+function nonEmpty(v) {
+  return typeof v === "string" && v.trim() !== "";
+}
+function coerceEvidence(raw) {
+  if (raw === void 0 || raw === null) return degrade("absent");
+  if (typeof raw !== "object") return degrade("malformed");
+  const rec = raw;
+  if (rec.kind === "measured") {
+    if (nonEmpty(rec.command) && nonEmpty(rec.output_excerpt) && nonEmpty(rec.also_explained_by)) {
+      return {
+        kind: "measured",
+        command: rec.command,
+        output_excerpt: rec.output_excerpt,
+        also_explained_by: rec.also_explained_by
+      };
+    }
+    return degrade("malformed");
+  }
+  if (rec.kind === "reported") {
+    if (nonEmpty(rec.source) && VERIFIED_AGAINST.includes(rec.verified_against)) {
+      const out = {
+        kind: "reported",
+        source: rec.source,
+        verified_against: rec.verified_against
+      };
+      if (nonEmpty(rec.commit_sha)) out.commit_sha = rec.commit_sha;
+      return out;
+    }
+    return degrade("malformed");
+  }
+  if (rec.kind === "hypothesis") {
+    if (nonEmpty(rec.how_to_falsify)) {
+      const out = { kind: "hypothesis", how_to_falsify: rec.how_to_falsify };
+      if (rec.degraded === true) out.degraded = true;
+      if (nonEmpty(rec.degraded_from)) out.degraded_from = rec.degraded_from;
+      return out;
+    }
+    return degrade("malformed");
+  }
+  return degrade(nonEmpty(rec.kind) ? `unknown_kind:${rec.kind}` : "malformed");
+}
+function degrade(from) {
+  return {
+    kind: "hypothesis",
+    how_to_falsify: ABSENT_FALSIFIER,
+    degraded: true,
+    degraded_from: from
+  };
+}
+function summarizeEvidence(findings) {
+  const mix = {
+    measurable: findings !== null,
+    measured: 0,
+    reported: 0,
+    hypothesis: 0,
+    unrecorded: 0,
+    total: 0
+  };
+  if (findings === null) return mix;
+  for (const f of findings) {
+    const e = f.evidence ?? coerceEvidence(void 0);
+    mix.total++;
+    if (e.kind === "measured") mix.measured++;
+    else if (e.kind === "reported") mix.reported++;
+    else {
+      mix.hypothesis++;
+      if (e.degraded === true) mix.unrecorded++;
+    }
+  }
+  return mix;
+}
+function describeEvidenceMix(mix) {
+  if (!mix.measurable) return "no findings baseline recorded \u2014 evidence mix unavailable";
+  if (mix.total === 0) return "no findings \u2014 nothing to weigh";
+  const unrecorded = mix.unrecorded > 0 ? ` (${mix.unrecorded} unrecorded)` : "";
+  return `${mix.total} finding(s) \u2014 ${mix.measured} measured, ${mix.reported} reported, ${mix.hypothesis} hypothesis${unrecorded}`;
+}
+function readFindingsBaseline(raw) {
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry;
+    if (typeof rec.id !== "string" || rec.id === "") continue;
+    const f = { id: rec.id };
+    if (typeof rec.category === "string") f.category = rec.category;
+    if (typeof rec.title === "string") f.title = rec.title;
+    f.evidence = coerceEvidence(rec.evidence);
+    out.push(f);
+  }
+  return out.length > 0 ? out : null;
+}
+function computeRunId(findings) {
+  const ids = findings.map((f) => f.id).sort();
+  return createHash("sha256").update(ids.join("\0")).digest("hex").slice(0, 12);
+}
+function describe(f) {
+  return f.title ? `${f.id} (${f.title})` : f.id;
+}
+function checkFindingsGate(input) {
+  const { baseline, storedRunId, suppliedRunId, actions, storedSpecRef, specRef } = input;
+  if (baseline === null) return { ok: true };
+  if (storedSpecRef != null && specRef != null && storedSpecRef !== specRef) {
+    return {
+      ok: false,
+      reject_kind: "findings_spec_mismatch",
+      reason: `The stored findings were declared for spec_ref '${storedSpecRef}', not '${specRef}'. They belong to a different task \u2014 re-run the phase start for this spec_ref rather than answering another one.`,
+      open_findings: baseline
+    };
+  }
+  const baselineDuplicates = baseline.map((f) => f.id).filter((id, i, all) => all.indexOf(id) !== i);
+  if (baselineDuplicates.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "ambiguous_baseline",
+      reason: `The stored findings reuse the same id more than once (${[...new Set(baselineDuplicates)].join(", ")}), so one action would silently close several findings. Re-declare them with a distinct id each.`,
+      open_findings: baseline
+    };
+  }
+  if (storedRunId !== null && suppliedRunId !== null && suppliedRunId !== storedRunId) {
+    return {
+      ok: false,
+      reject_kind: "stale_finding_run",
+      reason: `findings_run_id '${suppliedRunId}' is stale \u2014 the phase was re-run and now holds ${baseline.length} finding(s) under '${storedRunId}'. Re-read the findings listed here; earlier answers describe a set that no longer exists.`,
+      open_findings: baseline
+    };
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const duplicates = /* @__PURE__ */ new Set();
+  for (const a of actions) {
+    if (seen.has(a.finding_id)) duplicates.add(a.finding_id);
+    seen.add(a.finding_id);
+  }
+  if (duplicates.size > 0) {
+    return {
+      ok: false,
+      reject_kind: "duplicate_finding_ids",
+      reason: `The same finding is answered more than once: ${[...duplicates].join(", ")}. Two actions for one finding is not a decision \u2014 send exactly one action per finding.`,
+      open_findings: baseline
+    };
+  }
+  const validIds = new Set(baseline.map((f) => f.id));
+  const unknown2 = [...seen].filter((id) => !validIds.has(id));
+  if (unknown2.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "unknown_finding_ids",
+      reason: `No such finding: ${unknown2.join(", ")}. Valid ids for this phase: ${baseline.map((f) => f.id).join(", ")}.`,
+      open_findings: baseline
+    };
+  }
+  const unanswered = baseline.filter((f) => !seen.has(f.id));
+  if (unanswered.length > 0) {
+    return {
+      ok: false,
+      reject_kind: "unanswered_findings",
+      reason: `${unanswered.length} of ${baseline.length} finding(s) have no action: ${unanswered.map(describe).join("; ")}. Every finding needs a decision before this phase can complete.`,
+      open_findings: unanswered
+    };
+  }
+  return { ok: true };
+}
+
 // src/tools/load-context.ts
 var loadContextInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
@@ -24828,6 +25121,7 @@ function buildActivePhase(projectRoot) {
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count,
+      evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       started_at: state.verification.started_at ?? null
     };
   }
@@ -30966,109 +31260,63 @@ function coverageHints(result) {
 
 // src/lib/verification-checklist.ts
 init_esm_shims();
-
-// src/lib/findings.ts
-init_esm_shims();
-var FINDING_ACTIONS = [
-  "block",
-  "address-now",
-  "capture-as-issue",
-  "defer",
-  "accept"
-];
-function emptyActionsSummary() {
-  return Object.fromEntries(FINDING_ACTIONS.map((a) => [a, 0]));
-}
-function makeIdGenerator(prefix) {
-  let counter = 0;
-  return (category) => `${prefix}-${category}-${++counter}`;
-}
-function readFindingsBaseline(raw) {
-  if (!Array.isArray(raw)) return null;
-  const out = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const rec = entry;
-    if (typeof rec.id !== "string" || rec.id === "") continue;
-    const f = { id: rec.id };
-    if (typeof rec.category === "string") f.category = rec.category;
-    if (typeof rec.title === "string") f.title = rec.title;
-    out.push(f);
-  }
-  return out.length > 0 ? out : null;
-}
-function computeRunId(findings) {
-  const ids = findings.map((f) => f.id).sort();
-  return createHash("sha256").update(ids.join("\0")).digest("hex").slice(0, 12);
-}
-function describe(f) {
-  return f.title ? `${f.id} (${f.title})` : f.id;
-}
-function checkFindingsGate(input) {
-  const { baseline, storedRunId, suppliedRunId, actions, storedSpecRef, specRef } = input;
-  if (baseline === null) return { ok: true };
-  if (storedSpecRef != null && specRef != null && storedSpecRef !== specRef) {
+function evidenceForSource(f) {
+  if (f.source === "reverse-dep-walk") {
     return {
-      ok: false,
-      reject_kind: "findings_spec_mismatch",
-      reason: `The stored findings were declared for spec_ref '${storedSpecRef}', not '${specRef}'. They belong to a different task \u2014 re-run the phase start for this spec_ref rather than answering another one.`,
-      open_findings: baseline
+      kind: "measured",
+      command: "reverse-dep walk over declared_paths (lib/reverse-dep-walk.ts)",
+      output_excerpt: f.title,
+      also_explained_by: "The importers may already tolerate the change \u2014 this walk reads import EDGES, not semantics. A dynamic, aliased or generated import is invisible to it, so an absent edge is not an absent dependency, and a present one is not a break."
     };
   }
-  const baselineDuplicates = baseline.map((f) => f.id).filter((id, i, all) => all.indexOf(id) !== i);
-  if (baselineDuplicates.length > 0) {
+  if (f.source === "impact-doc") {
     return {
-      ok: false,
-      reject_kind: "ambiguous_baseline",
-      reason: `The stored findings reuse the same id more than once (${[...new Set(baselineDuplicates)].join(", ")}), so one action would silently close several findings. Re-declare them with a distinct id each.`,
-      open_findings: baseline
+      kind: "reported",
+      // affected_paths[1] is the doc; [0] is the declared path that matched it.
+      source: f.affected_paths[1] ?? "documentation/impact/",
+      verified_against: "working_tree"
     };
   }
-  if (storedRunId !== null && suppliedRunId !== null && suppliedRunId !== storedRunId) {
+  if (f.source === "architecture-overview") {
     return {
-      ok: false,
-      reject_kind: "stale_finding_run",
-      reason: `findings_run_id '${suppliedRunId}' is stale \u2014 the phase was re-run and now holds ${baseline.length} finding(s) under '${storedRunId}'. Re-read the findings listed here; earlier answers describe a set that no longer exists.`,
-      open_findings: baseline
+      kind: "reported",
+      source: "documentation/architecture.md",
+      verified_against: "working_tree"
     };
   }
-  const seen = /* @__PURE__ */ new Set();
-  const duplicates = /* @__PURE__ */ new Set();
-  for (const a of actions) {
-    if (seen.has(a.finding_id)) duplicates.add(a.finding_id);
-    seen.add(a.finding_id);
-  }
-  if (duplicates.size > 0) {
+  if (f.source === "contract-surface") {
     return {
-      ok: false,
-      reject_kind: "duplicate_finding_ids",
-      reason: `The same finding is answered more than once: ${[...duplicates].join(", ")}. Two actions for one finding is not a decision \u2014 send exactly one action per finding.`,
-      open_findings: baseline
+      kind: "measured",
+      command: "contractsTouchingPaths(readContracts(universeRoot), app, declared_paths)",
+      output_excerpt: f.title,
+      also_explained_by: "The consumers may not exercise the part of the surface that changed \u2014 a contract records a GLOB, not a call graph. And a consumer missing from contracts.json is invisible here, because that file is hand-written and no installer maintains it."
     };
   }
-  const validIds = new Set(baseline.map((f) => f.id));
-  const unknown2 = [...seen].filter((id) => !validIds.has(id));
-  if (unknown2.length > 0) {
+  if (f.source === "premise-check") {
     return {
-      ok: false,
-      reject_kind: "unknown_finding_ids",
-      reason: `No such finding: ${unknown2.join(", ")}. Valid ids for this phase: ${baseline.map((f) => f.id).join(", ")}.`,
-      open_findings: baseline
+      kind: "hypothesis",
+      how_to_falsify: "Open the referenced entry. The matcher scores SHARED TOKENS over title+excerpt, so if the shared words are generic domain nouns rather than the terms carrying the claim, this is vocabulary coincidence and the finding is false. Two shared tokens is enough to match."
     };
   }
-  const unanswered = baseline.filter((f) => !seen.has(f.id));
-  if (unanswered.length > 0) {
+  if (f.source === "basename-overlap") {
     return {
-      ok: false,
-      reject_kind: "unanswered_findings",
-      reason: `${unanswered.length} of ${baseline.length} finding(s) have no action: ${unanswered.map(describe).join("; ")}. Every finding needs a decision before this phase can complete.`,
-      open_findings: unanswered
+      kind: "hypothesis",
+      how_to_falsify: "Open the overlapping files. A shared basename is not duplication \u2014 parallel layers (a model and its controller, a port and its adapter) routinely share one."
     };
   }
-  return { ok: true };
+  if (f.source.startsWith("knowledge-category:")) {
+    return {
+      kind: "hypothesis",
+      how_to_falsify: "This is a PROMPT, not an observation: the checklist saw that the category exists, never that the spec ignored it. If the spec already covers it, the finding is answered by saying so."
+    };
+  }
+  return {
+    kind: "hypothesis",
+    how_to_falsify: `Unclassified checklist source '${f.source}' \u2014 no evidence class is recorded for it, so it is treated as a guess. Add a row to evidenceForSource().`,
+    degraded: true,
+    degraded_from: `unknown_source:${f.source}`
+  };
 }
-
-// src/lib/verification-checklist.ts
 var CATEGORY_PROMPTS = {
   "business-rules": "Did the spec consider business-rules.md? Check for invariants or compliance constraints.",
   "anti-decisions": "Did the spec consult anti-decisions.md? Avoid re-trying abandoned paths.",
@@ -31105,13 +31353,15 @@ function runVerificationChecklist(input) {
     decisions_scanned: 0,
     anti_decisions_scanned: 0,
     impact_docs_consulted: 0,
-    architecture_overview_present: false
+    architecture_overview_present: false,
+    contract_graph: "not_run",
+    contracts_scanned: 0
   };
   if (input.specTier === "trivial" || input.specTier === "small") {
     hints.push(
       `spec_tier=${input.specTier} \u2014 verification checklist skipped per tier table.`
     );
-    return { findings, stats, hints };
+    return { findings: [], stats, hints };
   }
   const decisions = readDecisions(input.projectRoot);
   const antiDecisions = readAntiDecisions(input.projectRoot);
@@ -31242,6 +31492,32 @@ ${head}${overflow}`,
       });
     }
   }
+  const graph = input.contractGraph ?? EMPTY_CONTRACT_GRAPH;
+  if (!input.universeLinked) stats.contract_graph = "no_universe";
+  else if (graph.available) stats.contract_graph = "available";
+  else if (graph.note !== null) stats.contract_graph = "degraded";
+  else stats.contract_graph = "no_manifest";
+  stats.contracts_scanned = graph.contracts.length;
+  if (graph.available) {
+    const touched = contractsTouchingPaths(graph, input.appName ?? null, input.declaredPaths);
+    for (const contract of touched) {
+      const consumers = affectedConsumers([contract]);
+      if (consumers.length === 0) continue;
+      findings.push({
+        id: nextId("breakage"),
+        category: "breakage",
+        severity: "address-now",
+        title: `Contract '${contract.id}' surface touched \u2014 ${consumers.length} consumer(s) declared`,
+        detail: `Declared paths match the surface of contract '${contract.id}', which ${consumers.join(", ")} depend${consumers.length === 1 ? "s" : ""} on. Surface globs: ${contract.surface.join(", ")}.${contract.description ? ` ${contract.description}` : ""}`,
+        affected_paths: [...input.declaredPaths],
+        source: "contract-surface"
+      });
+    }
+  } else if (input.universeLinked && stats.contract_graph === "degraded") {
+    hints.push(
+      `\u26A0 contract graph unavailable (${graph.note}) \u2014 the adjacency check did not run. This is a coverage GAP, not a clean pass.`
+    );
+  }
   stats.categories_run.push("redundancy");
   if (input.existingProjectFiles && input.existingProjectFiles.length > 0) {
     const declaredSet = new Set(input.declaredPaths);
@@ -31306,7 +31582,11 @@ ${head}${overflow}`,
       );
     }
   }
-  return { findings, stats, hints };
+  const classified = findings.map((f) => ({
+    ...f,
+    evidence: evidenceForSource(f)
+  }));
+  return { findings: classified, stats, hints };
 }
 
 // src/lib/phase-machine.ts
@@ -31536,7 +31816,9 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     approval: input.devApproval,
     dialog: {
       title: `RSCT \u2014 ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`
+      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${internal.dialogDetail ? `
+
+${internal.dialogDetail}` : ""}`
     },
     projectRoot: input.projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -31726,11 +32008,16 @@ async function phaseVerificationStartHandler(rawInput) {
     seedPaths: input.declared_paths,
     maxDepth: input.max_depth
   });
+  const topology = detectTopology(config2, projectRoot);
+  const contractGraph = readContracts(topology.universe_root);
   const checklistArgs = {
     projectRoot,
     declaredPaths: walk.declared,
     discoveredImporters: walk.discovered,
-    specTier: input.spec_tier
+    specTier: input.spec_tier,
+    contractGraph,
+    appName: config2?.app?.name ?? null,
+    universeLinked: topology.universe_root !== null
   };
   if (input.spec_claims !== void 0) checklistArgs.specClaims = input.spec_claims;
   if (input.existing_project_files !== void 0) {
@@ -31819,6 +32106,7 @@ async function phaseVerificationStartHandler(rawInput) {
     };
   }
   const staleRestart = isStaleVerificationLabel(baseState);
+  const headSha = getHeadShaFull(projectRoot);
   const verificationBlock = {
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -31826,8 +32114,10 @@ async function phaseVerificationStartHandler(rawInput) {
     discovered_importers: walk.discovered,
     findings: checklist.findings,
     findings_run_id: findingsRunId,
-    started_at: startedAt
+    started_at: startedAt,
+    observed_at: startedAt
   };
+  if (headSha !== null) verificationBlock.head_sha = headSha;
   if (requestedPersona !== null) verificationBlock.persona = requestedPersona;
   const newState = {
     ...baseState,
@@ -31868,9 +32158,15 @@ async function phaseVerificationStartHandler(rawInput) {
       // are needed to tell them apart: the seed counts do not capture a
       // resolver that dropped every edge while every seed was analyzable.
       walk_coverage: walk.coverage,
+      // #75 Part B. Which of the four contract-graph states this run saw — the
+      // difference between "no adjacent app depends on this" and "nobody has ever
+      // written the manifest that would say so" is invisible from a finding count.
+      contract_graph: checklist.stats.contract_graph,
+      contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
       findings_count: checklist.findings.length,
+      evidence_mix: summarizeEvidence(checklist.findings),
       phase_state_written: writeResult.ok
     },
     config2?.audit
@@ -31886,7 +32182,10 @@ async function phaseVerificationStartHandler(rawInput) {
         category: finding.category,
         severity: finding.severity,
         source: finding.source,
-        title: finding.title
+        title: finding.title,
+        // #75. The class, per finding, in the forensic record — so a past run can
+        // be re-read for what it actually knew, not only for what it decided.
+        evidence_kind: finding.evidence.kind
       },
       config2?.audit
     );
@@ -31894,6 +32193,7 @@ async function phaseVerificationStartHandler(rawInput) {
   const fields = auditFields(startAudit);
   const hints = [];
   if (writeResult.ok) {
+    hints.push(`Evidence: ${describeEvidenceMix(summarizeEvidence(checklist.findings))}.`);
     hints.push(
       `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced \u2014 EVERY one needs an action. Call rsct_phase_verification_complete with findings_actions[] covering all of them, findings_run_id='${findingsRunId}', and dev_approval.`
     );
@@ -32031,6 +32331,9 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
+      evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: null,
       audit_error: null,
       anti_replay_persisted: null,
@@ -32064,6 +32367,10 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      // The stored block belongs to another spec; weighing its evidence here
+      // would describe a set this caller is not completing.
+      evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
@@ -32074,6 +32381,11 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     };
   }
   const baseline = readFindingsBaseline(existing.state.verification.findings);
+  const evidence_mix = summarizeEvidence(baseline);
+  const staleness = headStaleness(
+    existing.state.verification.head_sha,
+    getHeadShaFull(projectRoot)
+  );
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: existing.state.verification.findings_run_id ?? null,
@@ -32107,6 +32419,8 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
@@ -32141,6 +32455,8 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
@@ -32155,9 +32471,16 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 verification complete",
+      // #75. The mix rides the line the dev actually reads before clicking. It is
+      // one of THREE surfaces, not the surface: `gateRequest` falls back to the
+      // `trust` channel when no dialog channel exists (headless, CI), and on that
+      // path this string is never rendered. The hints and audit legs below are
+      // what survive there.
       message: `Complete V phase for spec '${input.spec_ref}'?
 
-${input.findings_actions.length} action(s): ${summary["address-now"]} address-now, ${summary["capture-as-issue"]} capture, ${summary.defer} defer, ${summary.accept} accept`
+${input.findings_actions.length} action(s): ${summary["address-now"]} address-now, ${summary["capture-as-issue"]} capture, ${summary.defer} defer, ${summary.accept} accept
+
+Evidence: ${describeEvidenceMix(evidence_mix)}`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -32190,6 +32513,8 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       audit_path: fields2.audit_path,
       audit_error: fields2.audit_error,
       anti_replay_persisted: null,
@@ -32221,6 +32546,8 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   if (prevV?.spec_tier !== void 0) completedV.spec_tier = prevV.spec_tier;
   if (prevV?.started_at !== void 0) completedV.started_at = prevV.started_at;
   if (prevV?.persona !== void 0) completedV.persona = prevV.persona;
+  if (prevV?.head_sha !== void 0) completedV.head_sha = prevV.head_sha;
+  if (prevV?.observed_at !== void 0) completedV.observed_at = prevV.observed_at;
   newState.verification = completedV;
   delete newState.phase;
   delete newState.scope_globs;
@@ -32235,6 +32562,8 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok
@@ -32245,6 +32574,7 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
   const fields = auditFields(completeAudit);
   const hints = [];
   if (writeResult.ok) {
+    hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);
     hints.push(
       `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) \u2014 it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`
     );
@@ -32280,6 +32610,8 @@ ${input.findings_actions.length} action(s): ${summary["address-now"]} address-no
     cleared_verification: writeResult.ok,
     cleared_phase: writeResult.ok,
     actions_summary: summary,
+    evidence_mix,
+    head_stale: staleness.head_stale,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     anti_replay_persisted: record2.ok,
@@ -32829,6 +33161,10 @@ async function phaseStatusHandler(rawInput) {
       // what to answer except deliberately failing a call or re-running _start —
       // which rewrites the baseline it is being measured against.
       open_findings: readFindingsBaseline(findings) ?? [],
+      // Fed the baseline itself, NOT the `?? []` fallback: `null` means the
+      // baseline was unreadable, and collapsing it to an empty array here would
+      // report an unmeasurable block as a clean one.
+      evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null
     };
@@ -32842,6 +33178,7 @@ async function phaseStatusHandler(rawInput) {
       decided_at: state.review?.decided_at ?? null,
       completed_at: state.review?.completed_at ?? null,
       open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
+      evidence_mix: summarizeEvidence(readFindingsBaseline(state.review_findings?.findings)),
       findings_run_id: state.review_findings?.run_id ?? null
     };
   }
@@ -33631,7 +33968,12 @@ var declaredFindingSchema = external_exports.object({
   detail: external_exports.string().optional(),
   severity: external_exports.string().optional(),
   path: external_exports.string().optional(),
-  line: external_exports.number().optional()
+  line: external_exports.number().optional(),
+  // #75. REVIEW findings are 100% agent-declared — this tool generates none —
+  // so unlike the V phase, this is where the class comes from. Optional at the
+  // door: see `evidenceSchema` for why requiring it would buy ritual rather
+  // than evidence. Claiming `measured` without a command is still rejected here.
+  evidence: evidenceSchema.optional()
 }).strict();
 var phaseReviewStartInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
@@ -33680,7 +34022,8 @@ var phaseReviewStartTool = {
             detail: { type: "string" },
             severity: { type: "string" },
             path: { type: "string" },
-            line: { type: "number" }
+            line: { type: "number" },
+            evidence: evidenceJsonSchema
           },
           additionalProperties: false
         }
@@ -33705,6 +34048,7 @@ async function phaseReviewStartHandler(rawInput, internal = {}) {
   const previous = readPhaseState(resolution.root).state;
   const hadFindings = previous?.review_findings !== void 0;
   const declaredAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const headSha = getHeadShaFull(resolution.root);
   const patch = (state) => {
     if (runId === null) {
       delete state.review_findings;
@@ -33713,8 +34057,10 @@ async function phaseReviewStartHandler(rawInput, internal = {}) {
         spec_ref: input.spec_ref,
         run_id: runId,
         findings: declared,
-        declared_at: declaredAt
+        declared_at: declaredAt,
+        observed_at: declaredAt
       };
+      if (headSha !== null) block.head_sha = headSha;
       state.review_findings = block;
     }
     if (state.review?.completed_at !== void 0) {
@@ -33750,10 +34096,15 @@ async function phaseReviewStartHandler(rawInput, internal = {}) {
     );
   }
   const persisted = result.status === "started" && result.phase_state_written;
+  const evidence_mix = summarizeEvidence(persisted ? declared : null);
+  if (persisted && declared.length > 0) {
+    result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);
+  }
   return {
     ...result,
     findings: persisted ? declared : [],
-    findings_run_id: persisted ? runId : null
+    findings_run_id: persisted ? runId : null,
+    evidence_mix
   };
 }
 
@@ -33820,6 +34171,8 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   for (const fa of input.findings_actions) actions_summary[fa.action]++;
   const stored = readPhaseState(projectRoot).state?.review_findings;
   const baseline = readFindingsBaseline(stored?.findings);
+  const evidence_mix = summarizeEvidence(baseline);
+  const staleness = headStaleness(stored?.head_sha, getHeadShaFull(projectRoot));
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: stored?.run_id ?? null,
@@ -33858,6 +34211,8 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       anti_replay_persisted: null,
       anti_replay_error: null,
       actions_summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       next_recommended_phase: "review",
       open_findings: findingsGate.open_findings ?? [],
       hints: [
@@ -33894,7 +34249,9 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       hints: [
         `REVIEW is not complete: ${actions_summary.block} finding(s) are blocking. Fix them or downgrade the action with the dev \u2014 a blocking finding is the one thing this phase will not wave through.`
       ],
-      actions_summary
+      actions_summary,
+      evidence_mix,
+      head_stale: staleness.head_stale
     };
   }
   const result = await gatePhaseComplete(
@@ -33905,7 +34262,12 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       devApproval: input.dev_approval
     },
     resolution.config,
-    internal
+    // `dialogDetail` AFTER the spread, deliberately: every test here injects
+    // `internal` for `promptFn`, and setting it first would let the injected
+    // object shadow the production value — the dialog assertion would then pass
+    // against a string this path never produced. That is the issue's own "a test
+    // built to confirm rather than to discriminate", one level down.
+    { ...internal, dialogDetail: `Evidence: ${describeEvidenceMix(evidence_mix)}` }
   );
   if (result.status === "completed") {
     const completedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
@@ -33929,6 +34291,19 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
         );
       }
     }
+    appendAudit(
+      projectRoot,
+      {
+        event: "review.evidence_mix",
+        tool: "rsct_phase_review_complete",
+        spec_ref: input.spec_ref,
+        evidence_mix,
+        head_stale: staleness.head_stale,
+        head_sha_at_start: staleness.head_sha_at_start,
+        head_sha_now: staleness.head_sha_now
+      },
+      config2?.audit
+    );
     for (const fa of input.findings_actions) {
       appendAudit(
         projectRoot,
@@ -33944,7 +34319,13 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       );
     }
   }
-  return { ...result, actions_summary };
+  result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);
+  if (staleness.head_stale === true) {
+    result.hints.push(
+      `\u26A0 HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} \u2192 ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found \u2014 but any finding anchored to a line number was read against the earlier tree.`
+    );
+  }
+  return { ...result, actions_summary, evidence_mix, head_stale: staleness.head_stale };
 }
 
 // src/tools/phase-test-start.ts
@@ -35787,6 +36168,199 @@ async function tutorStepHandler(rawInput) {
   };
 }
 
+// src/tools/audit.ts
+init_esm_shims();
+var auditInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+}).strict();
+var COVERAGE_BOUNDARY = [
+  "Settings drift (.claude/settings.json ownership) is NOT checked here \u2014 it needs two git reads to assemble, and this tool spawns no processes. It already reaches you at the commit gate (rsct_request_commit).",
+  "Findings are pruned when a phase closes, so a finding raised and answered in a past phase leaves no trace this report can query.",
+  ".rsct/ state is per-worktree. In a linked git worktree this reports on THAT worktree only, not on the project as a whole.",
+  "Rule-section bodies in CLAUDE.md are not read by THIS tool. The framework does cover that axis \u2014 every section carries a sha256-body= stamp and /rsct-setup reconciles them (since v2.7.0, #45) \u2014 rsct_audit just does not check it, so a clean report here says nothing either way about rule-body freshness.",
+  'This is a point-in-time read of local files, and it never gates. ONE exception to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records one rsct_json.* entry in .rsct/audit.log \u2014 creating that file if absent, and regardless of audit.enabled. That write belongs to resolveProjectRoot and happens identically for rsct_status and rsct_load_context; it is not specific to this report.',
+  `install_drift.message is relayed VERBATIM from the drift detector and can contain a repair instruction (e.g. "Run /rsct-setup"). That text is the detector's, not this report's recommendation \u2014 nothing here tells you to run a tool that mutates RSCT phase state.`
+];
+var DAY_MS = 864e5;
+function explainEligibility(eligible, reasons) {
+  if (eligible) {
+    return "The dialog-free free-commit lane is available for this project. Every commit still goes through rsct_request_commit.";
+  }
+  const faults = reasons.filter((r) => r !== "audit_history_absent");
+  if (faults.length > 0) {
+    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. Commits still work; they go through the per-action \xA7C path.`;
+  }
+  if (reasons.includes("audit_history_absent")) {
+    return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
+  }
+  return "Free commits are closed; commits go through the per-action \xA7C path instead. This withholds a convenience, it does not block any work.";
+}
+var auditTool = {
+  name: "rsct_audit",
+  description: "On-demand report on this project's RSCT surface: install drift, free-commit-lane eligibility, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection."
+      }
+    },
+    additionalProperties: false
+  }
+};
+async function auditHandler(rawInput, deps = {}) {
+  const input = auditInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const hints = [];
+  let install_drift = null;
+  if (resolution.rsct_installed) {
+    const drift = getInstallDriftNotice({
+      projectRoot: resolution.root,
+      projectVersion: resolution.config?.rsct_version ?? null,
+      mcpVersion: RSCT_MCP_VERSION
+    });
+    install_drift = {
+      severity: drift.severity,
+      affected_components: drift.affected_components,
+      message: drift.hint
+    };
+  }
+  let free_commit_eligibility = null;
+  if (resolution.rsct_installed) {
+    const health = evaluateMcpHealth(resolution.root, {
+      now,
+      config: resolution.config
+    });
+    free_commit_eligibility = {
+      eligible: health.healthy,
+      reasons: health.reasons,
+      explanation: explainEligibility(health.healthy, health.reasons)
+    };
+  }
+  const state = readPhaseState(resolution.root).state;
+  let open_phase = null;
+  if (state?.phase) {
+    const startedAt = state.phase === "verification" ? state.verification?.started_at ?? null : state.started_at ?? null;
+    const startedMs = startedAt !== null ? Date.parse(startedAt) : NaN;
+    open_phase = {
+      phase: state.phase,
+      started_at: startedAt,
+      age_days: Number.isNaN(startedMs) ? null : Math.floor((now.getTime() - startedMs) / DAY_MS)
+    };
+  }
+  const plans = listPlans(resolution.root, { now });
+  if (!resolution.rsct_installed) {
+    hints.push(
+      existsSync(join(resolution.root, ".rsct.json")) ? "A .rsct.json is PRESENT here but was rejected \u2014 unreadable, malformed, or carrying a value outside the enforced bounds \u2014 so RSCT is treating this project as unmanaged and neither install drift nor free-commit eligibility is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo." : "This project is not rsct-managed (no .rsct.json), so install drift and free-commit eligibility are not reported. Plans found at the root are still listed."
+    );
+  }
+  if (open_phase && open_phase.age_days !== null && open_phase.age_days >= 7) {
+    hints.push(
+      `Phase '${open_phase.phase}' has been open for ${open_phase.age_days} days. Worth a look \u2014 this is an observation, not an instruction, and closing or discarding a phase is the dev's decision.`
+    );
+  }
+  return {
+    mcp_server: { name: "rsct-mcp", version: RSCT_MCP_VERSION },
+    rsct_installed: resolution.rsct_installed,
+    project: { root: resolution.root },
+    install_drift,
+    free_commit_eligibility,
+    open_phase,
+    plans,
+    plans_ordered_by: "plan_file_mtime",
+    coverage_boundary: COVERAGE_BOUNDARY,
+    hints
+  };
+}
+
+// src/catalog.ts
+var TOOLS = [
+  statusTool,
+  loadContextTool,
+  getDecisionsTool,
+  getKnowledgeTool,
+  getEnvironmentsTool,
+  getArchitectureTool,
+  getUniverseTool,
+  getTopologyTool,
+  detectOnboardingTool,
+  checkPremiseTool,
+  checkBranchTool,
+  checkSecretsTool,
+  checkEditScopeTool,
+  requestCommitTool,
+  requestPushTool,
+  requestMergeTool,
+  requestRebaseTool,
+  planAuthorizeTool,
+  planRevokeTool,
+  planDisposeTool,
+  classifyTaskTool,
+  phaseStatusTool,
+  phaseResearchStartTool,
+  phaseResearchCompleteTool,
+  phaseSpecStartTool,
+  phaseSpecCompleteTool,
+  phaseVerificationStartTool,
+  phaseVerificationCompleteTool,
+  phaseCodeStartTool,
+  phaseCodeCompleteTool,
+  phaseReviewStartTool,
+  phaseReviewCompleteTool,
+  phaseTestStartTool,
+  phaseTestCompleteTool,
+  phaseAbandonTool,
+  captureIssueTool,
+  personaReviewTool,
+  autoPersonaTool,
+  tutorStepTool,
+  auditTool
+];
+var HANDLERS = {
+  rsct_status: statusHandler,
+  rsct_load_context: loadContextHandler,
+  rsct_get_decisions: getDecisionsHandler,
+  rsct_get_knowledge: getKnowledgeHandler,
+  rsct_get_environments: getEnvironmentsHandler,
+  rsct_get_architecture: getArchitectureHandler,
+  rsct_get_universe: getUniverseHandler,
+  rsct_get_topology: getTopologyHandler,
+  rsct_detect_onboarding: detectOnboardingHandler,
+  rsct_check_premise: checkPremiseHandler,
+  rsct_check_branch: checkBranchHandler,
+  rsct_check_secrets: checkSecretsHandler,
+  rsct_check_edit_scope: checkEditScopeHandler,
+  rsct_request_commit: requestCommitHandler,
+  rsct_request_push: requestPushHandler,
+  rsct_request_merge: requestMergeHandler,
+  rsct_request_rebase: requestRebaseHandler,
+  rsct_plan_authorize: planAuthorizeHandler,
+  rsct_plan_revoke: planRevokeHandler,
+  rsct_plan_dispose: planDisposeHandler,
+  rsct_classify_task: classifyTaskHandler,
+  rsct_phase_status: phaseStatusHandler,
+  rsct_phase_research_start: phaseResearchStartHandler,
+  rsct_phase_research_complete: phaseResearchCompleteHandler,
+  rsct_phase_spec_start: phaseSpecStartHandler,
+  rsct_phase_spec_complete: phaseSpecCompleteHandler,
+  rsct_phase_verification_start: phaseVerificationStartHandler,
+  rsct_phase_verification_complete: phaseVerificationCompleteHandler,
+  rsct_phase_code_start: phaseCodeStartHandler,
+  rsct_phase_code_complete: phaseCodeCompleteHandler,
+  rsct_phase_review_start: phaseReviewStartHandler,
+  rsct_phase_review_complete: phaseReviewCompleteHandler,
+  rsct_phase_test_start: phaseTestStartHandler,
+  rsct_phase_test_complete: phaseTestCompleteHandler,
+  rsct_phase_abandon: phaseAbandonHandler,
+  rsct_capture_issue: captureIssueHandler,
+  rsct_persona_review: personaReviewHandler,
+  rsct_auto_persona: autoPersonaHandler,
+  rsct_tutor_step: tutorStepHandler,
+  rsct_audit: auditHandler
+};
+
 // src/resources.ts
 init_esm_shims();
 var MIME_MARKDOWN = "text/markdown";
@@ -35874,88 +36448,6 @@ var logger = (0, import_pino.default)(
   },
   import_pino.default.destination(2)
 );
-var TOOLS = [
-  statusTool,
-  loadContextTool,
-  getDecisionsTool,
-  getKnowledgeTool,
-  getEnvironmentsTool,
-  getArchitectureTool,
-  getUniverseTool,
-  getTopologyTool,
-  detectOnboardingTool,
-  checkPremiseTool,
-  checkBranchTool,
-  checkSecretsTool,
-  checkEditScopeTool,
-  requestCommitTool,
-  requestPushTool,
-  requestMergeTool,
-  requestRebaseTool,
-  planAuthorizeTool,
-  planRevokeTool,
-  planDisposeTool,
-  classifyTaskTool,
-  phaseStatusTool,
-  phaseResearchStartTool,
-  phaseResearchCompleteTool,
-  phaseSpecStartTool,
-  phaseSpecCompleteTool,
-  phaseVerificationStartTool,
-  phaseVerificationCompleteTool,
-  phaseCodeStartTool,
-  phaseCodeCompleteTool,
-  phaseReviewStartTool,
-  phaseReviewCompleteTool,
-  phaseTestStartTool,
-  phaseTestCompleteTool,
-  phaseAbandonTool,
-  captureIssueTool,
-  personaReviewTool,
-  autoPersonaTool,
-  tutorStepTool
-];
-var HANDLERS = {
-  rsct_status: statusHandler,
-  rsct_load_context: loadContextHandler,
-  rsct_get_decisions: getDecisionsHandler,
-  rsct_get_knowledge: getKnowledgeHandler,
-  rsct_get_environments: getEnvironmentsHandler,
-  rsct_get_architecture: getArchitectureHandler,
-  rsct_get_universe: getUniverseHandler,
-  rsct_get_topology: getTopologyHandler,
-  rsct_detect_onboarding: detectOnboardingHandler,
-  rsct_check_premise: checkPremiseHandler,
-  rsct_check_branch: checkBranchHandler,
-  rsct_check_secrets: checkSecretsHandler,
-  rsct_check_edit_scope: checkEditScopeHandler,
-  rsct_request_commit: requestCommitHandler,
-  rsct_request_push: requestPushHandler,
-  rsct_request_merge: requestMergeHandler,
-  rsct_request_rebase: requestRebaseHandler,
-  rsct_plan_authorize: planAuthorizeHandler,
-  rsct_plan_revoke: planRevokeHandler,
-  rsct_plan_dispose: planDisposeHandler,
-  rsct_classify_task: classifyTaskHandler,
-  rsct_phase_status: phaseStatusHandler,
-  rsct_phase_research_start: phaseResearchStartHandler,
-  rsct_phase_research_complete: phaseResearchCompleteHandler,
-  rsct_phase_spec_start: phaseSpecStartHandler,
-  rsct_phase_spec_complete: phaseSpecCompleteHandler,
-  rsct_phase_verification_start: phaseVerificationStartHandler,
-  rsct_phase_verification_complete: phaseVerificationCompleteHandler,
-  rsct_phase_code_start: phaseCodeStartHandler,
-  rsct_phase_code_complete: phaseCodeCompleteHandler,
-  rsct_phase_review_start: phaseReviewStartHandler,
-  rsct_phase_review_complete: phaseReviewCompleteHandler,
-  rsct_phase_test_start: phaseTestStartHandler,
-  rsct_phase_test_complete: phaseTestCompleteHandler,
-  rsct_phase_abandon: phaseAbandonHandler,
-  rsct_capture_issue: captureIssueHandler,
-  rsct_persona_review: personaReviewHandler,
-  rsct_auto_persona: autoPersonaHandler,
-  rsct_tutor_step: tutorStepHandler
-};
 async function main() {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
