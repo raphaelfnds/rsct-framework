@@ -14,7 +14,7 @@ import {
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
-import { getHeadSha } from '../lib/git.js'
+import { getHeadShaFull } from '../lib/git.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   FINDING_ACTIONS,
@@ -156,7 +156,7 @@ export async function phaseReviewCompleteHandler(
   // #75. From the stored baseline, not from findings_actions — an action is a
   // decision, never the evidence under it. `null` reads as unmeasurable.
   const evidence_mix = summarizeEvidence(baseline)
-  const staleness = headStaleness(stored?.head_sha, getHeadSha(projectRoot))
+  const staleness = headStaleness(stored?.head_sha, getHeadShaFull(projectRoot))
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: stored?.run_id ?? null,

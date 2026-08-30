@@ -500,26 +500,50 @@ function bufferOrStringToString(v: string | Buffer | undefined): string {
 }
 
 /**
- * Read the current HEAD SHA (FULL, 40 chars) via the injectable executor.
+ * Read the current HEAD SHORT sha via the injectable executor.
  * Returns `null` outside a git repo or on any git error.
  *
- * #75 changed this from `rev-parse --short HEAD`. A short sha is an ABBREVIATION,
- * not an identifier: its length grows with the repository's object count and is
- * configurable per-clone via `core.abbrev`, so it is not stable across machines —
- * and the staleness stamp it now feeds exists precisely because "only a commit is
- * immutable". Equality comparison inside one repo worked either way; anything
- * carried between repos or written into a record did not.
+ * REPORTING format, deliberately. Its eight callers below are the
+ * `sha_before`/`sha_after` pairs of {@link gitCommit}, {@link gitPush},
+ * {@link gitMerge} and {@link gitRebase}, which exist to tell a human what an
+ * operation did — and `readGitState` (line 22) fills the SAME `sha_before` field
+ * on `rsct_request_commit`'s rejection paths, also short. One field must not
+ * carry two widths depending on which branch produced it.
  *
- * Safe to change rather than duplicate: at the time of the change this function
- * had ZERO callers in `src/` or `tests/`, so no behaviour depended on the old
- * width. Adding a near-duplicate `getHeadShaFull` would have re-created exactly
- * the drift #10 consolidated away.
- *
- * ONE git spawn (measured ~64 ms warm on Windows, a floor rather than a ceiling),
- * against `readGitState`'s four — which is why the staleness stamp calls this and
- * not that.
+ * For an IDENTIFIER — anything stored, compared later, or carried between
+ * machines — use {@link getHeadShaFull}. The two are separate on purpose: a short
+ * sha is an abbreviation whose width tracks object count and `core.abbrev`, so it
+ * is not stable across clones. Two contracts, not a duplication to be
+ * consolidated.
  */
 export function getHeadSha(
+  projectRoot: string,
+  executor: GitExecutor = defaultGitExecutor,
+): string | null {
+  const r = executor(projectRoot, ['rev-parse', '--short', 'HEAD'])
+  if (!r.ok) return null
+  return r.stdout.trim() || null
+}
+
+/**
+ * Read the current HEAD sha in FULL (40 chars) via the injectable executor.
+ * Returns `null` outside a git repo or on any git error.
+ *
+ * IDENTIFIER format. #75's staleness stamp records which commit a finding was
+ * made against, and its whole premise is that only a commit is immutable — an
+ * abbreviation is not, so it cannot be the thing written down.
+ *
+ * Separate from {@link getHeadSha} rather than replacing it: that one has eight
+ * callers whose output is read by humans alongside a short sha from
+ * `readGitState`, and widening it would make one audit field 7 characters on a
+ * rejection path and 40 on a success path in the same tool. Nothing compares
+ * shas today, so that would break nobody now and mislead whoever reads the log
+ * later.
+ *
+ * ONE git spawn (~64 ms warm on Windows, a floor not a ceiling) against
+ * `readGitState`'s four, which is why the stamp calls this and not that.
+ */
+export function getHeadShaFull(
   projectRoot: string,
   executor: GitExecutor = defaultGitExecutor,
 ): string | null {

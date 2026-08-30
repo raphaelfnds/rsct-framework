@@ -24,7 +24,7 @@ import {
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel } from '../lib/phase-machine.js'
-import { getHeadSha } from '../lib/git.js'
+import { getHeadShaFull } from '../lib/git.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -306,7 +306,7 @@ export async function phaseVerificationStartHandler(
   // #75 Part C. One git spawn, full sha, null outside a repo. Read here rather
   // than at `_complete` so the record says what HEAD WAS when the findings were
   // produced — a working tree is a moving target and only a commit is fixed.
-  const headSha = getHeadSha(projectRoot)
+  const headSha = getHeadShaFull(projectRoot)
 
   const verificationBlock: PhaseVerificationBlock = {
     spec_ref: input.spec_ref,

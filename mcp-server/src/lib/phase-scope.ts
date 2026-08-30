@@ -137,7 +137,7 @@ export interface PhaseVerificationBlock {
   /**
    * #75 Part C. HEAD when this phase started, and when that was read.
    *
-   * Full sha, never an abbreviation — see `getHeadSha`. Nested inside this block
+   * Full sha, never an abbreviation — see `getHeadShaFull`. Nested inside this block
    * on purpose rather than added as a top-level PhaseState key: unlisted
    * top-level keys are dropped by `rsct_phase_abandon`
    * (PHASE_STATE_PRESERVED_ON_ABANDON), and a stamp describing discarded work

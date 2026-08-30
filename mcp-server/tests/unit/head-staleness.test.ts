@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { headStaleness } from '../../src/lib/phase-scope.js'
-import { getHeadSha } from '../../src/lib/git.js'
+import { getHeadSha, getHeadShaFull } from '../../src/lib/git.js'
 import { phaseReviewStartHandler } from '../../src/tools/phase-review-start.js'
 import { phaseReviewCompleteHandler } from '../../src/tools/phase-review-complete.js'
 
@@ -30,15 +30,15 @@ afterEach(() => {
 const SHA_A = 'a'.repeat(40)
 const SHA_B = 'b'.repeat(40)
 
-describe('getHeadSha — a full sha, because an abbreviation is not an identifier', () => {
-  // MUTATION: put `--short` back into the argv.
+describe('two sha contracts, kept separate on purpose', () => {
+  // MUTATION: make getHeadShaFull pass `--short`.
   //
-  // A short sha's length tracks the object count and honours core.abbrev, so it
-  // is not stable across machines — and this feeds a stamp whose whole premise is
-  // that only a commit is immutable.
-  it('T-sha — asks git for the full HEAD, never the abbreviation', () => {
+  // An abbreviation's width tracks object count and core.abbrev, so it is not
+  // stable across clones — and this feeds a stamp whose premise is that only a
+  // commit is immutable.
+  it('T-sha — getHeadShaFull asks git for the full HEAD', () => {
     const seen: string[][] = []
-    const sha = getHeadSha('/anywhere', (_root, args) => {
+    const sha = getHeadShaFull('/anywhere', (_root, args) => {
       seen.push(args)
       return { ok: true, stdout: `${SHA_A}\n`, stderr: '', exitCode: 0 }
     })
@@ -47,17 +47,38 @@ describe('getHeadSha — a full sha, because an abbreviation is not an identifie
     expect(sha).toHaveLength(40)
   })
 
-  // MUTATION: return `''` instead of null on failure.
-  it('T-sha-b — degrades to null outside a repo, never to an empty string', () => {
-    expect(getHeadSha('/x', () => ({ ok: false, stdout: '', stderr: 'fatal', exitCode: 128 }))).toBeNull()
-    expect(getHeadSha('/x', () => ({ ok: true, stdout: '\n', stderr: '', exitCode: 0 }))).toBeNull()
+  // MUTATION: widen getHeadSha to `rev-parse HEAD`.
+  //
+  // The regression guard for the fix that produced this split, and it exists
+  // because the first attempt widened getHeadSha itself on a false premise. It
+  // has EIGHT callers, all inside lib/git.ts — the sha_before/sha_after pairs of
+  // gitCommit, gitPush, gitMerge and gitRebase — and readGitState fills the SAME
+  // `sha_before` field on rsct_request_commit's rejection paths, also short.
+  // Widening one side makes a single audit field 7 characters on one branch and
+  // 40 on another, in the same tool and the same log. Nothing compares shas
+  // today, so it breaks nobody now and misleads whoever reads that log later.
+  it('T-sha-split — getHeadSha stays SHORT, so one audit field keeps one width', () => {
+    const seen: string[][] = []
+    getHeadSha('/anywhere', (_root, args) => {
+      seen.push(args)
+      return { ok: true, stdout: 'abc1234\n', stderr: '', exitCode: 0 }
+    })
+    expect(seen).toEqual([['rev-parse', '--short', 'HEAD']])
   })
 
-  // ONE spawn, not four. readGitState costs four (isGitRepo + 3) and this rides a
-  // path that spawned zero before Part C, so the count is the design.
-  it('T-sha-c — costs exactly one git invocation', () => {
+  // MUTATION: return `''` instead of null on failure.
+  it('T-sha-b — both degrade to null outside a repo, never to an empty string', () => {
+    for (const fn of [getHeadSha, getHeadShaFull]) {
+      expect(fn('/x', () => ({ ok: false, stdout: '', stderr: 'fatal', exitCode: 128 }))).toBeNull()
+      expect(fn('/x', () => ({ ok: true, stdout: '\n', stderr: '', exitCode: 0 }))).toBeNull()
+    }
+  })
+
+  // ONE spawn, not four. readGitState costs four (isGitRepo + 3) and the stamp
+  // rides a path that spawned zero before Part C, so the count is the design.
+  it('T-sha-c — the stamp costs exactly one git invocation', () => {
     let calls = 0
-    getHeadSha('/x', () => {
+    getHeadShaFull('/x', () => {
       calls++
       return { ok: true, stdout: SHA_A, stderr: '', exitCode: 0 }
     })
@@ -144,7 +165,7 @@ describe('the REVIEW phase stamps and compares', () => {
     writeFileSync(join(tmpRoot, 'f.txt'), 'two', 'utf8')
     execFileSync('git', ['add', '-A'], { cwd: tmpRoot })
     execFileSync('git', ['commit', '-qm', 'two'], { cwd: tmpRoot })
-    expect(getHeadSha(tmpRoot)).not.toBe(stamped)
+    expect(getHeadShaFull(tmpRoot)).not.toBe(stamped)
 
     const out = await complete()
     expect(out.status).toBe('completed')
@@ -168,7 +189,7 @@ describe('the REVIEW phase stamps and compares', () => {
 
   // MUTATION: drop the `if (headSha !== null)` guard and write `head_sha: null`.
   it('T18c — outside a git repo nothing is stamped and staleness stays null', async () => {
-    // tmpRoot is a bare temp dir with no .git, so getHeadSha returns null.
+    // tmpRoot is a bare temp dir with no .git, so getHeadShaFull returns null.
     await start()
     const state = JSON.parse(readFileSync(statePath(), 'utf8'))
     expect(state.review_findings.head_sha).toBeUndefined()

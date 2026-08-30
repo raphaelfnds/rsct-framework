@@ -18,7 +18,7 @@ import {
   type EvidenceMix,
 } from '../lib/findings.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
-import { getHeadSha } from '../lib/git.js'
+import { getHeadShaFull } from '../lib/git.js'
 import {
   readPhaseState,
   type PhaseFindingsBlock,
@@ -166,7 +166,7 @@ export async function phaseReviewStartHandler(
   const previous = readPhaseState(resolution.root).state
   const hadFindings = previous?.review_findings !== undefined
   const declaredAt = (internal.now ?? new Date()).toISOString()
-  const headSha = getHeadSha(resolution.root)
+  const headSha = getHeadShaFull(resolution.root)
 
   const patch = (state: PhaseState): void => {
     if (runId === null) {

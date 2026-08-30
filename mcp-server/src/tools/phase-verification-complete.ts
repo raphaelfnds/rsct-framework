@@ -35,7 +35,7 @@ import {
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
-import { getHeadSha } from '../lib/git.js'
+import { getHeadShaFull } from '../lib/git.js'
 
 
 const findingActionSchema = z
@@ -298,7 +298,7 @@ export async function phaseVerificationCompleteHandler(
   const evidence_mix = summarizeEvidence(baseline)
   const staleness = headStaleness(
     existing.state.verification.head_sha,
-    getHeadSha(projectRoot),
+    getHeadShaFull(projectRoot),
   )
   const findingsGate = checkFindingsGate({
     baseline,
