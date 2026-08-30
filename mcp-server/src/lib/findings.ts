@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 
 /**
  * The shared finding vocabulary (#19), plus the shared findings gate (#40).
@@ -135,8 +136,16 @@ export type FindingEvidence =
       /** Where it came from: a doc path, an issue number, another session. */
       source: string
       verified_against: VerifiedAgainst
-      /** The immutable id, when `verified_against` is `commit`. Full sha, not an abbreviation. */
-      commit_sha?: string
+      /**
+       * The immutable id, when `verified_against` is `commit`. Full sha, not an
+       * abbreviation — `git rev-parse --short` output is length-variable
+       * (`core.abbrev`, object count) and so is not stable across machines.
+       *
+       * `| undefined` is explicit: under `exactOptionalPropertyTypes` a
+       * zod-inferred optional carries it, and an explicitly-undefined sha means
+       * the same thing as an absent one.
+       */
+      commit_sha?: string | undefined
     }
   | {
       kind: 'hypothesis'
@@ -146,6 +155,70 @@ export type FindingEvidence =
       /** Why it degraded: `absent`, `malformed`, or `unknown_kind:<k>`. */
       degraded_from?: string
     }
+
+/**
+ * The declaration-side schema, for the agent-declared REVIEW findings.
+ *
+ * Kept beside the type so the two cannot drift, and shaped as a DISCRIMINATED
+ * union so a `measured` claim missing its `command` is a hard rejection at
+ * `rsct_phase_review_start` — the bad set never reaches storage, exactly like the
+ * duplicate-id refine that already guards that door.
+ *
+ * The field itself is OPTIONAL, deliberately. Requiring it would force a resumed
+ * session to re-derive evidence it may no longer have, and would break #40's
+ * recovery path for any finding stored before this shipped. More importantly, a
+ * required field is what produces ritual compliance: the point is not to make
+ * everyone type something, it is to make a set of cheap claims visible. So you
+ * are never forced to CLAIM a class — you are forced to be consistent once you
+ * do, and the absence is counted as `unrecorded` and shown to the dev.
+ */
+export const evidenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('measured'),
+      command: z.string().min(1, 'measured evidence needs the command that was run'),
+      output_excerpt: z.string().min(1, 'measured evidence needs an excerpt of the output'),
+      also_explained_by: z
+        .string()
+        .min(1, 'measured evidence needs what ELSE would produce that same output'),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reported'),
+      source: z.string().min(1, 'reported evidence needs a source'),
+      verified_against: z.enum(VERIFIED_AGAINST),
+      commit_sha: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('hypothesis'),
+      how_to_falsify: z.string().min(1, 'a hypothesis needs a way to falsify it'),
+    })
+    .strict(),
+])
+
+/** The JSON-Schema mirror for the MCP tool `inputSchema` (hand-kept, like its siblings). */
+export const evidenceJsonSchema = {
+  type: 'object' as const,
+  description:
+    'How this finding is known. OPTIONAL — omitting it is allowed and is not a rejection: the finding counts as an UNRECORDED hypothesis and the dev sees that in the evidence mix before approving. What is rejected is an inconsistent claim: kind="measured" without command/output_excerpt/also_explained_by. NOTE: nothing here can check whether also_explained_by is honest — only that you wrote one.',
+  properties: {
+    kind: { type: 'string' as const, enum: [...EVIDENCE_KINDS] },
+    command: { type: 'string' as const, description: 'measured: the command actually run.' },
+    output_excerpt: { type: 'string' as const, description: 'measured: an excerpt of its output.' },
+    also_explained_by: {
+      type: 'string' as const,
+      description:
+        'measured: what ELSE would produce that same output. The load-bearing field — a test that ran but did not discriminate is the most expensive failure this class exists to catch.',
+    },
+    source: { type: 'string' as const, description: 'reported: doc path, issue, or session.' },
+    verified_against: { type: 'string' as const, enum: [...VERIFIED_AGAINST] },
+    commit_sha: { type: 'string' as const, description: 'reported: the full sha, when checked against a commit.' },
+    how_to_falsify: { type: 'string' as const, description: 'hypothesis: how someone would prove it wrong.' },
+  },
+}
 
 const ABSENT_FALSIFIER =
   '<not recorded — no evidence class was supplied, so this finding is treated as a hypothesis>'
@@ -254,7 +327,12 @@ export interface EvidenceMix {
 }
 
 export function summarizeEvidence(
-  findings: readonly { evidence?: FindingEvidence }[] | null,
+  // `| undefined` is explicit because `exactOptionalPropertyTypes` is on and a
+  // zod-inferred optional carries it. The body already treats absent and
+  // explicitly-undefined the same way, so accepting both is honest rather than a
+  // loosening — narrowing it would only force callers to strip a field this
+  // function is built to count as unrecorded.
+  findings: readonly { evidence?: FindingEvidence | undefined }[] | null,
 ): EvidenceMix {
   const mix: EvidenceMix = {
     measurable: findings !== null,

@@ -22,7 +22,7 @@ import {
   type PhaseVerificationBlock,
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
-import { computeRunId } from '../lib/findings.js'
+import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel } from '../lib/phase-machine.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
@@ -359,6 +359,7 @@ export async function phaseVerificationStartHandler(
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
       findings_count: checklist.findings.length,
+      evidence_mix: summarizeEvidence(checklist.findings),
       phase_state_written: writeResult.ok,
     },
     config?.audit,
@@ -376,6 +377,9 @@ export async function phaseVerificationStartHandler(
         severity: finding.severity,
         source: finding.source,
         title: finding.title,
+        // #75. The class, per finding, in the forensic record — so a past run can
+        // be re-read for what it actually knew, not only for what it decided.
+        evidence_kind: finding.evidence.kind,
       },
       config?.audit,
     )
@@ -384,6 +388,7 @@ export async function phaseVerificationStartHandler(
   const fields = auditFields(startAudit)
   const hints: string[] = []
   if (writeResult.ok) {
+    hints.push(`Evidence: ${describeEvidenceMix(summarizeEvidence(checklist.findings))}.`)
     hints.push(
       `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced — EVERY one needs an action. Call rsct_phase_verification_complete with findings_actions[] covering all of them, findings_run_id='${findingsRunId}', and dev_approval.`,
     )

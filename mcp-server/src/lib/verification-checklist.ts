@@ -115,6 +115,13 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
   }
   // Weakest class, and it names the literal so the exhaustiveness test can report
   // WHICH source drifted rather than only that one did.
+  //
+  // DO NOT DELETE as redundant now that `RawFinding` makes classification total.
+  // That totality covers EMISSION — a site cannot build a finding without going
+  // through this function. It does NOT cover this function's own input: `source`
+  // is a `string`, so a literal added by a future emission site lands here with no
+  // type error. (The same split is why `coerceEvidence` keeps its own fallback for
+  // stored values.) Removing either one trades a loud degrade for a silent gap.
   return {
     kind: 'hypothesis',
     how_to_falsify: `Unclassified checklist source '${f.source}' — no evidence class is recorded for it, so it is treated as a guess. Add a row to evidenceForSource().`,

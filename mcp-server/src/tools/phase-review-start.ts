@@ -8,7 +8,15 @@ import {
   type StartPhaseInternal,
   type StartPhaseResult,
 } from '../lib/phase-machine.js'
-import { computeRunId, readFindingsBaseline, type StoredFinding } from '../lib/findings.js'
+import {
+  computeRunId,
+  describeEvidenceMix,
+  evidenceJsonSchema,
+  evidenceSchema,
+  readFindingsBaseline,
+  summarizeEvidence,
+  type EvidenceMix,
+} from '../lib/findings.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   readPhaseState,
@@ -26,6 +34,11 @@ const declaredFindingSchema = z
     severity: z.string().optional(),
     path: z.string().optional(),
     line: z.number().optional(),
+    // #75. REVIEW findings are 100% agent-declared — this tool generates none —
+    // so unlike the V phase, this is where the class comes from. Optional at the
+    // door: see `evidenceSchema` for why requiring it would buy ritual rather
+    // than evidence. Claiming `measured` without a command is still rejected here.
+    evidence: evidenceSchema.optional(),
   })
   .strict()
 
@@ -56,9 +69,18 @@ export const phaseReviewStartInputSchema = z
 
 export type PhaseReviewStartInput = z.infer<typeof phaseReviewStartInputSchema>
 
+/**
+ * What the agent declared, echoed back verbatim. Typed from the schema rather than
+ * as `StoredFinding[]`: the declaration is RICHER (detail, severity, path, line,
+ * and now evidence), and narrowing the echo to the storage shape both understated
+ * what the tool returns and collided with `exactOptionalPropertyTypes` once the
+ * optional `evidence` arrived.
+ */
+export type DeclaredFinding = z.infer<typeof declaredFindingSchema>
+
 export type PhaseReviewStartOutput = StartPhaseResult & {
   /** Echoed back so the caller can answer them — see `findings_run_id`. */
-  findings: StoredFinding[]
+  findings: DeclaredFinding[]
   /**
    * Identifies the SET of findings this run declared. `rsct_phase_review_complete`
    * must echo it: re-running this tool replaces the findings, and without run
@@ -66,6 +88,8 @@ export type PhaseReviewStartOutput = StartPhaseResult & {
    * whatever now happens to share an id.
    */
   findings_run_id: string | null
+  /** #75. The class mix of what was just declared, so it is visible before actions are chosen. */
+  evidence_mix: EvidenceMix
 }
 
 export const phaseReviewStartTool: Tool = {
@@ -104,6 +128,7 @@ export const phaseReviewStartTool: Tool = {
             severity: { type: 'string' },
             path: { type: 'string' },
             line: { type: 'number' },
+            evidence: evidenceJsonSchema,
           },
           additionalProperties: false,
         },
@@ -210,9 +235,18 @@ export async function phaseReviewStartHandler(
   // the agent prepare answers against a baseline that does not exist — which
   // `_complete` then fails open on, closing the review with no coverage at all.
   const persisted = result.status === 'started' && result.phase_state_written
+  // #75. Counted from what was actually PERSISTED, not from the input: advertising
+  // a mix for a baseline that was never stored would describe a set the dev cannot
+  // act on. `null` (not `[]`) where nothing landed, so the mix reads `unmeasurable`
+  // rather than an innocent-looking row of zeros.
+  const evidence_mix = summarizeEvidence(persisted ? declared : null)
+  if (persisted && declared.length > 0) {
+    result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
+  }
   return {
     ...result,
     findings: persisted ? declared : [],
     findings_run_id: persisted ? runId : null,
+    evidence_mix,
   }
 }
