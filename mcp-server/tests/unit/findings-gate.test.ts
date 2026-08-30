@@ -72,9 +72,12 @@ const F2 = { id: 'v-breakage-2', category: 'breakage', title: 'Edits affect 3 im
  * point of the #40 payload is that it hands back what is stored, so an assertion
  * that stops looking at the whole object stops guarding it.
  */
+// `how_to_falsify` is matched on a stable fragment, NOT expect.any(String): the
+// latter accepts '', so a mutation blanking the generated falsifier would pass
+// while the dev is handed a finding that says nothing about how to test it.
 const DEGRADED = {
   kind: 'hypothesis',
-  how_to_falsify: expect.any(String),
+  how_to_falsify: expect.stringContaining('no evidence class was supplied'),
   degraded: true,
   degraded_from: 'absent',
 }

@@ -28,6 +28,9 @@ describe('coerceEvidence — degradation never runs toward fact', () => {
     const e = coerceEvidence(undefined)
     expect(e.kind).toBe('hypothesis')
     expect(e).toMatchObject({ degraded: true, degraded_from: 'absent' })
+    // Asserted on content, not on `expect.any(String)`: an empty falsifier would
+    // satisfy the type and still hand the dev a finding with no way to test it.
+    expect(e).toMatchObject({ how_to_falsify: expect.stringContaining('no evidence class') })
     expect(coerceEvidence(null)).toEqual(e)
   })
 

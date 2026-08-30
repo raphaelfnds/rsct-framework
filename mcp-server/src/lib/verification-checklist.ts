@@ -9,7 +9,7 @@ import {
   readArchitectureModules,
 } from './architecture.js'
 import { checkPremise } from './premise-check.js'
-import { makeIdGenerator, type FindingSeverity } from './findings.js'
+import { makeIdGenerator, type FindingEvidence, type FindingSeverity } from './findings.js'
 import type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
 
 export type FindingCategory = 'gap' | 'breakage' | 'redundancy' | 'forgotten'
@@ -33,6 +33,94 @@ export interface VerificationFinding {
   detail: string
   affected_paths: string[]
   source: string
+  /**
+   * #75. How this finding is known. The V phase has no agent-declared findings
+   * channel — `phaseVerificationStartInputSchema` is `.strict()` with no
+   * `findings` field, so everything here is machine-produced — which means the
+   * framework must classify its OWN findings or the class covers half the record.
+   *
+   * Derived from `source` by {@link evidenceForSource}, a static table authored
+   * once in this file and reviewed in a diff. That is what makes
+   * `also_explained_by` honest on this side: it is written by a person, checked
+   * by a reviewer, and cannot be produced under queue pressure by an agent that
+   * wants to move on.
+   */
+  evidence: FindingEvidence
+}
+
+/** What the emission sites build. Evidence is added centrally — see below. */
+type RawFinding = Omit<VerificationFinding, 'evidence'>
+
+/**
+ * `source` → evidence class. TOTAL by construction: the `default` arm returns the
+ * WEAKEST class, so a source literal added years from now degrades safely instead
+ * of inheriting whatever row sat next to it. That is the same door policy the
+ * rest of the design runs on — absent or unrecognised is never fact.
+ *
+ * Matched by PREFIX for `knowledge-category:`, which is interpolated per category
+ * (`verification-checklist.ts` builds `knowledge-category:${cat}`); an equality
+ * table would miss every one of them.
+ *
+ * `tests/unit/verification-evidence.test.ts` asserts no source the checklist can
+ * actually emit reaches the `default` arm, so drift is named on the day it lands.
+ * The type of `source` is deliberately left as `string` rather than narrowed to a
+ * union — that is a retype with ripple through every `VerificationFinding`
+ * consumer, and it is not riding along on this feature.
+ */
+export function evidenceForSource(f: RawFinding): FindingEvidence {
+  if (f.source === 'reverse-dep-walk') {
+    return {
+      kind: 'measured',
+      command: 'reverse-dep walk over declared_paths (lib/reverse-dep-walk.ts)',
+      output_excerpt: f.title,
+      also_explained_by:
+        'The importers may already tolerate the change — this walk reads import EDGES, not semantics. A dynamic, aliased or generated import is invisible to it, so an absent edge is not an absent dependency, and a present one is not a break.',
+    }
+  }
+  if (f.source === 'impact-doc') {
+    return {
+      kind: 'reported',
+      // affected_paths[1] is the doc; [0] is the declared path that matched it.
+      source: f.affected_paths[1] ?? 'documentation/impact/',
+      verified_against: 'working_tree',
+    }
+  }
+  if (f.source === 'architecture-overview') {
+    return {
+      kind: 'reported',
+      source: 'documentation/architecture.md',
+      verified_against: 'working_tree',
+    }
+  }
+  if (f.source === 'premise-check') {
+    return {
+      kind: 'hypothesis',
+      how_to_falsify:
+        'Open the referenced entry. The matcher scores SHARED TOKENS over title+excerpt, so if the shared words are generic domain nouns rather than the terms carrying the claim, this is vocabulary coincidence and the finding is false. Two shared tokens is enough to match.',
+    }
+  }
+  if (f.source === 'basename-overlap') {
+    return {
+      kind: 'hypothesis',
+      how_to_falsify:
+        'Open the overlapping files. A shared basename is not duplication — parallel layers (a model and its controller, a port and its adapter) routinely share one.',
+    }
+  }
+  if (f.source.startsWith('knowledge-category:')) {
+    return {
+      kind: 'hypothesis',
+      how_to_falsify:
+        'This is a PROMPT, not an observation: the checklist saw that the category exists, never that the spec ignored it. If the spec already covers it, the finding is answered by saying so.',
+    }
+  }
+  // Weakest class, and it names the literal so the exhaustiveness test can report
+  // WHICH source drifted rather than only that one did.
+  return {
+    kind: 'hypothesis',
+    how_to_falsify: `Unclassified checklist source '${f.source}' — no evidence class is recorded for it, so it is treated as a guess. Add a row to evidenceForSource().`,
+    degraded: true,
+    degraded_from: `unknown_source:${f.source}`,
+  }
 }
 
 /**
@@ -68,7 +156,12 @@ export interface ChecklistResult {
   hints: string[]
 }
 
-const CATEGORY_PROMPTS: Record<string, string> = {
+/**
+ * Exported for the #75 exhaustiveness test, which derives its expected
+ * `knowledge-category:*` source set from these keys rather than hand-listing
+ * them — a hand-written list goes stale the day a category is added, silently.
+ */
+export const CATEGORY_PROMPTS: Record<string, string> = {
   'business-rules':
     'Did the spec consider business-rules.md? Check for invariants or compliance constraints.',
   'anti-decisions':
@@ -109,7 +202,7 @@ function stripExt(p: string): string {
 export function runVerificationChecklist(
   input: ChecklistInput,
 ): ChecklistResult {
-  const findings: VerificationFinding[] = []
+  const findings: RawFinding[] = []
   const hints: string[] = []
   // `v-` prefix: V-phase ids must stay distinguishable from REVIEW-phase ones in
   // a shared audit trail, since findings_actions[] references them by hand.
@@ -129,7 +222,10 @@ export function runVerificationChecklist(
     hints.push(
       `spec_tier=${input.specTier} — verification checklist skipped per tier table.`,
     )
-    return { findings, stats, hints }
+    // Nothing was raised, so nothing needs classifying — and returning `findings`
+    // here would leak the unclassified RawFinding[] out of the one door that adds
+    // the class. Empty literal keeps that door the only way out.
+    return { findings: [], stats, hints }
   }
 
   const decisions = readDecisions(input.projectRoot)
@@ -356,5 +452,13 @@ export function runVerificationChecklist(
     }
   }
 
-  return { findings, stats, hints }
+  // #75. The ONE place a checklist finding acquires its class. Assigning here
+  // rather than at the eight emission sites is what makes the table total: a new
+  // site cannot forget to classify, because the type it builds has no such field.
+  const classified: VerificationFinding[] = findings.map((f) => ({
+    ...f,
+    evidence: evidenceForSource(f),
+  }))
+
+  return { findings: classified, stats, hints }
 }
