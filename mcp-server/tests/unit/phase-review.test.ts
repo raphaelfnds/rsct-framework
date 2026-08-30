@@ -398,6 +398,18 @@ describe('phase_status review summary', () => {
       // #40: a completed review has no pending findings — the block is pruned at
       // _complete, and the test gate reads that emptiness as an invariant.
       open_findings: [],
+      // #75: and because it was pruned there is no baseline left to weigh, so the
+      // mix is UNMEASURABLE rather than a row of zeros. "Nothing to count" and
+      // "counted nothing" are different claims, and only the second would be a
+      // statement about the review's evidence.
+      evidence_mix: {
+        measurable: false,
+        measured: 0,
+        reported: 0,
+        hypothesis: 0,
+        unrecorded: 0,
+        total: 0,
+      },
       findings_run_id: null,
     })
     expect(r.rsct_phase_order).toContain('review')

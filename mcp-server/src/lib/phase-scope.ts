@@ -134,6 +134,17 @@ export interface PhaseVerificationBlock {
    * re-applied item by item against renumbered ids.
    */
   findings_run_id?: string
+  /**
+   * #75 Part C. HEAD when this phase started, and when that was read.
+   *
+   * Full sha, never an abbreviation — see `getHeadShaFull`. Nested inside this block
+   * on purpose rather than added as a top-level PhaseState key: unlisted
+   * top-level keys are dropped by `rsct_phase_abandon`
+   * (PHASE_STATE_PRESERVED_ON_ABANDON), and a stamp describing discarded work
+   * SHOULD go with the work rather than need an allowlist entry to survive it.
+   */
+  head_sha?: string
+  observed_at?: string
   started_at?: string
   completed_at?: string
 }
@@ -247,6 +258,9 @@ export interface PhaseFindingsBlock {
   run_id: string
   findings: unknown[]
   declared_at: string
+  /** #75 Part C. HEAD when these findings were declared (full sha), and when. */
+  head_sha?: string
+  observed_at?: string
 }
 
 /**
@@ -327,6 +341,30 @@ export interface PhaseState {
  * `completePhaseGeneric` is its sole producer today and {@link stampContextStale}
  * has no production caller, so the `'pivot'` reason is currently unreachable.
  */
+/**
+ * #75 Part C. Compare a stamped HEAD against the one now, for a phase closing.
+ *
+ * MARKS, never rejects — and that is the whole design, not a softening. HEAD
+ * moving between declaring a REVIEW finding and completing the phase is the
+ * NORMAL case: you commit the fixes you found. Rejecting it would make the phase
+ * uncompletable for doing the right thing, and an agent would learn to route
+ * around the stamp rather than read it.
+ *
+ * `null` means "cannot tell" — no stamp recorded (state predating this), or git
+ * unavailable. Never `true`, because an unknown is not a staleness finding.
+ */
+export function headStaleness(
+  stampedSha: string | undefined,
+  currentSha: string | null,
+): { head_stale: boolean | null; head_sha_at_start: string | null; head_sha_now: string | null } {
+  const at_start = stampedSha ?? null
+  return {
+    head_stale: at_start === null || currentSha === null ? null : at_start !== currentSha,
+    head_sha_at_start: at_start,
+    head_sha_now: currentSha,
+  }
+}
+
 export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'bootstrap_at',
   'context_stale',

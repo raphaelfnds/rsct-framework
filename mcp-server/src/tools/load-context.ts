@@ -8,6 +8,11 @@ import { readDecisions, type DecisionEntry } from '../lib/decisions.js'
 import { corpusMiss } from '../lib/corpus-health.js'
 import { readKnowledgeIndex, type KnowledgeIndex } from '../lib/knowledge.js'
 import {
+  readFindingsBaseline,
+  summarizeEvidence,
+  type EvidenceMix,
+} from '../lib/findings.js'
+import {
   BOOTSTRAP_STALE_MS,
   bootstrapWriteFailureHint,
   readContextStale,
@@ -42,6 +47,15 @@ export interface ActivePhaseVerificationSummary {
   spec_ref: string | null
   spec_tier: string | null
   findings_count: number
+  /**
+   * #75. How the open findings are known.
+   *
+   * This is the §0 bootstrap read — the FIRST thing a resumed session sees — so a
+   * count alone is where the mix would be missing exactly when a fresh session is
+   * forming its picture of the work. `measurable: false` means no baseline could
+   * be read, which is not the same as a phase that raised nothing.
+   */
+  evidence_mix: EvidenceMix
   started_at: string | null
 }
 
@@ -120,6 +134,7 @@ function buildActivePhase(projectRoot: string): ActivePhaseInfo | null {
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count,
+      evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       started_at: state.verification.started_at ?? null,
     }
   }

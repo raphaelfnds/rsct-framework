@@ -8,18 +8,23 @@ import {
   type CompletePhaseResult,
 } from '../lib/phase-machine.js'
 import {
+  headStaleness,
   readPhaseState,
   stampReviewDecision,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
+import { getHeadShaFull } from '../lib/git.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   FINDING_ACTIONS,
   checkFindingsGate,
+  describeEvidenceMix,
   emptyActionsSummary,
   readFindingsBaseline,
+  summarizeEvidence,
   type ActionsSummary,
+  type EvidenceMix,
   type FindingsGateRejectKind,
   type StoredFinding,
 } from '../lib/findings.js'
@@ -76,6 +81,15 @@ export type PhaseReviewCompleteRejectKind = FindingsGateRejectKind | 'block_acti
 
 export type PhaseReviewCompleteOutput = CompletePhaseResult & {
   actions_summary: ActionsSummary
+  /** #75. How the declared findings are known, counted from the stored baseline. */
+  evidence_mix: EvidenceMix
+  /**
+   * #75 Part C. `true` when HEAD moved since the findings were declared. Reported,
+   * NEVER a rejection: committing the fixes a review found is the normal reason
+   * for HEAD to move, and refusing to close the phase for it would punish the
+   * correct behaviour.
+   */
+  head_stale: boolean | null
   /** #40: on a findings-gate rejection, every finding still awaiting an action. */
   open_findings?: StoredFinding[]
 }
@@ -139,6 +153,10 @@ export async function phaseReviewCompleteHandler(
   // the action on a finding that does not exist.
   const stored = readPhaseState(projectRoot).state?.review_findings
   const baseline = readFindingsBaseline(stored?.findings)
+  // #75. From the stored baseline, not from findings_actions — an action is a
+  // decision, never the evidence under it. `null` reads as unmeasurable.
+  const evidence_mix = summarizeEvidence(baseline)
+  const staleness = headStaleness(stored?.head_sha, getHeadShaFull(projectRoot))
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: stored?.run_id ?? null,
@@ -177,6 +195,8 @@ export async function phaseReviewCompleteHandler(
       anti_replay_persisted: null,
       anti_replay_error: null,
       actions_summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
       next_recommended_phase: 'review',
       open_findings: findingsGate.open_findings ?? [],
       hints: [
@@ -218,6 +238,8 @@ export async function phaseReviewCompleteHandler(
         `REVIEW is not complete: ${actions_summary.block} finding(s) are blocking. Fix them or downgrade the action with the dev — a blocking finding is the one thing this phase will not wave through.`,
       ],
       actions_summary,
+      evidence_mix,
+      head_stale: staleness.head_stale,
     }
   }
 
@@ -229,7 +251,12 @@ export async function phaseReviewCompleteHandler(
       devApproval: input.dev_approval,
     },
     resolution.config,
-    internal,
+    // `dialogDetail` AFTER the spread, deliberately: every test here injects
+    // `internal` for `promptFn`, and setting it first would let the injected
+    // object shadow the production value — the dialog assertion would then pass
+    // against a string this path never produced. That is the issue's own "a test
+    // built to confirm rather than to discriminate", one level down.
+    { ...internal, dialogDetail: `Evidence: ${describeEvidenceMix(evidence_mix)}` },
   )
 
   // Stamp completed_at ONLY when the complete genuinely succeeded; a
@@ -269,6 +296,23 @@ export async function phaseReviewCompleteHandler(
       }
     }
 
+    // #75. The mix as its own forensic line. `gatePhaseComplete` owns the generic
+    // `review.complete` event and extending it would reach four other phases that
+    // have no findings at all, so this rides beside it instead.
+    appendAudit(
+      projectRoot,
+      {
+        event: 'review.evidence_mix',
+        tool: 'rsct_phase_review_complete',
+        spec_ref: input.spec_ref,
+        evidence_mix,
+        head_stale: staleness.head_stale,
+        head_sha_at_start: staleness.head_sha_at_start,
+        head_sha_now: staleness.head_sha_now,
+      },
+      config?.audit,
+    )
+
     // One audit entry per finding, AFTER the gate: a rejected complete must not
     // leave the log asserting decisions that were never approved. Deliberately NOT
     // gated on a declared baseline — see the matching note in
@@ -289,5 +333,12 @@ export async function phaseReviewCompleteHandler(
     }
   }
 
-  return { ...result, actions_summary }
+  // The leg that survives a headless run, where the dialog never renders.
+  result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
+  if (staleness.head_stale === true) {
+    result.hints.push(
+      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found — but any finding anchored to a line number was read against the earlier tree.`,
+    )
+  }
+  return { ...result, actions_summary, evidence_mix, head_stale: staleness.head_stale }
 }

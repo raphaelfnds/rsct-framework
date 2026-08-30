@@ -64,6 +64,27 @@ function writeRsctConfig(): void {
 const F1 = { id: 'v-gap-1', category: 'gap', title: 'Claim conflicts with AD-2' }
 const F2 = { id: 'v-breakage-2', category: 'breakage', title: 'Edits affect 3 importers' }
 
+/**
+ * #75. `readFindingsBaseline` now stamps an evidence class onto every entry it
+ * keeps. These fixtures are LEGACY-shaped — declared before the class existed —
+ * so they must come back degraded to `hypothesis`, never to fact, and never
+ * dropped. Kept as an exact shape rather than loosened to `toMatchObject`: the
+ * point of the #40 payload is that it hands back what is stored, so an assertion
+ * that stops looking at the whole object stops guarding it.
+ */
+// `how_to_falsify` is matched on a stable fragment, NOT expect.any(String): the
+// latter accepts '', so a mutation blanking the generated falsifier would pass
+// while the dev is handed a finding that says nothing about how to test it.
+const DEGRADED = {
+  kind: 'hypothesis',
+  how_to_falsify: expect.stringContaining('no evidence class was supplied'),
+  degraded: true,
+  degraded_from: 'absent',
+}
+function withEvidence<T extends object>(f: T): T & { evidence: typeof DEGRADED } {
+  return { ...f, evidence: DEGRADED }
+}
+
 /** An active V phase whose baseline is REAL — the fixture the old suite never had. */
 function seedVerification(findings: unknown[], runId?: string): void {
   const block: Record<string, unknown> = {
@@ -120,7 +141,10 @@ describe('lib/findings — readFindingsBaseline', () => {
     }
   })
   it('keeps only entries with a usable id, carrying category/title when present', () => {
-    expect(readFindingsBaseline([F1, { id: 'x' }, { noId: true }, 7])).toEqual([F1, { id: 'x' }])
+    expect(readFindingsBaseline([F1, { id: 'x' }, { noId: true }, 7])).toEqual([
+      withEvidence(F1),
+      withEvidence({ id: 'x' }),
+    ])
   })
 })
 
@@ -250,7 +274,7 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
     seedVerification([F1, F2], computeRunId([F1, F2]))
     const out = await completeV([{ finding_id: 'v-gap-1', action: 'accept' }], computeRunId([F1, F2]))
     expect(out.reject_kind).toBe('unanswered_findings')
-    expect(out.open_findings).toEqual([F2])
+    expect(out.open_findings).toEqual([withEvidence(F2)])
     expect(out.reason).toContain('v-breakage-2')
   })
 
@@ -332,7 +356,7 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
   it('phase_status lists the open findings so a resumed session can answer them', async () => {
     seedVerification([F1, F2], computeRunId([F1, F2]))
     const st = await phaseStatusHandler({ project_root: tmpRoot })
-    expect(st.verification?.open_findings).toEqual([F1, F2])
+    expect(st.verification?.open_findings).toEqual([withEvidence(F1), withEvidence(F2)])
     expect(st.verification?.findings_run_id).toBe(computeRunId([F1, F2]))
   })
 })

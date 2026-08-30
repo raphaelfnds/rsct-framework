@@ -20,17 +20,22 @@ import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   FINDING_ACTIONS as ACTION_VALUES,
   checkFindingsGate,
+  describeEvidenceMix,
   emptyActionsSummary,
   readFindingsBaseline,
+  summarizeEvidence,
   type ActionsSummary,
+  type EvidenceMix,
   type FindingsGateRejectKind,
   type StoredFinding,
 } from '../lib/findings.js'
 import {
+  headStaleness,
   readPhaseState,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
+import { getHeadShaFull } from '../lib/git.js'
 
 
 const findingActionSchema = z
@@ -104,6 +109,20 @@ export interface PhaseVerificationCompleteOutput {
   cleared_verification: boolean
   cleared_phase: boolean
   actions_summary: ActionsSummary
+  /**
+   * #75. How the findings this phase raised are KNOWN, counted from the stored
+   * baseline rather than from `findings_actions` — an action records what was
+   * decided, never what it rested on. Required rather than optional so every
+   * return path below has to carry it: an omission is a compile error, not a
+   * silently absent field on the one path nobody looked at.
+   */
+  evidence_mix: EvidenceMix
+  /**
+   * #75 Part C. `true` when HEAD moved since the V phase started, `false` when it
+   * did not, `null` when it cannot be told (no stamp, or no git). Reported, never
+   * acted on — see `headStaleness`.
+   */
+  head_stale: boolean | null
   /**
    * #40: on a findings-gate rejection, every finding still awaiting an action.
    * Present only on those rejections — nothing else in the framework surfaces the
@@ -211,6 +230,9 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
+      evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: null,
       audit_error: null,
       anti_replay_persisted: null,
@@ -245,6 +267,10 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      // The stored block belongs to another spec; weighing its evidence here
+      // would describe a set this caller is not completing.
+      evidence_mix: summarizeEvidence(null),
+      head_stale: null,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -264,6 +290,16 @@ export async function phaseVerificationCompleteHandler(
   // the three around it: leaving the evasion these guards exist to catch as the only
   // unlogged outcome would invert the point.
   const baseline = readFindingsBaseline(existing.state.verification.findings)
+  // #75. From the BASELINE, never from findings_actions: an action records the
+  // decision, not the evidence. `null` propagates as `measurable: false`, so a
+  // hand-edited or foreign block reads as "unmeasurable" instead of as a clean
+  // row of zeros — the difference between "nothing was found" and "nothing can
+  // be counted" is exactly the confusion this issue was opened over.
+  const evidence_mix = summarizeEvidence(baseline)
+  const staleness = headStaleness(
+    existing.state.verification.head_sha,
+    getHeadShaFull(projectRoot),
+  )
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: existing.state.verification.findings_run_id ?? null,
@@ -297,6 +333,8 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -332,6 +370,8 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -347,7 +387,12 @@ export async function phaseVerificationCompleteHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — verification complete',
-      message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept`,
+      // #75. The mix rides the line the dev actually reads before clicking. It is
+      // one of THREE surfaces, not the surface: `gateRequest` falls back to the
+      // `trust` channel when no dialog channel exists (headless, CI), and on that
+      // path this string is never rendered. The hints and audit legs below are
+      // what survive there.
+      message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {
@@ -381,6 +426,8 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
+      evidence_mix,
+    head_stale: staleness.head_stale,
       audit_path: fields.audit_path,
       audit_error: fields.audit_error,
       anti_replay_persisted: null,
@@ -426,6 +473,12 @@ export async function phaseVerificationCompleteHandler(
   if (prevV?.spec_tier !== undefined) completedV.spec_tier = prevV.spec_tier
   if (prevV?.started_at !== undefined) completedV.started_at = prevV.started_at
   if (prevV?.persona !== undefined) completedV.persona = prevV.persona
+  // #75 Part C / V-3. This prune is an ALLOWLIST — a fresh object with explicit
+  // copies — so a field not named here is dropped by construction. The stamp has
+  // to be named or the record of WHICH commit the findings described disappears
+  // at exactly the moment the phase becomes evidence for `rsct_phase_code_start`.
+  if (prevV?.head_sha !== undefined) completedV.head_sha = prevV.head_sha
+  if (prevV?.observed_at !== undefined) completedV.observed_at = prevV.observed_at
   // findings + discovered_importers + declared_paths intentionally dropped
   // (their content already lives in the audit log as per-finding entries).
   newState.verification = completedV
@@ -449,6 +502,8 @@ export async function phaseVerificationCompleteHandler(
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       actions_summary: summary,
+      evidence_mix,
+    head_stale: staleness.head_stale,
       cleared_phase: writeResult.ok,
       completed_at: completedAt,
       phase_state_written: writeResult.ok,
@@ -461,6 +516,8 @@ export async function phaseVerificationCompleteHandler(
   const fields = auditFields(completeAudit)
   const hints: string[] = []
   if (writeResult.ok) {
+    // The leg that survives a headless run, where the dialog above never renders.
+    hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
     hints.push(
       `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) — it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`,
     )
@@ -497,6 +554,8 @@ export async function phaseVerificationCompleteHandler(
     cleared_verification: writeResult.ok,
     cleared_phase: writeResult.ok,
     actions_summary: summary,
+    evidence_mix,
+    head_stale: staleness.head_stale,
     audit_path: fields.audit_path,
     audit_error: fields.audit_error,
     anti_replay_persisted: record.ok,

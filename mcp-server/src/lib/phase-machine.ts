@@ -319,6 +319,18 @@ export interface CompletePhaseInternal {
   now?: Date
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
+  /**
+   * #75. An extra line appended to the approval dialog's message, for a phase
+   * that has something the generic transition cannot know — today, REVIEW's
+   * evidence mix.
+   *
+   * Placed on the INTERNAL struct rather than on the public `CompletePhaseInput`,
+   * following `StartPhaseInternal.patch`: the shared public type stays untouched,
+   * and so does `DialogOptions`, which is `{title, message}` and would otherwise
+   * need a third field — a cross-OS change to `os-dialog.ts` in release week.
+   * The other four callers of `gatePhaseComplete` are unaffected.
+   */
+  dialogDetail?: string
 }
 
 export async function gatePhaseComplete(
@@ -427,7 +439,11 @@ export async function gatePhaseComplete(
     approval: input.devApproval,
     dialog: {
       title: `RSCT — ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?`,
+      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${
+        internal.dialogDetail ? `
+
+${internal.dialogDetail}` : ''
+      }`,
     },
     projectRoot: input.projectRoot,
     ...(config?.approval_modes !== undefined && {

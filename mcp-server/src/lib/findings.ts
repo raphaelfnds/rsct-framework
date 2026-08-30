@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 
 /**
  * The shared finding vocabulary (#19), plus the shared findings gate (#40).
@@ -79,14 +80,309 @@ export function makeIdGenerator(prefix: string): (category: string) => string {
 }
 
 /**
+ * #75. HOW a finding is known — the discriminator the record never carried.
+ *
+ * The framework already forced the agent to DECLARE findings and to ANSWER every
+ * one of them, and never asked how any of them was known: a measured fact and an
+ * untested guess were stored, counted and gated identically. So the phase gate
+ * could prove a finding was answered and could never prove it was true.
+ *
+ * Three classes, mechanically checkable, no calibration and no score.
+ *
+ * **What this module can and cannot check, stated plainly because the tool
+ * descriptions repeat it.** It can check that a claimed class carries its fields
+ * — `measured` without a `command` is rejected at the door. It CANNOT check
+ * whether `also_explained_by` is honest. A minimum length, a denylist of null
+ * answers ("nothing", "n/a", "nada"), a distinctness test against `title` — each
+ * is an arms race, each is bilingual, and each rewards a longer lie over a short
+ * truth. Pretending otherwise would be the same failure the class exists to
+ * price.
+ *
+ * So the weight sits elsewhere, on two things that ARE mechanical:
+ *
+ *  1. **Irreversible degradation.** Absent, malformed or unrecognised becomes
+ *     `hypothesis`. Never fact. No text defeats it — see {@link coerceEvidence}.
+ *  2. **A visible mix at approval time.** "12 findings — 1 measured, 0 reported,
+ *     11 hypothesis (9 unrecorded)" reaches the dev BEFORE the OK, so the cost of
+ *     a cheap claim lands on the answerer, immediately, instead of on the reader,
+ *     later. That asymmetry is the generator this whole issue is about.
+ */
+export const EVIDENCE_KINDS = ['measured', 'reported', 'hypothesis'] as const
+export type FindingEvidenceKind = (typeof EVIDENCE_KINDS)[number]
+
+/** Where a `reported` claim was checked. A working tree moves; only a commit is fixed. */
+export const VERIFIED_AGAINST = ['commit', 'working_tree', 'unverified'] as const
+export type VerifiedAgainst = (typeof VERIFIED_AGAINST)[number]
+
+export type FindingEvidence =
+  | {
+      kind: 'measured'
+      /** The command actually run. Not a description of one. */
+      command: string
+      output_excerpt: string
+      /**
+       * What ELSE would produce that same output.
+       *
+       * The load-bearing field, and deliberately the one nothing here validates.
+       * The most expensive failure in the record behind #75 survived a command
+       * being present: a probe threw `spawnSync npx ENOENT` with both streams
+       * empty — vitest never spawned — and the throw was reported as a
+       * reproduction. The test ran. It simply did not discriminate.
+       */
+      also_explained_by: string
+    }
+  | {
+      kind: 'reported'
+      /** Where it came from: a doc path, an issue number, another session. */
+      source: string
+      verified_against: VerifiedAgainst
+      /**
+       * The immutable id, when `verified_against` is `commit`. Full sha, not an
+       * abbreviation — `git rev-parse --short` output is length-variable
+       * (`core.abbrev`, object count) and so is not stable across machines.
+       *
+       * `| undefined` is explicit: under `exactOptionalPropertyTypes` a
+       * zod-inferred optional carries it, and an explicitly-undefined sha means
+       * the same thing as an absent one.
+       */
+      commit_sha?: string | undefined
+    }
+  | {
+      kind: 'hypothesis'
+      how_to_falsify: string
+      /** Set ONLY by {@link coerceEvidence}, and only when it did the degrading. */
+      degraded?: true
+      /** Why it degraded: `absent`, `malformed`, or `unknown_kind:<k>`. */
+      degraded_from?: string
+    }
+
+/**
+ * The declaration-side schema, for the agent-declared REVIEW findings.
+ *
+ * Kept beside the type so the two cannot drift, and shaped as a DISCRIMINATED
+ * union so a `measured` claim missing its `command` is a hard rejection at
+ * `rsct_phase_review_start` — the bad set never reaches storage, exactly like the
+ * duplicate-id refine that already guards that door.
+ *
+ * The field itself is OPTIONAL, deliberately. Requiring it would force a resumed
+ * session to re-derive evidence it may no longer have, and would break #40's
+ * recovery path for any finding stored before this shipped. More importantly, a
+ * required field is what produces ritual compliance: the point is not to make
+ * everyone type something, it is to make a set of cheap claims visible. So you
+ * are never forced to CLAIM a class — you are forced to be consistent once you
+ * do, and the absence is counted as `unrecorded` and shown to the dev.
+ */
+export const evidenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('measured'),
+      command: z.string().min(1, 'measured evidence needs the command that was run'),
+      output_excerpt: z.string().min(1, 'measured evidence needs an excerpt of the output'),
+      also_explained_by: z
+        .string()
+        .min(1, 'measured evidence needs what ELSE would produce that same output'),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reported'),
+      source: z.string().min(1, 'reported evidence needs a source'),
+      verified_against: z.enum(VERIFIED_AGAINST),
+      commit_sha: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('hypothesis'),
+      how_to_falsify: z.string().min(1, 'a hypothesis needs a way to falsify it'),
+    })
+    .strict(),
+])
+
+/** The JSON-Schema mirror for the MCP tool `inputSchema` (hand-kept, like its siblings). */
+export const evidenceJsonSchema = {
+  type: 'object' as const,
+  // Flat, not `oneOf`: no schema in this catalog uses a JSON-Schema combinator,
+  // and introducing one in release week trades a real client-compatibility risk
+  // for a presentational gain. The cost is that the property list alone cannot
+  // express "these three groups are mutually exclusive" — so the description says
+  // it outright, and `phase-schema-parity` pins that the rejection is real rather
+  // than merely claimed here.
+  required: ['kind'] as string[],
+  description:
+    'How this finding is known. OPTIONAL — omitting it is allowed and is not a rejection: the finding counts as an UNRECORDED hypothesis, and the dev sees that in the evidence mix before approving. Send ONLY the fields belonging to your chosen kind: measured -> command + output_excerpt + also_explained_by; reported -> source + verified_against (+ commit_sha); hypothesis -> how_to_falsify. Mixing fields across kinds is REJECTED, and so is a kind whose own fields are missing (e.g. measured with no command). NOTE: nothing here can check whether also_explained_by is honest — only that you wrote one.',
+  properties: {
+    kind: { type: 'string' as const, enum: [...EVIDENCE_KINDS] },
+    command: { type: 'string' as const, description: 'measured: the command actually run.' },
+    output_excerpt: { type: 'string' as const, description: 'measured: an excerpt of its output.' },
+    also_explained_by: {
+      type: 'string' as const,
+      description:
+        'measured: what ELSE would produce that same output. The load-bearing field — a test that ran but did not discriminate is the most expensive failure this class exists to catch.',
+    },
+    source: { type: 'string' as const, description: 'reported: doc path, issue, or session.' },
+    verified_against: { type: 'string' as const, enum: [...VERIFIED_AGAINST] },
+    commit_sha: { type: 'string' as const, description: 'reported: the full sha, when checked against a commit.' },
+    how_to_falsify: { type: 'string' as const, description: 'hypothesis: how someone would prove it wrong.' },
+  },
+}
+
+const ABSENT_FALSIFIER =
+  '<not recorded — no evidence class was supplied, so this finding is treated as a hypothesis>'
+
+function nonEmpty(v: unknown): v is string {
+  return typeof v === 'string' && v.trim() !== ''
+}
+
+/**
+ * Read whatever is on disk (or came off the wire) as an evidence class, degrading
+ * anything that is not a well-formed member to `hypothesis`. Never throws.
+ *
+ * **Idempotent, and that is a correctness requirement rather than a nicety.**
+ * Every class the checklist assigns is written into phase state and read back
+ * through {@link readFindingsBaseline} on the very next tool call. If this
+ * function re-stamped `degraded` on a well-formed stored hypothesis, then after
+ * ONE round-trip every honestly-declared hypothesis would count as `unrecorded`,
+ * and the headline the dev reads would flip from "22 hypotheses, labelled" to
+ * "22 unrecorded, nobody said anything". The mix would lie in the exact direction
+ * this design exists to make trustworthy. So a well-formed member passes through
+ * unchanged, `degraded` is preserved when already present, and it is SET only
+ * where this function itself performed the degradation.
+ */
+export function coerceEvidence(raw: unknown): FindingEvidence {
+  if (raw === undefined || raw === null) return degrade('absent')
+  if (typeof raw !== 'object') return degrade('malformed')
+  const rec = raw as Record<string, unknown>
+
+  if (rec.kind === 'measured') {
+    if (nonEmpty(rec.command) && nonEmpty(rec.output_excerpt) && nonEmpty(rec.also_explained_by)) {
+      return {
+        kind: 'measured',
+        command: rec.command,
+        output_excerpt: rec.output_excerpt,
+        also_explained_by: rec.also_explained_by,
+      }
+    }
+    // A `measured` claim missing its fields is NOT a weaker measurement — it is
+    // not a measurement. Degrade rather than repair.
+    return degrade('malformed')
+  }
+
+  if (rec.kind === 'reported') {
+    if (
+      nonEmpty(rec.source) &&
+      VERIFIED_AGAINST.includes(rec.verified_against as VerifiedAgainst)
+    ) {
+      const out: FindingEvidence = {
+        kind: 'reported',
+        source: rec.source,
+        verified_against: rec.verified_against as VerifiedAgainst,
+      }
+      if (nonEmpty(rec.commit_sha)) out.commit_sha = rec.commit_sha
+      return out
+    }
+    return degrade('malformed')
+  }
+
+  if (rec.kind === 'hypothesis') {
+    if (nonEmpty(rec.how_to_falsify)) {
+      const out: FindingEvidence = { kind: 'hypothesis', how_to_falsify: rec.how_to_falsify }
+      // Preserved, never re-stamped — see the idempotence note above.
+      if (rec.degraded === true) out.degraded = true
+      if (nonEmpty(rec.degraded_from)) out.degraded_from = rec.degraded_from
+      return out
+    }
+    return degrade('malformed')
+  }
+
+  return degrade(nonEmpty(rec.kind) ? `unknown_kind:${rec.kind}` : 'malformed')
+}
+
+function degrade(from: string): FindingEvidence {
+  return {
+    kind: 'hypothesis',
+    how_to_falsify: ABSENT_FALSIFIER,
+    degraded: true,
+    degraded_from: from,
+  }
+}
+
+/**
+ * The evidence mix of a finding set.
+ *
+ * `unrecorded` is a SUBSET of `hypothesis`, not a fourth class: the three kind
+ * counts sum to `total`. It is split out because "I considered it and it is a
+ * guess" and "I did not say" are different facts about the answerer, and folding
+ * the second into the first hides the one the ritual-compliance analysis says
+ * will dominate.
+ */
+export interface EvidenceMix {
+  /**
+   * `false` when there is no baseline to measure — foreign or hand-edited state,
+   * where {@link readFindingsBaseline} returns `null`. A row of zeros from `null`
+   * ("unmeasurable") and from `[]` ("the phase ran and found nothing") would
+   * render identically, which is a state read as if it were an observation — the
+   * very mechanism this issue was opened over.
+   */
+  measurable: boolean
+  measured: number
+  reported: number
+  hypothesis: number
+  /** Degraded rather than declared. A subset of `hypothesis`. */
+  unrecorded: number
+  total: number
+}
+
+export function summarizeEvidence(
+  // `| undefined` is explicit because `exactOptionalPropertyTypes` is on and a
+  // zod-inferred optional carries it. The body already treats absent and
+  // explicitly-undefined the same way, so accepting both is honest rather than a
+  // loosening — narrowing it would only force callers to strip a field this
+  // function is built to count as unrecorded.
+  findings: readonly { evidence?: FindingEvidence | undefined }[] | null,
+): EvidenceMix {
+  const mix: EvidenceMix = {
+    measurable: findings !== null,
+    measured: 0,
+    reported: 0,
+    hypothesis: 0,
+    unrecorded: 0,
+    total: 0,
+  }
+  if (findings === null) return mix
+  for (const f of findings) {
+    const e = f.evidence ?? coerceEvidence(undefined)
+    mix.total++
+    if (e.kind === 'measured') mix.measured++
+    else if (e.kind === 'reported') mix.reported++
+    else {
+      mix.hypothesis++
+      if (e.degraded === true) mix.unrecorded++
+    }
+  }
+  return mix
+}
+
+/** One line for the OS dialog, the hints and the audit. */
+export function describeEvidenceMix(mix: EvidenceMix): string {
+  if (!mix.measurable) return 'no findings baseline recorded — evidence mix unavailable'
+  if (mix.total === 0) return 'no findings — nothing to weigh'
+  const unrecorded = mix.unrecorded > 0 ? ` (${mix.unrecorded} unrecorded)` : ''
+  return `${mix.total} finding(s) — ${mix.measured} measured, ${mix.reported} reported, ${mix.hypothesis} hypothesis${unrecorded}`
+}
+
+/**
  * A finding as it survives a round-trip through phase state, which types it as
- * `unknown[]`. Only these three fields are read back — `id` to validate against,
- * `category`/`title` so a rejection can tell the agent WHAT is still open.
+ * `unknown[]`. Only these fields are read back — `id` to validate against,
+ * `category`/`title` so a rejection can tell the agent WHAT is still open, and
+ * `evidence` (#75) so the mix can be counted and so #40's `open_findings`
+ * recovery path hands back what was declared rather than a stripped copy.
  */
 export interface StoredFinding {
   id: string
   category?: string
   title?: string
+  evidence?: FindingEvidence
 }
 
 /**
@@ -108,6 +404,11 @@ export function readFindingsBaseline(raw: unknown): StoredFinding[] | null {
     const f: StoredFinding = { id: rec.id }
     if (typeof rec.category === 'string') f.category = rec.category
     if (typeof rec.title === 'string') f.title = rec.title
+    // #75. The ONE line that carries the evidence class to every consumer: both
+    // `phase_status` blocks, both `_complete` gates, and #40's `open_findings`
+    // rejection payload all read the baseline through here. Never drops a finding
+    // — a legacy entry with no `evidence` degrades to a hypothesis and still gates.
+    f.evidence = coerceEvidence(rec.evidence)
     out.push(f)
   }
   return out.length > 0 ? out : null

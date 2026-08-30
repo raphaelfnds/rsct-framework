@@ -22,8 +22,11 @@ import {
   type PhaseVerificationBlock,
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
-import { computeRunId } from '../lib/findings.js'
+import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel } from '../lib/phase-machine.js'
+import { getHeadShaFull } from '../lib/git.js'
+import { detectTopology } from '../lib/topology.js'
+import { readContracts } from '../lib/contracts.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -181,11 +184,20 @@ export async function phaseVerificationStartHandler(
     maxDepth: input.max_depth,
   })
 
+  // #75 Part B. Read here rather than inside the checklist: `detectTopology`
+  // needs the config, and the checklist deliberately takes a project root and
+  // nothing else. Degrades to the empty graph on every failure path.
+  const topology = detectTopology(config, projectRoot)
+  const contractGraph = readContracts(topology.universe_root)
+
   const checklistArgs: Parameters<typeof runVerificationChecklist>[0] = {
     projectRoot,
     declaredPaths: walk.declared,
     discoveredImporters: walk.discovered,
     specTier: input.spec_tier,
+    contractGraph,
+    appName: config?.app?.name ?? null,
+    universeLinked: topology.universe_root !== null,
   }
   if (input.spec_claims !== undefined) checklistArgs.specClaims = input.spec_claims
   if (input.existing_project_files !== undefined) {
@@ -302,6 +314,11 @@ export async function phaseVerificationStartHandler(
   // the transition #15's gate exception leans on, and it deserves a forensic line.
   const staleRestart = isStaleVerificationLabel(baseState)
 
+  // #75 Part C. One git spawn, full sha, null outside a repo. Read here rather
+  // than at `_complete` so the record says what HEAD WAS when the findings were
+  // produced — a working tree is a moving target and only a commit is fixed.
+  const headSha = getHeadShaFull(projectRoot)
+
   const verificationBlock: PhaseVerificationBlock = {
     spec_ref: input.spec_ref,
     spec_tier: input.spec_tier,
@@ -310,7 +327,11 @@ export async function phaseVerificationStartHandler(
     findings: checklist.findings,
     findings_run_id: findingsRunId,
     started_at: startedAt,
+    observed_at: startedAt,
   }
+  // Conditional, not `?? null`: `exactOptionalPropertyTypes` is on, and a stamp
+  // that is absent outside a git repo is honest where a null one is noise.
+  if (headSha !== null) verificationBlock.head_sha = headSha
   if (requestedPersona !== null) verificationBlock.persona = requestedPersona
 
   const newState: PhaseState = {
@@ -356,9 +377,15 @@ export async function phaseVerificationStartHandler(
       // are needed to tell them apart: the seed counts do not capture a
       // resolver that dropped every edge while every seed was analyzable.
       walk_coverage: walk.coverage,
+      // #75 Part B. Which of the four contract-graph states this run saw — the
+      // difference between "no adjacent app depends on this" and "nobody has ever
+      // written the manifest that would say so" is invisible from a finding count.
+      contract_graph: checklist.stats.contract_graph,
+      contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
       findings_count: checklist.findings.length,
+      evidence_mix: summarizeEvidence(checklist.findings),
       phase_state_written: writeResult.ok,
     },
     config?.audit,
@@ -376,6 +403,9 @@ export async function phaseVerificationStartHandler(
         severity: finding.severity,
         source: finding.source,
         title: finding.title,
+        // #75. The class, per finding, in the forensic record — so a past run can
+        // be re-read for what it actually knew, not only for what it decided.
+        evidence_kind: finding.evidence.kind,
       },
       config?.audit,
     )
@@ -384,6 +414,7 @@ export async function phaseVerificationStartHandler(
   const fields = auditFields(startAudit)
   const hints: string[] = []
   if (writeResult.ok) {
+    hints.push(`Evidence: ${describeEvidenceMix(summarizeEvidence(checklist.findings))}.`)
     hints.push(
       `Phase state written to ${writeResult.path}. ${checklist.findings.length} finding(s) surfaced — EVERY one needs an action. Call rsct_phase_verification_complete with findings_actions[] covering all of them, findings_run_id='${findingsRunId}', and dev_approval.`,
     )

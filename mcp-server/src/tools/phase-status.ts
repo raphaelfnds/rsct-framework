@@ -3,7 +3,12 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readPhaseState } from '../lib/phase-scope.js'
-import { readFindingsBaseline, type StoredFinding } from '../lib/findings.js'
+import {
+  readFindingsBaseline,
+  summarizeEvidence,
+  type EvidenceMix,
+  type StoredFinding,
+} from '../lib/findings.js'
 import { readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
 import { readToken } from '../lib/plan-authorization.js'
 import {
@@ -26,6 +31,12 @@ export interface PhaseStatusVerificationSummary {
   findings_count: number
   /** #40: the findings themselves — completing the phase requires answering each. */
   open_findings: StoredFinding[]
+  /**
+   * #75. How those findings are known. `measurable: false` distinguishes "no
+   * baseline could be read" from "the phase ran and raised nothing" — a row of
+   * zeros would render the two identically.
+   */
+  evidence_mix: EvidenceMix
   findings_run_id: string | null
   started_at: string | null
 }
@@ -38,6 +49,8 @@ export interface PhaseStatusReviewSummary {
   completed_at: string | null
   /** #40: findings declared at review_start and not yet answered. */
   open_findings: StoredFinding[]
+  /** #75. How those declared findings are known. */
+  evidence_mix: EvidenceMix
   findings_run_id: string | null
 }
 
@@ -137,6 +150,10 @@ export async function phaseStatusHandler(
       // what to answer except deliberately failing a call or re-running _start —
       // which rewrites the baseline it is being measured against.
       open_findings: readFindingsBaseline(findings) ?? [],
+      // Fed the baseline itself, NOT the `?? []` fallback: `null` means the
+      // baseline was unreadable, and collapsing it to an empty array here would
+      // report an unmeasurable block as a clean one.
+      evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null,
     }
@@ -151,6 +168,7 @@ export async function phaseStatusHandler(
       decided_at: state.review?.decided_at ?? null,
       completed_at: state.review?.completed_at ?? null,
       open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
+      evidence_mix: summarizeEvidence(readFindingsBaseline(state.review_findings?.findings)),
       findings_run_id: state.review_findings?.run_id ?? null,
     }
   }
