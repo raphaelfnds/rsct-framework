@@ -107,10 +107,36 @@ describe('rsct_phase_review_start — nested findings[] parity', () => {
   }
   const items = exposed.properties.findings.items
 
+  /**
+   * A type-appropriate probe value per advertised field.
+   *
+   * `line` was already special-cased because a string is not a number. #75 adds
+   * `evidence`, the first OBJECT-typed field here, and probing it with `'v'` would
+   * report "advertised but rejected" for a field zod accepts perfectly well — a
+   * false alarm, not a caught defect.
+   *
+   * The guard is unchanged in strength: the probe still sends a value that MUST
+   * parse, so dropping `evidence` from the zod shape while leaving it advertised
+   * still fails here (the object becomes an unknown key against a `.strict()`
+   * schema). What changed is that `evidence` is now genuinely exercised instead of
+   * being asserted against with the wrong type.
+   */
+  const PROBE: Record<string, unknown> = {
+    line: 1,
+    evidence: { kind: 'hypothesis', how_to_falsify: 'run the command and compare' },
+  }
+
   function acceptsKey(key: string): boolean {
     const finding: Record<string, unknown> = { id: 'r-1', category: 'c', title: 't' }
-    finding[key] = key === 'line' ? 1 : 'v'
+    finding[key] = key in PROBE ? PROBE[key] : 'v'
     return phaseReviewStartInputSchema.safeParse({ spec_ref: 'x', findings: [finding] }).success
+  }
+
+  function acceptsEvidence(evidence: unknown): boolean {
+    return phaseReviewStartInputSchema.safeParse({
+      spec_ref: 'x',
+      findings: [{ id: 'r-1', category: 'c', title: 't', evidence }],
+    }).success
   }
 
   it('every advertised finding field is actually accepted by zod', () => {
@@ -121,6 +147,56 @@ describe('rsct_phase_review_start — nested findings[] parity', () => {
 
   it('rejects a finding field it does not advertise', () => {
     expect(acceptsKey('not_a_real_field')).toBe(false)
+  })
+
+  /**
+   * #75. `evidence` is advertised as a FLAT property bag because no schema in this
+   * catalog uses a JSON-Schema combinator, so the mutual exclusion between kinds
+   * lives only in its `description`. A description is a claim; this is the test
+   * that makes it true. Without it, the schema could quietly start accepting a
+   * mixed object and the only thing contradicting the docs would be a runtime
+   * rejection the agent cannot predict.
+   */
+  it('enforces the evidence-kind exclusivity its description promises', () => {
+    expect(acceptsEvidence(undefined)).toBe(true)
+    expect(
+      acceptsEvidence({
+        kind: 'measured',
+        command: 'c',
+        output_excerpt: 'o',
+        also_explained_by: 'a',
+      }),
+    ).toBe(true)
+    // A kind missing its own fields.
+    expect(acceptsEvidence({ kind: 'measured', command: 'c' })).toBe(false)
+    // Fields borrowed from another kind.
+    expect(
+      acceptsEvidence({
+        kind: 'measured',
+        command: 'c',
+        output_excerpt: 'o',
+        also_explained_by: 'a',
+        how_to_falsify: 'x',
+      }),
+    ).toBe(false)
+    // An unrecognised kind never reaches storage.
+    expect(acceptsEvidence({ kind: 'vibes' })).toBe(false)
+  })
+
+  it('advertises every evidence field the union actually names', () => {
+    const advertised = Object.keys(
+      (items.properties.evidence as { properties: Record<string, unknown> }).properties,
+    ).sort()
+    expect(advertised).toEqual([
+      'also_explained_by',
+      'command',
+      'commit_sha',
+      'how_to_falsify',
+      'kind',
+      'output_excerpt',
+      'source',
+      'verified_against',
+    ])
   })
 
   it('advertises the same required finding fields zod enforces', () => {

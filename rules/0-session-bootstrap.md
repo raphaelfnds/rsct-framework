@@ -139,7 +139,15 @@ R→S→V→C→REVIEW→T):
   `rsct_phase_review_complete` with an action for **every** declared
   finding, echoing the `findings_run_id`. Declaring a finding commits
   you to resolving it: the phase will not close while any of them is
-  unanswered. Re-running `_start` REPLACES the declared set and is
+  unanswered. Say how each finding is known — `evidence`: `measured`
+  (the command you ran, an excerpt of its output, and **what else would
+  produce that same output**), `reported` (the source, and whether you
+  checked it against a commit or a working tree), or `hypothesis` (how
+  someone would falsify it). Omitting it is allowed and is never a
+  rejection — the finding simply counts as *unrecorded*, and the dev
+  sees the mix ("12 findings, 11 of them hypotheses") before approving.
+  What IS rejected is an inconsistent claim: `measured` with no command.
+  Re-running `_start` REPLACES the declared set and is
   recorded in the audit log.
 - `include_review: false` → the review is skipped and never run.
 - The test phase enforces this (see §5 below). NOTE: this REVIEW *phase*

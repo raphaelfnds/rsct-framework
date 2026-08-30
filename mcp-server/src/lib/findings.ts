@@ -202,8 +202,15 @@ export const evidenceSchema = z.discriminatedUnion('kind', [
 /** The JSON-Schema mirror for the MCP tool `inputSchema` (hand-kept, like its siblings). */
 export const evidenceJsonSchema = {
   type: 'object' as const,
+  // Flat, not `oneOf`: no schema in this catalog uses a JSON-Schema combinator,
+  // and introducing one in release week trades a real client-compatibility risk
+  // for a presentational gain. The cost is that the property list alone cannot
+  // express "these three groups are mutually exclusive" — so the description says
+  // it outright, and `phase-schema-parity` pins that the rejection is real rather
+  // than merely claimed here.
+  required: ['kind'] as string[],
   description:
-    'How this finding is known. OPTIONAL — omitting it is allowed and is not a rejection: the finding counts as an UNRECORDED hypothesis and the dev sees that in the evidence mix before approving. What is rejected is an inconsistent claim: kind="measured" without command/output_excerpt/also_explained_by. NOTE: nothing here can check whether also_explained_by is honest — only that you wrote one.',
+    'How this finding is known. OPTIONAL — omitting it is allowed and is not a rejection: the finding counts as an UNRECORDED hypothesis, and the dev sees that in the evidence mix before approving. Send ONLY the fields belonging to your chosen kind: measured -> command + output_excerpt + also_explained_by; reported -> source + verified_against (+ commit_sha); hypothesis -> how_to_falsify. Mixing fields across kinds is REJECTED, and so is a kind whose own fields are missing (e.g. measured with no command). NOTE: nothing here can check whether also_explained_by is honest — only that you wrote one.',
   properties: {
     kind: { type: 'string' as const, enum: [...EVIDENCE_KINDS] },
     command: { type: 'string' as const, description: 'measured: the command actually run.' },
