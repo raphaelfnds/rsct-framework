@@ -3,7 +3,13 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { readGitState, readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
 import { effectiveProtectedList } from '../lib/branch-protection.js'
-import { stampBootstrapMarker } from '../lib/phase-scope.js'
+import {
+  BOOTSTRAP_STALE_MS,
+  bootstrapWriteFailureHint,
+  readThenStampBootstrap,
+  truncateForHint,
+  type BootstrapRefresh,
+} from '../lib/phase-scope.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
 import { getUniverse, type UniverseBlock } from '../lib/universe.js'
 import { detectTopology, type TopologyBlock } from '../lib/topology.js'
@@ -98,15 +104,17 @@ export async function statusHandler(
   const resolution = resolveProjectRoot(input.project_root)
   const git = readGitState(resolution.root)
 
-  // CAP-31: stamp bootstrap marker so downstream mutating tools can
-  // detect whether §0 was performed in this session window. Stamping is
-  // best-effort — a write failure is swallowed silently (status itself
-  // is a read-only diagnostic and never fails on metadata write).
-  if (resolution.rsct_installed) {
-    stampBootstrapMarker(resolution.root)
-  }
+  // CAP-31: stamp bootstrap marker so downstream mutating tools can detect
+  // whether §0 was performed in this session window. #53: read-then-stamp (see
+  // readThenStampBootstrap), and the write outcome is reported rather than
+  // swallowed. Guarded on rsct_installed: an unmanaged project has no §0 to
+  // report on, and buildStatusHints already tells it to run /rsct-setup.
+  const bootstrap: BootstrapRefresh | null = resolution.rsct_installed
+    ? readThenStampBootstrap(resolution.root)
+    : null
 
   const hints = buildStatusHints(resolution, git)
+  if (bootstrap) hints.push(...bootstrapHints(bootstrap))
 
   // T3: worktree context. When running inside a LINKED worktree, the rsct
   // runtime state (.rsct/phase-state.json incl. any plan-authorization token,
@@ -246,6 +254,63 @@ function applyUpdateMutations(input: StatusInput, opts: UpdateOptions | undefine
       hints.push('Could not persist the decline (the cache file is not writable) — nothing was recorded.')
     }
   }
+}
+
+const BOOTSTRAP_STALE_MIN = Math.round(BOOTSTRAP_STALE_MS / 60000)
+
+/**
+ * #53: the §0 bootstrap report, in `rsct_status`'s own voice — twin of the one in
+ * tools/load-context.ts. The verdict strings are deliberately not shared:
+ * `evaluateBootstrapMarker`'s own hints tell the reader to run rsct_status AND
+ * rsct_load_context, which is self-referential from inside either, and its
+ * `missing` branch fires on the first call in every freshly installed project.
+ * What IS shared sits in lib/phase-scope (`truncateForHint`,
+ * `bootstrapWriteFailureHint`).
+ *
+ * Every "recorded/refreshed it" claim hangs off `recorded`: a report that claims
+ * a refresh it failed to write is the same vacuity one layer up.
+ */
+function bootstrapHints(refresh: BootstrapRefresh): string[] {
+  const { marker, read, write } = refresh
+
+  if (write === null) {
+    return [
+      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
+    ]
+  }
+
+  const hints: string[] = []
+  const recorded = write.ok
+
+  if (marker.status === 'missing' && marker.bootstrap_at !== null) {
+    // The file parsed; the VALUE did not.
+    hints.push(
+      `⚠ The recorded bootstrap_at value ('${truncateForHint(marker.bootstrap_at, 40)}') is not a parseable timestamp${recorded ? ' — this rsct_status call replaced it' : ', and this call could not replace it (see below)'}.`,
+    )
+  } else if (marker.status === 'missing') {
+    hints.push(
+      recorded
+        ? `ℹ No §0 bootstrap marker was on record for this project — this rsct_status call recorded one, so the session baseline starts now. Next: rsct_load_context, which loads plan, decisions and knowledge.`
+        : `ℹ No §0 bootstrap marker is on record for this project, and this call could not record one (see below). Next: rsct_load_context, which loads plan, decisions and knowledge.`,
+    )
+  } else if (marker.status === 'stale') {
+    const min = Math.round((marker.age_ms ?? 0) / 60000)
+    hints.push(
+      recorded
+        ? `ℹ §0 was last recorded ${min} min ago (stale window ${BOOTSTRAP_STALE_MIN} min) — this rsct_status call refreshed it. If this session has been running since then, re-run rsct_load_context so plan, decisions and knowledge are current too.`
+        : `ℹ §0 was last recorded ${min} min ago (stale window ${BOOTSTRAP_STALE_MIN} min) and this call could not refresh it (see below). Re-run rsct_load_context so plan, decisions and knowledge are current.`,
+    )
+  }
+  // `fresh` says nothing — matching evaluateBootstrapMarker's own `hint: null`.
+
+  const writeHint = bootstrapWriteFailureHint(
+    write,
+    'rsct_status',
+    marker.status === 'fresh',
+  )
+  if (writeHint) hints.push(writeHint)
+
+  return hints
 }
 
 function buildStatusHints(

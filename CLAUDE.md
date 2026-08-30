@@ -41,6 +41,7 @@ diferenças que historicamente quebraram o projeto:
 | `grep -iF` (case-insens + fixed) | **SIGABRT / core dump** (grep 3.0) — usar `tr`+`case` | OK | OK |
 | `sed -i` flag | sem sufixo | sem sufixo | exige `sed -i '' ...` ou Perl |
 | CRLF line endings | git autocrlf adiciona `\r` | LF nativo | LF nativo |
+| `awk`/`sed` **vendo** o `\r` | **cegos** — MSYS abre em modo texto e descarta o CR antes de `$0` existir | enxergam o `\r` | enxergam o `\r` |
 | `\b` em `node -e '...'` | MSYS colapsa `\\b` → `\b` (backspace) | shell preserva | shell preserva |
 | Tools default | `sha256sum`, `awk` GNU | `sha256sum`, `awk` GNU | `shasum -a 256`, BSD awk |
 
@@ -235,7 +236,31 @@ awk '/^foo$/{ ... }' file
 tr -d '\r' < file | awk '/^foo$/{ ... }'
 ```
 
-Histórico: CAP-10 (SHA pipelines), CAP-16 v0.7.2 (Phase 4.4b backfill).
+**E nunca tente o contrário: `awk`/`sed` não conseguem detectar nem preservar
+CRLF no Git Bash.** O MSYS abre o arquivo em modo texto e o CR é descartado
+**antes** de o script enxergar a linha — não é "ignorado", ele não existe para
+o script. Medido em Git Bash, arquivo com bytes `61 62 63 0d 0a` verificados:
+
+```bash
+awk '{ print length($0) }' crlf.txt     # → 3, não 4 (o CR sumiu)
+awk '/\r$/ { c++ }'                     # → 0 linhas casam
+sed -n 's/\r$/X/p' crlf.txt             # → nada
+awk '{ print }' crlf.txt > out.txt      # → out.txt sai LF: 61 62 63 0a
+```
+
+Ou seja, `awk` **normaliza sozinho na saída**, em silêncio. Um script escrito
+para detectar ou preservar CRLF funciona no Linux/macOS (onde `awk` lê binário
+e enxerga o CR) e **não faz nada no Windows** — mesmo script, dois
+comportamentos, zero mensagem de erro. É a classe de falha silenciosa que esta
+seção existe para prevenir, na direção inversa do anti-pattern acima.
+
+Regra: normalizar explicitamente com `tr -d '\r'` e trabalhar em LF. Se um
+artefato precisa sair em CRLF, isso é decisão de escrita (quem gera o arquivo),
+nunca algo a ser preservado através de um pipe `awk`/`sed`.
+
+Histórico: CAP-10 (SHA pipelines), CAP-16 v0.7.2 (Phase 4.4b backfill);
+a cegueira `awk`/`sed` foi medida em 2026-08-22 durante a #73, ao tentar
+preservar CRLF no backfill do `.gitignore` — tentativa revertida.
 
 ### 5. JSON.parse → JSON.stringify em arquivos managed — PROIBIDO
 

@@ -134,6 +134,17 @@ export interface PhaseVerificationBlock {
    * re-applied item by item against renumbered ids.
    */
   findings_run_id?: string
+  /**
+   * #75 Part C. HEAD when this phase started, and when that was read.
+   *
+   * Full sha, never an abbreviation — see `getHeadShaFull`. Nested inside this block
+   * on purpose rather than added as a top-level PhaseState key: unlisted
+   * top-level keys are dropped by `rsct_phase_abandon`
+   * (PHASE_STATE_PRESERVED_ON_ABANDON), and a stamp describing discarded work
+   * SHOULD go with the work rather than need an allowlist entry to survive it.
+   */
+  head_sha?: string
+  observed_at?: string
   started_at?: string
   completed_at?: string
 }
@@ -247,6 +258,9 @@ export interface PhaseFindingsBlock {
   run_id: string
   findings: unknown[]
   declared_at: string
+  /** #75 Part C. HEAD when these findings were declared (full sha), and when. */
+  head_sha?: string
+  observed_at?: string
 }
 
 /**
@@ -302,6 +316,86 @@ export interface PhaseState {
    * agents to run §0 bootstrap before deeper phase work.
    */
   bootstrap_at?: string
+}
+
+/**
+ * #53: the keys `rsct_phase_abandon` PRESERVES. The rule this list encodes:
+ * abandon clears everything that describes the work being discarded — the phase,
+ * its spec, and every plan- or spec-scoped token, budget or recorded decision —
+ * and preserves only what describes the SESSION or the PROJECT, never the work.
+ *
+ * Consumed as an ALLOWLIST by {@link preserveAcrossAbandon}, never as a wipe-list.
+ * A key added to {@link PhaseState} later is therefore dropped by an abandon
+ * unless its author deliberately adds it here — fail-closed, and the reason this
+ * is a list rather than a sequence of `delete` calls: written the other way
+ * round, forgetting `plan_authorization` would leave a live §C batch token alive
+ * across an abandon and the whole suite would stay green.
+ *
+ * `context_stale` is on the list because it is an OBLIGATION on the session, not
+ * state of the work: while it is set the edit guard blocks every managed edit
+ * (lib/edit-guard.ts), and the only legitimate clear is a real re-load through
+ * `rsct_load_context` (D4 — see {@link stampBootstrapMarker}'s `clearStale`).
+ * Wiping it here let an agent the guard had blocked unblock itself by discarding
+ * an unrelated phase: a mechanical gate defeated by a call that never satisfied
+ * it. Note abandon only ever PRESERVES the flag, never arms one —
+ * `completePhaseGeneric` is its sole producer today and {@link stampContextStale}
+ * has no production caller, so the `'pivot'` reason is currently unreachable.
+ */
+/**
+ * #75 Part C. Compare a stamped HEAD against the one now, for a phase closing.
+ *
+ * MARKS, never rejects — and that is the whole design, not a softening. HEAD
+ * moving between declaring a REVIEW finding and completing the phase is the
+ * NORMAL case: you commit the fixes you found. Rejecting it would make the phase
+ * uncompletable for doing the right thing, and an agent would learn to route
+ * around the stamp rather than read it.
+ *
+ * `null` means "cannot tell" — no stamp recorded (state predating this), or git
+ * unavailable. Never `true`, because an unknown is not a staleness finding.
+ */
+export function headStaleness(
+  stampedSha: string | undefined,
+  currentSha: string | null,
+): { head_stale: boolean | null; head_sha_at_start: string | null; head_sha_now: string | null } {
+  const at_start = stampedSha ?? null
+  return {
+    head_stale: at_start === null || currentSha === null ? null : at_start !== currentSha,
+    head_sha_at_start: at_start,
+    head_sha_now: currentSha,
+  }
+}
+
+export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
+  'bootstrap_at',
+  'context_stale',
+]
+
+/** Copy one key when the source actually carries it (exactOptionalPropertyTypes). */
+function copyIfPresent<K extends keyof PhaseState>(
+  from: PhaseState,
+  to: PhaseState,
+  key: K,
+): void {
+  const value = from[key]
+  if (value !== undefined) to[key] = value
+}
+
+/**
+ * Build the post-abandon phase-state: an allowlist copy of
+ * {@link PHASE_STATE_PRESERVED_ON_ABANDON} and nothing else. Everything the
+ * abandoned work owned is dropped, including the four blocks whose docstrings
+ * already declare themselves "wiped by phase_abandon" (`plan_authorization`,
+ * `free_commit_budget`, `review`, `disposition`).
+ */
+export function preserveAcrossAbandon(
+  state: PhaseState | null | undefined,
+): PhaseState {
+  const next: PhaseState = {}
+  if (!state) return next
+  for (const key of PHASE_STATE_PRESERVED_ON_ABANDON) {
+    copyIfPresent(state, next, key)
+  }
+  return next
 }
 
 const PHASE_STATE_RELATIVE = '.rsct/phase-state.json'
@@ -548,13 +642,14 @@ export function tierRank(tier: string | undefined | null): number {
 export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
 
 /**
- * CAP-31: stamp `bootstrap_at` on the current phase-state. Called by
- * `rsct_status` and `rsct_load_context` so downstream mutating tools
- * can detect when §0 was skipped or stale.
+ * CAP-31: stamp `bootstrap_at` on the current phase-state, so downstream
+ * mutating tools can detect when §0 was skipped or stale.
  *
- * Failures are swallowed — bootstrap stamping is best-effort metadata,
- * never the reason a status/load_context call fails. Callers may
- * inspect the returned `WritePhaseStateResult` for diagnostics.
+ * Do NOT call this directly from a §0 tool — go through
+ * {@link readThenStampBootstrap}, the only production caller, which evaluates
+ * the marker first and refuses to stamp over an unparseable file. Stamping is
+ * still best-effort (never the reason a status/load_context call fails), but
+ * #53 stopped the result being DISCARDED: both tools now report it.
  */
 export function stampBootstrapMarker(
   projectRoot: string,
@@ -605,7 +700,12 @@ export function readContextStale(
  * CAP-31 / CAP-33 bootstrap marker reader. Returns whether §0 was
  * performed and how recently. Soft signal — callers surface a hint
  * and audit entry but do NOT reject. Shared across `phase_code_start`
- * (CAP-31) and `request_commit/_push/_merge` (CAP-33).
+ * (CAP-31), `request_commit/_push/_merge/_rebase` (CAP-33) and — via
+ * {@link readThenStampBootstrap} — `rsct_status` / `rsct_load_context` (#53).
+ *
+ * `bootstrap_at` is whatever the JSON held: the schema is deliberately
+ * forgiving and nothing validates the type, so a caller interpolating it into
+ * a hint must treat it as `unknown` ({@link truncateForHint}).
  */
 export type BootstrapStatus = 'fresh' | 'stale' | 'missing'
 
@@ -655,6 +755,93 @@ export function evaluateBootstrapMarker(args: {
     age_ms: age,
     hint: null,
   }
+}
+
+/**
+ * #53: what a §0 bootstrap call learned about the marker BEFORE it touched it.
+ *
+ * `marker` is the pre-stamp verdict, `read` the pre-stamp read it was computed
+ * over, and `write` the stamp — or `null` when the stamp was deliberately
+ * skipped (see {@link readThenStampBootstrap}).
+ */
+export interface BootstrapRefresh {
+  marker: BootstrapMarker
+  read: PhaseStateReadResult
+  write: WritePhaseStateResult | null
+}
+
+/**
+ * #53: evaluate the bootstrap marker, THEN stamp it. The ordering is the whole
+ * point and it is centralised here for exactly one reason: `rsct_status` and
+ * `rsct_load_context` both stamp before anything else runs, so a report built
+ * from a post-stamp read is vacuously "fresh" on every single call — a report
+ * that can never fire. Both tools call this instead of pairing the two library
+ * functions themselves.
+ *
+ * On an UNPARSEABLE phase-state.json the stamp is SKIPPED (`write: null`) rather
+ * than attempted. {@link stampBootstrapMarker} builds its write from
+ * `existing.state ?? {}`, which makes an unreadable file indistinguishable from
+ * an empty one: the write would land carrying `bootstrap_at` and nothing else,
+ * destroying whatever `plan_authorization`, `free_commit_budget`, `last_classify`
+ * or `context_stale` the file still held. A corrupt file is the moment the
+ * framework most needs to preserve what it cannot read. Skipping is fail-closed:
+ * downstream tools then report bootstrap as missing, which is the truth.
+ *
+ * Callers surface the outcome as hints; nothing here throws or gates.
+ */
+export function readThenStampBootstrap(
+  projectRoot: string,
+  opts: { now?: Date; clearStale?: boolean } = {},
+): BootstrapRefresh {
+  const read = readPhaseState(projectRoot)
+  const marker = evaluateBootstrapMarker({
+    projectRoot,
+    ...(opts.now !== undefined && { now: opts.now }),
+  })
+  if (read.parse_error !== undefined) {
+    return { marker, read, write: null }
+  }
+  return { marker, read, write: stampBootstrapMarker(projectRoot, opts) }
+}
+
+/**
+ * #53: bound an untrusted value before it is interpolated into `hints[]`, the
+ * agent's control channel. Takes `unknown` on purpose: `bootstrap_at` and
+ * `parse_error` come straight out of a JSON file nothing validates, so a
+ * `{"bootstrap_at": {"length": 999}}` would otherwise reach `.slice()` and throw
+ * out of a tool documented "always succeeds", and an array would slip the length
+ * check entirely and interpolate in full.
+ */
+export function truncateForHint(value: unknown, max = 80): string {
+  const s = typeof value === 'string' ? value : String(value)
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+/**
+ * #53: the "the stamp did not land" hint, shared by both §0 tools because it is
+ * the same fact about the same file — only the retry tool differs. The verdict
+ * lines around it are per-call-site on purpose (the library's own marker hints
+ * name both tools, which is self-referential from inside either); this one names
+ * neither except through `toolName`.
+ *
+ * `markerFresh` exists because the consequence clause is FALSE without it: when
+ * a still-fresh marker is already on disk, a failed write changes nothing that
+ * `phase_code_start` or the `request_*` gates can see — they read the same
+ * marker and report `fresh`. Only a missing or stale marker leaves them warning.
+ */
+export function bootstrapWriteFailureHint(
+  write: WritePhaseStateResult,
+  toolName: string,
+  markerFresh: boolean,
+): string | null {
+  if (write.ok) return null
+  if (write.reason === 'locked') {
+    return `ℹ Another session holds .rsct/phase-state.lock (acquired ${write.lock_age_ms}ms ago) — the §0 marker for this call was not recorded. Harmless when two sessions share one worktree; the next ${toolName} records it.`
+  }
+  const consequence = markerFresh
+    ? 'The marker already on record still stands and will go stale at the usual window.'
+    : `Until a write succeeds, rsct_phase_code_start and the rsct_request_* gates keep reporting bootstrap as missing or stale.`
+  return `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncateForHint(write.error)}. ${consequence}`
 }
 
 /**

@@ -172,7 +172,20 @@ files are kept. The pre-setup git SHA recorded in `.rsct.json` is the backup —
 no separate backup files are created.
 
 **Consent gates.** Acts only on this repo. It removes the project-scope `.mcp.json`
-`rsct` entry by key (preserving any other servers) when present.
+`rsct` entry by key (preserving any other servers) when present, and scrubs the
+matching approval — the `rsct` entry in `enabledMcpjsonServers` in
+`.claude/settings.local.json`, which setup wrote because a project `.mcp.json`
+does not start until the project has approved it. Both are removed by value, never
+by rewriting the file: `.claude/settings.local.json` also holds your own
+permission grants and any other servers' approvals, so it is deleted only when the
+`rsct` approval was the single thing in it. A refusal you recorded in
+`disabledMcpjsonServers` is left untouched — that decision is yours, and setup
+already declines to override it.
+
+Leaving the approval behind is why this matters: uninstall also removes the
+`.gitignore` line that was keeping that file out of the repo, so a stale approval
+would become a tracked file pre-granting a server that no longer exists, and it
+would silently re-grant on the next install.
 
 **Re-run behavior.** Safe to re-run; already-removed artifacts are skipped.
 
@@ -195,6 +208,25 @@ phase** is a *post-Code* audit of a **diff inside** an open cycle.
 `rsct_persona_review` is a *stateless* consultative lens (focus areas + questions
 + anti-patterns). Three distinct tools; this one is the "should we open a cycle to
 clean this up?" entry point.
+
+**Where the cleanup sweep is practised, recorded and enforced — three different
+points.** Do not collapse them:
+
+- **Practised** at the refactor moment, right after the code works and while the
+  context is still warm. That is where a sweep is cheap and where the literature
+  puts it; nothing about the machinery below changes that.
+- **Recorded** in `findings_actions[]` on `rsct_phase_review_complete`, where a
+  record already exists.
+- **Enforced** at the **integration boundary**, by the `hygiene_swept` item of
+  `pre_merge_ack` — on a merge, a rebase/squash, and a push to a protected
+  branch. Not inside a phase: no phase always runs, and a `trivial` task may
+  legitimately skip the phase machine entirely, so an obligation created there
+  binds only the agents that opted in. Residue is paid for by every task after
+  it, so the obligation applies at **every tier**, with no exemption.
+
+The enforcement checks **coverage** — that the paths the integration carries were
+*claimed* as swept. It does not verify that a sweep happened, or that one found
+anything.
 
 **When to use it.** In any repo, when you want a structured pass for duplication,
 scalability, or stale/loose dependencies — before committing to a refactor. Works

@@ -98,6 +98,13 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
       env,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      // execFileSync BLOCKS this worker thread, so a block that never exits
+      // stops the event loop and vitest's per-test timeout cannot fire — the
+      // suite hangs indefinitely rather than failing. This is the only bound
+      // that exists. Generous against runs that normally take 1-3s so CPU
+      // contention cannot trip it.
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
     })
     return { exit: 0, out, dir }
   } catch (e: unknown) {

@@ -215,10 +215,137 @@ function safeMtime(path: string): number | null {
   }
 }
 
+interface PlanFileEntry {
+  name: string
+  path: string
+  /** Derived from the FILENAME — see {@link listPlans} on why that matters. */
+  slug: string
+  mtime: number
+}
+
+/**
+ * #55: the shared `plan_`/`spec_` enumerator — readdir + template filter + mtime
+ * sort, ordered most-recent first. Returns [] when the root is unreadable.
+ *
+ * DELIBERATELY consumed by {@link listPlans} ONLY, for now. `findActivePlan` and
+ * `findPlanByBranch` each still carry their own inline copy of this walk: #57's
+ * guard rail pins `findActivePlan`'s mtime rule verbatim (an unrelated edit must
+ * never be able to shift what the plan-authorization token validates against —
+ * see `plan-authorization.ts:142`), and `findPlanByBranch` backs the gate in all
+ * three request tools. Adopting them is a separate change that wants
+ * characterization tests on the resolvers first; this is the seam for it, not
+ * the migration.
+ */
+function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
+  let entries: string[]
+  try {
+    entries = readdirSync(projectRoot)
+  } catch {
+    return []
+  }
+  return entries
+    .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
+    .map((name) => {
+      const path = join(projectRoot, name)
+      return {
+        name,
+        path,
+        slug: name.replace(/^(?:plan|spec)_/, '').replace(/\.md$/, ''),
+        mtime: safeMtime(path),
+      }
+    })
+    .filter((e): e is PlanFileEntry => e.mtime !== null)
+    .sort((a, b) => b.mtime - a.mtime)
+}
+
+/** One row of {@link listPlans}. */
+export interface PlanSummary {
+  /**
+   * Derived from the FILENAME. This is the resolution identity — the one
+   * `findPlanBySlug` and the plan-authorization token key on. Never populated
+   * from the metadata table; see `declared_slug`.
+   */
+  slug: string
+  plan_path: string
+  /** ISO timestamp of the plan file's mtime. The ONLY recency source here. */
+  plan_mtime: string
+  status: string | null
+  branch: string | null
+  created: string | null
+  /**
+   * #57: the metadata table's `Slug` row (`doc-templates/plan_slug.md.template:12`).
+   * Dev-written prose, reported so a mismatch with `slug` is visible. It MUST NOT
+   * be used to resolve a plan — that is what the name keeps apart.
+   */
+  declared_slug: string | null
+  /**
+   * #57: the metadata table's `Last update` row (template `:16`). Carried as
+   * DATA, never as a sort key — ordering is `plan_mtime`, one source only.
+   */
+  last_update: string | null
+  progress_path: string | null
+  progress_mtime: string | null
+  progress_state: ProgressCompletionState
+  /** Whole days since the progress file was last written; null when absent. */
+  progress_idle_days: number | null
+}
+
+/**
+ * #55: enumerate EVERY `plan_`/`spec_` file at the project root, most-recently-
+ * modified first, with its metadata and the state of its progress file.
+ *
+ * The four existing resolvers each return a single plan; this is the first
+ * list-all. Read-only: `readdirSync` / `readFileSync` / `statSync`, no spawn, no
+ * network.
+ *
+ * Recency has exactly ONE source: the plan file's mtime. The table's
+ * `Last update` row is reported alongside it but never orders anything — two
+ * recency sources would disagree the moment someone forgets to edit a row.
+ *
+ * NB: `slug` is NOT unique across the returned array. `plan_x.md` and `spec_x.md`
+ * can coexist (normal under `plan_file_retention: documented`) and yield two rows
+ * with slug `x`, both pointing at the same `progress_x.md`. That is faithful to
+ * "every plan_/spec_ file at the root" — but do not key this array by `slug`.
+ */
+export function listPlans(
+  projectRoot: string,
+  opts: { now?: Date } = {},
+): PlanSummary[] {
+  const now = (opts.now ?? new Date()).getTime()
+  const DAY_MS = 86_400_000
+
+  return enumeratePlanFiles(projectRoot).map((entry) => {
+    const metadata = extractPlanMetadata(entry.path)
+    const progressPath = join(projectRoot, `progress_${entry.slug}.md`)
+    const progressMtime = safeMtime(progressPath)
+
+    return {
+      slug: entry.slug,
+      plan_path: entry.path,
+      plan_mtime: new Date(entry.mtime).toISOString(),
+      status: metadata.status,
+      branch: metadata.branch,
+      created: metadata.created,
+      declared_slug: metadata.declared_slug,
+      last_update: metadata.last_update,
+      progress_path: progressMtime !== null ? progressPath : null,
+      progress_mtime:
+        progressMtime !== null ? new Date(progressMtime).toISOString() : null,
+      progress_state: progressCompletionState(projectRoot, entry.slug),
+      progress_idle_days:
+        progressMtime !== null
+          ? Math.floor((now - progressMtime) / DAY_MS)
+          : null,
+    }
+  })
+}
+
 interface PlanMetadata {
   status: string | null
   branch: string | null
   created: string | null
+  declared_slug: string | null
+  last_update: string | null
 }
 
 function extractPlanMetadata(path: string): PlanMetadata {
@@ -226,7 +353,13 @@ function extractPlanMetadata(path: string): PlanMetadata {
   try {
     body = readFileSync(path, 'utf8')
   } catch {
-    return { status: null, branch: null, created: null }
+    return {
+      status: null,
+      branch: null,
+      created: null,
+      declared_slug: null,
+      last_update: null,
+    }
   }
 
   // Metadata table parsing: look for a markdown row `| Status | <value> |`
@@ -237,6 +370,13 @@ function extractPlanMetadata(path: string): PlanMetadata {
     status: extractTableField(head, 'Status'),
     branch: extractTableField(head, 'Branch'),
     created: extractTableField(head, 'Created'),
+    // #57: the template writes these two rows
+    // (`doc-templates/plan_slug.md.template:12` and `:16`) and nothing read them
+    // — a metadata table with dead rows. Surfaced through `listPlans` only; the
+    // `ActivePlan` shape the resolvers return is deliberately unchanged, so no
+    // existing tool's output moves.
+    declared_slug: extractTableField(head, 'Slug'),
+    last_update: extractTableField(head, 'Last update'),
   }
 }
 

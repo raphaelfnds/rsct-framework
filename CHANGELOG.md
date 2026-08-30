@@ -10,6 +10,168 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.8.0] - 2026-08-30
+
+Six issues closed and one advanced by a stage. Most of them share a shape: a gate,
+a report or a menu that **looked** like it was working. **One new tool — the catalog
+goes 39 → 40** — and the marker schema id is still `v=1.0.0`.
+
+What changes for a user: choosing **project** scope in the installer now actually
+produces project scope. The `[3] Skip` option is gone, so the menu is a real binary.
+A `§0` bootstrap report no longer describes state the same call just wrote, and a
+corrupt `phase-state.json` stops being silently overwritten. The hygiene sweep the
+rules have always instructed is now **required** by `pre_merge_ack` rather than
+suggested. The V phase says what it could **not** analyse instead of returning an
+empty impact set that reads as a clean bill of health. A finding now records **how
+it is known**, and the developer sees the mix before approving. `rsct_audit` reports
+install drift, free-commit-lane eligibility, open-phase age and stalled plans in one
+read-only call. And the git-exec sites reject option-shaped values instead of handing
+them to git.
+
+**What this release deliberately does NOT claim.** #54 shipped **stage 1 of four** —
+honest walk coverage. Contract consultation in the V phase, the persisted graph and
+the impact-doc reconciliation are open, and #54 stays open with them. `also_explained_by`
+is not validated and cannot be; the evidence class separates **kinds** of knowing, not
+strengths within a kind. Four accuracy and hygiene issues found during the program were
+opened rather than fixed here: #76, #77, #78, #79, plus #80.
+
+### Security
+
+- **The ref/remote injection class is closed on the git exec sites.**
+  `execFileSync` removes the shell, but **git itself executes** the program named by
+  `--exec=` and `--receive-pack=`, so removing the shell was never sufficient.
+  Agent-controlled operands — including the **remote**, not only the branch — now go
+  through a predicate that rejects an empty value, a leading `-`, and control
+  characters, and the push argv places `--` **before** the remote rather than after
+  it. A push destination is parsed as a refspec: `+` is stripped, the split is on the
+  **last** colon (matching git, measured), and the resolved candidates are compared
+  against the protected list.
+
+  Precision, because an overstated security note ages badly: `+main`,
+  `refs/heads/main`, `heads/main`, `main:main` and `HEAD:main` are **recognised as
+  protected** — they reject without `override_protected_branch` and proceed with it.
+  They were never "blocked". And the destination check defends against a
+  **garbage ref** (`main:--all` creates a branch literally named `--all`, rc=0); the
+  execution vectors are all *pre*-colon and it is the leading-`-` reject that closes
+  those.
+
+- **A repair to unreleased work, not a disclosure.** While reviewing the above, the
+  ref-store resolution arm was found dead: `git rev-parse --symbolic-full-name --
+  <x>` puts rev-parse into **echo-the-operands** mode, so the answer never starts
+  with `refs/`. `branch: 'HEAD'` therefore reported `protected: false`, skipping the
+  ack, the coverage check and the override — while the audit recorded it as
+  unprotected. **Both the flaw and its repair were introduced and fixed inside this
+  unreleased cycle; no published version ever carried it.**
+
+### Added
+
+- **`pre_merge_ack` gains a fourth item, `hygiene_swept`**, with a coverage check
+  that cross-references the paths a merge, rebase or push actually carries. Dead
+  code, leftover scaffolding and comments that no longer match the code were
+  instructed by the rules and required by no phase; now they are required at the
+  gate. Applies at every tier — there is no exemption. The claimed list is compared
+  against `git diff --name-only --diff-filter=d <base>...<head>` — deletions are
+  excluded, because sweeping a file the integration removes is incoherent — and it
+  **rejects regardless of the four booleans**, with a 2,000-path cap.
+
+- **`rsct_audit` — the 40th tool (#55), read-only, no slash command.** One call
+  reports install drift, free-commit-lane eligibility (named for what it gates, not
+  as "health"), the age of an open phase, and every `plan_`/`spec_` file at the root
+  with its progress movement. It states its own coverage boundary in the tool
+  description: **a clean report is not a clean project.** Settings drift stays at the
+  commit gate rather than being restated here. Honest about one thing that surprised
+  its own author: it is **not** write-free — a rejected `.rsct.json` makes the shared
+  `resolveProjectRoot` append one violation entry, exactly as `rsct_status` already
+  does. That is the shared resolver's behaviour, disclosed rather than hidden, and
+  the consequence for the free-commit lane is tracked in #80.
+
+- **A finding records how it is known (#75).** `evidence` is `measured` (the command,
+  an output excerpt, and **what else would produce that same output**), `reported`
+  (the source, and whether it was checked against a commit or a working tree), or
+  `hypothesis` (how to falsify it). It is **optional at the door**: omitting it is
+  never a rejection — the finding counts as `unrecorded` and the developer sees the
+  mix ("12 findings, 11 of them hypotheses") **before** approving. Absent, malformed
+  or unrecognised degrades to `hypothesis`, **never to fact**. What is rejected is an
+  inconsistent claim, such as `measured` with no command. Two mechanisms, because the
+  phases differ: the V phase has no agent-declared channel, so it classifies its own
+  findings from a static source-to-class table; REVIEW takes evidence from the agent.
+  Findings also carry `head_sha` + `observed_at`; a moved HEAD is **marked, never
+  rejected**, because committing the fixes you found is the normal case.
+  **Not claimed:** nothing validates whether `also_explained_by` is honest, and the
+  tool description says so rather than implying a guarantee.
+
+- **The V phase answers adjacency from the contract graph (#54 stage 2 groundwork,
+  shipped with #75).** A declared path matching a surface this app produces raises a
+  `breakage` finding naming the declared consumers, classed `measured`. It is a no-op
+  in four states — no universe, no `contracts.json`, oversized, unreadable — and all
+  four are reported. `contracts.json` is hand-written and no installer creates it, so
+  an empty graph is the **default** state of every universe: "nothing adjacent depends
+  on this" must never read like "nobody ever wrote the file".
+
+### Fixed
+
+- **The MCP scope menu recorded a choice it never applied (#73).** Only `[1]`
+  acted, so choosing **project** left user scope effective and masking it. Both
+  switch directions now take effect, installed projects are corrected
+  automatically, and the menu is a real binary — `[3] Skip` is gone, a typed `3` is
+  handled, and a legacy recorded `skip` is honoured rather than silently reinterpreted.
+  Uninstall now also scrubs the project MCP approval from
+  `.claude/settings.local.json` by value, dropping the key when the array empties and
+  the file only when nothing else remains — previously the approval survived,
+  un-ignored, and silently re-granted on the next install.
+
+- **A `§0` bootstrap report described state the call had just written (#53).** The
+  marker is now **evaluated before it is stamped**, so the report describes the
+  session on entry. `rsct_phase_abandon` and the `§0` stamp no longer discard
+  unrelated state — **on the bootstrap stamp path**; four other writers in
+  `phase-scope.ts` still rebuild an empty object from an unreadable state and are
+  tracked in [#77](https://github.com/raphaelfnds/rsct-framework/issues/77).
+  A consequence worth knowing: a project with a corrupt `phase-state.json` now
+  **stops refreshing** `bootstrap_at` until the file is repaired or deleted, and the
+  hint names the file and says deleting it is a safe recovery.
+
+- **The V phase reported a blast radius without saying what it could not analyse
+  (#54, stage 1).** The reverse-dependency walk now reports what it failed to
+  resolve. The remaining accuracy gaps — the NodeNext resolver, and a partial
+  under-report emitting no hint at all — are tracked in
+  [#77](https://github.com/raphaelfnds/rsct-framework/issues/77).
+
+- **One test file never adopted the suite's timeout convention**, so a varying
+  subset of it failed under load while every other bash-spawning file annotated
+  `60_000`. Measured: `T8` at **5,091 ms on an idle box inside a full suite** and
+  **11,018 ms under load**, against a 5,000 ms budget — the file did not need
+  contention to fail, only to run inside a suite. `testTimeout` is now suite-wide at
+  `60_000`, with `hookTimeout: 30_000` because hooks are budgeted separately and a
+  suite-wide `testTimeout` never reached them. Separately, both bash harnesses called
+  `execFileSync` with **no timeout at all**: a synchronous body is never interrupted,
+  only failed retroactively, so a child that never exits hung the run rather than
+  failing it — no value of `testTimeout` could have helped.
+
+- **The plan metadata table had two rows nothing parsed (#57).** `Slug` and
+  `Last update` were written by the template and read by no one. They now reach
+  `listPlans()` as `declared_slug` and `last_update`. The name is the guard: a plan's
+  real `slug` comes from its filename and is what the plan-authorization token
+  validates against, so a developer-written table row can never reach that path.
+  Recency has exactly one source — the file's mtime — and the output says so
+  (`plans_ordered_by: 'plan_file_mtime'`).
+
+- **A tool could be added and silently omitted from the server.** `TOOLS` and
+  `HANDLERS` moved out of `src/index.ts` into `src/catalog.ts`, because importing
+  `index.ts` boots a stdio server and no test could therefore read the real catalog.
+  A new `tool-count.test.ts` now pins the six documentation sites, the arithmetic
+  line and the boot-log name list against it, so a stale count fails CI by name
+  instead of rotting quietly across releases.
+
+- **Six statements an agent acts on inside a user's project were wrong.** The
+  installer wrote an absolute `mkdir -p "$(pwd)/.claude"`, undoing a documented fix
+  for UNC project roots (`//wsl.localhost/...`), where walking the mount root is
+  hostile. The knowledge-graph template promised **seven `rsct_capture_*` tools that
+  never existed** — shipped into every project since v1.0.0. `§D` claimed one
+  cross-checked ack item and contradicted itself four lines later. The `files_swept`
+  recipe omitted `--diff-filter=d` and never said the range differs per operation.
+  And uninstall showed the developer a consent table that never named
+  `.claude/settings.local.json`, a file it removes.
+
 ## [2.7.5] - 2026-08-21
 
 Four things that were quietly wrong on every run. Patch: no new tool, no new phase,

@@ -39,12 +39,17 @@ const countBegin = (s: string) => (s.match(/RSCT-BEGIN/g) ?? []).length
 
 // True iff `needle` appears on its own line strictly between the RSCT-BEGIN and
 // RSCT-END markers (proves a backfilled line lands INSIDE the block, not after END).
-const inMarkerRange = (s: string, needle: string) => {
+const inMarkerRange = (s: string, needle: string) => markerRange(s).includes(needle)
+
+// The non-empty, trimmed lines strictly between RSCT-BEGIN and RSCT-END. Returned
+// rather than probed one needle at a time so a case can assert the EXACT set a
+// block emits — "X is absent" is satisfied by a typo, "the set is exactly Y" is not.
+const markerRange = (s: string): string[] => {
   const lines = s.replace(/\r/g, '').split('\n')
   const begin = lines.findIndex((l) => l.includes('RSCT-BEGIN'))
   const end = lines.findIndex((l) => l.includes('RSCT-END'))
-  if (begin < 0 || end < 0 || end <= begin) return false
-  return lines.slice(begin + 1, end).some((l) => l.trim() === needle)
+  if (begin < 0 || end < 0 || end <= begin) return []
+  return lines.slice(begin + 1, end).map((l) => l.trim()).filter(Boolean)
 }
 
 describe('block-harness self-test + node policy', () => {
@@ -150,6 +155,150 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, runs: 2 })
     const gi = readIn(r, '.gitignore')
     expect((gi.match(/\/rsct-framework\//g) ?? []).length).toBe(1)
+  }, 60_000)
+
+  // #73 — Phase 4.V.c2 now writes the project's MCP approval into
+  // .claude/settings.local.json. That file is per-developer, so it must be
+  // ignored: option B was chosen over splicing the host's global config
+  // precisely because it does NOT dirty the developer's repository, and an
+  // untracked file showing up in `git status` on the first project-scope run
+  // would give that argument away.
+  it('#73 fresh — the block ignores .claude/settings.local.json', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR })
+    const gi = readIn(r, '.gitignore')
+    expect(inMarkerRange(gi, '.claude/settings.local.json')).toBe(true)
+    // The SHARED settings file carries the RSCT hooks and stays trackable —
+    // ignoring the whole .claude/ directory would silently drop them.
+    //
+    // This was `expect(gi).not.toContain('.claude/settings.json\n')`, which is
+    // very nearly unfalsifiable: no edit to this block plausibly emits that
+    // exact string, and — worse — it does NOT catch the hazard the sentence
+    // above names. A bare `.claude/` line ignores settings.json without ever
+    // spelling it, and would sail straight through. Assert the exact set of
+    // .claude entries instead; then `.claude/`, `.claude/settings.json` and
+    // `.claude/*` are all red, and so is dropping the local one.
+    expect(markerRange(gi).filter((l) => l.startsWith('.claude')), gi)
+      .toEqual(['.claude/settings.local.json'])
+  }, 60_000)
+
+  it('#73 backfill — adds it to a block written before this release', () => {
+    // Every project set up before #73 has a block ending at /rsct-framework/.
+    // Without the backfill those repos get the untracked file on their next
+    // project-scope run. Mutation: delete the #73 backfill clause — this goes
+    // red while the "fresh" case above stays green, which is the whole point of
+    // testing the two paths separately.
+    const old = [
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      'spec_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '.rsct/phase-state.lock',
+      '/rsct-framework/',
+      '# RSCT-END',
+      '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    const gi = readIn(r, '.gitignore')
+    expect(r.out, r.out).toMatch(/#73 backfill: added \.claude\/settings\.local\.json/)
+    expect(inMarkerRange(gi, '.claude/settings.local.json')).toBe(true)
+    expect(countBegin(gi)).toBe(1)
+    // The lines it anchors on must survive the awk splice untouched.
+    expect(inMarkerRange(gi, '/rsct-framework/')).toBe(true)
+    expect(inMarkerRange(gi, 'plan_*.md')).toBe(true)
+  }, 60_000)
+
+  it('#73 backfill — anchors INSIDE the block when the dev wrote /rsct-framework/ themselves', () => {
+    // `/rsct-framework/` is the one anchor in this block that developers are
+    // actively told to add by hand (README, and the block's own comment). With
+    // an unscoped anchor and a whole-file guard, a dev who wrote it in their own
+    // section got the line spliced THERE — success reported, marker range wrong,
+    // and /rsct-uninstall (which excises only between the markers) could never
+    // remove it. Mutation: drop the -v b/-v e block scoping from the awk.
+    const old = [
+      '# my own rules',
+      '/rsct-framework/',
+      'node_modules/',
+      '',
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      'spec_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '.rsct/phase-state.lock',
+      '/rsct-framework/',
+      '# RSCT-END',
+      '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    const gi = readIn(r, '.gitignore')
+    expect(inMarkerRange(gi, '.claude/settings.local.json'), gi).toBe(true)
+    // Exactly once — a duplicated anchor must not produce a duplicated insert.
+    expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length, gi).toBe(1)
+    // The dev's own section is untouched.
+    expect(gi.split('\n').slice(0, 4)).toEqual(['# my own rules', '/rsct-framework/', 'node_modules/', ''])
+  }, 60_000)
+
+  it('#73 backfill — does not duplicate a line the dev already ignores themselves', () => {
+    // The guard is WHOLE-FILE while the splice is block-scoped, and the two
+    // scopes are not interchangeable. With the guard also block-scoped (its
+    // first shape), a dev who already ignores this path in their own section
+    // got a SECOND copy inside the RSCT block. git dedups it, so nothing breaks
+    // and nothing is visible at runtime — a tracked file mutated to no effect
+    // by the one clause whose whole purpose is avoiding git churn.
+    // Mutation: re-scope the guard to the block.
+    const old = [
+      '# my own rules',
+      '.claude/settings.local.json',
+      'node_modules/',
+      '',
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      'spec_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '.rsct/phase-state.lock',
+      '/rsct-framework/',
+      '# RSCT-END',
+      '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    const gi = readIn(r, '.gitignore')
+    expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length, gi).toBe(1)
+    // It stays the dev's line, in the dev's section — we neither copy nor move it.
+    expect(gi.split('\n').slice(0, 4)).toEqual(['# my own rules', '.claude/settings.local.json', 'node_modules/', ''])
+    expect(inMarkerRange(gi, '.claude/settings.local.json'), gi).toBe(false)
+    // And no success line for an insert that correctly never happened.
+    expect(r.out, r.out).not.toMatch(/#73 backfill: added/)
+  }, 60_000)
+
+  it('#73 backfill — idempotent, and survives a CRLF .gitignore', () => {
+    // The awk clause anchors on /^\/rsct-framework\/$/, so a CRLF file would
+    // leave "/rsct-framework/\r" and the `$` would never match — the line would
+    // silently never be added (anti-pattern #4). `tr -d '\r'` guards it.
+    const old = [
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md',
+      'progress_*.md',
+      'spec_*.md',
+      '.rsct/audit.log',
+      '.rsct/approvals-seen.json',
+      '.rsct/phase-state.json',
+      '.rsct/phase-state.lock',
+      '/rsct-framework/',
+      '# RSCT-END',
+      '',
+    ].join('\r\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old }, runs: 2 })
+    const gi = readIn(r, '.gitignore')
+    expect(inMarkerRange(gi, '.claude/settings.local.json')).toBe(true)
+    expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length).toBe(1)
   }, 60_000)
 
   // #51 — the block used to instruct `git add --force`, the one action that defeats
@@ -1419,4 +1568,213 @@ describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
     expect(r.out).toContain('HOOK_MATCHES=1')
     expect(r.out).not.toContain('SETTINGS_MALFORMED')
   }, 90_000)
+})
+
+// --- Block: project MCP registration + approval (01-setup 4.V.c2) — #73 ------
+//
+// A project .mcp.json is inert until the project has approved it: measured,
+// `claude mcp list` reports "Pending approval" and the server never spawns.
+// #73 makes 4.V.c2 write that approval into <project>/.claude/settings.local.json
+// — the host's OWN location, which it migrates the legacy global key into and
+// then deletes. Writing the global config instead would be undone at the next
+// host boot and would materialise this very file inside the dev's repo anyway.
+const MCPC2_ANCHOR = 'CHECKPOINT: Phase 4.V.c2 evaluating project-scope MCP registration'
+
+describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #73)', () => {
+  // The block gates on SANITIZER_SRC (set by Phase 4.V.a) AND the recorded
+  // scope. HOME is the temp dir, so the marker seeds as a plain relative file.
+  const PRE = 'SANITIZER_SRC=/tmp/fake-sanitizer.js'
+  const scope = (v: string) => ({ '.rsct/mcp-scope': `${v}\n` })
+  const settingsLocal = (r: RunBlockResult) =>
+    JSON.parse(readIn(r, '.claude/settings.local.json')) as {
+      enabledMcpjsonServers?: string[]
+      disabledMcpjsonServers?: string[]
+      hooks?: unknown
+    }
+
+  it('project scope — writes .mcp.json AND approves it', () => {
+    // The registration on its own is what shipped before #73, and it does not
+    // run. Both halves are asserted: dropping the approval write leaves the
+    // .mcp.json assertion green, which is exactly how this stayed unnoticed.
+    const r = run({ promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE, seedFiles: scope('project') })
+    expect(r.exit, r.out).toBe(0)
+    const mcp = JSON.parse(readIn(r, '.mcp.json')) as { mcpServers: Record<string, { command: string; args: string[] }> }
+    expect(mcp.mcpServers.rsct.command).toBe('rsct-mcp')
+    expect(settingsLocal(r).enabledMcpjsonServers).toEqual(['rsct'])
+    expect(r.out).toMatch(/approved rsct for this project/)
+  }, 60_000)
+
+  it('idempotent — a re-run neither duplicates nor rewrites the approval', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE, seedFiles: scope('project'), runs: 2 })
+    expect(r.exit, r.out).toBe(0)
+    expect(settingsLocal(r).enabledMcpjsonServers).toEqual(['rsct'])
+    expect(r.out).toMatch(/already approved for this project/)
+  }, 60_000)
+
+  it('preserves a dev-owned settings.local.json instead of replacing it', () => {
+    // The dev owns this file — the host writes its own choices here too. A
+    // structured merge is required (the documented exception); clobbering it
+    // would throw away their other approvals and any local hook config.
+    const seeded = '{\n  "enabledMcpjsonServers": ["other-server"],\n  "hooks": {"SessionStart": []}\n}\n'
+    const r = run({
+      promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
+      seedFiles: { ...scope('project'), '.claude/settings.local.json': seeded },
+    })
+    expect(r.exit, r.out).toBe(0)
+    const s = settingsLocal(r)
+    expect(s.enabledMcpjsonServers).toEqual(['other-server', 'rsct'])
+    expect(s.hooks, 'unrelated keys must survive').toBeDefined()
+  }, 60_000)
+
+  it('never overrides an explicit refusal recorded in disabledMcpjsonServers', () => {
+    // The host checks the disabled list FIRST and it wins, so writing the
+    // approval anyway would leave rsct in BOTH lists and report success for
+    // something that can never run — while contradicting a human decision.
+    // Paired with a positive: the .mcp.json is still written in the same run,
+    // so this cannot pass by the block doing nothing at all.
+    const seeded = '{\n  "disabledMcpjsonServers": ["rsct"]\n}\n'
+    const r = run({
+      promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
+      seedFiles: { ...scope('project'), '.claude/settings.local.json': seeded },
+    })
+    expect(r.exit, r.out).toBe(0)
+    expect(hasIn(r, '.mcp.json'), 'positive control: registration still happens').toBe(true)
+    const s = settingsLocal(r)
+    expect(s.enabledMcpjsonServers, 'must not approve over a refusal').toBeUndefined()
+    expect(s.disabledMcpjsonServers).toEqual(['rsct'])
+    expect(r.out).toMatch(/REJECTED rsct here/)
+  }, 60_000)
+
+  it('user scope — writes neither the registration nor the approval', () => {
+    // The gate that keeps a solo-dev machine from acquiring per-project files.
+    const r = run({ promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE, seedFiles: scope('user') })
+    expect(r.exit, r.out).toBe(0)
+    expect(hasIn(r, '.mcp.json')).toBe(false)
+    expect(hasIn(r, '.claude/settings.local.json'), 'no approval outside project scope').toBe(false)
+    expect(r.out).toMatch(/not project.*\.mcp\.json not written/)
+  }, 60_000)
+
+  it('refuses valid-JSON-but-not-an-object instead of reporting a phantom approval', () => {
+    // `null`, `[]`, `"x"` and `42` all survive JSON.parse. Before the Rv:
+    // `null` threw a raw TypeError (aborting the phase with a stack trace
+    // instead of the friendly message), and the other three silently dropped
+    // the assignment in sloppy mode, wrote the value back unchanged, and
+    // printed "approved rsct for this project" for an approval that never
+    // landed — the report-success-for-nothing class this whole issue is about.
+    //
+    // `exec 2>&1` IS THE TEST. Without it every assertion below is blind: the
+    // mutation harness ran "delete the typeof/Array.isArray guard" and it
+    // SURVIVED. The reason is that the post-write read-back a few lines later
+    // catches all three non-null values on its own and exits 1, so the shell
+    // takes the same `else` arm and prints the same "NOT approved" line as the
+    // guard does — and the write it lets through re-serialises each primitive
+    // to bytes identical to the seed (`[]` -> `[]`, `"x"` -> `"x"`, `42` ->
+    // `42`), so the file-state assertion cannot see it either. stdout, exit
+    // code and file bytes are ALL identical with and without the guard. The
+    // only thing that differs is WHICH refusal was printed, and refusals go to
+    // stderr, which runBlock discards on a zero exit.
+    const CAPTURE = `${PRE}\nexec 2>&1`
+    for (const bad of ['null', '[]', '"x"', '42']) {
+      const r = run({
+        promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: CAPTURE,
+        seedFiles: { ...scope('project'), '.claude/settings.local.json': `${bad}\n` },
+      })
+      expect(r.out, `${bad} must not claim success`).not.toMatch(/approved rsct for this project/)
+      expect(r.out, `${bad} must not print the all-set notes`).toMatch(/rsct was NOT approved for this project/)
+      // THE falsifiable assertion: the guard's own message, named. Without the
+      // guard `null` produces a raw TypeError and the other three produce the
+      // read-back's "wrote ... but rsct is not in" — neither matches.
+      expect(r.out, `${bad}: the guard must be what refuses`).toMatch(/is valid JSON but not an object/)
+      // `null` specifically must not abort with a stack trace.
+      expect(r.out, `${bad} must not surface a raw stack`).not.toMatch(/TypeError|at Object\.<anonymous>/)
+      // Positive control in the same run: registration still happened, so this
+      // cannot pass by the whole phase being skipped.
+      expect(hasIn(r, '.mcp.json'), `${bad}: registration still happens`).toBe(true)
+      // The dev's file is left exactly as it was — we refuse, we do not repair.
+      expect(readIn(r, '.claude/settings.local.json').trim()).toBe(bad)
+    }
+  }, 90_000)
+
+  it('tolerates a BOM-prefixed settings.local.json', () => {
+    // #12 class: a BOM makes JSON.parse throw, and this block exits 1 on a parse
+    // failure — which would abort /rsct-setup mid-run.
+    const r = run({
+      promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
+      seedFiles: { ...scope('project'), '.claude/settings.local.json': '\uFEFF{"hooks":{}}\n' },
+    })
+    expect(r.exit, r.out).toBe(0)
+    expect(settingsLocal(r).enabledMcpjsonServers).toEqual(['rsct'])
+  }, 60_000)
+})
+
+// --- Block: project MCP approval scrub (03-uninstall 4.V.a3) — #73 -----------
+//
+// The mirror of 01-setup 4.V.c2. Without it, uninstall removes the registration
+// AND the .gitignore line that was hiding the approval, and leaves the approval
+// itself: an un-ignored file pre-granting a server that no longer exists, which
+// silently re-grants it on the next install. The residue is created by #73's own
+// write, so scrubbing it belongs in #73.
+const APPROVAL_ANCHOR = 'CHECKPOINT: Phase 4.V.a3'
+
+describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3, #73)', () => {
+  const local = '.claude/settings.local.json'
+  const readLocal = (r: RunBlockResult) => JSON.parse(readIn(r, local)) as Record<string, unknown>
+
+  it('removes only the rsct value and preserves every other key', () => {
+    // The dev and the host both own this file. Mutation: replace the by-value
+    // filter with a whole-file delete, or with `delete cfg.enabledMcpjsonServers`.
+    const seed = JSON.stringify({
+      enabledMcpjsonServers: ['other-server', 'rsct'],
+      disabledMcpjsonServers: ['nope'],
+      permissions: { allow: ['Bash(ls:*)'] },
+    }, null, 2) + '\n'
+    const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed } })
+    expect(hasIn(r, local), 'a shared file is rewritten, never removed').toBe(true)
+    const cfg = readLocal(r)
+    expect(cfg.enabledMcpjsonServers).toEqual(['other-server'])
+    expect(cfg.disabledMcpjsonServers, 'a recorded refusal is the dev\'s, not ours').toEqual(['nope'])
+    expect(cfg.permissions, 'unrelated keys must survive').toBeDefined()
+  }, 60_000)
+
+  it('deletes the file only when the approval was all it held', () => {
+    // The "RSCT created it" test: nothing left means we were its only author.
+    const seed = JSON.stringify({ enabledMcpjsonServers: ['rsct'] }, null, 2) + '\n'
+    const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed } })
+    expect(hasIn(r, local)).toBe(false)
+    expect(r.out).toMatch(/it held only the rsct approval/)
+  }, 60_000)
+
+  it('keeps the file when another key survives the scrub', () => {
+    // Paired with the case above: the delete must be conditional, not the norm.
+    const seed = JSON.stringify({ enabledMcpjsonServers: ['rsct'], permissions: {} }, null, 2) + '\n'
+    const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed } })
+    expect(hasIn(r, local)).toBe(true)
+    const cfg = readLocal(r)
+    expect(cfg.enabledMcpjsonServers, 'an emptied array is dropped, not left as []').toBeUndefined()
+    expect(cfg.permissions).toBeDefined()
+  }, 60_000)
+
+  it('no-op when there is no rsct approval, and idempotent on a second run', () => {
+    const seed = JSON.stringify({ enabledMcpjsonServers: ['other-server'] }, null, 2) + '\n'
+    const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed }, runs: 2 })
+    expect(hasIn(r, local)).toBe(true)
+    expect(readLocal(r).enabledMcpjsonServers).toEqual(['other-server'])
+    expect(r.out).toMatch(/nothing to scrub/)
+  }, 60_000)
+
+  it('skips a file that is valid JSON but not an object, without throwing', () => {
+    // `null` would otherwise TypeError on the first property access and abort
+    // the phase with a raw stack trace — the same shape the install side hit.
+    for (const bad of ['null', '[]', '"x"']) {
+      const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: `${bad}\n` } })
+      expect(r.exit, `${bad}: ${r.out}`).toBe(0)
+      expect(readIn(r, local).trim(), `${bad} must be left untouched`).toBe(bad)
+    }
+  }, 90_000)
+
+  it('absent file is a clean no-op', () => {
+    const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR })
+    expect(r.exit, r.out).toBe(0)
+    expect(hasIn(r, local)).toBe(false)
+  }, 60_000)
 })

@@ -302,6 +302,7 @@ For each Category B item, the dev will choose:
 | `.rsct/scripts/sanitize-permissions.js` | **remove** | yes | none — pure framework code |
 | `.rsct/scripts/edit-scope-guard.js` | **remove** | yes (with `.rsct/scripts/`) | none — pure framework code |
 | `.rsct/audit.log` | **keep** | no | dev may choose to delete for full clean removal |
+| The `rsct` entry in `enabledMcpjsonServers` of `.claude/settings.local.json` (#73) | **remove** | yes (4.V.a3 — by value; the key is dropped when its array empties, and the file only when nothing else remains) | none — a stale approval silently re-grants on the next install |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
 | `.rsct/phase-state.json` | **remove** | yes (silent — no question raised) | none — M3 phase-machine state with no post-uninstall value |
 | Any other file under `.rsct/` not listed above | **keep** | no | preserved unconditionally — never delete unknowns |
@@ -594,6 +595,17 @@ uninstall can find and remove them cleanly without disturbing the rest
 of the file. Skip this step if `.gitignore` is absent or holds no RSCT
 markers.
 
+> **Asymmetry to tell the developer about, when Category E is OUT of scope.**
+> This block also carries the `.claude/settings.local.json` ignore line, and this
+> step is **not** gated on Category E while the approval scrub (4.V.a3) **is**. So
+> on a Custom uninstall that keeps M2 enforcement state, the ignore line is removed
+> while the approval file remains — leaving a machine-local file trackable by git,
+> which is exactly what that line existed to prevent.
+> **In that case, say so and tell the developer to re-add `.claude/settings.local.json`
+> to `.gitignore` by hand.** Do not silently leave it: the file records a
+> per-developer MCP approval, and approving a server on YOUR machine is not a
+> decision to share with the repository.
+
 ```bash
 GITIGNORE="$(pwd)/.gitignore"
 BEGIN_PATTERN="^# RSCT-BEGIN .*source=01-setup\.md/4\.4b"
@@ -866,6 +878,75 @@ if [ -f "$MCP_JSON" ]; then
       console.log("Removed rsct from .mcp.json; preserved the other entries.");
     }
   ' "$MCP_JSON"
+fi
+```
+
+**4.V.a3 — Scrub the project MCP approval from `.claude/settings.local.json` (#73)**
+
+Symmetric with 4.V.a2 above, and required by it: since #73, `/rsct-setup`
+Phase 4.V.c2 writes `enabledMcpjsonServers: ["rsct"]` into
+`<project>/.claude/settings.local.json` — a project `.mcp.json` does not spawn
+until the project has approved it. Without this scrub, uninstall removes the
+registration **and** the `.gitignore` line that was hiding the approval, and
+leaves the approval itself standing: an un-ignored file pre-granting a server
+that no longer exists, which silently re-grants it on the next install.
+
+Scrub **by the `rsct` value**, never the whole file — the dev and Claude Code
+both own this file (permission grants, other servers' approvals, local hook
+config). `disabledMcpjsonServers` is deliberately untouched: a refusal the dev
+recorded is theirs, and the install side already refuses to override it.
+
+```bash
+echo "  CHECKPOINT: Phase 4.V.a3 scrubbing the project MCP approval"
+# EXCEPTION: structured merge required — same rationale as 4.V.a2 and the
+# install side (01-setup.md Phase 4.V.c2). The value nests inside an array
+# under a key the dev may also own, so a text splice cannot guarantee shape.
+SETTINGS_LOCAL="$(pwd)/.claude/settings.local.json"
+if [ -f "$SETTINGS_LOCAL" ]; then
+  node -e '
+    const fs = require("fs");
+    const target = process.argv[1];
+    let cfg;
+    // #12: tolerate a UTF-8 BOM — see Phase 1.9.
+    try {
+      var raw = fs.readFileSync(target, "utf8");
+      if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+      cfg = raw.trim() ? JSON.parse(raw) : {};
+    }
+    catch (e) { console.error("WARN: " + target + " is malformed JSON — approval scrub skipped. Fix manually."); process.exit(0); }
+    // Valid JSON that is not an object (null, [], "x", 42) — leave it alone and
+    // say so, rather than throwing a raw TypeError on the property access.
+    if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
+      console.error("WARN: " + target + " is not a JSON object — approval scrub skipped. Fix manually.");
+      process.exit(0);
+    }
+    const enabled = Array.isArray(cfg.enabledMcpjsonServers) ? cfg.enabledMcpjsonServers : null;
+    if (!enabled || enabled.indexOf("rsct") === -1) {
+      console.log("No rsct approval in .claude/settings.local.json — nothing to scrub.");
+      process.exit(0);
+    }
+    const kept = enabled.filter(s => s !== "rsct");
+    if (kept.length === 0) { delete cfg.enabledMcpjsonServers; }
+    else { cfg.enabledMcpjsonServers = kept; }
+    // NO APOSTROPHES ANYWHERE IN THIS BLOCK. The whole body sits inside a
+    // single-quoted `node -e '...'`, where one apostrophe closes the shell
+    // string and the rest of the JavaScript is handed to bash as commands.
+    // `bash -n` does not flag it. That is why the next line reads "the dev own
+    // permissions" instead of the natural phrasing — the grammar is deliberate.
+    // Do not correct it, and do not add a contraction anywhere below.
+    //
+    // Delete the file only when RSCT is demonstrably its only author: nothing
+    // at all is left in it. Any other key — the dev own permissions, another
+    // server approval, a recorded refusal — means the file predates us or is
+    // shared, so it is rewritten, never removed.
+    if (Object.keys(cfg).length === 0) {
+      fs.unlinkSync(target);
+      console.log("Removed .claude/settings.local.json (it held only the rsct approval).");
+    } else {
+      fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+      console.log("Removed the rsct approval from .claude/settings.local.json; preserved the other keys.");
+    }
+  ' "$SETTINGS_LOCAL"
 fi
 ```
 

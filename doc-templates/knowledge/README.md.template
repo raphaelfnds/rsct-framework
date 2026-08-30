@@ -132,14 +132,8 @@ the task's classification.
 - Persona reviews — each persona has a `knowledge_categories[]` list
 declaring which graph files it consults during review.
 
-Capture tools (called by phase tools when triggers fire):
-
-- `rsct_capture_anti_decision`, `rsct_capture_incident`,
-`rsct_capture_vendor_choice`, `rsct_capture_glossary_term`,
-`rsct_capture_business_rule`, `rsct_capture_workflow`,
-`rsct_capture_override` — each appends a well-formed entry to the
-appropriate file. See `mcp-server/README.md` for the full list and
-JSON schemas.
+There are no capture *tools*. Entries reach these files by ordinary
+editing, proposed inline and confirmed by you — see the next section.
 
 ---
 

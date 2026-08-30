@@ -57,10 +57,149 @@ export function getStagedPaths(projectRoot: string): string[] | null {
   if (!isGitRepo(projectRoot)) return null
   const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
   if (raw === null) return null
+  return splitNulPaths(raw)
+}
+
+/**
+ * Split a `-z` (NUL-separated) git path list into forward-slash-normalized
+ * entries. Shared by {@link getStagedPaths} and {@link getRangePaths} so the two
+ * readers cannot drift apart in how they parse the same wire format.
+ *
+ * The `\` → `/` replace is inherited from the original `getStagedPaths` body and
+ * kept for symmetry. Be aware of what it is: git emits `/` as the separator on
+ * every OS (including Windows) for `-z` output, so as a SEPARATOR fix it never
+ * fires. It only fires on a legal Linux/macOS filename containing a literal
+ * backslash, where it is lossy. Divergence between the two readers would be the
+ * worse defect, so it stays — documented rather than silently inherited.
+ */
+function splitNulPaths(raw: string): string[] {
   return raw
     .split('\0')
     .map((p) => p.replace(/\\/g, '/'))
     .filter((p) => p.length > 0)
+}
+
+/**
+ * Is `rev` safe to place in a git REVISION position?
+ *
+ * An injection guard, NOT a validity check — git still decides whether the ref
+ * resolves. It exists because {@link getRangePaths} builds a single
+ * `<base>...<head>` argv token out of caller-supplied strings, and a token
+ * beginning with `-` is read by git as an OPTION rather than an operand.
+ *
+ * Why that matters more here than elsewhere: the `pre_merge_ack` gate runs
+ * BEFORE `gateRequest` at all three call sites, deliberately, so a rejected ack
+ * never spends a §C approval. An unguarded revision would therefore reach
+ * `execFileSync` with no OS dialog shown and no `dev_approval` validated.
+ * `execFileSync` passes argv directly (no shell), so this is not command
+ * execution — it is an unapproved arbitrary-path WRITE, which is enough:
+ *
+ *     git diff --name-only -z --diff-filter=d "--output=SIDEEFFECT...HEAD"
+ *       -> rc=0, and a file named `SIDEEFFECT...HEAD` is created
+ *
+ * **The rule set is deliberately tiny, and that is a measured result, not
+ * minimalism.** A 30-token battery was run through the real argv above. Exactly
+ * one shape did anything other than resolve-or-fail: the option-shaped one.
+ * Every other candidate either resolved legitimately or exited 128/129 with no
+ * side effect — including `feat:main`, `main..feat`, `+feat`, `a b`,
+ * `feat.lock` and `feat/`. Rejecting those buys nothing the `unavailable`
+ * path does not already give, and each extra rule costs real availability.
+ *
+ * An earlier draft of this predicate also rejected `~ ^ : ? * [ .. @{` and a
+ * bare `@`. The battery refuted it: `HEAD~1`, `HEAD^`, `HEAD^1`,
+ * `HEAD@{0}` and `@` all RESOLVE, and `git rebase HEAD~3` is a canonical
+ * call. Because merge and rebase fail CLOSED on an unreadable range, a false
+ * reject here is a hard stop on a legitimate integration — raised before any
+ * dialog, with no override path. Over-restriction is the expensive error.
+ *
+ * Rejected alternatives, both measured:
+ * - `--end-of-options` works (rc=128, nothing written) but landed in git 2.24,
+ *   and this project declares no minimum git version; on older git it would fail
+ *   EVERY read, which for merge/rebase means a blocked merge. Depth only.
+ * - `--` is worse than nothing: it reclassifies the token as a pathspec and
+ *   returns rc=0 with empty output, which this module's caller would read as an
+ *   empty range — turning an attack into a silent pass.
+ *
+ * Exported for unit testing; NOT an MCP input.
+ */
+export function isSafeRevisionToken(rev: string): boolean {
+  if (typeof rev !== 'string' || rev.length === 0) return false
+  // THE rule — the only shape measured to have a side effect.
+  if (rev.startsWith('-')) return false
+  // Control characters, NUL and newline included. Not a git-parsing concern (git
+  // forbids them in refnames anyway): a NUL makes Node's execFileSync throw, and
+  // a newline would split the JSONL audit record that echoes the rejected
+  // revision. Fails here rather than somewhere worse.
+  if (/[\u0000-\u001f\u007f]/.test(rev)) return false
+  return true
+}
+
+/**
+ * Outcome of {@link getRangePaths}. Deliberately a three-way result rather than
+ * `string[] | null` (the shape {@link getStagedPaths} uses), because the caller
+ * must tell a REJECTED revision apart from an UNREADABLE range:
+ *
+ * - `unsafe_revision` means the caller handed us something option-shaped or
+ *   otherwise not a refname. That is an input-validation event and it is
+ *   audited as such.
+ * - `unavailable` means git could not answer — not a repo, a ref that does not
+ *   resolve, no merge base, an exec failure.
+ *
+ * Collapsing the two would make a crafted ref and an unfetched remote branch
+ * indistinguishable in `.rsct/audit.log`, which is precisely the case a
+ * forensic reader needs to separate.
+ */
+export type RangePathsResult =
+  | { status: 'ok'; paths: string[] }
+  | { status: 'unsafe_revision'; revision: string }
+  | { status: 'unavailable' }
+
+/**
+ * Return the paths a branch-scoped integration CARRIES — the three-dot range
+ * `git diff --name-only -z --diff-filter=d <base>...<head>` —
+ * forward-slash-normalized. `status:'ok'` with an empty `paths` means the range
+ * is genuinely empty (an already-merged source branch, or nothing to push);
+ * that is NOT the same as being unable to read it.
+ *
+ * Used by the `pre_merge_ack` hygiene cross-check (#62) at `rsct_request_merge`,
+ * `rsct_request_push` and `rsct_request_rebase`. Deliberately the REAL range —
+ * there is NO MCP-substitutable override (the A2/INV-6 lesson: a public diff
+ * override is an enforcement bypass). The tools carry a test-only READER seam on
+ * their `Internal` interface instead, which is not reachable from a tool call.
+ *
+ * **`--diff-filter=d` is load-bearing and does more than it looks like.**
+ * Measured against real git, not assumed:
+ *
+ * - It drops DELETIONS, which `--name-only` lists by default. A hygiene sweep of
+ *   a file the integration removes is incoherent — there is nothing left to
+ *   sweep and no honest way to attest it.
+ * - It also, as a consequence, drops the OLD side of a rename that git did not
+ *   detect as one. Under a user's `diff.renames=false` — or the silent
+ *   `diff.renameLimit` fallback, whose warning goes to stderr and is discarded
+ *   by `safeGitRaw` — the range would otherwise carry a path that does not exist
+ *   at `head`, an unsatisfiable demand. An explicit `-M` was tried here first and
+ *   REMOVED after measurement: git reports that old side as a deletion, so
+ *   `--diff-filter=d` already excludes it and the two flags produce byte-identical
+ *   output. Adding `-M` back would be dead weight, not defense.
+ */
+export function getRangePaths(
+  projectRoot: string,
+  base: string,
+  head: string,
+): RangePathsResult {
+  for (const rev of [base, head]) {
+    if (!isSafeRevisionToken(rev)) return { status: 'unsafe_revision', revision: rev }
+  }
+  if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
+  const raw = safeGitRaw(projectRoot, [
+    'diff',
+    '--name-only',
+    '-z',
+    '--diff-filter=d',
+    `${base}...${head}`,
+  ])
+  if (raw === null) return { status: 'unavailable' }
+  return { status: 'ok', paths: splitNulPaths(raw) }
 }
 
 export interface StagedStats {
@@ -271,6 +410,23 @@ function safeGit(cwd: string, args: string[]): string | null {
   return raw !== null ? raw.trim() : null
 }
 
+/**
+ * Wall-clock bound for the READ helpers below.
+ *
+ * `execFileSync` blocks the event loop, so a wedged git child holds the whole
+ * MCP server. A test-level timeout is no substitute: a synchronous body is never
+ * interrupted, only failed retroactively, so the process stays alive either way.
+ * On expiry Node kills the child and throws, the `catch` returns `null`, and the
+ * caller takes its normal degraded path — a hang becomes a degrade.
+ *
+ * Deliberately NOT applied to {@link defaultGitExecutor}. That one carries the
+ * MUTATING ops, and `git push` to a slow remote is legitimately long; a bound
+ * there would abort real work rather than a stall. These callers are all LOCAL
+ * reads (`rev-parse`, `status`, `diff`, `show`), where 30s is far past any
+ * honest duration and only a genuine stall reaches it.
+ */
+const GIT_READ_TIMEOUT_MS = 30_000
+
 function safeGitRaw(cwd: string, args: string[]): string | null {
   try {
     return execFileSync('git', args, {
@@ -278,6 +434,7 @@ function safeGitRaw(cwd: string, args: string[]): string | null {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 16 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS,
     })
   } catch {
     return null
@@ -343,8 +500,21 @@ function bufferOrStringToString(v: string | Buffer | undefined): string {
 }
 
 /**
- * Read the current HEAD short SHA via the injectable executor.
+ * Read the current HEAD SHORT sha via the injectable executor.
  * Returns `null` outside a git repo or on any git error.
+ *
+ * REPORTING format, deliberately. Its eight callers below are the
+ * `sha_before`/`sha_after` pairs of {@link gitCommit}, {@link gitPush},
+ * {@link gitMerge} and {@link gitRebase}, which exist to tell a human what an
+ * operation did — and `readGitState` (line 22) fills the SAME `sha_before` field
+ * on `rsct_request_commit`'s rejection paths, also short. One field must not
+ * carry two widths depending on which branch produced it.
+ *
+ * For an IDENTIFIER — anything stored, compared later, or carried between
+ * machines — use {@link getHeadShaFull}. The two are separate on purpose: a short
+ * sha is an abbreviation whose width tracks object count and `core.abbrev`, so it
+ * is not stable across clones. Two contracts, not a duplication to be
+ * consolidated.
  */
 export function getHeadSha(
   projectRoot: string,
@@ -353,6 +523,60 @@ export function getHeadSha(
   const r = executor(projectRoot, ['rev-parse', '--short', 'HEAD'])
   if (!r.ok) return null
   return r.stdout.trim() || null
+}
+
+/**
+ * Read the current HEAD sha in FULL (40 chars) via the injectable executor.
+ * Returns `null` outside a git repo or on any git error.
+ *
+ * IDENTIFIER format. #75's staleness stamp records which commit a finding was
+ * made against, and its whole premise is that only a commit is immutable — an
+ * abbreviation is not, so it cannot be the thing written down.
+ *
+ * Separate from {@link getHeadSha} rather than replacing it: that one has eight
+ * callers whose output is read by humans alongside a short sha from
+ * `readGitState`, and widening it would make one audit field 7 characters on a
+ * rejection path and 40 on a success path in the same tool. Nothing compares
+ * shas today, so that would break nobody now and mislead whoever reads the log
+ * later.
+ *
+ * ONE git spawn (~64 ms warm on Windows, a floor not a ceiling) against
+ * `readGitState`'s four, which is why the stamp calls this and not that.
+ */
+export function getHeadShaFull(
+  projectRoot: string,
+  executor: GitExecutor = defaultGitExecutor,
+): string | null {
+  const r = executor(projectRoot, ['rev-parse', 'HEAD'])
+  if (!r.ok) return null
+  return r.stdout.trim() || null
+}
+
+/**
+ * Guard every agent-controlled operand a mutating helper is about to place in
+ * git's argv. Returns a reason string when one is unsafe, `null` when all are.
+ *
+ * This is the SECOND barrier, deliberately independent of the `--` sentinel each
+ * helper also passes. Neither relies on the other: `--` is a git-side control
+ * whose exact behaviour differs per subcommand (measured: at `git diff` it
+ * reclassifies the token as a PATHSPEC and returns rc=0 with empty output — a
+ * silent pass — which is why the range reader validates instead), while this is
+ * a process-side control that holds regardless of git version. The project
+ * declares no minimum git version, so a control that depends on one is not
+ * something to lean the whole fix on.
+ *
+ * Reuses {@link isSafeRevisionToken}: its two rules — no leading `-`, no control
+ * characters — are operand rules, not revision rules, and apply equally to a
+ * remote name. Anything beyond them was measured to cost availability without
+ * buying safety; see that function's docblock.
+ */
+function unsafeOperand(operands: Record<string, string>): string | null {
+  for (const [name, value] of Object.entries(operands)) {
+    if (!isSafeRevisionToken(value)) {
+      return `refusing to run git: ${name} is not a safe operand (${JSON.stringify(value)}) — a value starting with '-' is read by git as an OPTION, not a name`
+    }
+  }
+  return null
 }
 
 export interface GitCommitResult {
@@ -404,7 +628,15 @@ export function gitPush(
   branch: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitPushResult {
-  const exec = executor(projectRoot, ['push', remote, branch])
+  const bad = unsafeOperand({ remote, branch })
+  if (bad) return { ok: false, error: bad }
+  // `--` goes BEFORE the remote, not after it. `remote` is an agent-controlled
+  // slot too, and `git push --exec=<program> -- <branch>` RUNS THE PROGRAM
+  // (measured, git 2.45.1) — putting the sentinel after the remote guards the
+  // refspec while leaving the execution vector wide open. With it first,
+  // `git push -- --exec=X main` is refused ("strange hostname blocked") and
+  // `git push -- origin release/2.0` is unaffected. See {@link unsafeOperand}.
+  const exec = executor(projectRoot, ['push', '--', remote, branch])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()
@@ -446,10 +678,16 @@ export function gitMerge(
   options: GitMergeOptions,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ sourceBranch })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const args = ['merge']
   if (options.no_ff) args.push('--no-ff')
   if (options.allow_unrelated_histories) args.push('--allow-unrelated-histories')
-  args.push(sourceBranch)
+  // Every flag above comes from a boolean, so nothing agent-controlled precedes
+  // the sentinel. `--` makes git read what follows as an operand: measured,
+  // `merge -m x -- --no-verify` is refused ("not something we can merge") while
+  // `merge --no-ff -m x -- feat` merges normally.
+  args.push('--', sourceBranch)
 
   const sha_before = getHeadSha(projectRoot, executor)
   const exec = executor(projectRoot, args)
@@ -475,8 +713,13 @@ export function gitRebase(
   upstream: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ upstream })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const sha_before = getHeadSha(projectRoot, executor)
-  const exec = executor(projectRoot, ['rebase', upstream])
+  // The sharpest of the four: measured, `git rebase "--exec=<program>" main`
+  // EXECUTES the program. `git rebase -- "--exec=..."` is refused as an invalid
+  // upstream, and `git rebase -- main` is unaffected.
+  const exec = executor(projectRoot, ['rebase', '--', upstream])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
     if (exec.stderr) result.stderr = exec.stderr.trim()
@@ -499,8 +742,10 @@ export function gitSquash(
   sourceBranch: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitMergeResult {
+  const bad = unsafeOperand({ sourceBranch })
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const sha_before = getHeadSha(projectRoot, executor)
-  const exec = executor(projectRoot, ['merge', '--squash', sourceBranch])
+  const exec = executor(projectRoot, ['merge', '--squash', '--', sourceBranch])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
     if (exec.stderr) result.stderr = exec.stderr.trim()

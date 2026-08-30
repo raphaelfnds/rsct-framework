@@ -26,9 +26,12 @@ bash scripts/install.sh
 ```
 
 The installer copies the runtime to `~/.rsct/`, registers the four `rsct-*`
-slash commands, and asks where to register the `rsct-mcp` companion (User scope
-is the simplest for a solo dev). For unattended/CI installs and the registration
-scopes, see the [root README](../README.md#installation).
+slash commands, and asks where to register the `rsct-mcp` companion. The choice
+is binary: **[1]** solo developer (user scope, the simplest) or **[2]** team
+(project scope, a committable `.mcp.json`). Pick **[2]** if your repo shares a
+`.mcp.json` — a user-scope entry masks project scope on the whole machine. For
+unattended/CI installs and the details, see the
+[root README](../README.md#installation).
 
 ## Restart your IDE — the #1 gotcha
 
@@ -67,7 +70,7 @@ updates what changed.
 | `.claude/settings.json` | The SessionStart sanitizer hook and the PreToolUse edit-scope guard (only if you opted into `rsct-mcp`). |
 | `.gitignore` | A marker-wrapped block for the branch-local plan-tracking files. |
 | `.rsct/scripts/` | The two enforcement scripts the hooks above point at. |
-| `.mcp.json` | Only when you chose the project registration scope at install time. |
+| `.mcp.json` | Only when you chose the project registration scope at install time. Setup also approves it for you, in `.claude/settings.local.json` — a `.mcp.json` does not spawn until approved. |
 | `CONVENTIONS.md` | Optional, and only if you say yes — the standing code conventions. |
 
 Setup also creates a `chore/sync-rsct-rules` branch to hold the changes, so nothing

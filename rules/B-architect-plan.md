@@ -153,6 +153,12 @@ NEVER edit code without first presenting the user a plan containing:
    wording). When this kind of reminder appears in the conversation,
    treat it as an explicit context-pressure trigger.
 
+   Your host may also offer a manual context-compaction command (in Claude
+   Code: `/compact`). Running it is a **mitigation, never a substitute for
+   step 1 below**: compaction summarizes the conversation, so whatever was
+   not written to `progress_<slug>.md` first is exactly what gets lost.
+   Update the progress file, then compact — in that order.
+
    **Signal 2 — Operation count heuristic.** After substantial work
    (rough indicators: 4+ commits, 6+ significant edits, 30+ dev
    messages in the same session, multiple parallel agent runs), assume

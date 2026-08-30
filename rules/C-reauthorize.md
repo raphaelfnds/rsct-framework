@@ -96,16 +96,35 @@ Use these tools by default for commit / push / merge / rebase / squash. If
 enforcement — follow it strictly.
 
 **Pre-integration hygiene — `pre_merge_ack` (PH-5):** `rsct_request_merge`
-(always) and `rsct_request_push` (**only when pushing to a protected
-branch**) require a `pre_merge_ack` checklist ALONGSIDE the
-`dev_approval`. It is checked **before** the OS dialog, so a missing or
+(always), `rsct_request_rebase` (always) and `rsct_request_push` (**only when
+pushing to a protected branch**) require a `pre_merge_ack` checklist ALONGSIDE
+the `dev_approval`. It is checked **before** the OS dialog, so a missing or
 incomplete ack rejects **in chat with no new popup**. Be honest about what
 it is:
 
 - **Presence is a forcing function.** It makes you stop and assemble the
   checklist at the integration point (the MCP re-surfaces the hygiene the prose
-  forgets in a long session). Only `plan_complete` is machine-cross-checked
-  (below); `adr_confirmed` / `issues_resolved` are not.
+  forgets in a long session). Two items are machine-cross-checked —
+  `plan_complete` (below) and `hygiene_swept` via `files_swept[]`;
+  `adr_confirmed` / `issues_resolved` are not.
+- **`hygiene_swept` + `files_swept[]` — the cleanup obligation, at every tier.**
+  Before you integrate, sweep the files this integration carries for **dead code**
+  and for **comments that no longer match the code**, then list those paths in
+  `files_swept`. RSCT reads the carried paths out of git itself and **rejects when
+  one is missing from your list, regardless of the four booleans** — that is the
+  one part of the checklist you cannot assert your way past. Get the SAME list it
+  reads with `git diff --name-only --diff-filter=d <base>...<head>` — the filter
+  matters, because a sweep of a file the integration DELETES is incoherent and the
+  tool excludes it. The range differs per operation, and guessing it is the common
+  mistake: merge → `HEAD...<source_branch>` · rebase → `<ref>...HEAD` ·
+  squash → `HEAD...<ref>` · push → `<remote>/<dest_branch>...<source_ref>`.
+  It checks **coverage** — that the carried paths were *claimed* as swept — not
+  that a sweep happened or that it found anything. There is no `trivial`/`small`
+  exemption: residue reaches the codebase at every task size and is paid for by
+  every task after it.
+  Practise the sweep at the **refactor moment**, while the context is warm;
+  record what it found in `findings_actions[]` at REVIEW; it is **enforced** here,
+  at the integration boundary, because that is where residue becomes permanent.
 - **`plan_complete` now has a mechanical cross-check (plan-lifecycle-v2):** a
   `plan_complete:true` that contradicts open `- [ ]` items in
   `progress_<slug>.md` (resolved by the plan whose `Branch` matches the branch

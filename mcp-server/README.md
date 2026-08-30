@@ -89,7 +89,7 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**39 tools · 5 resources · tsc strict · ESM ~1.2 MB
+**40 tools · 5 resources · tsc strict · ESM ~1.2 MB
 (server) + ~13 KB (sanitize-permissions hook) + ~146 KB (edit-scope guard) ·
 cross-platform (Windows / macOS / Linux)**
 
@@ -139,7 +139,7 @@ Expect on stderr (single JSON line, then clean exit 0):
           "rsct_phase_review_complete","rsct_phase_test_start",
           "rsct_phase_test_complete","rsct_phase_abandon",
           "rsct_capture_issue","rsct_persona_review",
-          "rsct_auto_persona","rsct_tutor_step"],
+          "rsct_auto_persona","rsct_tutor_step","rsct_audit"],
  "resources":["rsct://decisions","rsct://architecture",
               "rsct://plan","rsct://progress"],
  "resource_templates":["rsct://knowledge/{category}"],
@@ -263,6 +263,13 @@ when the key is absent. A project with no `.rsct.json` reports none.
 - Input: `project_root?`, `update_check?` (`"on"|"off"`), `decline_update?` (a release tag)
 - Output: identity, git, `worktree`, `universe`, `topology`, hints
 
+The bootstrap marker is **evaluated before it is stamped**, so the report describes the
+session as it was on entry, not the state this call just wrote. `hints[]` carries one line
+when §0 had never been recorded, when the recorded marker was older than the stale window,
+or when the marker could not be written (another session holds the phase-state lock, or the
+write failed) — and stays silent when it was already fresh. Stamping is still best-effort:
+`rsct_status` never fails on a metadata write.
+
 The two update-check parameters are the response channel for the release hint this
 tool emits (the check consults by default since v2.6.0 — see
 [README § Update check](../README.md#update-check-what-leaves-your-machine-and-how-to-turn-it-off)).
@@ -320,6 +327,41 @@ because #33 established there is no viable mechanical producer for it. That clos
 "declared five, answered none" — it does not close an agent that declares nothing,
 and the tool descriptions say so rather than implying a stronger guarantee.
 
+#### How a finding is known (#75)
+
+The gate above could prove a finding was *answered* and never that it was *true*: a
+measured fact and an untested guess were stored, counted and gated identically. Each
+finding now carries an `evidence` class — `measured` (the command, an output excerpt,
+and **what else would produce that same output**), `reported` (the source, and whether
+it was checked against a commit or a working tree), or `hypothesis` (how to falsify
+it). The two phases get it from different places, because they are structurally
+different: **V** findings are machine-produced, so the framework classifies its own
+from a static `source` table; **REVIEW** findings are agent-declared, so the agent
+supplies it.
+
+- **Optional at the door, degraded when absent.** Omitting `evidence` is never a
+  rejection — the finding counts as an *unrecorded* hypothesis. What IS rejected is an
+  inconsistent claim: `measured` with no command. Absent, malformed or unrecognised
+  becomes `hypothesis`, never fact.
+- **`open_findings` carries it.** The recovery payload returns the class with the
+  finding, so a rejected or resumed session answers without re-deriving evidence it no
+  longer has — and a legacy finding stored before this still parses, still gates, and
+  reads as unrecorded.
+- **The mix is surfaced** in `rsct_phase_status`, `rsct_load_context`, both `_complete`
+  summaries, the approval dialog and the audit log — *"12 findings, 11 of them
+  hypotheses"* before the dev approves. Three surfaces rather than one, because the
+  `trust` channel renders no dialog at all.
+- **What it does not do.** Nothing here checks whether `also_explained_by` is honest;
+  the class separates *kinds* of knowing, not strengths within a kind, so two findings
+  from the same source stay indistinguishable from each other. `findings_run_id` still
+  hashes ids only, so re-declaring the same ids with weaker evidence does not read as a
+  stale set.
+
+Findings also record `head_sha` (full, never an abbreviation) and `observed_at` at the
+phase start; `_complete` compares against HEAD and reports `head_stale`. It **marks,
+never rejects** — committing the fixes a review found is the normal reason for HEAD to
+move. Unknown is `null`, never `true`.
+
 ### `rsct_load_context`
 
 Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, knowledge index, next-action hints.
@@ -327,6 +369,11 @@ Full session bootstrap — `rsct_status` plus active plan, decisions snapshot, k
 - Input: `project_root?`, `decisions_excerpt_count?` (default 3, max 20)
 - Output: structured snapshot for session priming (identity, git, active plan,
   decisions, knowledge, `universe`, `next_action_hints`)
+
+Same pre-stamp evaluation as `rsct_status`, reported in `next_action_hints[]`. One
+difference: this tool also clears the `context_stale` re-bootstrap flag, and that clear
+rides in the **same write** as the marker — so when the write does not land, the hint says
+the flag was NOT cleared and the edit guard is still blocking.
 
 ### The `universe` block
 
@@ -520,8 +567,12 @@ tool can give.
 
 ## M2 features — Enforcement layer
 
-M2 adds **6 new tools** (3 pure queries + 3 §C-gated mutating ops) plus a
-SessionStart sanitizer hook. Together they materialize §C/§D/§E from
+M2 adds **7 new tools** (3 pure queries + 4 §C-gated mutating ops — commit,
+push, merge and `rsct_request_rebase`) plus a SessionStart sanitizer hook.
+Counting note, because the headings below invite the wrong answer: the
+`§C-gated mutating ops` section documents **six** ops, since `rsct_plan_authorize`
+and `rsct_plan_revoke` are filed there by subject while belonging to the post-M3
+group. M2 is four. `README.md`'s group breakdown is the arithmetic of record. Together they materialize §C/§D/§E from
 [CLAUDE.md governance rules](../rules/) as enforceable contracts: an "always
 allow" entry in `permissions.allow[]` no longer bypasses commit/push/merge
 on a protected branch or with secrets in the diff.
@@ -567,21 +618,38 @@ regex metachar escape; `{a,b}` and `[abc]` are deferred to v2.
 
 ### §C-gated mutating ops
 
-These three tools require a valid `dev_approval` payload on every call
-(INV-2 anti-reuse) AND pop an OS dialog for explicit dev confirmation
-(INV-2.1 out-of-band channel) unless the tool's own name is listed in
-`approval_modes.trust_allowed_for[]` (e.g. `["rsct_request_commit"]`).
-Fabrication signals (INV-2.2) auto-elevate to forced-dialog mode
-regardless of trust.
+There are **four** §C-gated mutating ops: `rsct_request_commit`,
+`rsct_request_push`, `rsct_request_merge` and `rsct_request_rebase`. All four pop
+an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel) unless
+the tool's own name is listed in `approval_modes.trust_allowed_for[]` (e.g.
+`["rsct_request_commit"]`), and fabrication signals (INV-2.2) auto-elevate to
+forced-dialog mode regardless of trust.
 
-**Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always) and
-`rsct_request_push` (only when the target branch is protected) additionally
-require a `pre_merge_ack` hygiene checklist. It is checked **before** the OS
-dialog — a missing/incomplete ack rejects **in chat with no dialog**. The three
-items (`plan_complete` / `adr_confirmed` / `issues_resolved`, plus a `note` when
-ADRs/issues are attested) are honest **self-attestations**, not machine-verified;
-the mechanical teeth are that you cannot integrate without the checklist and that
-a declared `false` is honored as a stop.
+**Three of them require a `dev_approval` payload on every call** (INV-2
+anti-reuse): push, merge and rebase. `rsct_request_commit` is the exception — its
+authorization is EITHER a per-action `dev_approval` OR a plan-scoped batch token
+OR the free-commit lane, as described under its own heading below.
+
+**Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always),
+`rsct_request_rebase` (always — a rebase/squash rewrites history, which is an
+integration event) and `rsct_request_push` (only when the target branch is
+protected) additionally require a `pre_merge_ack` hygiene checklist. It is checked
+**before** the OS dialog — a missing/incomplete ack rejects **in chat with no
+dialog**, so a rejected ack never spends an approval.
+
+The four items — `plan_complete` / `adr_confirmed` / `issues_resolved` /
+`hygiene_swept`, plus a `note` whenever ADRs, issues or the sweep are attested —
+are honest **self-attestations**, not machine-verified. Two mechanical teeth back
+them: you cannot integrate without assembling the checklist, and a declared
+`false` is honored as a stop.
+
+A fifth field, **`files_swept[]`**, is evidence rather than an attestation. RSCT
+reads the paths the integration actually carries out of git (never a
+caller-supplied value) and rejects when one of them is absent from your list —
+**regardless of the four booleans**. Obtain it with `git diff --name-only
+<base>...<head>`. Be precise about what this buys: it verifies **coverage**, that
+the carried paths were *claimed* as swept. It does not verify that a sweep
+happened, nor that one found anything.
 
 The `dev_approval` shape (validated by `lib/dev-approval.ts`):
 
@@ -628,8 +696,24 @@ consumed by design).
 Pushes the current branch if `dev_approval` is valid + branch is not
 protected (or `override_protected_branch` is set with reason).
 
-- Input: `project_root?`, `remote?` (default `origin`), `branch?` (default HEAD), `dev_approval`, `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
-- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Input: `project_root?`, `remote?` (default `origin` — must be a **configured remote name**; see below), `branch?` (default HEAD), `dev_approval`, `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
+- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'unsafe_push_target' | 'unknown_remote'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+
+**Branch protection compares the push DESTINATION, not the string you passed.**
+`branch` accepts a refspec, and several forms write to a protected branch while
+comparing unequal to its name: `+main` (the force marker), `HEAD:main` and
+`feat/x:main` (the destination is after the colon — git splits on the LAST one),
+`refs/heads/main` and `heads/main` (qualified forms). RSCT resolves the
+destination first and compares that. Refused outright, before git runs:
+a value starting with `-` (git would read it as an option), a `*` glob refspec
+(it can rewrite branches the protection check never sees), and an empty
+destination (a bare `:` is git's "matching" refspec and pushes everything).
+
+**`remote` must be a configured remote name — pushing straight to a URL or a
+filesystem path is refused.** That capability sends the repository somewhere
+branch protection cannot see, so it is not available through this tool. Add the
+destination with `git remote add` first. Only an *unreadable* remote list (e.g.
+outside a git repo) skips the check; an *empty* one rejects.
 
 #### `rsct_request_merge`
 
@@ -642,6 +726,23 @@ force-pushy patterns by default).
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
 don't accidentally pass the flag without the override.
+
+#### `rsct_request_rebase`
+
+The history-rewriting integration paths. `mode:'rebase'` runs `git rebase <ref>`;
+`mode:'squash'` runs `git merge --squash <ref>`, which STAGES the combined change
+without committing it — commit it afterwards through `rsct_request_commit`.
+
+**Always per-action**: never covered by a plan token or the free-commit lane, and
+it always requires a `pre_merge_ack`. Runs INV-5 on the CURRENT branch, since
+rewriting a protected branch's history needs `override_protected_branch`.
+
+- Input: `project_root?`, `mode?` (`'rebase' | 'squash'`, default `'rebase'`), `ref`, `dev_approval`, `pre_merge_ack` (REQUIRED)
+- Output: `status: 'rebased' | 'squashed' | 'rejected' | 'mutation_failed'`, `mode`, `ref`, `current_branch`, `sha_before`, `sha_after`, `reject_kind?` (incl. `'detached_head' | 'same_ref' | 'pre_merge_ack_missing' | 'pre_merge_ack_incomplete'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`
+
+Conflicts surface as `mutation_failed` carrying git's stderr; the working tree is
+left as git leaves it and nothing is force-pushed. `ref` is refused before git
+runs if it would be read as an option rather than a name.
 
 #### `rsct_plan_authorize` (T3 — plan execution mode: batch)
 
@@ -857,7 +958,7 @@ src/
 │   ├── update-check.ts      # opt-OUT GitHub release check + per-release declines (#38)
 │   ├── version-drift.ts     # install drift: LOCAL compare only, never network
 │   ├── git.ts               # minimal git state + GitExecutor + commit/push/merge
-│   ├── plan.ts              # find active plan_<slug>.md + progress_<slug>.md
+│   ├── plan.ts              # find active / list all plan_<slug>.md + progress_<slug>.md
 │   ├── decisions.ts         # parse documentation/decisions.md
 │   ├── anti-decisions.ts    # parse documentation/knowledge/anti-decisions.md (AD-NNN)
 │   ├── knowledge.ts         # detect + read documentation/knowledge/<category>.md
@@ -893,7 +994,12 @@ src/
 
 Each tool: zod schema for input, structured output type, pure handler.
 Adding a new tool — create `src/tools/<name>.ts` and register it in
-`src/index.ts` (`TOOLS` array + `HANDLERS` map).
+`src/catalog.ts` (`TOOLS` array + `HANDLERS` map). The catalog lives apart from
+`src/index.ts` because `index.ts` ends in a module-scope `main()` that connects a
+stdio transport, so importing it from a test would boot a server;
+`tests/unit/tool-count.test.ts` imports the catalog to cross-check the documented
+tool count and the boot-log tool list above against the live one. Update those
+docs in the same change — the test will tell you which.
 
 `tsup` builds three ESM entry points:
 - `dist/index.js` — the MCP server (registered via `bin: { "rsct-mcp": ... }`).
@@ -936,7 +1042,7 @@ companion install (`npm run build && npm install -g .`) and after
 
 - [ ] M1 validation gate signed off (per progress_rsct-mcp-v1.md).
 - [ ] `rsct-mcp` on PATH and `node dist/index.js < /dev/null` prints the
-      ready log including all 13 M1+M2 tool names (the full catalog is 39 now).
+      ready log including all 13 M1+M2 tool names (the full catalog is 40 now).
 - [ ] `/rsct-setup` re-run in the test project; Phase 4.V reports either
       "Installed RSCT SessionStart sanitizer hook" (fresh) or "already
       present — no change" (idempotent).

@@ -65,13 +65,44 @@ done
 # Interactive: prints the prompt and reads stdin into <varname>.
 # Non-interactive (ASSUME_YES): assigns <default> and echoes the choice.
 read_or_default() {
-  __rod_var="$1"; __rod_prompt="$2"; __rod_def="$3"
+  __rod_var="$1"; __rod_prompt="$2"; __rod_def="$3"; __rod_eof_ok="${4:-}"
   if [ -n "$ASSUME_YES" ]; then
     printf '%s%s   (RSCT non-interactive default)\n' "$__rod_prompt" "$__rod_def"
     eval "$__rod_var=\$__rod_def"
   else
     printf '%s' "$__rod_prompt"
-    read -r __rod_reply
+    # #73: `read -r` returns non-zero at EOF and `set -e` (:12) turns that into
+    # an abort. That is the DEFAULT and it must stay the default — an earlier
+    # version of this fix made the fallback unconditional, and the Rv measured
+    # what that does: `bash scripts/install.sh </dev/null` with no
+    # RSCT_ASSUME_YES stopped cancelling and ran a FULL install instead. The
+    # first call site (`Proceed? [y/N]`, :340) displays N but passes a coded
+    # default of `y`, so EOF there answered yes to everything — global
+    # `npm install -g`, `claude mcp add --scope user`, and on a team machine a
+    # recorded `project` silently rewritten to `user`, with none of the
+    # ASSUME_YES guards firing because ASSUME_YES was never set. Nothing on
+    # screen said a default had been taken.
+    #
+    # So the fallback is OPT-IN: only a call site that passes a 4th argument
+    # gets it, and only the removal-consent prompt does — it is the second
+    # question in its branch, and its default is the safe one ("n", remove
+    # nothing). A partial final line (EOF with no trailing newline) IS assigned
+    # by `read`, so only an EMPTY reply falls back; otherwise the last answer
+    # would be discarded.
+    if ! read -r __rod_reply; then
+      if [ -z "$__rod_eof_ok" ]; then
+        # `set -e` turns this into an abort at the call site. Say why: the
+        # pre-#73 behaviour was to die here with nothing on screen at all,
+        # which reads like a crash rather than a refusal to guess.
+        printf '\n⚠ stdin closed with no answer — cancelling.\n' >&2
+        printf '  For an unattended install set RSCT_ASSUME_YES=1 (see README).\n' >&2
+        return 1
+      fi
+      if [ -z "$__rod_reply" ]; then
+        __rod_reply="$__rod_def"
+        printf '%s   (stdin closed — taking the default)\n' "$__rod_def"
+      fi
+    fi
     eval "$__rod_var=\$__rod_reply"
   fi
 }
@@ -79,6 +110,29 @@ read_or_default() {
 # --- Compute target paths ---
 RSCT_HOME="$HOME/.rsct"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+
+# --- Resolve the Claude Code host config the way the CLI itself does (#73) ---
+# `claude mcp add/remove` is a Node program: it reads CLAUDE_CONFIG_DIR when
+# set, otherwise os.homedir() — which on Windows is USERPROFILE, NOT the bash
+# $HOME. Until #73 this script hardcoded "$HOME/.claude.json" in three places
+# while delegating the actual mutation to that CLI. When the two disagree the
+# failure is silent and lands on either side:
+#   - detection reads a stale/absent file -> "no user entry" -> the consent is
+#     never asked and `project` is recorded while the user-scope entry is still
+#     live. That is #73 reproduced WITH the fix installed.
+#   - or the removal succeeds against the CLI's file while re-verification reads
+#     the other one, and a switch that worked is reported as failed.
+# The test harness pins HOME/USERPROFILE/CLAUDE_CONFIG_DIR to one sandbox dir,
+# so no test can see the divergence — hence the fix, not a test, is the guard.
+# node -e is SINGLE-quoted and builds the separator with String.fromCharCode(92)
+# (see the quote-form note at the scope menu below).
+# Falls back to $HOME/.claude.json when node is absent (the --skip-mcp path):
+# that is the pre-#73 behaviour, so the fallback is never worse than before.
+HOST_CFG="$HOME/.claude.json"
+if command -v node >/dev/null 2>&1; then
+  HOST_CFG_RESOLVED=$(node -e 'var d = process.env.CLAUDE_CONFIG_DIR || require("os").homedir(); process.stdout.write(d.split(String.fromCharCode(92)).join("/") + "/.claude.json")' 2>/dev/null || echo "")
+  if [ -n "$HOST_CFG_RESOLVED" ]; then HOST_CFG="$HOST_CFG_RESOLVED"; fi
+fi
 
 # --- Read the MCP scope recorded by a previous run (#71) ---
 # The three menu branches below write this file, and until #71 nothing ever
@@ -103,9 +157,23 @@ fi
 # a stray space, different case or a UTF-8 BOM (the #29 class) is non-empty
 # but unmapped: offering to "keep" it would promise exactly the silent
 # rewrite #71 reports.
+#
+# #73: the menu is now BINARY — [1] user / [2] project. `skip` stays READABLE as
+# a legacy value (machines installed before this change carry it) and resolves
+# deterministically to the documented default [1]. It keeps MCP_SCOPE_KNOWN set
+# so the "a typo REPLACED your recorded scope" warning below still fires, but
+# MCP_SCOPE_LEGACY swaps the "press Enter to keep it" line for one that tells
+# the truth: there is no [3] left to keep.
+# Resolving to [1] is display/default only — it must NOT make an unattended run
+# register user scope. README.md told every teammate on a project-scope team to
+# pick [3], so `skip` is the TEAM population: silently adding a user-scope entry
+# on their machines would mask the very .mcp.json they share via git (the issue's
+# measured behaviour 1), which is the mirror of the removal this issue forbids
+# doing unattended. The [1] arm gates on this.
+MCP_SCOPE_LEGACY=""
 case "$MCP_SCOPE_RECORDED" in
   project) MCP_SCOPE_DEFAULT="2"; MCP_SCOPE_KNOWN="project" ;;
-  skip)    MCP_SCOPE_DEFAULT="3"; MCP_SCOPE_KNOWN="skip" ;;
+  skip)    MCP_SCOPE_DEFAULT="1"; MCP_SCOPE_KNOWN="skip"; MCP_SCOPE_LEGACY="1" ;;
   user)    MCP_SCOPE_DEFAULT="1"; MCP_SCOPE_KNOWN="user" ;;
   *)       MCP_SCOPE_DEFAULT="1" ;;
 esac
@@ -379,7 +447,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp (Model Context Protocol server)"
   echo "────────────────────────────────────────────────────────"
-  echo "Adds 39 tools + 5 resources to Claude Code — §C-gated"
+  echo "Adds 40 tools + 5 resources to Claude Code — §C-gated"
   echo "commit/push/merge, SessionStart sanitizer hook, audit log,"
   echo "and structured project recall. Strongly recommended."
   echo ""
@@ -422,26 +490,39 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             echo "✓ rsct-mcp installed globally."
 
             # --- Ask the dev where to register the MCP server ---
-            # User scope = one-time per machine, works in all projects (low friction)
-            # Project scope = per-project .mcp.json, commits to repo (team workflow)
-            # Skip = dev does it manually later (full control)
+            # #73: BINARY choice. Until now the menu offered three options and
+            # only [1] ever acted: [2] recorded `project` and printed manual
+            # instructions, so a machine with a user-scope entry kept resolving
+            # at user scope in every project — the choice was recorded and never
+            # honored. [3] Skip is removed; a scope you never register is not a
+            # scope, and the value survives only as a legacy marker (see the
+            # MCP_SCOPE_LEGACY note at the top of this script).
             echo ""
             echo "────────────────────────────────────────────────────────"
             echo "Register rsct-mcp with Claude Code now?"
             echo "────────────────────────────────────────────────────────"
-            echo "  [1] User scope (Recommended for solo dev)"
-            echo "      → registers globally; rsct__* tools available in"
+            echo "  [1] Solo developer — USER scope (Recommended)"
+            echo "      → registers once per machine; rsct__* tools available in"
             echo "        every project on this machine after IDE restart."
-            echo "  [2] Project scope (for teams committing .mcp.json)"
-            echo "      → must be added per project; instructions printed."
-            echo "  [3] Skip — I'll register manually later."
+            echo "  [2] Team — PROJECT scope (committable .mcp.json)"
+            echo "      → /rsct-setup writes and approves a .mcp.json in each"
+            echo "        project. Requires REMOVING any user-scope entry, since"
+            echo "        a user-scope entry masks project scope everywhere."
             echo ""
             # #71: the default is DERIVED from the recorded scope, so Enter and
             # RSCT_ASSUME_YES both mean "keep what I chose last time".
             # The suffix is mode-aware: an unattended run has no Enter to press,
             # and two adjacent lines saying "press Enter" then "(RSCT
             # non-interactive default)" contradict each other.
-            if [ -n "$MCP_SCOPE_KNOWN" ]; then
+            # #73: a recorded `skip` is LEGACY — there is no [3] to keep, so
+            # "press Enter to keep it" would be a promise this menu cannot make.
+            # Checked BEFORE the generic arm because MCP_SCOPE_KNOWN is set for
+            # `skip` too (it still gates the replacement warning below).
+            if [ -n "$MCP_SCOPE_LEGACY" ]; then
+              echo "  (recorded scope 'skip' is legacy — [3] no longer exists;"
+              echo "   the documented default [1] applies, and an unattended run"
+              echo "   registers nothing)"
+            elif [ -n "$MCP_SCOPE_KNOWN" ]; then
               if [ -n "$ASSUME_YES" ]; then
                 echo "  (current: $MCP_SCOPE_KNOWN — kept unless overridden)"
               else
@@ -450,7 +531,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             elif [ -n "$MCP_SCOPE_RECORDED" ]; then
               echo "  (recorded scope unrecognized — the documented default [1] applies)"
             fi
-            read_or_default mcp_scope "Choice [1/2/3] (default: $MCP_SCOPE_DEFAULT): " "$MCP_SCOPE_DEFAULT"
+            read_or_default mcp_scope "Choice [1/2] (default: $MCP_SCOPE_DEFAULT): " "$MCP_SCOPE_DEFAULT"
             # read_or_default assigns the RAW reply on the interactive branch
             # (:75), so an empty line lands as "" and falls through `case` to
             # *) → user. That is the Enter half of #71. Resolved at the CALL
@@ -459,73 +540,236 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             # own prompt.
             [ -n "$mcp_scope" ] || mcp_scope="$MCP_SCOPE_DEFAULT"
 
+            # #73: `3` is still the most likely keypress even though [3] is gone
+            # — README.md told every teammate on a project-scope team to press
+            # it, and muscle memory outlives a menu. Left to fall through to *)
+            # it registers USER scope, which masks the team's committed
+            # .mcp.json in every repo — and on a teammate's fresh machine the
+            # *) warning below is gated on a recorded scope, so there would be
+            # NOTHING on screen. Normalised here, before dispatch, with a notice
+            # that is deliberately NOT gated.
+            if [ "$mcp_scope" = "3" ]; then
+              echo ""
+              echo "⚠ [3] Skip no longer exists — the menu is [1] or [2]."
+              echo "  Applying the documented default [1] (user scope)."
+              if [ -n "$MCP_SCOPE_KNOWN" ]; then
+                echo "  This REPLACES the recorded '$MCP_SCOPE_KNOWN'."
+              fi
+              echo "  If you meant project scope, re-run and pick [2]."
+              mcp_scope="1"
+            fi
+
             case "$mcp_scope" in
               2)
-                # CAP-48: persist the scope choice so /rsct-setup (which runs in
-                # the PROJECT dir, unlike this installer) can materialize a
-                # committable project .mcp.json. install.sh cannot create it here
-                # — it does not know the target project path.
-                printf 'project\n' > "$RSCT_HOME/mcp-scope"
-                # E1 (field-report): the dev picked "project" — but if rsct is
-                # ALREADY registered at USER scope, that registration applies to
-                # every project, so rsct resolves at user scope EVEN where no
-                # .mcp.json exists. `claude mcp list` then shows ✓ Connected and
-                # masks the chosen scope (the report: "chose project but stayed
-                # global, no warning"). Detect the same way the default branch
-                # does — parse ~/.claude.json top-level mcpServers.rsct (the key
-                # `--scope user` writes; project .mcp.json files are ignored here).
-                if [ -f "$HOME/.claude.json" ] && command -v node >/dev/null 2>&1; then
-                  if node -e "
-                    try {
-                      var j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-                      process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1);
-                    } catch (e) { process.exit(1); }
-                  " "$HOME/.claude.json" 2>/dev/null; then
-                    echo ""
-                    echo "⚠ NOTE: rsct is ALREADY registered at USER scope on this machine."
-                    echo "  A user-scope entry applies to EVERY project, so 'claude mcp list'"
-                    echo "  will show rsct ✓ Connected even where no project .mcp.json exists —"
-                    echo "  masking the project scope you just chose. To make project scope the"
-                    echo "  EFFECTIVE one, remove the user-scope entry first:"
-                    echo "      claude mcp remove rsct --scope user"
+                # #73: project scope now TAKES EFFECT instead of merely being
+                # recorded. Measured: a user-scope entry WINS a name collision —
+                # the project entry's process is never spawned, approved or not.
+                # So "project scope" is a lie for as long as that entry exists,
+                # and CAP-48's `printf project` + a warning was recording the lie
+                # with the developer's consent attached.
+                #
+                # The marker is written LAST, from SCOPE_EFFECTIVE, so it records
+                # what is TRUE on the machine rather than what was asked for.
+                # SCOPE_EFFECTIVE is initialised empty and EVERY arm assigns it.
+                #
+                # An arm that fell through leaves it EMPTY, so the dispatch below
+                # writes NOTHING — the failure mode is silence, not a wrong value.
+                # (An earlier version of this comment claimed a fall-through would
+                # write `project`. It would not, and believing that is what let the
+                # unattended arm go untested: mutation `SCOPE_EFFECTIVE="project"`
+                # SURVIVED the suite, because the case that exercises it seeds a
+                # marker already reading `project`. Both holes are closed below —
+                # `unattended` has its own arm and `*)` is loud.)
+                #
+                # Every node -e in this file is SINGLE-quoted, and must stay that
+                # way. In a DOUBLE-quoted -e body bash collapses `\\` to a single
+                # backslash (and `\\b` to a backspace — the MED-16 / CAP-20
+                # shape), and `$`/backticks become live shell metacharacters that
+                # `bash -n` does not flag. Measured on this repo's own machine.
+                # This is plain POSIX double-quote semantics, not an MSYS quirk:
+                # it behaves identically on Linux and macOS.
+                SCOPE_EFFECTIVE=""
+                USER_SCOPE_ENTRY="no"
+                USER_SCOPE_CMD=""
+                if [ -f "$HOST_CFG" ] && command -v node >/dev/null 2>&1; then
+                  # Read-only. Emits the entry's `command` so the consent text can
+                  # name what is about to be destroyed: `claude mcp remove` is
+                  # blunt where the rest of this is narrow, and [1] only ever
+                  # re-adds the plain `rsct-mcp` form — a hand-registered dev
+                  # build would not come back.
+                  if USER_SCOPE_CMD=$(node -e 'try { var j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); var e = j.mcpServers && j.mcpServers.rsct; if (!e) { process.exit(1); } process.stdout.write(String(e.command || "?")); } catch (err) { process.exit(1); }' "$HOST_CFG" 2>/dev/null); then
+                    USER_SCOPE_ENTRY="yes"
                   fi
                 fi
-                echo ""
-                # #71: under RSCT_ASSUME_YES nothing was "selected" this run —
-                # the recorded value was kept. Say which actually happened.
-                if [ "$MCP_SCOPE_KNOWN" = "project" ]; then
-                  echo "→ Project scope kept (recorded in $RSCT_HOME/mcp-scope)."
+
+                if [ "$USER_SCOPE_ENTRY" = "yes" ]; then
+                  echo ""
+                  echo "⚠ rsct is registered at USER scope on this machine"
+                  echo "  (command: ${USER_SCOPE_CMD:-rsct-mcp})."
+                  echo "  A user-scope entry WINS over every project .mcp.json —"
+                  echo "  the project entry is never spawned. Project scope cannot"
+                  echo "  become effective until that entry is removed."
+                  echo ""
+                  echo "  This affects EVERY project on this machine, not only the"
+                  echo "  one you are working in."
+                  echo ""
+                  if [ -n "$ASSUME_YES" ]; then
+                    # An unattended run must NEVER remove a user-scope entry:
+                    # silently de-registering every project on the machine is a
+                    # worse defect than the one being fixed. It must not rewrite
+                    # the marker either — recording `user` here would destroy a
+                    # deliberate `project` on every unattended re-run, which is
+                    # #71 from the other side.
+                    SCOPE_EFFECTIVE="unattended"
+                    echo "  RSCT_ASSUME_YES is set — nothing was removed and the"
+                    echo "  recorded scope is left unchanged. Re-run interactively"
+                    echo "  to complete the switch."
+                  else
+                    # 4th arg: this is the ONLY prompt that survives EOF, and it
+                    # survives it as "n" — see read_or_default. It is the second
+                    # question in this branch, so a piped answer that supplies
+                    # the menu choice and stops would otherwise abort the
+                    # installer mid-switch.
+                    read_or_default mcp_rm "Remove the user-scope rsct entry now? [y/N] " "n" eof-ok
+                    case "$mcp_rm" in
+                      y|Y|yes|YES)
+                        MCP_RM_CLI="no"
+                        if command -v claude >/dev/null 2>&1; then
+                          # The CLI owns this format — never hand-edit it out.
+                          #
+                          # `</dev/null` defends against the CLI reading stdin
+                          # and swallowing the answer to a LATER prompt: this
+                          # branch already asks two questions in sequence, and
+                          # `read_or_default` would then see EOF instead of the
+                          # developer's reply.
+                          # DELIBERATELY UNTESTED — no prompt currently follows
+                          # this call, so any test of it would assert nothing and
+                          # pass with the redirect deleted. Do not remove it as
+                          # dead weight: it becomes load-bearing the moment a
+                          # third question is added to this branch, and nothing
+                          # will go red when that happens.
+                          if claude mcp remove rsct --scope user </dev/null >/dev/null 2>&1; then
+                            MCP_RM_CLI="yes"
+                          fi
+                        fi
+                        # RE-VERIFY, UNCONDITIONALLY. The probe is the sole
+                        # authority; the CLI's exit code is diagnostic text only.
+                        # An earlier version gated the probe on MCP_RM_CLI=yes,
+                        # which falsifies success but never failure — so a CLI
+                        # that REMOVED the entry and then exited non-zero (this
+                        # file's own :737-739 documents those exit codes
+                        # differing across Windows wrapper variants) left the
+                        # marker recording `user` on a machine where rsct was
+                        # then registered nowhere at all. Both directions have to
+                        # be checked, or the marker lies again.
+                        MCP_RM_OK="yes"
+                        if [ -f "$HOST_CFG" ] && command -v node >/dev/null 2>&1; then
+                          if node -e 'try { var j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1); } catch (err) { process.exit(1); }' "$HOST_CFG" 2>/dev/null; then
+                            MCP_RM_OK="no"
+                          fi
+                        elif [ "$MCP_RM_CLI" = "no" ]; then
+                          # Nothing to probe with and the CLI reported failure —
+                          # do not claim a removal that cannot be confirmed.
+                          MCP_RM_OK="no"
+                        fi
+                        if [ "$MCP_RM_OK" = "yes" ]; then
+                          SCOPE_EFFECTIVE="project"
+                          echo "✓ User-scope rsct entry removed — project scope is now effective."
+                        else
+                          SCOPE_EFFECTIVE="user"
+                          echo ""
+                          echo "⚠ The user-scope entry could not be removed (or is still present)."
+                          echo "  Recording 'user', because that is what still resolves."
+                          echo "  Remove it manually and re-run this installer:"
+                          echo "      claude mcp remove rsct --scope user"
+                        fi
+                        ;;
+                      *)
+                        # Declining must NOT record `project` — that reproduces
+                        # today's recorded-but-not-effective state with consent
+                        # attached. `user` is what is true.
+                        SCOPE_EFFECTIVE="user"
+                        echo ""
+                        echo "→ Kept the user-scope entry. It stays EFFECTIVE in every"
+                        echo "  project, so 'user' is what gets recorded — not 'project'."
+                        echo "  /rsct-setup will NOT create or refresh a .mcp.json while"
+                        echo "  'user' is the recorded scope. Re-run and confirm the"
+                        echo "  removal to switch."
+                        ;;
+                    esac
+                  fi
                 else
-                  echo "→ Project scope selected (saved to $RSCT_HOME/mcp-scope)."
+                  SCOPE_EFFECTIVE="project"
                 fi
-                echo "  /rsct-setup will AUTOMATICALLY create/update a committable"
-                echo "  '.mcp.json' in each project where you run it — no manual"
-                echo "  'claude mcp add' needed. Just run /rsct-setup in the project."
-                echo ""
-                echo "  Share with your team by committing .mcp.json to git. Each"
-                echo "  teammate still needs rsct-mcp installed (run this installer)"
-                echo "  so the 'rsct-mcp' binary is on their PATH."
-                echo ""
-                echo "  After /rsct-setup, restart Claude Code and verify with:"
-                echo "    claude mcp list   →  rsct: rsct-mcp - ✓ Connected"
-                echo ""
-                echo "  (To register manually instead: cd <project> &&"
-                echo "   claude mcp add rsct rsct-mcp --scope project)"
-                echo ""
-                echo "  Full doc: see 'Project scope detail' section in"
-                echo "  the rsct-framework README.md."
-                ;;
-              3)
-                printf 'skip\n' > "$RSCT_HOME/mcp-scope"
-                echo ""
-                # #71: same distinction as the project branch above.
-                if [ "$MCP_SCOPE_KNOWN" = "skip" ]; then
-                  echo "→ Skip kept. To register later:"
-                else
-                  echo "→ Skipped. To register later:"
-                fi
-                echo "    User scope (1x per machine):   claude mcp add rsct rsct-mcp --scope user"
-                echo "    OR project scope (per project): cd <project> && claude mcp add rsct rsct-mcp --scope project"
+
+                case "$SCOPE_EFFECTIVE" in
+                  project)
+                    printf 'project\n' > "$RSCT_HOME/mcp-scope"
+                    echo ""
+                    # #71: under RSCT_ASSUME_YES nothing was "selected" this run —
+                    # the recorded value was kept. Say which actually happened.
+                    if [ "$MCP_SCOPE_KNOWN" = "project" ]; then
+                      echo "→ Project scope kept (recorded in $RSCT_HOME/mcp-scope)."
+                    else
+                      echo "→ Project scope selected (saved to $RSCT_HOME/mcp-scope)."
+                    fi
+                    echo "  /rsct-setup will AUTOMATICALLY create/update a committable"
+                    echo "  '.mcp.json' in each project where you run it AND approve it"
+                    echo "  for that project — no manual 'claude mcp add' needed."
+                    echo ""
+                    echo "  Share with your team by committing .mcp.json to git. Each"
+                    echo "  teammate still needs rsct-mcp installed (run this installer)"
+                    echo "  so the 'rsct-mcp' binary is on their PATH, and should pick"
+                    echo "  [2] here too — a user-scope entry on their machine would"
+                    echo "  mask the .mcp.json you just shared."
+                    echo ""
+                    # HONEST SENTENCE (#73): the installer cannot fix projects that
+                    # already exist — it does not write .mcp.json or the approval,
+                    # /rsct-setup does. Removing the user-scope entry is therefore
+                    # the moment those projects STOP working, and saying which ones
+                    # is the difference between an honest AC and the class of
+                    # defect this issue is.
+                    #
+                    # A project is fine only when BOTH halves are in place: its
+                    # .mcp.json registers rsct AND .claude/settings.local.json
+                    # approves it. Listing only the projects missing a .mcp.json
+                    # (the first version of this report) named the wrong set — the
+                    # ones the removal actually breaks are those that HAVE one and
+                    # are unapproved, which is every project a legacy CAP-48
+                    # machine set up while the masking user entry made them work.
+                    if [ -f "$HOST_CFG" ] && command -v node >/dev/null 2>&1; then
+                      node -e 'try { var fs = require("fs"); function readJson(p) { try { var raw = fs.readFileSync(p, "utf8"); if (raw.charCodeAt(0) === 65279) { raw = raw.slice(1); } return raw.trim() ? JSON.parse(raw) : null; } catch (e) { return null; } } var j = readJson(process.argv[1]); if (!j) { process.exit(0); } var ks = Object.keys(j.projects || {}); var pending = []; for (var i = 0; i < ks.length; i++) { var k = ks[i]; if (!fs.existsSync(k + "/.rsct.json")) { continue; } var m = readJson(k + "/.mcp.json"); var registered = !!(m && m.mcpServers && m.mcpServers.rsct); var s = readJson(k + "/.claude/settings.local.json"); var approved = !!(s && Array.isArray(s.enabledMcpjsonServers) && s.enabledMcpjsonServers.indexOf("rsct") !== -1); if (!registered || !approved) { pending.push(k + (registered ? "   (registered, not approved)" : "   (no .mcp.json)")); } } if (pending.length) { console.log("  " + pending.length + " RSCT project(s) will NOT resolve rsct until /rsct-setup is re-run"); console.log("  in them (it writes the .mcp.json and approves it):"); var cap = pending.length < 20 ? pending.length : 20; for (var n = 0; n < cap; n++) { console.log("      " + pending[n]); } if (pending.length > cap) { console.log("      ... and " + (pending.length - cap) + " more"); } console.log(""); } } catch (e) { }' "$HOST_CFG" 2>/dev/null || true
+                    fi
+                    echo "  After /rsct-setup, restart Claude Code and verify with:"
+                    echo "    claude mcp list   →  rsct: rsct-mcp - ✓ Connected"
+                    echo ""
+                    echo "  Full doc: see 'Project scope detail' section in"
+                    echo "  the rsct-framework README.md."
+                    ;;
+                  user)
+                    printf 'user\n' > "$RSCT_HOME/mcp-scope"
+                    ;;
+                  unattended)
+                    # The ONE legitimate no-write outcome: RSCT_ASSUME_YES met a
+                    # user-scope entry, so nothing was removed and nothing may be
+                    # recorded. Split out from `*)` on purpose — folding the
+                    # deliberate case into the impossible one is what made a
+                    # missing assignment indistinguishable from a correct run.
+                    echo ""
+                    echo "→ Recorded scope left unchanged (${MCP_SCOPE_RECORDED:-none})."
+                    ;;
+                  *)
+                    # UNREACHABLE. Every arm above assigns SCOPE_EFFECTIVE, so an
+                    # empty value here means one stopped doing so. Say it loudly:
+                    # the whole point of this dispatch is that the marker records
+                    # what is true, and a silent no-write leaves the developer
+                    # believing a switch happened.
+                    echo ""
+                    echo "⚠ INTERNAL: no scope decision was reached (SCOPE_EFFECTIVE empty)."
+                    echo "  Nothing was recorded — $RSCT_HOME/mcp-scope still reads"
+                    echo "  '${MCP_SCOPE_RECORDED:-none}'. Please report this output as a bug."
+                    ;;
+                esac
                 ;;
               *)
                 # Default: user scope.
@@ -537,12 +781,22 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                 # nothing to lose, and `user` is the documented default.
                 if [ "$mcp_scope" != "1" ] && [ -n "$MCP_SCOPE_KNOWN" ]; then
                   echo ""
-                  echo "⚠ '$mcp_scope' is not 1/2/3 — applying the documented default (user scope),"
+                  echo "⚠ '$mcp_scope' is not 1/2 — applying the documented default (user scope),"
                   echo "  REPLACING the recorded '$MCP_SCOPE_KNOWN'. Re-run and pick again to undo."
                 fi
-                # CAP-48: record the chosen scope so /rsct-setup does NOT
-                # materialize a project .mcp.json for a user-scope install.
-                printf 'user\n' > "$RSCT_HOME/mcp-scope"
+                # #73: a legacy `skip` marker resolves to [1] as the MENU DEFAULT,
+                # but an unattended run must not ACT on that resolution. README.md
+                # told every teammate on a project-scope team to pick [3], so
+                # `skip` is the TEAM population: adding a user-scope entry on their
+                # machines with no human present would mask the .mcp.json they
+                # share via git, in every repo — the mirror of the removal this
+                # issue forbids doing unattended.
+                if [ -n "$MCP_SCOPE_LEGACY" ] && [ -n "$ASSUME_YES" ]; then
+                  echo ""
+                  echo "→ Legacy 'skip' marker + unattended run — registering nothing"
+                  echo "  and leaving the recorded scope as 'skip'. Re-run"
+                  echo "  interactively to pick [1] or [2]."
+                else
                 # Detection must be SCOPE-SPECIFIC. Previous attempts:
                 #   - `claude mcp get rsct`: exit code differs across Windows
                 #     wrapper variants (PowerShell .ps1 returns 1 on "not
@@ -554,35 +808,70 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                 # Final fix: parse ~/.claude.json directly for the top-level
                 # mcpServers.rsct key — that's where `claude mcp add --scope
                 # user` writes. Project-scope .mcp.json files are ignored.
-                if command -v claude >/dev/null 2>&1; then
-                  USER_SCOPE_HAS_RSCT="no"
-                  if [ -f "$HOME/.claude.json" ] && command -v node >/dev/null 2>&1; then
-                    if node -e "
-                      try {
-                        var j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-                        process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1);
-                      } catch (e) { process.exit(1); }
-                    " "$HOME/.claude.json" 2>/dev/null; then
+                USER_SCOPE_HAS_RSCT="no"
+                if [ -f "$HOST_CFG" ] && command -v node >/dev/null 2>&1; then
+                  if node -e 'try { var j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1); } catch (err) { process.exit(1); }' "$HOST_CFG" 2>/dev/null; then
+                    USER_SCOPE_HAS_RSCT="yes"
+                  fi
+                fi
+                if [ "$USER_SCOPE_HAS_RSCT" = "yes" ]; then
+                  echo "✓ rsct already registered at user scope — no change."
+                  # A deliberate [1] on a machine recorded as `project` DOES
+                  # change something, even when the entry is already there: the
+                  # marker flips, and /rsct-setup stops maintaining every
+                  # committed .mcp.json. "no change" alone would be the silent
+                  # replacement #71 exists to stop, just reached on purpose.
+                  if [ -n "$MCP_SCOPE_KNOWN" ] && [ "$MCP_SCOPE_KNOWN" != "user" ]; then
+                    echo "  Recorded scope changes '$MCP_SCOPE_KNOWN' → 'user'. Any committed"
+                    echo "  .mcp.json stays in git but is now masked by this entry, and"
+                    echo "  /rsct-setup will no longer create or refresh one."
+                  fi
+                elif command -v claude >/dev/null 2>&1; then
+                  echo ""
+                  echo "Registering rsct with Claude Code at user scope..."
+                  claude mcp add rsct rsct-mcp --scope user </dev/null >/dev/null 2>&1 || true
+                  # RE-VERIFY, UNCONDITIONALLY (#73). Until this issue the arm
+                  # wrote `user` to the marker BEFORE it even tried to register
+                  # and never checked afterwards, so a missing `claude` or an add
+                  # that reported success without landing left the marker
+                  # claiming a scope that does not resolve — the same
+                  # recorded-but-not-effective defect as [2], on the other side
+                  # of the menu, and what AC 3 rides on.
+                  #
+                  # The probe runs whatever the CLI's exit code was. Gating it on
+                  # success falsifies success but never failure: a `claude` that
+                  # ADDED the entry and then exited non-zero (see the Windows
+                  # wrapper note above) would be reported as "not registered"
+                  # while user scope was in fact live, and the marker would be
+                  # left recording `project`.
+                  if [ -f "$HOST_CFG" ] && command -v node >/dev/null 2>&1; then
+                    if node -e 'try { var j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1); } catch (err) { process.exit(1); }' "$HOST_CFG" 2>/dev/null; then
                       USER_SCOPE_HAS_RSCT="yes"
                     fi
                   fi
                   if [ "$USER_SCOPE_HAS_RSCT" = "yes" ]; then
-                    echo "✓ rsct already registered at user scope — no change."
+                    echo "✓ rsct registered (user scope)."
+                    echo "  Available in every project on this machine after IDE restart."
                   else
-                    echo ""
-                    echo "Registering rsct with Claude Code at user scope..."
-                    if claude mcp add rsct rsct-mcp --scope user >/dev/null 2>&1; then
-                      echo "✓ rsct registered (user scope)."
-                      echo "  Available in every project on this machine after IDE restart."
-                    else
-                      echo "⚠ 'claude mcp add' failed. Register manually:"
-                      echo "    claude mcp add rsct rsct-mcp --scope user"
-                    fi
+                    echo "⚠ rsct is NOT registered at user scope in $HOST_CFG."
+                    echo "  Register manually, then re-run this installer:"
+                    echo "    claude mcp add rsct rsct-mcp --scope user"
                   fi
                 else
                   echo "⚠ 'claude' CLI not on PATH — cannot auto-register."
                   echo "  Once Claude Code is installed, run:"
                   echo "    claude mcp add rsct rsct-mcp --scope user"
+                fi
+                # CAP-48: the marker gates whether /rsct-setup materializes a
+                # project .mcp.json. #73: it is written LAST, and only when user
+                # scope is actually effective — recording a scope that does not
+                # resolve is the defect this issue removes.
+                if [ "$USER_SCOPE_HAS_RSCT" = "yes" ]; then
+                  printf 'user\n' > "$RSCT_HOME/mcp-scope"
+                else
+                  echo "  Recorded scope left unchanged (${MCP_SCOPE_RECORDED:-none}) —"
+                  echo "  'user' is not recorded until the entry actually exists."
+                fi
                 fi
                 ;;
             esac
@@ -626,22 +915,25 @@ echo "      /rsct-setup"
 echo "   This writes CLAUDE.md, documentation/, memory entries,"
 echo "   and the SessionStart sanitizer hook. Per-project, one-time."
 echo ""
-echo "(If you chose 'Project scope' above, also run"
-echo " 'claude mcp add rsct rsct-mcp --scope project' inside each"
-echo " target project BEFORE step 2.)"
+# #73: this used to order a manual `claude mcp add rsct rsct-mcp --scope
+# project` in every target project — stale since CAP-48, and after #73 it
+# contradicts step 2 outright. /rsct-setup writes the .mcp.json AND approves it
+# for that project; there is no manual registration step left.
+echo "(Chose 'Project scope' above? /rsct-setup writes and approves the"
+echo " project's .mcp.json for you — nothing to register by hand.)"
 echo ""
 # E1 (field-report): report the EFFECTIVE user-level scope so the dev knows what
 # actually resolves, independent of the menu choice above. A lingering user-scope
 # entry silently overrides a project-scope intent in every project.
-if command -v node >/dev/null 2>&1 && [ -f "$HOME/.claude.json" ] && node -e "
-  try { var j = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
-    process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1); } catch(e){ process.exit(1); }
-" "$HOME/.claude.json" 2>/dev/null; then
-  echo "Effective MCP scope: USER — rsct is in ~/.claude.json, active in EVERY project"
-  echo "  on this machine (a project .mcp.json would be redundant)."
+# #73: reads HOST_CFG (CLAUDE_CONFIG_DIR / os.homedir()) rather than a hardcoded
+# $HOME, so this report cannot disagree with the CLI that owns the file.
+if command -v node >/dev/null 2>&1 && [ -f "$HOST_CFG" ] && node -e 'try { var j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit((j.mcpServers && j.mcpServers.rsct) ? 0 : 1); } catch (err) { process.exit(1); }' "$HOST_CFG" 2>/dev/null; then
+  echo "Effective MCP scope: USER — rsct is in $HOST_CFG, active in EVERY project"
+  echo "  on this machine (a project .mcp.json would be masked by it)."
 else
   echo "Effective MCP scope: no user-level rsct — it resolves only where a project"
-  echo "  .mcp.json registers it (i.e. true project scope)."
+  echo "  .mcp.json registers it AND that project has approved it (i.e. true"
+  echo "  project scope; /rsct-setup does both)."
 fi
 echo ""
 echo "To uninstall the framework from this machine (different from"
