@@ -10,6 +10,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed
+
+- **The test suite runs from any Windows shell, and an unusable `bash` is now named
+  instead of producing 71 unexplained failures** (#78, comment item 5). `tests/bash/` hands bash a
+  Windows path, and `bash` on `PATH` is frequently WSL's — which mounts drives at
+  `/mnt/c/`, eats the backslashes, and reports "No such file or directory" for a file
+  that was written correctly. Measured before: `npx vitest run` from PowerShell failed
+  71 tests; the same commit from Git Bash passed. The message reads as broken prompt
+  logic, and two sessions hit it on the same day.
+
+  The harness now resolves bash rather than trusting `PATH`: on Windows it takes the
+  first candidate whose `uname -s` is `MINGW*`/`MSYS*`, deriving Git Bash from
+  `git --exec-path` before `%ProgramFiles%` and `PATH`. Measured after: the full suite
+  from PowerShell is **1740 passed / 1 skipped**, identical to the Git Bash run.
+  `RSCT_BASH` overrides the search and is treated as an instruction — a wrong override
+  fails naming itself instead of silently falling back.
+
+  When no usable bash exists, a test fails carrying the binary found, its `uname -s`,
+  every candidate tried and both fixes, and the bash blocks skip instead of failing.
+  (Under `RSCT_REQUIRE_BASH=1`, as CI sets it, a second test reports the same cause.)
+  `assertBashPolicy`
+  stopped reporting *"bash was not found on PATH"* for a bash that was found and was
+  the wrong one. `canonical-source-slot.test.ts` gained the skip gate its four siblings
+  already had.
+
+  **Linux and macOS are untouched by construction**: the platform check returns the
+  literal `bash` before any candidate logic, any spawn or any cache read.
+
+  Contributor-facing only — no `mcp-server/src/` change, `dist/` unchanged.
+
 ## [2.8.0] - 2026-08-30
 
 Six issues closed and one advanced by a stage. Most of them share a shape: a gate,

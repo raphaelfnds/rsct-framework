@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runBlock } from './lib/block-harness.js'
+import { bashAvailable } from './lib/bash-lint.js'
+
+// #78: this was the only file under tests/bash/ with no bash gate, so on a machine
+// whose `bash` is unusable the 32 of its 35 tests that spawn bash failed on file
+// state — 'CLAUDE.md missing' — with nothing naming the real cause. The gate is
+// applied per describe, by need, the way the four siblings apply it: the one
+// describe below that spawns nothing is deliberately left ungated. Inert whenever a
+// usable bash exists; when one is not, resolve-bash.test.ts says why.
+const BASH = bashAvailable()
 
 // #66 — the canonical-source handoff between 01-setup.md (which reserves the slot)
 // and 02-canonical-source.md (which fills it).
@@ -43,6 +52,11 @@ function read(dir: string, rel = 'CLAUDE.md'): string {
   return readFileSync(join(dir, rel), 'utf8')
 }
 
+// NOT gated: these three are readFileSync + string comparison and spawn no bash
+// (measured at 1-3 ms against ~1 s for every bash test in this file). Gating them
+// would turn off the only checks still running on the very machine #78 is about —
+// and they are the ones pinning prompts/06-universe.md's probe and the shipped
+// CLAUDE.md.template. The siblings gate per describe BY NEED, never per file.
 describe('#66 — the reserved slot never reads as a linked project', () => {
   // The whole design rests on this: the SLOT marker must NOT be a substring of the
   // real one, because prompts/06-universe.md:92 decides PROJECT_LINKED with a bare
@@ -78,7 +92,7 @@ describe('#66 — the reserved slot never reads as a linked project', () => {
   })
 })
 
-describe('#66 — the four-way mode probe', () => {
+describe.skipIf(!BASH)('#66 — the four-way mode probe', () => {
   const modeOf = (claudeMd: string | null): string => {
     const seedFiles = claudeMd === null ? {} : { 'CLAUDE.md': claudeMd }
     const r = runBlock(ROOT, { promptBasename: '02-canonical-source.md', anchor: PROBE, seedFiles })
@@ -105,7 +119,7 @@ describe('#66 — the four-way mode probe', () => {
     expect(modeOf([...header, SLOT_BEGIN, SLOT_END, REAL_BEGIN, HEADING, REAL_END].join('\n'))).toBe('update'))
 })
 
-describe('#66 — update mode also clears the orphan placeholder', () => {
+describe.skipIf(!BASH)('#66 — update mode also clears the orphan placeholder', () => {
   // The Rv caught this: the probe reports `update` and the preamble used to remove
   // only the real pair, leaving the slot behind. The agent then wrote a second
   // section and the sanity check rejected a run it had no way to get right.
@@ -124,7 +138,7 @@ describe('#66 — update mode also clears the orphan placeholder', () => {
   })
 })
 
-describe('#66 — the Phase 4 preamble never truncates CLAUDE.md', () => {
+describe.skipIf(!BASH)('#66 — the Phase 4 preamble never truncates CLAUDE.md', () => {
   const preamble = (claudeMd: string) =>
     runBlock(ROOT, { promptBasename: '02-canonical-source.md', anchor: PREAMBLE, seedFiles: { 'CLAUDE.md': claudeMd } })
 
@@ -172,7 +186,7 @@ describe('#66 — the Phase 4 preamble never truncates CLAUDE.md', () => {
   })
 })
 
-describe('#66 — the post-mutation sanity check can actually fail', () => {
+describe.skipIf(!BASH)('#66 — the post-mutation sanity check can actually fail', () => {
   const sanity = (claudeMd: string) =>
     runBlock(ROOT, { promptBasename: '02-canonical-source.md', anchor: SANITY, seedFiles: { 'CLAUDE.md': claudeMd } })
 
@@ -228,7 +242,7 @@ describe('#66 — the post-mutation sanity check can actually fail', () => {
   })
 })
 
-describe('#66 — the uninstall reaches the placeholder and stops at the guard', () => {
+describe.skipIf(!BASH)('#66 — the uninstall reaches the placeholder and stops at the guard', () => {
   const uninstall = (claudeMd: string | null) =>
     runBlock(ROOT, {
       promptBasename: '03-uninstall.md',
@@ -312,7 +326,7 @@ describe('#66 — the uninstall reaches the placeholder and stops at the guard',
   })
 })
 
-describe('#66 — the uninstall removes the placeholder, marked or legacy', () => {
+describe.skipIf(!BASH)('#66 — the uninstall removes the placeholder, marked or legacy', () => {
   // Phase 4.2. The Rv proved this block had zero coverage: deleting it outright
   // left the whole suite green, because every uninstall test anchored on 4.3.
   const phase42 = (claudeMd: string | null) =>

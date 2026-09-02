@@ -86,6 +86,11 @@ Claude Code slash commands at `~/.claude/commands/rsct-*.md`.
 > Open **Git Bash** from the Start menu (or right-click a folder →
 > "Git Bash Here") and run the commands below from there. The prompt
 > will look like `MINGW64` followed by your path.
+>
+> This applies to the install and uninstall scripts above. If you are
+> *contributing* to the framework, Git Bash matters for the test suite
+> too — but there the harness locates it for you, from whichever shell
+> you start. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/raphaelfnds/rsct-framework ~/dev/rsct-framework
