@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
 import {
   resolveBash,
   bashBin,
@@ -210,9 +211,18 @@ describe('resolveBash (#78)', () => {
       // and `git --exec-path` derives the same file — so an undeduped list named one
       // binary three times, printing three identical lines in the failure report that
       // is this issue's deliverable, and paying six spawns to re-ask one question.
-      const GIT = 'C:\\Program Files\\Git\\bin\\bash.exe'
+      //
+      // The expected path is built with `join`, NOT written as a backslash literal.
+      // CI caught the first version of this test: `windowsCandidates` joins with the
+      // HOST separator, so a hand-written `C:\Program Files\Git\bin\bash.exe` matched
+      // on Windows and differed from the POSIX `C:\Program Files/Git/bin/bash.exe` on
+      // ubuntu and macOS, where dedupe then had two distinct strings and kept both.
+      // The resolver was right; the test was asserting path.join's platform behaviour
+      // instead of the dedupe it claims to check.
+      const ROOT = 'C:\\Program Files'
+      const GIT = join(ROOT, 'Git', 'bin', 'bash.exe')
       const list = windowsCandidates(
-        { ProgramFiles: 'C:\\Program Files', ProgramW6432: 'C:\\Program Files' },
+        { ProgramFiles: ROOT, ProgramW6432: ROOT },
         () => true,
         () => GIT,
       )
