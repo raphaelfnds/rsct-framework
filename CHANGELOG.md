@@ -10,7 +10,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
-## [Unreleased]
+## [2.8.1] - 2026-09-02
+
+Two silent failures become named ones. **Nothing about the shipped product changes** —
+no file under `mcp-server/src/` is touched, the tool catalog stays at **40**, and the
+marker schema id stays `v=1.0.0`. A user upgrading from 2.8.0 gets identical behaviour.
+
+What changes is what the repository can no longer do to itself. A tool module that was
+never registered used to reach `main` with a fully green suite; now it fails, and so do
+the three ways a module can slip past a directory scan. And the test suite, which failed
+71 times on Windows for anyone whose `bash` was WSL's, now runs from PowerShell, cmd and
+Git Bash alike — or, where no usable bash exists, says so once instead of 71 times.
+
+Both issues stay **open**: this delivers one acceptance item from each, and the rest of
+#83 and #78 is untouched.
 
 ### Added
 
