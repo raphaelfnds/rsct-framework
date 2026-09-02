@@ -10,6 +10,75 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.8.1] - 2026-09-02
+
+Two silent failures become named ones. **Nothing about the shipped product changes** —
+no file under `mcp-server/src/` is touched, the tool catalog stays at **40**, and the
+marker schema id stays `v=1.0.0`. A user upgrading from 2.8.0 gets identical behaviour.
+
+What changes is what the repository can no longer do to itself. A tool module that was
+never registered used to reach `main` with a fully green suite; now it fails, and so do
+the three ways a module can slip past a directory scan. And the test suite, which failed
+71 times on Windows for anyone whose `bash` was WSL's, now runs from PowerShell, cmd and
+Git Bash alike — or, where no usable bash exists, says so once instead of 71 times.
+
+Both issues stay **open**: this delivers one acceptance item from each, and the rest of
+#83 and #78 is untouched.
+
+### Added
+
+- **A tool module that is not registered in `src/catalog.ts` now fails the suite
+  instead of disappearing in silence** (#83, acceptance item 5). Registration in
+  `catalog.ts` is what puts a tool on the wire — `index.ts` takes its whole tool surface
+  from `TOOLS` and `HANDLERS` — and nothing checked it: `tool-count.test.ts` reads from
+  the catalog *outward* (docs, boot log, handler lockstep), while 44 test files import
+  `src/tools/*` directly. A contributor could therefore write a tool **and a fully green
+  unit test for it** and ship a server that never exposes it. Measured before the fix: a
+  valid unregistered tool left the full suite at 1727 passed / exit 0.
+
+  The new `tests/unit/tool-registration.test.ts` scans from disk inward. It fails, rather
+  than passing over, on the three ways a module can escape a directory scan: a
+  subdirectory (`readdirSync` does not recurse), a non-`.ts` extension, and a tool
+  declaration it cannot parse. The exemption list for genuine non-tool helpers cannot
+  hide a tool — unparsed modules are re-checked for anything tool-shaped regardless of
+  what is exempted. `CONTRIBUTING.md` and the PR template now name `src/catalog.ts` as
+  the registration point.
+
+  Scope, stated because the neighbouring gap is real: this guards **tools**. Resources
+  are registered separately in `src/resources.ts` and have no equivalent check.
+
+  Not a behaviour change: no `mcp-server/src/` file is touched and `dist/` is unchanged.
+
+### Fixed
+
+- **The test suite runs from any Windows shell, and an unusable `bash` is now named
+  instead of producing 71 unexplained failures** (#78, comment item 5). `tests/bash/` hands bash a
+  Windows path, and `bash` on `PATH` is frequently WSL's — which mounts drives at
+  `/mnt/c/`, eats the backslashes, and reports "No such file or directory" for a file
+  that was written correctly. Measured before: `npx vitest run` from PowerShell failed
+  71 tests; the same commit from Git Bash passed. The message reads as broken prompt
+  logic, and two sessions hit it on the same day.
+
+  The harness now resolves bash rather than trusting `PATH`: on Windows it takes the
+  first candidate whose `uname -s` is `MINGW*`/`MSYS*`, deriving Git Bash from
+  `git --exec-path` before `%ProgramFiles%` and `PATH`. Measured after: the full suite
+  from PowerShell is **1740 passed / 1 skipped**, identical to the Git Bash run.
+  `RSCT_BASH` overrides the search and is treated as an instruction — a wrong override
+  fails naming itself instead of silently falling back.
+
+  When no usable bash exists, a test fails carrying the binary found, its `uname -s`,
+  every candidate tried and both fixes, and the bash blocks skip instead of failing.
+  (Under `RSCT_REQUIRE_BASH=1`, as CI sets it, a second test reports the same cause.)
+  `assertBashPolicy`
+  stopped reporting *"bash was not found on PATH"* for a bash that was found and was
+  the wrong one. `canonical-source-slot.test.ts` gained the skip gate its four siblings
+  already had.
+
+  **Linux and macOS are untouched by construction**: the platform check returns the
+  literal `bash` before any candidate logic, any spawn or any cache read.
+
+  Contributor-facing only — no `mcp-server/src/` change, `dist/` unchanged.
+
 ## [2.8.0] - 2026-08-30
 
 Six issues closed and one advanced by a stage. Most of them share a shape: a gate,

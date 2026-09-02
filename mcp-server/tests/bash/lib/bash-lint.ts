@@ -17,6 +17,12 @@
 //   AP7 grep -iF SIGABRT on Git Bash (CAP-41)
 
 import { execFileSync } from 'node:child_process'
+import {
+  resolveBash,
+  bashBin,
+  explainWrongBash,
+  type BashResolution,
+} from './resolve-bash.js'
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve, basename } from 'node:path'
 
@@ -241,12 +247,40 @@ function detectPhantomVars(lines: string[]): Finding[] {
 let _bashChecked = false
 let _bashOk = false
 
-/** Is `bash` runnable on this machine? Cached. */
+/**
+ * Is a USABLE bash runnable on this machine? Cached.
+ *
+ * #78: a `wrong` resolution (Windows resolving `bash` to WSL) reports false here, so
+ * the 33 `describe.skipIf(!BASH)` blocks — 189 tests, after this change added the gate
+ * canonical-source-slot.test.ts was missing — skip instead of failing. Measured on the
+ * issue: 71 of them actually failed, every one reading "No such file or directory".
+ * That skip is NOT silent: the ungated test in `resolve-bash.test.ts` fails at the same
+ * time and names the cause, which is the trade this issue asks for — an explained
+ * failure instead of 71 unexplained ones.
+ *
+ * The `--version` spawn stays. On non-Windows the resolver returns the literal `bash`
+ * without probing anything (that inertness is the cross-OS guarantee), so this is
+ * still the only thing that knows whether bash exists at all on Linux and macOS.
+ */
 export function bashAvailable(): boolean {
   if (_bashChecked) return _bashOk
   _bashChecked = true
+  const r = resolveBash()
+  if (process.platform === 'win32') {
+    // On Windows the resolver has ALREADY run `uname -s` against the binary it
+    // returned, which is a strictly stronger check than `--version` — and it ran it
+    // under a timeout. Re-asking here with an UNBOUNDED spawn was a hole: on a `none`
+    // verdict `bashBin()` falls back to the literal `bash`, so a binary the bounded
+    // probe had given up on could still answer `--version` and hand every gated test
+    // a bash nothing vetted, while the ungated guard stayed green (`none` is not
+    // `wrong`). Trust the one bounded answer instead.
+    _bashOk = r.kind === 'ok'
+    return _bashOk
+  }
+  // POSIX: the resolver returns `ok` without probing (that inertness is the cross-OS
+  // guarantee), so this spawn is still the only thing that knows bash exists at all.
   try {
-    execFileSync('bash', ['--version'], { stdio: 'ignore' })
+    execFileSync(bashBin(), ['--version'], { stdio: 'ignore' })
     _bashOk = true
   } catch {
     _bashOk = false
@@ -257,7 +291,7 @@ export function bashAvailable(): boolean {
 /** Run `bash -n` (syntax-only) on a snippet. Reads the script from stdin. */
 export function bashSyntaxCheck(code: string): { ok: boolean; error?: string } {
   try {
-    execFileSync('bash', ['-n'], { input: code, stdio: ['pipe', 'ignore', 'pipe'] })
+    execFileSync(bashBin(), ['-n'], { input: code, stdio: ['pipe', 'ignore', 'pipe'] })
     return { ok: true }
   } catch (e: unknown) {
     const err = e as { stderr?: Buffer | string; message?: string }
@@ -270,14 +304,28 @@ export function bashSyntaxCheck(code: string): { ok: boolean; error?: string } {
  * CI anti-silent-skip guard (V11): when bash is REQUIRED (RSCT_REQUIRE_BASH set)
  * but unavailable, the suite must FAIL rather than quietly skip the bash -n gate.
  */
-export function assertBashPolicy(required: boolean, available: boolean): void {
-  if (required && !available) {
-    throw new Error(
-      'RSCT_REQUIRE_BASH is set but `bash` was not found on PATH. The bash -n gate ' +
+export function assertBashPolicy(
+  required: boolean,
+  available: boolean,
+  // Injectable ONLY so both messages can be asserted. Without it the `wrong` branch is
+  // unreachable in any green run — it needs a host whose bash is wrong, and on such a
+  // host resolve-bash.test.ts is already red. Measured during REVIEW: mutating the
+  // branch to `&& false` left the suite green, i.e. the corrected message — the point
+  // of the change — was never checked by anything.
+  resolution: BashResolution = resolveBash(),
+): void {
+  if (!required || available) return
+  // #78: this message used to say "`bash` was not found on PATH" unconditionally.
+  // On Windows resolving to WSL that is FALSE — bash was found and was the wrong
+  // one — and a message naming the wrong cause is what sent two sessions looking
+  // for a regression in the prompts.
+  throw new Error(
+    resolution.kind === 'wrong'
+      ? `RSCT_REQUIRE_BASH is set and a bash was found, but it is not usable.\n${explainWrongBash(resolution)}`
+      : 'RSCT_REQUIRE_BASH is set but `bash` was not found on PATH. The bash -n gate ' +
         'would silently skip — failing instead (a green CI that tested nothing is the ' +
         'failure class T0 exists to prevent).',
-    )
-  }
+  )
 }
 
 // --- repo corpus loaders ------------------------------------------------------
