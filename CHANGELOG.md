@@ -10,6 +10,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Added
+
+- **A tool module that is not registered in `src/catalog.ts` now fails the suite
+  instead of disappearing in silence** (#83, acceptance item 5). Registration in
+  `catalog.ts` is what puts a tool on the wire — `index.ts` takes its whole tool surface
+  from `TOOLS` and `HANDLERS` — and nothing checked it: `tool-count.test.ts` reads from
+  the catalog *outward* (docs, boot log, handler lockstep), while 44 test files import
+  `src/tools/*` directly. A contributor could therefore write a tool **and a fully green
+  unit test for it** and ship a server that never exposes it. Measured before the fix: a
+  valid unregistered tool left the full suite at 1727 passed / exit 0.
+
+  The new `tests/unit/tool-registration.test.ts` scans from disk inward. It fails, rather
+  than passing over, on the three ways a module can escape a directory scan: a
+  subdirectory (`readdirSync` does not recurse), a non-`.ts` extension, and a tool
+  declaration it cannot parse. The exemption list for genuine non-tool helpers cannot
+  hide a tool — unparsed modules are re-checked for anything tool-shaped regardless of
+  what is exempted. `CONTRIBUTING.md` and the PR template now name `src/catalog.ts` as
+  the registration point.
+
+  Scope, stated because the neighbouring gap is real: this guards **tools**. Resources
+  are registered separately in `src/resources.ts` and have no equivalent check.
+
+  Not a behaviour change: no `mcp-server/src/` file is touched and `dist/` is unchanged.
+
 ## [2.8.0] - 2026-08-30
 
 Six issues closed and one advanced by a stage. Most of them share a shape: a gate,

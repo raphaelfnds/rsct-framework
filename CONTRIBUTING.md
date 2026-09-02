@@ -37,6 +37,35 @@ npm test           # vitest (full suite)
 
 Requires **Node 20+**.
 
+### Adding a tool: `src/catalog.ts` is what decides it exists
+
+A new tool module under `mcp-server/src/tools/` reaches the server **only** by being
+registered in **`mcp-server/src/catalog.ts`** — its `Tool` in `TOOLS`, its handler in
+`HANDLERS`. `src/index.ts` takes its entire tool surface from those two exports (the
+other things it serves are resources, which come from `src/resources.ts`), so a module
+that compiles, type-checks and has green unit tests is still invisible to every client
+until that row exists.
+
+`tests/unit/tool-registration.test.ts` enforces it: it enumerates `src/tools/` and fails
+when a declared tool name is absent from the catalog. Three conventions it relies on, all
+of which it names in the failure if you break them:
+
+- `src/tools/` is **flat**, and holds only `.ts` files. The scan does not recurse and
+  does not read other extensions, so it fails on a subdirectory or a `.mts` rather than
+  passing over it.
+- the tool name is a plain single-quoted literal following the indentation directly —
+  `name: 'rsct_…'`. Digits are fine; a trailing comma or comment is fine.
+- `NON_TOOL_MODULES` in that test exempts a module that declares **no** tool at all — a
+  shared helper, a types module. **It is never the fix for a tool that failed to parse.**
+  A separate assertion re-checks every unparsed module for anything that *looks* like a
+  tool declaration and stays red regardless of the allowlist, so exempting a real tool
+  cannot make the suite green.
+
+Adding or removing a tool also reddens `tests/unit/tool-count.test.ts`, which pins the
+documented count, the group breakdown and the startup name list across `README.md`,
+`mcp-server/README.md`, `examples/README.md` and `scripts/install.sh`. Read that test for
+the current list of anchors rather than trusting a count written here.
+
 ---
 
 ## The #1 rule: everything must work on all three OS families
