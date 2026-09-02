@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, chmodSync, r
 import { tmpdir } from 'node:os'
 import { join, resolve, delimiter } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
+import { bashBin } from './lib/resolve-bash.js'
 
 // T0.b — script-level sandbox smoke for scripts/install.sh +
 // uninstall-framework.sh. Drives them non-interactively (RSCT_ASSUME_YES +
@@ -104,7 +105,7 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
   }
   if (opts.path) env.PATH = `${opts.path}${delimiter}${process.env.PATH ?? ''}`
   try {
-    const out = execFileSync('bash', [script], {
+    const out = execFileSync(bashBin(), [script], {
       env,
       encoding: 'utf8',
       // #71: `read -r` on a closed stdin returns non-zero and `set -e`
@@ -236,7 +237,7 @@ function newStubBin(): string {
   // PRE-FLIGHT BOTH. Until #73 only `npm` was checked, while the docstring
   // claimed the dir was verified — and `claude` is now the dangerous one.
   for (const bin of ['npm', 'claude']) {
-    const resolved = execFileSync('bash', ['-c', `command -v ${bin}`], {
+    const resolved = execFileSync(bashBin(), ['-c', `command -v ${bin}`], {
       env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH ?? ''}` },
       encoding: 'utf8',
     }).trim()
@@ -451,7 +452,7 @@ describe.skipIf(!BASH)('install/uninstall WSL guard (CAP-38 family)', () => {
   // /proc, but we can prove the detection pattern it relies on is correct.
   function matches(osrelease: string): boolean {
     try {
-      execFileSync('bash', ['-c', `printf '%s\\n' "$1" | grep -qiE "microsoft|wsl"`, '_', osrelease], { stdio: 'ignore' })
+      execFileSync(bashBin(), ['-c', `printf '%s\\n' "$1" | grep -qiE "microsoft|wsl"`, '_', osrelease], { stdio: 'ignore' })
       return true
     } catch {
       return false
@@ -480,7 +481,7 @@ describe.skipIf(!BASH)('uninstall plan-line wording under --skip-mcp (A4)', () =
 
     let out: string
     try {
-      out = execFileSync('bash', [UNINSTALL], {
+      out = execFileSync(bashBin(), [UNINSTALL], {
         env: {
           ...process.env,
           HOME: home.replace(/\\/g, '/'),

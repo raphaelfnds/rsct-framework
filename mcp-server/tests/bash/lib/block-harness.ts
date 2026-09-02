@@ -12,6 +12,10 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { loadPromptBlocks, type BashBlock } from './bash-lint.js'
+// #78: the bash to spawn is RESOLVED, not assumed. The catch below would swallow a
+// throw into a normal-looking result whose assertions then fail on missing files —
+// exactly the symptom this fixes — so the resolver classifies instead of throwing.
+import { bashBin } from './resolve-bash.js'
 
 // --- node availability (blocks 2 & 3 call `node -e`) ---
 let _nodeChecked = false
@@ -93,7 +97,7 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
   // $HOME/.rsct/... never touches the real home (overridable via opts.env).
   const env = { ...process.env, HOME: dir.replace(/\\/g, '/'), ...(opts.env ?? {}) }
   try {
-    const out = execFileSync('bash', [runnerPath], {
+    const out = execFileSync(bashBin(), [runnerPath], {
       cwd: dir,
       env,
       encoding: 'utf8',

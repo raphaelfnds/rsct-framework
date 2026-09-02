@@ -66,6 +66,34 @@ documented count, the group breakdown and the startup name list across `README.m
 `mcp-server/README.md`, `examples/README.md` and `scripts/install.sh`. Read that test for
 the current list of anchors rather than trusting a count written here.
 
+### On Windows, the suite needs Git Bash — it finds it for you
+
+The `tests/bash/` files hand a Windows path to `bash`. Windows ships several different
+`bash` binaries, and `bash` on `PATH` is frequently WSL's — which mounts drives at
+`/mnt/c/`, consumes the backslashes in `C:\Users\…`, and reports *"No such file or
+directory"* for a file that was written correctly. The message reads as broken prompt
+logic, which is the wrong conclusion.
+
+The harness therefore **resolves** bash instead of trusting `PATH`
+(`tests/bash/lib/resolve-bash.ts`): on Windows it takes the first candidate whose
+`uname -s` is `MINGW*` or `MSYS*`, deriving Git Bash from `git --exec-path` before
+falling back to `%ProgramFiles%` and `PATH`. So `npm test` works from PowerShell, cmd or
+Git Bash alike. **On Linux and macOS nothing changed** — the platform check returns the
+literal `bash` before any of that logic runs.
+
+- **On Windows only**, set `RSCT_BASH` to an absolute `bash.exe` to override the search.
+  It is an instruction, not a suggestion: if it points at something unusable the suite
+  fails naming it, rather than quietly falling back to another candidate. (Elsewhere the
+  variable is ignored — the platform check returns before it is read.)
+- Only `MINGW*` and `MSYS*` are accepted. WSL is the binary this exists to reject, and
+  Cygwin is excluded too: it is a third flavour that no test here has ever exercised, so
+  accepting it would widen the contract past what is verified. [README.md](README.md)
+  binds *users* installing the framework to Git Bash for a related reason — different
+  audience, same binary.
+- If no usable bash is found, a test fails with the binary it found, its `uname -s`,
+  every candidate it tried and both fixes — and the bash-dependent blocks skip instead
+  of producing the 71 failures that all say "No such file or directory".
+
 ---
 
 ## The #1 rule: everything must work on all three OS families
