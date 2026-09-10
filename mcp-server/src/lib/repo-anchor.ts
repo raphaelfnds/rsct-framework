@@ -212,7 +212,7 @@ export function resolveRepositoryAnchor(
   if (!info.in_git_repo) {
     return {
       status: 'not-applicable',
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity: null,
       detail:
         'not a git repository — no repository identity exists, so the shared anchors stay at the project root',
@@ -223,7 +223,7 @@ export function resolveRepositoryAnchor(
   if (commonRaw === null) {
     return {
       status: 'unavailable',
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity: null,
       detail:
         'git could not report the repository identity (absent, unreadable, or an unsupported version) — anchors stay at the project root and the binding is not enforced',
@@ -246,7 +246,7 @@ export function resolveRepositoryAnchor(
   if (anchorRoot === null || anchorRoot.length === 0) {
     return {
       status: 'unavailable',
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity,
       detail:
         'git reported a repository but no usable working root — anchors stay at the project root and the binding is not enforced',
@@ -255,7 +255,15 @@ export function resolveRepositoryAnchor(
 
   const resolved = canonicalPath(anchorRoot)
   if (sameDirectory(resolved, projectRoot)) {
-    return { status: 'same', root: canonicalPath(projectRoot), identity, detail: null }
+    // The caller's OWN spelling, deliberately. Canonicalization decides
+    // EQUALITY; it must not rewrite what every existing caller receives.
+    // Returning the realpath'd form here changed `resolveAuditPath`'s output for
+    // every project on macOS (/var -> /private/var) and reddened five
+    // pre-existing tests that had nothing to do with this issue — a blast radius
+    // far wider than the fix needs. When the anchor genuinely RELOCATES the root
+    // is a different directory, and there git's canonical form is the right
+    // answer because it is the one the repository actually has.
+    return { status: 'same', root: resolve(projectRoot), identity, detail: null }
   }
   return {
     status: 'relocated',

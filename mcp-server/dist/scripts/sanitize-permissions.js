@@ -91,7 +91,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (!info.in_git_repo) {
     return {
       status: "not-applicable",
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity: null,
       detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
     };
@@ -100,7 +100,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (commonRaw === null) {
     return {
       status: "unavailable",
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity: null,
       detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
     };
@@ -118,14 +118,14 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (anchorRoot === null || anchorRoot.length === 0) {
     return {
       status: "unavailable",
-      root: canonicalPath(projectRoot),
+      root: resolve(projectRoot),
       identity,
       detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
     };
   }
   const resolved = canonicalPath(anchorRoot);
   if (sameDirectory(resolved, projectRoot)) {
-    return { status: "same", root: canonicalPath(projectRoot), identity, detail: null };
+    return { status: "same", root: resolve(projectRoot), identity, detail: null };
   }
   return {
     status: "relocated",
