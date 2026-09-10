@@ -81,13 +81,14 @@ import {
   contractsTouchingPaths,
   affectedConsumers,
 } from '../lib/contracts.js'
+import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 
 export const requestCommitInputSchema = z
   .object({
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     message: z
       .string()
       .min(1, 'commit message required')
@@ -251,7 +252,7 @@ export const requestCommitTool: Tool = {
     properties: {
       project_root: {
         type: 'string',
-        description: 'Optional absolute path to override project root detection.',
+        description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
       },
       message: {
         type: 'string',
@@ -310,6 +311,7 @@ export async function requestCommitHandler(
   // advisory derived from the staged diff still has an index to read, and so a
   // rejected commit does not swallow the warning.
   const advisories: string[] = []
+  advisories.push(...anchorHints(projectRoot, config?.audit))
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
 
   // Install drift, security tier only: an enforcement script under
@@ -417,10 +419,11 @@ export async function requestCommitHandler(
       approval: input.dev_approval,
       dialog: {
         title: 'RSCT — commit approval',
-        message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}`,
+        message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}` + gateDialogFooter(projectRoot, config),
       },
       projectRoot,
       ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+      auditConfig: config?.audit,
       promptFn,
       now,
     })
@@ -996,7 +999,7 @@ export async function requestCommitHandler(
   const bookkeepingHints: string[] = []
 
   if (approval) {
-    const record = recordApproval(approval, { projectRoot, now })
+    const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
     antiReplayPersisted = record.ok
     if (!record.ok) {
       antiReplayError = record.error

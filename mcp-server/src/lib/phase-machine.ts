@@ -449,6 +449,7 @@ ${internal.dialogDetail}` : ''
     ...(config?.approval_modes !== undefined && {
       approvalModes: config.approval_modes,
     }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -502,6 +503,7 @@ ${internal.dialogDetail}` : ''
   const record = recordApproval(gate.approval, {
     projectRoot: input.projectRoot,
     now,
+    auditConfig: config?.audit,
   })
 
   const recommended = nextPhase(input.phase)

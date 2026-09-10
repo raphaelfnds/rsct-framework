@@ -452,6 +452,7 @@ export async function captureIssueHandler(
     ...(config?.approval_modes !== undefined && {
       approvalModes: config.approval_modes,
     }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -540,7 +541,7 @@ export async function captureIssueHandler(
     }
   }
 
-  const record = recordApproval(gate.approval, { projectRoot, now })
+  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
 
   const createdAudit = appendAudit(
     projectRoot,

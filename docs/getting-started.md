@@ -114,7 +114,10 @@ misbehaves, that's a bug worth filing.
    `trivial`/`small` task it goes through the **dialog-free free-commit lane**
    (bounded by an audit-log-anchored ceiling, with branch-protection and the
    secret-scan still enforced). Either way the audit trail goes to
-   `.rsct/audit.log`. Without the companion, a plain `git commit` is refused or
+   `.rsct/audit.log` — at the **git repository the commit lands in**, which is the
+   same folder in the normal case and one level up in a monorepo package, a project
+   nested inside another repository, or a linked worktree. When it differs, the
+   approval dialog says so. Without the companion, a plain `git commit` is refused or
    triggers a reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes

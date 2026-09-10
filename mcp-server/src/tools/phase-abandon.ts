@@ -31,7 +31,7 @@ export const phaseAbandonInputSchema = z
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     reason: z
       .string()
       .min(10, 'reason must be ≥10 chars — explain why this phase is being discarded')
@@ -151,6 +151,7 @@ export async function phaseAbandonHandler(
     ...(config?.approval_modes !== undefined && {
       approvalModes: config.approval_modes,
     }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -196,7 +197,7 @@ export async function phaseAbandonHandler(
     (key) => newState[key] !== undefined,
   )
   const writeResult = writePhaseState(projectRoot, newState)
-  const record = recordApproval(gate.approval, { projectRoot, now })
+  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
 
   const abandonedAudit = appendAudit(
     projectRoot,

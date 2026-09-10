@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, readdirSync, mkdirSync, unlinkSync, realpathSync, lstatSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, readdirSync, mkdirSync, unlinkSync, realpathSync, lstatSync, copyFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 import { homedir } from 'os';
@@ -3015,7 +3015,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve8.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3042,7 +3042,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve8(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3673,7 +3673,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve7(baseURI, relativeURI, options) {
+    function resolve8(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed } = parseWithStatus(baseURI, schemelessOptions);
       const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed } = parseWithStatus(relativeURI, schemelessOptions);
@@ -3957,7 +3957,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve7,
+      resolve: resolve8,
       resolveComponent,
       equal,
       serialize,
@@ -21337,7 +21337,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+        await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21354,7 +21354,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21432,7 +21432,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve7(parseResult.data);
+            resolve8(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -21693,12 +21693,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve7, interval);
+      const timeoutId = setTimeout(resolve8, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22565,12 +22565,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve7) => {
+    return new Promise((resolve8) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve7();
+        resolve8();
       } else {
-        this._stdout.once("drain", resolve7);
+        this._stdout.once("drain", resolve8);
       }
     });
   }
@@ -22603,6 +22603,369 @@ function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
 }
 
+// src/lib/repo-anchor.ts
+init_esm_shims();
+
+// src/lib/git.ts
+init_esm_shims();
+function readGitState(projectRoot) {
+  if (!isGitRepo(projectRoot)) {
+    return { available: false, branch: null, head_sha: null, is_clean: null };
+  }
+  const branch = safeGit(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const head_sha = safeGit(projectRoot, ["rev-parse", "--short", "HEAD"]);
+  const status = safeGit(projectRoot, ["status", "--porcelain"]);
+  return {
+    available: true,
+    branch,
+    head_sha,
+    is_clean: status !== null ? status.length === 0 : null
+  };
+}
+function getStagedDiff(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  return safeGitRaw(projectRoot, ["diff", "--cached", "--no-color", "-U0"]);
+}
+function getStagedPaths(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--name-only", "-z"]);
+  if (raw === null) return null;
+  return splitNulPaths(raw);
+}
+function splitNulPaths(raw) {
+  return raw.split("\0").map((p) => p.replace(/\\/g, "/")).filter((p) => p.length > 0);
+}
+function isSafeRevisionToken(rev) {
+  if (typeof rev !== "string" || rev.length === 0) return false;
+  if (rev.startsWith("-")) return false;
+  if (/[\u0000-\u001f\u007f]/.test(rev)) return false;
+  return true;
+}
+function getRangePaths(projectRoot, base, head) {
+  for (const rev of [base, head]) {
+    if (!isSafeRevisionToken(rev)) return { status: "unsafe_revision", revision: rev };
+  }
+  if (!isGitRepo(projectRoot)) return { status: "unavailable" };
+  const raw = safeGitRaw(projectRoot, [
+    "diff",
+    "--name-only",
+    "-z",
+    "--diff-filter=d",
+    `${base}...${head}`
+  ]);
+  if (raw === null) return { status: "unavailable" };
+  return { status: "ok", paths: splitNulPaths(raw) };
+}
+function getStagedStats(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--numstat", "-z"]);
+  if (raw === null) return null;
+  return parseNumstatZ(raw);
+}
+function parseNumstatZ(raw) {
+  const tokens = raw.split("\0");
+  const paths = [];
+  let insertions = 0;
+  let deletions = 0;
+  let i = 0;
+  while (i < tokens.length) {
+    const tok = tokens[i];
+    if (tok === "") {
+      i += 1;
+      continue;
+    }
+    const firstTab = tok.indexOf("	");
+    const secondTab = firstTab >= 0 ? tok.indexOf("	", firstTab + 1) : -1;
+    if (firstTab < 0 || secondTab < 0) {
+      i += 1;
+      continue;
+    }
+    const addedRaw = tok.slice(0, firstTab);
+    const deletedRaw = tok.slice(firstTab + 1, secondTab);
+    const rest = tok.slice(secondTab + 1);
+    const added = addedRaw === "-" ? 0 : Number.parseInt(addedRaw, 10);
+    const deleted = deletedRaw === "-" ? 0 : Number.parseInt(deletedRaw, 10);
+    insertions += Number.isFinite(added) ? added : 0;
+    deletions += Number.isFinite(deleted) ? deleted : 0;
+    if (rest !== "") {
+      paths.push(rest.replace(/\\/g, "/"));
+      i += 1;
+    } else {
+      const newPath = tokens[i + 2];
+      if (newPath !== void 0 && newPath !== "") {
+        paths.push(newPath.replace(/\\/g, "/"));
+      }
+      i += 3;
+    }
+  }
+  return { files: paths.length, insertions, deletions, paths };
+}
+function getFileAtHead(projectRoot, relPath) {
+  if (!isGitRepo(projectRoot)) return null;
+  return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
+}
+function getUnstagedDiff(projectRoot) {
+  if (!isGitRepo(projectRoot)) return null;
+  return safeGitRaw(projectRoot, ["diff", "--no-color", "-U0"]);
+}
+function isGitRepo(projectRoot) {
+  const out = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
+  return out === "true";
+}
+function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
+  if (r.ok) return true;
+  if (r.exitCode === 1) return false;
+  return true;
+}
+function gitBranchMerged(projectRoot, branch, target, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["branch", "--merged", target]);
+  if (!r.ok) return false;
+  return r.stdout.split("\n").map((l) => l.replace(/^[*+]?\s*/, "").trim()).includes(branch);
+}
+function readWorktreeInfo(projectRoot) {
+  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
+  }
+  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
+  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
+  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
+  let isWorktree = false;
+  let name = null;
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
+    if (m) {
+      isWorktree = true;
+      name = m[1] ?? null;
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
+}
+function safeGit(cwd2, args) {
+  const raw = safeGitRaw(cwd2, args);
+  return raw !== null ? raw.trim() : null;
+}
+var safeGitRead = safeGit;
+var GIT_READ_TIMEOUT_MS = 3e4;
+function safeGitRaw(cwd2, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: cwd2,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS
+    });
+  } catch {
+    return null;
+  }
+}
+var defaultGitExecutor = (cwd2, args) => {
+  try {
+    const stdout = execFileSync("git", args, {
+      cwd: cwd2,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 16 * 1024 * 1024
+    });
+    return { ok: true, stdout, stderr: "", exitCode: 0 };
+  } catch (err) {
+    return normalizeGitExecError(err);
+  }
+};
+function normalizeGitExecError(err) {
+  if (err && typeof err === "object") {
+    const e = err;
+    const result = {
+      ok: false,
+      stdout: bufferOrStringToString(e.stdout),
+      stderr: bufferOrStringToString(e.stderr),
+      exitCode: typeof e.status === "number" ? e.status : -1
+    };
+    const message = e.message ?? (e.code ? `git exec failed: ${e.code}` : void 0);
+    if (message) result.error = message;
+    return result;
+  }
+  return { ok: false, stdout: "", stderr: "", exitCode: -1, error: String(err) };
+}
+function bufferOrStringToString(v) {
+  if (v === void 0) return "";
+  if (typeof v === "string") return v;
+  return v.toString("utf8");
+}
+function getHeadSha(projectRoot, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["rev-parse", "--short", "HEAD"]);
+  if (!r.ok) return null;
+  return r.stdout.trim() || null;
+}
+function getHeadShaFull(projectRoot, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["rev-parse", "HEAD"]);
+  if (!r.ok) return null;
+  return r.stdout.trim() || null;
+}
+function unsafeOperand(operands) {
+  for (const [name, value] of Object.entries(operands)) {
+    if (!isSafeRevisionToken(value)) {
+      return `refusing to run git: ${name} is not a safe operand (${JSON.stringify(value)}) \u2014 a value starting with '-' is read by git as an OPTION, not a name`;
+    }
+  }
+  return null;
+}
+function gitCommit(projectRoot, message, executor = defaultGitExecutor) {
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["commit", "-m", message]);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after };
+}
+function gitPush(projectRoot, remote, branch, executor = defaultGitExecutor) {
+  const bad = unsafeOperand({ remote, branch });
+  if (bad) return { ok: false, error: bad };
+  const exec = executor(projectRoot, ["push", "--", remote, branch]);
+  if (!exec.ok) {
+    const result = { ok: false };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.error) result.error = exec.error;
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    return result;
+  }
+  return { ok: true, stdout: exec.stdout.trim() };
+}
+function gitMerge(projectRoot, sourceBranch, options, executor = defaultGitExecutor) {
+  const bad = unsafeOperand({ sourceBranch });
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
+  const args = ["merge"];
+  if (options.no_ff) args.push("--no-ff");
+  if (options.allow_unrelated_histories) args.push("--allow-unrelated-histories");
+  args.push("--", sourceBranch);
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, args);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitRebase(projectRoot, upstream, executor = defaultGitExecutor) {
+  const bad = unsafeOperand({ upstream });
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["rebase", "--", upstream]);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
+  const bad = unsafeOperand({ sourceBranch });
+  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
+  const sha_before = getHeadSha(projectRoot, executor);
+  const exec = executor(projectRoot, ["merge", "--squash", "--", sourceBranch]);
+  if (!exec.ok) {
+    const result = { ok: false, sha_before, sha_after: null };
+    if (exec.stderr) result.stderr = exec.stderr.trim();
+    if (exec.stdout) result.stdout = exec.stdout.trim();
+    if (exec.error) result.error = exec.error;
+    return result;
+  }
+  const sha_after = getHeadSha(projectRoot, executor);
+  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
+}
+
+// src/lib/repo-anchor.ts
+function comparable(p) {
+  const abs = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+function sameDirectory(a, b) {
+  return comparable(a) === comparable(b);
+}
+var anchorCache = /* @__PURE__ */ new Map();
+function anchorFor(projectRoot, deps = {}) {
+  const key = resolve(projectRoot);
+  const hit = anchorCache.get(key);
+  if (hit) return hit;
+  const computed = resolveRepositoryAnchor(projectRoot, deps);
+  anchorCache.set(key, computed);
+  return computed;
+}
+function repositoryDialogLine(projectRoot) {
+  const a = anchorFor(projectRoot);
+  const shown = a.root.replace(/\\/g, "/");
+  if (a.status === "relocated") {
+    return `Repository: ${shown}
+\u26A0 RSCT state resolves there, NOT at the folder you passed (${resolve(projectRoot).replace(/\\/g, "/")}).`;
+  }
+  if (a.status === "not-applicable") return `Folder: ${shown} (not a git repository)`;
+  if (a.status === "unavailable") return `Folder: ${shown} (git could not confirm the repository)`;
+  return `Repository: ${shown}`;
+}
+function resolveRepositoryAnchor(projectRoot, deps = {}) {
+  const gitRead = deps.gitRead ?? safeGitRead;
+  const worktreeInfo = deps.worktreeInfo ?? readWorktreeInfo;
+  const info = worktreeInfo(projectRoot);
+  if (!info.in_git_repo) {
+    return {
+      status: "not-applicable",
+      root: projectRoot,
+      identity: null,
+      detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
+    };
+  }
+  const commonRaw = gitRead(projectRoot, ["rev-parse", "--git-common-dir"]);
+  if (commonRaw === null) {
+    return {
+      status: "unavailable",
+      root: projectRoot,
+      identity: null,
+      detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const identity = resolve(projectRoot, commonRaw).replace(/\\/g, "/");
+  let anchorRoot;
+  if (info.is_worktree) {
+    const first = gitRead(projectRoot, ["worktree", "list", "--porcelain"]);
+    const line = first?.split("\n")[0]?.trim() ?? "";
+    anchorRoot = line.startsWith("worktree ") ? line.slice("worktree ".length).trim() : null;
+    if (anchorRoot === null || anchorRoot.length === 0) anchorRoot = dirname(identity);
+  } else {
+    anchorRoot = info.toplevel;
+  }
+  if (anchorRoot === null || anchorRoot.length === 0) {
+    return {
+      status: "unavailable",
+      root: projectRoot,
+      identity,
+      detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const resolved = resolve(anchorRoot);
+  if (sameDirectory(resolved, projectRoot)) {
+    return { status: "same", root: resolve(projectRoot), identity, detail: null };
+  }
+  return {
+    status: "relocated",
+    root: resolved,
+    identity,
+    detail: `shared RSCT state resolves at ${resolved.replace(/\\/g, "/")}, the repository this action lands in \u2014 not at the declared project root`
+  };
+}
+
 // src/lib/audit-log.ts
 var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
 function auditFields(audit) {
@@ -22613,12 +22976,56 @@ function auditFields(audit) {
     audit_error: audit.error ?? "write_failed"
   };
 }
-function resolveAuditPath(projectRoot, config2) {
+var migrationAttempted = /* @__PURE__ */ new Set();
+function migrateLegacyLog(projectRoot, base, target) {
+  if (sameDirectory(projectRoot, base)) return;
+  const key = resolve(projectRoot);
+  if (migrationAttempted.has(key)) return;
+  migrationAttempted.add(key);
+  const legacy = join(resolve(projectRoot), DEFAULT_RELATIVE_PATH);
+  try {
+    if (!existsSync(legacy) || existsSync(target)) return;
+    ensureParentDir(target);
+    copyFileSync(legacy, target);
+    appendFileSync(
+      target,
+      JSON.stringify({
+        ts: (/* @__PURE__ */ new Date()).toISOString(),
+        event: "audit_log.migrated",
+        from: legacy.replace(/\\/g, "/"),
+        to: target.replace(/\\/g, "/"),
+        reason: "anchor bound to the repository (#92); history carried forward"
+      }) + "\n",
+      "utf8"
+    );
+  } catch {
+  }
+}
+function decideAuditPath(projectRoot, config2) {
+  const anchor = anchorFor(projectRoot);
+  const base = anchor.root;
+  const fallback = join(base, DEFAULT_RELATIVE_PATH);
+  migrateLegacyLog(projectRoot, base, fallback);
   const configured = config2?.path;
   if (configured && configured.length > 0) {
-    return isAbsolute(configured) ? configured : resolve(projectRoot, configured);
+    const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
+    if (!isInside(base, candidate)) {
+      return { path: fallback, base, escaped: candidate, anchor: anchor.status };
+    }
+    return { path: candidate, base, escaped: null, anchor: anchor.status };
   }
-  return join(projectRoot, DEFAULT_RELATIVE_PATH);
+  return { path: fallback, base, escaped: null, anchor: anchor.status };
+}
+function isInside(base, candidate) {
+  if (sameDirectory(base, candidate)) return true;
+  const b = resolve(base).replace(/\\/g, "/").replace(/\/+$/, "");
+  const c = resolve(candidate).replace(/\\/g, "/");
+  const prefix = process.platform === "win32" ? b.toLowerCase() + "/" : b + "/";
+  const target = process.platform === "win32" ? c.toLowerCase() : c;
+  return target.startsWith(prefix);
+}
+function resolveAuditPath(projectRoot, config2) {
+  return decideAuditPath(projectRoot, config2).path;
 }
 function appendAuditEntry(projectRoot, entry, config2) {
   if (config2?.enabled === false) {
@@ -22838,286 +23245,6 @@ function emitConfigViolation(projectRoot, reason, extras) {
   appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true });
 }
 
-// src/lib/git.ts
-init_esm_shims();
-function readGitState(projectRoot) {
-  if (!isGitRepo(projectRoot)) {
-    return { available: false, branch: null, head_sha: null, is_clean: null };
-  }
-  const branch = safeGit(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  const head_sha = safeGit(projectRoot, ["rev-parse", "--short", "HEAD"]);
-  const status = safeGit(projectRoot, ["status", "--porcelain"]);
-  return {
-    available: true,
-    branch,
-    head_sha,
-    is_clean: status !== null ? status.length === 0 : null
-  };
-}
-function getStagedDiff(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  return safeGitRaw(projectRoot, ["diff", "--cached", "--no-color", "-U0"]);
-}
-function getStagedPaths(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--name-only", "-z"]);
-  if (raw === null) return null;
-  return splitNulPaths(raw);
-}
-function splitNulPaths(raw) {
-  return raw.split("\0").map((p) => p.replace(/\\/g, "/")).filter((p) => p.length > 0);
-}
-function isSafeRevisionToken(rev) {
-  if (typeof rev !== "string" || rev.length === 0) return false;
-  if (rev.startsWith("-")) return false;
-  if (/[\u0000-\u001f\u007f]/.test(rev)) return false;
-  return true;
-}
-function getRangePaths(projectRoot, base, head) {
-  for (const rev of [base, head]) {
-    if (!isSafeRevisionToken(rev)) return { status: "unsafe_revision", revision: rev };
-  }
-  if (!isGitRepo(projectRoot)) return { status: "unavailable" };
-  const raw = safeGitRaw(projectRoot, [
-    "diff",
-    "--name-only",
-    "-z",
-    "--diff-filter=d",
-    `${base}...${head}`
-  ]);
-  if (raw === null) return { status: "unavailable" };
-  return { status: "ok", paths: splitNulPaths(raw) };
-}
-function getStagedStats(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--numstat", "-z"]);
-  if (raw === null) return null;
-  return parseNumstatZ(raw);
-}
-function parseNumstatZ(raw) {
-  const tokens = raw.split("\0");
-  const paths = [];
-  let insertions = 0;
-  let deletions = 0;
-  let i = 0;
-  while (i < tokens.length) {
-    const tok = tokens[i];
-    if (tok === "") {
-      i += 1;
-      continue;
-    }
-    const firstTab = tok.indexOf("	");
-    const secondTab = firstTab >= 0 ? tok.indexOf("	", firstTab + 1) : -1;
-    if (firstTab < 0 || secondTab < 0) {
-      i += 1;
-      continue;
-    }
-    const addedRaw = tok.slice(0, firstTab);
-    const deletedRaw = tok.slice(firstTab + 1, secondTab);
-    const rest = tok.slice(secondTab + 1);
-    const added = addedRaw === "-" ? 0 : Number.parseInt(addedRaw, 10);
-    const deleted = deletedRaw === "-" ? 0 : Number.parseInt(deletedRaw, 10);
-    insertions += Number.isFinite(added) ? added : 0;
-    deletions += Number.isFinite(deleted) ? deleted : 0;
-    if (rest !== "") {
-      paths.push(rest.replace(/\\/g, "/"));
-      i += 1;
-    } else {
-      const newPath = tokens[i + 2];
-      if (newPath !== void 0 && newPath !== "") {
-        paths.push(newPath.replace(/\\/g, "/"));
-      }
-      i += 3;
-    }
-  }
-  return { files: paths.length, insertions, deletions, paths };
-}
-function getFileAtHead(projectRoot, relPath) {
-  if (!isGitRepo(projectRoot)) return null;
-  return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
-}
-function getUnstagedDiff(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  return safeGitRaw(projectRoot, ["diff", "--no-color", "-U0"]);
-}
-function isGitRepo(projectRoot) {
-  const out = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
-  return out === "true";
-}
-function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
-  const r = executor(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
-  if (r.ok) return true;
-  if (r.exitCode === 1) return false;
-  return true;
-}
-function gitBranchMerged(projectRoot, branch, target, executor = defaultGitExecutor) {
-  const r = executor(projectRoot, ["branch", "--merged", target]);
-  if (!r.ok) return false;
-  return r.stdout.split("\n").map((l) => l.replace(/^[*+]?\s*/, "").trim()).includes(branch);
-}
-function readWorktreeInfo(projectRoot) {
-  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
-    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
-  }
-  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
-  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
-  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
-  let isWorktree = false;
-  let name = null;
-  if (gitDirRaw !== null) {
-    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
-    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
-    if (m) {
-      isWorktree = true;
-      name = m[1] ?? null;
-    }
-  }
-  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
-}
-function safeGit(cwd2, args) {
-  const raw = safeGitRaw(cwd2, args);
-  return raw !== null ? raw.trim() : null;
-}
-var GIT_READ_TIMEOUT_MS = 3e4;
-function safeGitRaw(cwd2, args) {
-  try {
-    return execFileSync("git", args, {
-      cwd: cwd2,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: GIT_READ_TIMEOUT_MS
-    });
-  } catch {
-    return null;
-  }
-}
-var defaultGitExecutor = (cwd2, args) => {
-  try {
-    const stdout = execFileSync("git", args, {
-      cwd: cwd2,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 16 * 1024 * 1024
-    });
-    return { ok: true, stdout, stderr: "", exitCode: 0 };
-  } catch (err) {
-    return normalizeGitExecError(err);
-  }
-};
-function normalizeGitExecError(err) {
-  if (err && typeof err === "object") {
-    const e = err;
-    const result = {
-      ok: false,
-      stdout: bufferOrStringToString(e.stdout),
-      stderr: bufferOrStringToString(e.stderr),
-      exitCode: typeof e.status === "number" ? e.status : -1
-    };
-    const message = e.message ?? (e.code ? `git exec failed: ${e.code}` : void 0);
-    if (message) result.error = message;
-    return result;
-  }
-  return { ok: false, stdout: "", stderr: "", exitCode: -1, error: String(err) };
-}
-function bufferOrStringToString(v) {
-  if (v === void 0) return "";
-  if (typeof v === "string") return v;
-  return v.toString("utf8");
-}
-function getHeadSha(projectRoot, executor = defaultGitExecutor) {
-  const r = executor(projectRoot, ["rev-parse", "--short", "HEAD"]);
-  if (!r.ok) return null;
-  return r.stdout.trim() || null;
-}
-function getHeadShaFull(projectRoot, executor = defaultGitExecutor) {
-  const r = executor(projectRoot, ["rev-parse", "HEAD"]);
-  if (!r.ok) return null;
-  return r.stdout.trim() || null;
-}
-function unsafeOperand(operands) {
-  for (const [name, value] of Object.entries(operands)) {
-    if (!isSafeRevisionToken(value)) {
-      return `refusing to run git: ${name} is not a safe operand (${JSON.stringify(value)}) \u2014 a value starting with '-' is read by git as an OPTION, not a name`;
-    }
-  }
-  return null;
-}
-function gitCommit(projectRoot, message, executor = defaultGitExecutor) {
-  const sha_before = getHeadSha(projectRoot, executor);
-  const exec = executor(projectRoot, ["commit", "-m", message]);
-  if (!exec.ok) {
-    const result = { ok: false, sha_before, sha_after: null };
-    if (exec.stderr) result.stderr = exec.stderr.trim();
-    if (exec.error) result.error = exec.error;
-    return result;
-  }
-  const sha_after = getHeadSha(projectRoot, executor);
-  return { ok: true, sha_before, sha_after };
-}
-function gitPush(projectRoot, remote, branch, executor = defaultGitExecutor) {
-  const bad = unsafeOperand({ remote, branch });
-  if (bad) return { ok: false, error: bad };
-  const exec = executor(projectRoot, ["push", "--", remote, branch]);
-  if (!exec.ok) {
-    const result = { ok: false };
-    if (exec.stderr) result.stderr = exec.stderr.trim();
-    if (exec.error) result.error = exec.error;
-    if (exec.stdout) result.stdout = exec.stdout.trim();
-    return result;
-  }
-  return { ok: true, stdout: exec.stdout.trim() };
-}
-function gitMerge(projectRoot, sourceBranch, options, executor = defaultGitExecutor) {
-  const bad = unsafeOperand({ sourceBranch });
-  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
-  const args = ["merge"];
-  if (options.no_ff) args.push("--no-ff");
-  if (options.allow_unrelated_histories) args.push("--allow-unrelated-histories");
-  args.push("--", sourceBranch);
-  const sha_before = getHeadSha(projectRoot, executor);
-  const exec = executor(projectRoot, args);
-  if (!exec.ok) {
-    const result = { ok: false, sha_before, sha_after: null };
-    if (exec.stderr) result.stderr = exec.stderr.trim();
-    if (exec.stdout) result.stdout = exec.stdout.trim();
-    if (exec.error) result.error = exec.error;
-    return result;
-  }
-  const sha_after = getHeadSha(projectRoot, executor);
-  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
-}
-function gitRebase(projectRoot, upstream, executor = defaultGitExecutor) {
-  const bad = unsafeOperand({ upstream });
-  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
-  const sha_before = getHeadSha(projectRoot, executor);
-  const exec = executor(projectRoot, ["rebase", "--", upstream]);
-  if (!exec.ok) {
-    const result = { ok: false, sha_before, sha_after: null };
-    if (exec.stderr) result.stderr = exec.stderr.trim();
-    if (exec.stdout) result.stdout = exec.stdout.trim();
-    if (exec.error) result.error = exec.error;
-    return result;
-  }
-  const sha_after = getHeadSha(projectRoot, executor);
-  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
-}
-function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
-  const bad = unsafeOperand({ sourceBranch });
-  if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad };
-  const sha_before = getHeadSha(projectRoot, executor);
-  const exec = executor(projectRoot, ["merge", "--squash", "--", sourceBranch]);
-  if (!exec.ok) {
-    const result = { ok: false, sha_before, sha_after: null };
-    if (exec.stderr) result.stderr = exec.stderr.trim();
-    if (exec.stdout) result.stdout = exec.stdout.trim();
-    if (exec.error) result.error = exec.error;
-    return result;
-  }
-  const sha_after = getHeadSha(projectRoot, executor);
-  return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
-}
-
 // src/lib/branch-protection.ts
 init_esm_shims();
 var DEFAULT_PROTECTED_BRANCHES = [
@@ -23140,7 +23267,12 @@ function effectiveProtectedList(config2) {
   if (extras.length > 0) source = "config+extras";
   else if (usingConfig) source = "config";
   else source = "default";
-  return { list: merged, source };
+  const narrowed = DEFAULT_PROTECTED_BRANCHES.filter((d) => !merged.includes(d));
+  return { list: merged, source, narrowed: [...narrowed] };
+}
+function narrowedProtectionNotice(effective) {
+  if (effective.narrowed.length === 0) return "";
+  return `\u26A0 This project's .rsct.json protects FEWER branches than the built-in default \u2014 dropped: ${effective.narrowed.join(", ")}. Protecting now: ${effective.list.join(", ")}.`;
 }
 function isProtectedBranch(branch, list) {
   if (!branch) return false;
@@ -24269,7 +24401,7 @@ function getInstallDriftNotice(args) {
 
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   // Values are deliberately LOOSE here while the exposed inputSchema advertises the
   // strict contract. rsct_status is the session-bootstrap tool documented "always
   // succeeds", and its .parse() is unguarded — a z.enum would turn a paraphrased
@@ -24288,7 +24420,7 @@ var statusTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       update_check: {
         type: "string",
@@ -25094,7 +25226,7 @@ var loadContextTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       decisions_excerpt_count: {
         type: "number",
@@ -25344,7 +25476,7 @@ var filterSchema = external_exports.object({
   status: external_exports.enum(["active", "superseded", "deprecated"]).optional()
 }).strict();
 var getDecisionsInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   filter: filterSchema.optional()
 }).strict();
 var getDecisionsTool = {
@@ -25355,7 +25487,7 @@ var getDecisionsTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       filter: {
         type: "object",
@@ -25439,7 +25571,7 @@ function buildHints2(snapshot, filter, filteredCount) {
 // src/tools/get-knowledge.ts
 init_esm_shims();
 var getKnowledgeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   category: external_exports.string().min(1).describe(
     "Knowledge category file slug, matching documentation/knowledge/<category>.md. Canonical categories: " + KNOWN_CATEGORIES.join(", ")
   ),
@@ -25456,7 +25588,7 @@ var getKnowledgeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       category: {
         type: "string",
@@ -25923,7 +26055,7 @@ ${continuation[1].trim()}` : continuation[1].trim();
 // src/tools/get-environments.ts
 var SCOPES = ["profiles", "infrastructure", "all"];
 var getEnvironmentsInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   scope: external_exports.enum(SCOPES)
 }).strict();
 var getEnvironmentsTool = {
@@ -25935,7 +26067,7 @@ var getEnvironmentsTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       scope: {
         type: "string",
@@ -26088,7 +26220,7 @@ function readArchitectureModules(projectRoot, subdir) {
 // src/tools/get-architecture.ts
 var SCOPES2 = ["overview", "module", "impact", "all"];
 var getArchitectureInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   scope: external_exports.enum(SCOPES2).default("overview"),
   module_name: external_exports.string().min(1).optional().describe(
     "Optional module slug to narrow scope=module or scope=impact to a single file. Matches the basename without .md."
@@ -26102,7 +26234,7 @@ var getArchitectureTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       scope: {
         type: "string",
@@ -26194,7 +26326,7 @@ function surfaceFilterHints(hints, label, set, moduleName) {
 init_esm_shims();
 var SCOPES3 = ["governance", "index", "all"];
 var getUniverseInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   scope: external_exports.enum(SCOPES3).default("governance").describe(
     "governance: read docs/governance/*.md. index: read docs/INDEX.md. all: both."
   ),
@@ -26213,7 +26345,7 @@ var getUniverseTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       scope: {
         type: "string",
@@ -26403,7 +26535,7 @@ function unregisteredNames(names, registered) {
 
 // src/tools/get-topology.ts
 var getTopologyInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
 }).strict();
 var getTopologyTool = {
   name: "rsct_get_topology",
@@ -26413,7 +26545,7 @@ var getTopologyTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       }
     },
     additionalProperties: false
@@ -26781,7 +26913,7 @@ function detectOnboarding(config2, projectRoot, opts = {}) {
 
 // src/tools/detect-onboarding.ts
 var detectOnboardingInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
 }).strict();
 var detectOnboardingTool = {
   name: "rsct_detect_onboarding",
@@ -26791,7 +26923,7 @@ var detectOnboardingTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       }
     },
     additionalProperties: false
@@ -27049,7 +27181,7 @@ function explain(matches, antiMatches, scanned, scannedAnti) {
 // src/tools/check-premise.ts
 var AGAINST = ["premises", "adrs", "both"];
 var checkPremiseInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   claim: external_exports.string().min(5).describe(
     'A short proposal or design statement to vet against existing decisions (e.g., "use DynamoDB for orders" or "store session tokens in cookies").'
   ),
@@ -27064,7 +27196,7 @@ var checkPremiseTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       claim: {
         type: "string",
@@ -27183,7 +27315,7 @@ function buildHints5(installed, decisions, antiDecisions, recommendation, antiMa
 // src/tools/check-branch.ts
 init_esm_shims();
 var checkBranchInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   branch: external_exports.string().optional().describe(
     "Optional branch name to check instead of the current git HEAD. Useful for what-if queries."
   )
@@ -27196,7 +27328,7 @@ var checkBranchTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       branch: {
         type: "string",
@@ -27262,7 +27394,7 @@ function buildHints6(input) {
 // src/tools/check-secrets.ts
 init_esm_shims();
 var checkSecretsInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   staged_only: external_exports.boolean().optional().describe(
     "When true (default), scan only `git diff --cached`. When false, scan unstaged changes too."
   ),
@@ -27278,7 +27410,7 @@ var checkSecretsTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       staged_only: {
         type: "boolean",
@@ -27365,7 +27497,7 @@ var phaseStateOverrideSchema = external_exports.object({
   context_stale: external_exports.object({ since: external_exports.string(), reason: external_exports.enum(["plan_closed", "pivot"]) }).strict().optional()
 }).strict();
 var checkEditScopeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   file_path: external_exports.string().min(1, "file_path required").describe("Path to check against the active spec scope. Forward and backslash both accepted."),
   phase_state_override: phaseStateOverrideSchema.optional().describe(
     "Programmatic override of `.rsct/phase-state.json`. When provided, the file is NOT read from disk."
@@ -27379,7 +27511,7 @@ var checkEditScopeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       file_path: {
         type: "string",
@@ -27755,6 +27887,7 @@ function evaluateFreeEligibility(args) {
 
 // src/lib/dev-approval.ts
 init_esm_shims();
+var APPROVAL_CONSUMED_EVENT = "approval.consumed";
 var DevApprovalSchema = external_exports.object({
   timestamp: external_exports.string().min(1, "timestamp required"),
   action_scope: external_exports.string().min(1, "action_scope required"),
@@ -27787,22 +27920,46 @@ var DEFAULT_FABRICATION_THRESHOLD_MS = 500;
 var MIN_REASON_LENGTH = 10;
 var APPROVALS_STORE_RELATIVE = ".rsct/approvals-seen.json";
 function resolveStorePath(projectRoot) {
-  return join(projectRoot, APPROVALS_STORE_RELATIVE);
+  return join(anchorFor(projectRoot).root, APPROVALS_STORE_RELATIVE);
+}
+function consumedInAudit(projectRoot, auditConfig, approval) {
+  let anyEverRecorded = false;
+  try {
+    const path2 = decideAuditPath(projectRoot, auditConfig).path;
+    if (!existsSync(path2)) return { thisApproval: false, anyEverRecorded };
+    for (const line of readFileSync(path2, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      if (!trimmed.includes(APPROVAL_CONSUMED_EVENT)) continue;
+      try {
+        const entry = JSON.parse(trimmed);
+        if (entry["event"] !== APPROVAL_CONSUMED_EVENT) continue;
+        anyEverRecorded = true;
+        if (entry["action_scope"] === approval.action_scope && entry["approval_timestamp"] === approval.timestamp) {
+          return { thisApproval: true, anyEverRecorded: true };
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+  }
+  return { thisApproval: false, anyEverRecorded };
 }
 function loadStore(projectRoot) {
   const path2 = resolveStorePath(projectRoot);
   if (!existsSync(path2)) {
-    return { store: { version: 1, entries: [] }, corrupt: false };
+    return { store: { version: 1, entries: [] }, corrupt: false, absent: true };
   }
   try {
     const raw = readFileSync(path2, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.entries)) {
-      return { store: { version: 1, entries: [] }, corrupt: true };
+      return { store: { version: 1, entries: [] }, corrupt: true, absent: false };
     }
-    return { store: parsed, corrupt: false };
+    return { store: parsed, corrupt: false, absent: false };
   } catch {
-    return { store: { version: 1, entries: [] }, corrupt: true };
+    return { store: { version: 1, entries: [] }, corrupt: true, absent: false };
   }
 }
 function lastConsumedAt(store) {
@@ -27849,12 +28006,14 @@ function validateDevApproval(raw, options) {
       fabrication_signals: []
     };
   }
-  const { store, corrupt } = loadStore(options.projectRoot);
+  const { store, corrupt, absent } = loadStore(options.projectRoot);
   const signals = [];
   if (corrupt) signals.push("approvals_store_corrupt");
+  const audit = consumedInAudit(options.projectRoot, options.auditConfig, approval);
+  if (absent && audit.anyEverRecorded) signals.push("approvals_store_absent");
   const reused = store.entries.some(
     (e) => e.action_scope === approval.action_scope && e.timestamp === approval.timestamp
-  );
+  ) || audit.thisApproval;
   if (reused) {
     return {
       status: "rejected",
@@ -27908,6 +28067,21 @@ function detectBurstPattern(store, now) {
 function recordConsumedApproval(approval, options) {
   const path2 = resolveStorePath(options.projectRoot);
   const now = options.now ?? /* @__PURE__ */ new Date();
+  try {
+    const auditPath = decideAuditPath(options.projectRoot, options.auditConfig).path;
+    ensureParentDir(auditPath);
+    appendFileSync(
+      auditPath,
+      JSON.stringify({
+        ts: now.toISOString(),
+        event: APPROVAL_CONSUMED_EVENT,
+        action_scope: approval.action_scope,
+        approval_timestamp: approval.timestamp
+      }) + "\n",
+      "utf8"
+    );
+  } catch {
+  }
   try {
     ensureParentDir(path2);
     const { store } = loadStore(options.projectRoot);
@@ -28199,6 +28373,7 @@ async function gateRequest(opts) {
   };
   if (opts.approvalModes !== void 0) validateOpts.approvalModes = opts.approvalModes;
   if (opts.now !== void 0) validateOpts.now = opts.now;
+  if (opts.auditConfig !== void 0) validateOpts.auditConfig = opts.auditConfig;
   const validation = validateDevApproval(opts.approval, validateOpts);
   if (validation.status === "rejected") {
     return {
@@ -28380,9 +28555,33 @@ function resolveAbsTtlMinutes(input, configDefault) {
   return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v));
 }
 
+// src/lib/gate-dialog.ts
+init_esm_shims();
+function gateDialogFooter(projectRoot, config2) {
+  const notice = config2 === void 0 ? "" : narrowedProtectionNotice(effectiveProtectedList(config2));
+  return `
+
+${repositoryDialogLine(projectRoot)}${notice ? `
+${notice}` : ""}`;
+}
+function anchorHints(projectRoot, auditConfig) {
+  const hints = [];
+  const anchor = anchorFor(projectRoot);
+  if (anchor.detail !== null && anchor.status !== "not-applicable") {
+    hints.push(`\u2139 ${anchor.detail}`);
+  }
+  const decision = decideAuditPath(projectRoot, auditConfig);
+  if (decision.escaped !== null) {
+    hints.push(
+      `\u26A0 .rsct.json audit.path ("${decision.escaped.replace(/\\/g, "/")}") resolves OUTSIDE the project and was ignored \u2014 the audit log stays at ${decision.path.replace(/\\/g, "/")}. An audit log outside the repository can be swapped for a blank one without touching the project.`
+    );
+  }
+  return hints;
+}
+
 // src/tools/request-commit.ts
 var requestCommitInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   message: external_exports.string().min(1, "commit message required").describe("Commit message to pass to `git commit -m`."),
   dev_approval: external_exports.unknown().optional().describe(
     "The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action \xA7C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) \u2014 but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff."
@@ -28396,7 +28595,7 @@ var requestCommitTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       message: {
         type: "string",
@@ -28442,6 +28641,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const advisories = [];
+  advisories.push(...anchorHints(projectRoot, config2?.audit));
   const withAdvisories = (hints2) => [...advisories, ...hints2];
   const installAdvisory = evaluateInstallAdvisory({
     projectRoot,
@@ -28526,10 +28726,11 @@ async function requestCommitHandler(rawInput, internal = {}) {
         title: "RSCT \u2014 commit approval",
         message: `Approve commit on '${branchLabel}'?
 
-message: ${input.message}`
+message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       },
       projectRoot,
       ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+      auditConfig: config2?.audit,
       promptFn,
       now
     });
@@ -29003,7 +29204,7 @@ message: ${input.message}`
   let freeSummary = null;
   const bookkeepingHints = [];
   if (approval) {
-    const record2 = recordApproval(approval, { projectRoot, now });
+    const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
     antiReplayPersisted = record2.ok;
     if (!record2.ok) {
       antiReplayError = record2.error;
@@ -29351,7 +29552,7 @@ function pushRefspecRejectReason(reason, refspec) {
 
 // src/tools/request-push.ts
 var requestPushInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   remote: external_exports.string().optional().describe(
     "Configured remote NAME (default: origin). A URL or filesystem path is refused \u2014 it would send the repository somewhere branch protection cannot see. Add it with `git remote add` first."
   ),
@@ -29373,7 +29574,7 @@ var requestPushTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       remote: {
         type: "string",
@@ -29409,6 +29610,7 @@ async function requestPushHandler(rawInput, internal = {}) {
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const { list: protectedList } = effectiveProtectedList(config2);
   const advisories = [];
+  advisories.push(...anchorHints(projectRoot, config2?.audit));
   const withAdvisories = (hints2) => [...advisories, ...hints2];
   const installAdvisory = evaluateInstallAdvisory({
     projectRoot,
@@ -29581,10 +29783,11 @@ async function requestPushHandler(rawInput, internal = {}) {
       message: [
         `Approve push of '${branchLabel}' to '${remote}'?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
-      ].join("\n")
+      ].join("\n") + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -29722,7 +29925,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       hints: withAdvisories(["git push failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."])
     };
   }
-  const record2 = recordApproval(approval, { projectRoot, now });
+  const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
   const audit = appendAudit(
     projectRoot,
     {
@@ -29799,7 +30002,7 @@ async function requestPushHandler(rawInput, internal = {}) {
 // src/tools/request-merge.ts
 init_esm_shims();
 var requestMergeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   source_branch: external_exports.string().min(1, "source_branch required").describe("Branch to merge INTO the current HEAD."),
   no_ff: external_exports.boolean().optional().describe("Pass --no-ff to git merge (default true)."),
   allow_unrelated_histories: external_exports.boolean().optional().describe(
@@ -29820,7 +30023,7 @@ var requestMergeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       source_branch: {
         type: "string",
@@ -29860,6 +30063,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const advisories = [];
+  advisories.push(...anchorHints(projectRoot, config2?.audit));
   const withAdvisories = (hints2) => [...advisories, ...hints2];
   const installAdvisory = evaluateInstallAdvisory({
     projectRoot,
@@ -29971,10 +30175,11 @@ async function requestMergeHandler(rawInput, internal = {}) {
       message: [
         `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
-      ].join("\n")
+      ].join("\n") + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -30193,7 +30398,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       hints: withAdvisories(["git merge failed \u2014 approval NOT consumed. Resolve conflicts or fix the error, then retry with the same dev_approval."])
     };
   }
-  const record2 = recordApproval(approval, { projectRoot, now });
+  const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
   const audit = appendAudit(
     projectRoot,
     {
@@ -30281,7 +30486,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
 // src/tools/plan-authorize.ts
 init_esm_shims();
 var planAuthorizeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   dev_approval: external_exports.unknown().describe(
     'The dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:" (INV-2.2 scope_mismatch). Validated via the full \xA7C gate (schema/skew/anti-reuse/fabrication + OS dialog). This single approval mints a batch token covering up to max_actions commits.'
   ),
@@ -30301,7 +30506,7 @@ var planAuthorizeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       dev_approval: {
         type: "object",
@@ -30338,10 +30543,11 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
       title: "RSCT \u2014 authorize batch plan execution",
       message: `Authorize batch commits for this plan on '${branchLabel}'?
 
-This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 limited to this plan and branch, until it expires, runs out, or is revoked.`
+This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 limited to this plan and branch, until it expires, runs out, or is revoked.` + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -30372,7 +30578,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [...anchorHints(projectRoot, config2?.audit), `Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const reject = (reject_kind, reason) => {
@@ -30402,7 +30608,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason]
+      hints: [...anchorHints(projectRoot, config2?.audit), reason]
     };
   };
   if (branch === null) {
@@ -30486,10 +30692,10 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`]
+      hints: [...anchorHints(projectRoot, config2?.audit), `\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`]
     };
   }
-  const record2 = recordApproval(gate.approval, { projectRoot, now });
+  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const audit = appendAudit(
     projectRoot,
     {
@@ -30507,6 +30713,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
   );
   const afields = auditFields(audit);
   const hints = [
+    ...anchorHints(projectRoot, config2?.audit),
     `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`
   ];
   if (!record2.ok) {
@@ -30538,7 +30745,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
 // src/tools/plan-revoke.ts
 init_esm_shims();
 var planRevokeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   reason: external_exports.string().optional().describe("Optional human-readable reason; lands in the audit log.")
 }).strict();
 var planRevokeTool = {
@@ -30549,7 +30756,7 @@ var planRevokeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       reason: {
         type: "string",
@@ -30628,7 +30835,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
 // src/tools/plan-dispose.ts
 init_esm_shims();
 var planDisposeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   plan_slug: external_exports.string().min(1).describe("The plan slug (as in plan_<slug>.md) whose artifacts to dispose."),
   decision: external_exports.enum(["keep", "delete"]).describe("'keep' retains the plan artifacts; 'delete' advises removing the loose ones.")
 }).strict();
@@ -30640,7 +30847,7 @@ var planDisposeTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       plan_slug: {
         type: "string",
@@ -30725,7 +30932,7 @@ async function planDisposeHandler(rawInput, internal = {}) {
 // src/tools/request-rebase.ts
 init_esm_shims();
 var requestRebaseInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   mode: external_exports.enum(["rebase", "squash"]).optional().describe("'rebase' = git rebase current onto ref; 'squash' = git merge --squash ref into current (default 'rebase')."),
   ref: external_exports.string().min(1, "ref required").describe("For mode='rebase': the upstream to rebase onto. For mode='squash': the branch to squash-merge into the current HEAD."),
   dev_approval: external_exports.unknown().describe("The dev_approval payload. Validated via lib/dev-approval (schema/skew/anti-reuse/fabrication)."),
@@ -30737,7 +30944,7 @@ var requestRebaseTool = {
   inputSchema: {
     type: "object",
     properties: {
-      project_root: { type: "string", description: "Optional absolute path to override project root detection." },
+      project_root: { type: "string", description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent." },
       mode: { type: "string", enum: ["rebase", "squash"], description: "'rebase' or 'squash' (default 'rebase')." },
       ref: { type: "string", description: "Upstream to rebase onto, or branch to squash-merge." },
       dev_approval: { type: "object", description: "dev_approval payload." },
@@ -30777,8 +30984,12 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     audit_error: null,
     anti_replay_persisted: null,
     anti_replay_error: null,
-    hints: [],
-    ...over
+    ...over,
+    // #92 — the anchor facts ride EVERY return path, including the rejects.
+    // Spreading `over` first and then rebuilding `hints` is deliberate: a caller
+    // that passes its own hints must not drop the relocation notice, and a
+    // headless run has no dialog to carry it instead.
+    hints: [...anchorHints(projectRoot, config2?.audit), ...over.hints ?? []]
   });
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null;
   const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : void 0;
@@ -30836,10 +31047,11 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 rebase approval",
-      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)`
+      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)` + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -30924,7 +31136,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       ]
     });
   }
-  const record2 = recordApproval(approval, { projectRoot, now });
+  const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
   const audit = appendAudit(
     projectRoot,
     {
@@ -31824,6 +32036,7 @@ ${internal.dialogDetail}` : ""}`
     ...config2?.approval_modes !== void 0 && {
       approvalModes: config2.approval_modes
     },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -31868,7 +32081,8 @@ ${internal.dialogDetail}` : ""}`
   const writeResult = writePhaseState(input.projectRoot, newState);
   const record2 = recordApproval(gate.approval, {
     projectRoot: input.projectRoot,
-    now
+    now,
+    auditConfig: config2?.audit
   });
   const recommended = nextPhase(input.phase);
   const completedAt = now.toISOString();
@@ -31936,7 +32150,7 @@ ${internal.dialogDetail}` : ""}`
 // src/tools/phase-verification-start.ts
 var TIER_VALUES = ["trivial", "small", "standard", "complex"];
 var phaseVerificationStartInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   spec_ref: external_exports.string().min(1, "spec_ref required").describe(
     'Free-form spec identifier \u2014 typically the plan slug (e.g., "feat-aprovacao") or a path to plan_<slug>.md. Used to correlate start/complete and as audit key.'
   ),
@@ -31956,7 +32170,7 @@ var phaseVerificationStartTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       spec_ref: {
         type: "string",
@@ -32244,7 +32458,7 @@ var findingActionSchema = external_exports.object({
   note: external_exports.string().optional()
 }).strict();
 var phaseVerificationCompleteInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   spec_ref: external_exports.string().min(1, "spec_ref required").describe("Must match the spec_ref recorded by the open V phase in .rsct/phase-state.json."),
   findings_actions: external_exports.array(findingActionSchema).default([]).describe(
     'One action per finding raised by this V phase \u2014 EVERY finding needs one, or completion is rejected. Any action="block" aborts completion.'
@@ -32266,7 +32480,7 @@ var phaseVerificationCompleteTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       },
       spec_ref: {
         type: "string",
@@ -32486,6 +32700,7 @@ Evidence: ${describeEvidenceMix(evidence_mix)}`
     ...config2?.approval_modes !== void 0 && {
       approvalModes: config2.approval_modes
     },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -32570,7 +32785,7 @@ Evidence: ${describeEvidenceMix(evidence_mix)}`
     },
     config2?.audit
   );
-  const record2 = recordApproval(gate.approval, { projectRoot, now });
+  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const fields = auditFields(completeAudit);
   const hints = [];
   if (writeResult.ok) {
@@ -33241,7 +33456,7 @@ async function phaseStatusHandler(rawInput) {
 // src/tools/phase-research-start.ts
 init_esm_shims();
 var phaseResearchStartInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   spec_ref: external_exports.string().min(1, "spec_ref required").describe(
     'Free-form spec identifier \u2014 typically the plan slug (e.g., "feat-foo") or a path to plan_<slug>.md. Correlates start/complete and used as audit key.'
   ),
@@ -34581,7 +34796,7 @@ async function phaseTestCompleteHandler(rawInput, internal = {}) {
 // src/tools/phase-abandon.ts
 init_esm_shims();
 var phaseAbandonInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection."),
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   reason: external_exports.string().min(10, "reason must be \u226510 chars \u2014 explain why this phase is being discarded").describe(
     "Human-readable reason for abandoning the active phase. Lands in the audit log so a future reader can understand why work was discarded."
   ),
@@ -34658,6 +34873,7 @@ This discards the phase without advancing the RSCT cycle.`
     ...config2?.approval_modes !== void 0 && {
       approvalModes: config2.approval_modes
     },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -34698,7 +34914,7 @@ This discards the phase without advancing the RSCT cycle.`
     (key) => newState[key] !== void 0
   );
   const writeResult = writePhaseState(projectRoot, newState);
-  const record2 = recordApproval(gate.approval, { projectRoot, now });
+  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const abandonedAudit = appendAudit(
     projectRoot,
     {
@@ -35128,6 +35344,7 @@ Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching labe
     ...config2?.approval_modes !== void 0 && {
       approvalModes: config2.approval_modes
     },
+    auditConfig: config2?.audit,
     promptFn,
     now
   });
@@ -35212,7 +35429,7 @@ Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching labe
       ]
     };
   }
-  const record2 = recordApproval(gate.approval, { projectRoot, now });
+  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const createdAudit = appendAudit(
     projectRoot,
     {
@@ -36171,7 +36388,7 @@ async function tutorStepHandler(rawInput) {
 // src/tools/audit.ts
 init_esm_shims();
 var auditInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection.")
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
 }).strict();
 var COVERAGE_BOUNDARY = [
   "Settings drift (.claude/settings.json ownership) is NOT checked here \u2014 it needs two git reads to assemble, and this tool spawns no processes. It already reaches you at the commit gate (rsct_request_commit).",
@@ -36203,7 +36420,7 @@ var auditTool = {
     properties: {
       project_root: {
         type: "string",
-        description: "Optional absolute path to override project root detection."
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
       }
     },
     additionalProperties: false

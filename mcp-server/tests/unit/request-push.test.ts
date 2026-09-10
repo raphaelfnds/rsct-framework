@@ -561,8 +561,14 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
     )
     expect(seen).toContain('Approve push')
     expect(seen).toContain('RSCT enforcement is NOT running')
-    // One line, not the whole hint — the dialog is a decision surface.
-    expect(seen.split('\n')).toHaveLength(2)
+    // One line, not the whole hint — the dialog is a decision surface. The old
+    // form asserted the WHOLE message was 2 lines; #92 defect F added the
+    // repository the push lands in, so the message grew. The guarantee being
+    // protected is the advisory's own line count, and it is unchanged.
+    const advisoryLines = seen
+      .split('\n')
+      .filter((l) => l.includes('RSCT enforcement is NOT running'))
+    expect(advisoryLines).toHaveLength(1)
   })
 
   it('says nothing when the project is not rsct-managed', async () => {

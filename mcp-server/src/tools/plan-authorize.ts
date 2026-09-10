@@ -39,13 +39,14 @@ import {
   PLAN_TOKEN_MAX_ACTIONS_MIN,
   PLAN_TOKEN_MAX_ACTIONS_MAX,
 } from '../lib/plan-authorization.js'
+import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 
 export const planAuthorizeInputSchema = z
   .object({
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     dev_approval: z
       .unknown()
       .describe(
@@ -119,7 +120,7 @@ export const planAuthorizeTool: Tool = {
     properties: {
       project_root: {
         type: 'string',
-        description: 'Optional absolute path to override project root detection.',
+        description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
       },
       dev_approval: {
         type: 'object',
@@ -160,10 +161,11 @@ export async function planAuthorizeHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — authorize batch plan execution',
-      message: `Authorize batch commits for this plan on '${branchLabel}'?\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.`,
+      message: `Authorize batch commits for this plan on '${branchLabel}'?\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.` + gateDialogFooter(projectRoot, config),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -195,7 +197,7 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [...anchorHints(projectRoot, config?.audit), `Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -231,7 +233,7 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [reason],
+      hints: [...anchorHints(projectRoot, config?.audit), reason],
     }
   }
 
@@ -331,12 +333,12 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [`⚠ token NOT minted — ${reason}. dev_approval NOT consumed; retry.`],
+      hints: [...anchorHints(projectRoot, config?.audit), `⚠ token NOT minted — ${reason}. dev_approval NOT consumed; retry.`],
     }
   }
 
   // FV4: token persisted → now consume the emitting approval (anti-reuse).
-  const record = recordApproval(gate.approval, { projectRoot, now })
+  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
   const audit = appendAudit(
     projectRoot,
     {
@@ -354,7 +356,7 @@ export async function planAuthorizeHandler(
   )
   const afields = auditFields(audit)
 
-  const hints: string[] = [
+  const hints: string[] = [...anchorHints(projectRoot, config?.audit),
     `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`,
   ]
   if (!record.ok) {

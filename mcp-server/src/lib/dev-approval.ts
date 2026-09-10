@@ -1,8 +1,20 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { ensureParentDir } from './io-utils.js'
-import type { RsctApprovalModes } from './project-root.js'
+import { anchorFor } from './repo-anchor.js'
+import { decideAuditPath } from './audit-log.js'
+import type { RsctApprovalModes, RsctAuditConfig } from './project-root.js'
+
+/**
+ * The audit event that records a consumed approval. Written beside the store,
+ * read back as the other half of the anti-reuse union.
+ *
+ * `reason` is deliberately NOT recorded: the store already omits it, it is free
+ * developer text, and the audit log must not carry free-form payload that may
+ * contain secrets.
+ */
+const APPROVAL_CONSUMED_EVENT = 'approval.consumed'
 
 /**
  * Schema for the `dev_approval` payload required by every §C-gated tool
@@ -41,6 +53,15 @@ export type FabricationSignal =
   | 'reason_too_short'
   | 'implausibly_fast'
   | 'approvals_store_corrupt'
+  /**
+   * #92 — the anti-reuse store is ABSENT. A corrupt store already raised a
+   * signal; an absent one raised nothing, and MEASURED, `loadStore` reports
+   * `corrupt: false` for a missing file. So `rm .rsct/approvals-seen.json` was
+   * indistinguishable from a fresh project. It stays a signal rather than a
+   * rejection because a genuinely fresh project has no store either — the
+   * audit half of the union is what actually catches the replay.
+   */
+  | 'approvals_store_absent'
   | 'scope_mismatch'
   | 'burst_pattern'
   // plan-lifecycle-v2 (Bloco 1.3): the declared task tier is trivial/small but
@@ -73,6 +94,15 @@ export interface ValidateOptions {
    * Forwarded automatically by {@link gateRequest}.
    */
   toolName?: string
+  /**
+   * `.rsct.json` `audit` block, so the audit half of the anti-reuse union reads
+   * the same file the consumption was written to. Omitting it is safe but
+   * narrower: a project that configured `audit.path` would have its consumption
+   * records written and read at the default location instead, which keeps the
+   * two halves consistent with each other while splitting them from the rest of
+   * the log. Every gated call site forwards it.
+   */
+  auditConfig?: RsctAuditConfig | undefined
 }
 
 /**
@@ -121,14 +151,79 @@ interface ApprovalsStore {
   entries: StoredEntry[]
 }
 
+/**
+ * #92 — the anti-reuse store follows the REPOSITORY, not the declared root.
+ *
+ * MEASURED before the change: the identical `dev_approval` payload was rejected
+ * as reused at the real root and accepted as valid at a crafted subdirectory of
+ * the same repository — and on a host with no dialog channel it was then
+ * approved via `channel: 'trust'` with no fabrication signals. INV-2, "one
+ * approval, one action", was not durable, because the store that proves an
+ * approval was spent lived inside the thing being relocated.
+ */
 function resolveStorePath(projectRoot: string): string {
-  return join(projectRoot, APPROVALS_STORE_RELATIVE)
+  return join(anchorFor(projectRoot).root, APPROVALS_STORE_RELATIVE)
 }
 
-function loadStore(projectRoot: string): { store: ApprovalsStore; corrupt: boolean } {
+/**
+ * The audit half of the anti-reuse check.
+ *
+ * The store alone cannot answer "was this approval already spent": MEASURED,
+ * `loadStore` returns an empty store for an ABSENT file with `corrupt: false`,
+ * so `rm .rsct/approvals-seen.json` is indistinguishable from a fresh project.
+ * The log is append-only and now repository-bound, so a consumption recorded
+ * there survives deleting the store.
+ *
+ * An idea that looked obvious and was REFUTED before this was written: deriving
+ * this from the existing log as-is. No audit event carried `action_scope` or
+ * `timestamp` — they appeared only in tool descriptions and one warning string —
+ * so there was nothing to cross-check against. Recording them is the addition
+ * that makes the union possible, not a free ride.
+ */
+function consumedInAudit(
+  projectRoot: string,
+  auditConfig: RsctAuditConfig | undefined,
+  approval: { action_scope: string; timestamp: string },
+): { thisApproval: boolean; anyEverRecorded: boolean } {
+  let anyEverRecorded = false
+  try {
+    const path = decideAuditPath(projectRoot, auditConfig).path
+    if (!existsSync(path)) return { thisApproval: false, anyEverRecorded }
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.length === 0) continue
+      // A cheap pre-filter: the overwhelming majority of lines are not approval
+      // records, and this scan runs on the validation path of every gated tool.
+      if (!trimmed.includes(APPROVAL_CONSUMED_EVENT)) continue
+      try {
+        const entry = JSON.parse(trimmed) as Record<string, unknown>
+        if (entry['event'] !== APPROVAL_CONSUMED_EVENT) continue
+        anyEverRecorded = true
+        if (
+          entry['action_scope'] === approval.action_scope &&
+          entry['approval_timestamp'] === approval.timestamp
+        ) {
+          return { thisApproval: true, anyEverRecorded: true }
+        }
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    // Unreadable log ⇒ the store is the only witness. Returning false here is
+    // the same posture the store's own absence takes; it never invents a reuse.
+  }
+  return { thisApproval: false, anyEverRecorded }
+}
+
+function loadStore(projectRoot: string): {
+  store: ApprovalsStore
+  corrupt: boolean
+  absent: boolean
+} {
   const path = resolveStorePath(projectRoot)
   if (!existsSync(path)) {
-    return { store: { version: 1, entries: [] }, corrupt: false }
+    return { store: { version: 1, entries: [] }, corrupt: false, absent: true }
   }
   try {
     const raw = readFileSync(path, 'utf8')
@@ -138,11 +233,11 @@ function loadStore(projectRoot: string): { store: ApprovalsStore; corrupt: boole
       typeof parsed !== 'object' ||
       !Array.isArray((parsed as ApprovalsStore).entries)
     ) {
-      return { store: { version: 1, entries: [] }, corrupt: true }
+      return { store: { version: 1, entries: [] }, corrupt: true, absent: false }
     }
-    return { store: parsed as ApprovalsStore, corrupt: false }
+    return { store: parsed as ApprovalsStore, corrupt: false, absent: false }
   } catch {
-    return { store: { version: 1, entries: [] }, corrupt: true }
+    return { store: { version: 1, entries: [] }, corrupt: true, absent: false }
   }
 }
 
@@ -216,13 +311,29 @@ export function validateDevApproval(
     }
   }
 
-  const { store, corrupt } = loadStore(options.projectRoot)
+  const { store, corrupt, absent } = loadStore(options.projectRoot)
   const signals: FabricationSignal[] = []
   if (corrupt) signals.push('approvals_store_corrupt')
 
-  const reused = store.entries.some(
-    (e) => e.action_scope === approval.action_scope && e.timestamp === approval.timestamp,
-  )
+  // #92 — consumed is the UNION of the store and the append-only audit log.
+  // Either witness alone is defeatable: the store by `rm`, and the log only by
+  // an edit that the log's own append-only shape and its repository binding
+  // make visible. A partial write failure therefore degrades to SAFE — one
+  // witness marking the approval spent is enough.
+  const audit = consumedInAudit(options.projectRoot, options.auditConfig, approval)
+
+  // The store being ABSENT is only suspicious when the log proves this project
+  // has consumed approvals before — that is a DELETED store, not a fresh one.
+  // Raising it on absence alone was measured wrong: every genuinely new project
+  // starts without the file, so the signal fired on the first approval of every
+  // project and, because any signal forces the dialog, it broke the headless
+  // `trust` fallback in CI. The union is what makes the distinction possible.
+  if (absent && audit.anyEverRecorded) signals.push('approvals_store_absent')
+
+  const reused =
+    store.entries.some(
+      (e) => e.action_scope === approval.action_scope && e.timestamp === approval.timestamp,
+    ) || audit.thisApproval
   if (reused) {
     return {
       status: 'rejected',
@@ -287,6 +398,8 @@ function detectBurstPattern(store: ApprovalsStore, now: Date): boolean {
 export interface RecordOptions {
   projectRoot: string
   now?: Date
+  /** See {@link ValidateOptions.auditConfig} — the two must agree. */
+  auditConfig?: RsctAuditConfig | undefined
 }
 
 export type RecordResult =
@@ -307,6 +420,31 @@ export function recordConsumedApproval(
 ): RecordResult {
   const path = resolveStorePath(options.projectRoot)
   const now = options.now ?? new Date()
+
+  // The audit witness is written FIRST and independently of the store, so a
+  // store failure cannot leave the approval unrecorded on both sides. Today a
+  // failed store write only warns and the approval stays replayable "for a
+  // short time" (request-commit.ts). With two witnesses that degrades to safe.
+  // Placement is inherited, not chosen: `recordConsumedApproval` is called AFTER
+  // the mutation lands so a failed mutation does not burn the approval, and the
+  // audit line has to sit at the same point for the same reason.
+  try {
+    const auditPath = decideAuditPath(options.projectRoot, options.auditConfig).path
+    ensureParentDir(auditPath)
+    appendFileSync(
+      auditPath,
+      JSON.stringify({
+        ts: now.toISOString(),
+        event: APPROVAL_CONSUMED_EVENT,
+        action_scope: approval.action_scope,
+        approval_timestamp: approval.timestamp,
+      }) + '\n',
+      'utf8',
+    )
+  } catch {
+    // The store below is the other witness; never block on this one.
+  }
+
   try {
     ensureParentDir(path)
     const { store } = loadStore(options.projectRoot)

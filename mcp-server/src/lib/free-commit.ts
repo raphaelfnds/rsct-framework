@@ -18,6 +18,13 @@ import type { FabricationSignal } from './dev-approval.js'
  *    truncate-and-rewrite forge of the gitignored log — is the accepted Fork
  *    1/A limit; there is no privilege boundary between mcp-server and a
  *    same-user agent, so this raises the attack cost rather than closing it.)
+ *
+ *    #92: that log now resolves at the REPOSITORY the commit lands in, not at
+ *    the caller's `project_root`. Before, the anchor was defeated without any
+ *    forge at all — MEASURED, pointing `project_root` at a crafted
+ *    subdirectory produced `status=committed` in the PARENT repo while the
+ *    budget debited the subdirectory, and the real log recorded nothing. A
+ *    ceiling re-derived from a log the caller chooses is not an anchor.
  *  - {@link reserveFreeBudget} is the pure debit-first budget update.
  *  - {@link evaluateFreeEligibility} is the ALL-must-hold gate the commit
  *    handler consults; any failure degrades to the strict token/§C path.

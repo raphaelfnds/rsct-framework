@@ -10,6 +10,66 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+### Fixed — the trust anchor is no longer addressed by a string the agent supplies (#92)
+
+Every framework anchor used to resolve **down** from the `project_root` a caller passed,
+while `git` resolves **up** from it to the real repository, and nothing reconciled the two.
+MEASURED end to end: a real `rsct_request_commit` with `project_root` pointed at a crafted
+subdirectory returned `status=committed`, moved HEAD **in the parent repository**, debited a
+budget that lived in the crafted directory, and left **no trace** in the real project's audit
+log. The same string made `rsct_plan_authorize` mint a 20-commit batch token on `main` that
+the real root rejects.
+
+- **The audit log and the §C anti-reuse store now resolve at the repository the mutation
+  lands in.** The derivation is conditional because both one-line forms are measured wrong
+  for a submodule: a linked worktree resolves to its **main** worktree (so the free-commit
+  ceiling survives `git worktree add`), everything else to its own toplevel.
+- **`audit.path` is contained.** A configured path resolving outside the project is refused
+  and reported instead of silently honoured — measured, an absolute `audit.path` relocated
+  both free-lane anchors *from the correct root*, so it survived the root binding untouched.
+- **A spent `dev_approval` stays spent after `rm .rsct/approvals-seen.json`.** Consumption is
+  now recorded in the append-only log as well as the store, and "already consumed" is the
+  union of the two. `action_scope` and the approval timestamp are recorded; `reason` never is.
+- **Every §C dialog names the repository the action affects**, and warns when that is not the
+  folder the caller passed. The dialog is the one channel an agent cannot forge — it could,
+  however, be aimed.
+- **A `.rsct.json` that protects FEWER branches than the built-in default now says so** in the
+  dialog and the audit. Narrowing stays legal and deliberate (`prompts/01-setup.md:261-266`
+  documents why); what changes is that it stops being silent. The reachable form of the
+  branch-protection defect needed no crafted root at all — just an edit to `.rsct.json`.
+- **Existing installs are migrated.** Where the anchor relocates, a log at the old location is
+  copied forward (never moved) and the migration is audited. Without it the first run after
+  upgrade would have orphaned the ceiling, the `free_commit.locked` latch and the tier ratchet
+  — silently unlocking a locked budget.
+
+### Changed
+
+- `sanitize-permissions` no longer carries its own copy of the audit-path resolver. The
+  duplication was justified by *"`resolveAuditPath` sits in a module that reaches zod"*, which
+  is measurably no longer true; the SessionStart bundle still contains **zero** `zod`
+  occurrences (13.3 KB → 19.2 KB).
+- `git.ts` exports `safeGitRead`, a re-export of its internal trimmed reader, so the timeout
+  and failure-to-null contract stay in one module.
+
+### Known limitation
+
+**`/rsct-uninstall` and the `.gitignore` block do not yet follow a relocated `.rsct/`.** In a
+monorepo package, a project nested inside an unrelated repository, or a linked worktree, the
+log now lives one level up while the uninstall enumeration and the ignore block are still
+project-relative — so uninstall can report the project clean and leave the file behind, and the
+log can appear in `git status`. **The common case (a repo whose root carries `.rsct.json`) is
+unaffected.** Tracked on **#82**; deferred deliberately because fixing it in the prompts means
+a third copy of the anchor derivation, in bash, right after this release deleted a second one.
+
+### Performance
+
+`deriveAuditCeiling` full-scans the audit log. MEASURED: 2.1 ms at 1k lines, **15.1 ms at 10k**,
+87.5 ms at 50k, 314 ms at 200k. This release adds a second scan on the approval-validation path
+and, for parallel worktrees, points both at one shared log. Bounding it needs checkpoints or a
+backwards read — that is **#93**'s design, not this one's.
+
 ## [2.8.1] - 2026-09-02
 
 Two silent failures become named ones. **Nothing about the shipped product changes** —

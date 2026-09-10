@@ -51,7 +51,7 @@ export const phaseVerificationCompleteInputSchema = z
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     spec_ref: z
       .string()
       .min(1, 'spec_ref required')
@@ -154,7 +154,7 @@ export const phaseVerificationCompleteTool: Tool = {
     properties: {
       project_root: {
         type: 'string',
-        description: 'Optional absolute path to override project root detection.',
+        description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
       },
       spec_ref: {
         type: 'string',
@@ -398,6 +398,7 @@ export async function phaseVerificationCompleteHandler(
     ...(config?.approval_modes !== undefined && {
       approvalModes: config.approval_modes,
     }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -511,7 +512,7 @@ export async function phaseVerificationCompleteHandler(
     config?.audit,
   )
 
-  const record = recordApproval(gate.approval, { projectRoot, now })
+  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
 
   const fields = auditFields(completeAudit)
   const hints: string[] = []
