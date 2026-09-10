@@ -20,6 +20,7 @@
  *    Other Bash patterns and tool permissions are preserved.
  */
 
+import { decideAuditPath } from '../lib/audit-log.js'
 import {
   appendFileSync,
   existsSync,
@@ -31,7 +32,12 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Node builtins only, transitively — this file is bundled into a standalone
-// SessionStart hook, and it stays small (~11 KB) precisely by never reaching zod.
+// SessionStart hook and never reaches zod. MEASURED after #92 folded the shared
+// audit-path resolver back in: 19 KB, zero `zod` occurrences in
+// `dist/scripts/sanitize-permissions.js`. (It read "~11 KB" before that change;
+// the number is kept honest rather than dropped, because it is the budget this
+// constraint exists to protect — for scale, the sibling edit-scope-guard bundle
+// is 152 KB.)
 import { stripBom } from '../lib/io-utils.js'
 import { hashSettingsFile } from '../lib/settings-drift.js'
 
@@ -405,31 +411,42 @@ export function sanitize(
 }
 
 /**
- * Where the audit log lives for this project, honouring `audit.path` in
- * `.rsct.json` exactly as `lib/audit-log.ts` `resolveAuditPath` does.
+ * Where the audit log lives for this project.
  *
- * Reimplemented here rather than imported, and that is deliberate: this file is
- * bundled into a standalone SessionStart hook, and `resolveAuditPath` sits in a
- * module that reaches zod. Reading the one key with a bare `JSON.parse` keeps the
- * bundle on node builtins.
+ * This used to REIMPLEMENT `lib/audit-log.ts`'s resolver, with a docstring
+ * explaining that the duplication was forced: *"this file is bundled into a
+ * standalone SessionStart hook, and `resolveAuditPath` sits in a module that
+ * reaches zod."* **That is no longer true, and it was verified rather than
+ * assumed** — `audit-log.ts`'s runtime imports are `node:fs`, `node:path`,
+ * `io-utils` (node builtins) and `repo-anchor` (→ `git.ts`, node builtins); its
+ * only `project-root` import is `import type`, which is erased at build. The
+ * bundle stays on node builtins.
  *
- * It has to agree with the real resolver, and #17 is why that suddenly matters:
- * the `settings.baseline` this hook writes is read back by
- * `rsct_request_commit`. Written to a different file than the reader looks at,
- * the drift report is silently dead in any project that configured `audit.path`.
+ * So the duplication is removed rather than tested. That matters more since
+ * #92: the resolver now also derives the REPOSITORY anchor, and two copies of
+ * that would be a second way for this hook and `rsct_request_commit` to disagree
+ * about where the log is. The old docstring named the consequence exactly —
+ * *"written to a different file than the reader looks at, the drift report is
+ * silently dead"* — and #17's `settings.baseline` is written HERE and read
+ * THERE.
+ *
+ * The bare `JSON.parse` for the one config key stays: reading `audit.path`
+ * without zod is what kept this file light, and only the PATH LOGIC was ever
+ * the duplication worth removing.
  */
 function resolveAuditLogPath(projectRoot: string): string {
+  let configured: string | undefined
   try {
     const raw = stripBom(readFileSync(join(projectRoot, '.rsct.json'), 'utf8'))
     const cfg = JSON.parse(raw) as { audit?: { path?: unknown } }
-    const configured = cfg.audit?.path
-    if (typeof configured === 'string' && configured.length > 0) {
-      return isAbsolute(configured) ? configured : resolve(projectRoot, configured)
+    if (typeof cfg.audit?.path === 'string' && cfg.audit.path.length > 0) {
+      configured = cfg.audit.path
     }
   } catch {
-    // No config, unreadable, or malformed → the default below.
+    // No config, unreadable, or malformed → the shared resolver's default.
   }
-  return join(projectRoot, '.rsct', 'audit.log')
+  return decideAuditPath(projectRoot, configured === undefined ? undefined : { path: configured })
+    .path
 }
 
 function defaultAuditWriter(

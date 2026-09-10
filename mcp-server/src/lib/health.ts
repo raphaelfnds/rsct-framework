@@ -41,9 +41,17 @@ export interface McpHealth {
  *    direction: the free lane is earned by an established plan context (the
  *    anti-rollback ceiling in Bloco 1.2 re-derives from this same append-only
  *    log), so a fresh or wiped project simply does not qualify — no
- *    wiped-vs-new disambiguation is needed. NB: a project that disabled audit
- *    (`audit.enabled: false`) has no history log, so free commits are closed
- *    by design — the anti-rollback anchor cannot exist without the audit log.
+ *    wiped-vs-new disambiguation is needed.
+ *
+ *    Two corrections, both verified against the code rather than inherited:
+ *    the log resolves at the **repository** the action lands in (#92), not at
+ *    the caller's `project_root`, so this signal can no longer be answered by a
+ *    blank file in a crafted subdirectory. And the note that used to sit here —
+ *    *"a project that disabled audit (`audit.enabled: false`) has no history
+ *    log"* — described an UNREACHABLE state: `project-root.ts:154` is
+ *    `z.literal(true).optional()`, so writing `false` rejects the whole config
+ *    and the project reads as not-installed. It is not audit-off; it is
+ *    unmanaged.
  *
  * Never throws.
  */

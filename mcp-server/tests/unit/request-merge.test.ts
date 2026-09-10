@@ -840,7 +840,16 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
     )
     expect(seen).toContain('Approve merge')
     expect(seen).toContain('RSCT enforcement is NOT running')
-    expect(seen.split('\n')).toHaveLength(2)
+    // The old assertion was `split('\n')` length 2 — i.e. the whole message. The
+    // guarantee it was protecting is that the drift advisory contributes exactly
+    // ONE line, and that still holds; the message itself grew because #92 defect
+    // F now names the repository the merge lands in. Asserting the advisory's own
+    // line count keeps the original guarantee and stops the test from pinning
+    // unrelated message content.
+    const advisoryLines = seen
+      .split('\n')
+      .filter((l) => l.includes('RSCT enforcement is NOT running'))
+    expect(advisoryLines).toHaveLength(1)
   })
 })
 

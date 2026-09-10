@@ -413,9 +413,16 @@ function emitConfigViolation(
   process.stderr.write(
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.\n`,
   )
-  // Force enabled: true so tamper events survive even when the attack
-  // vector was `audit.enabled: false`. The audit path falls back to
-  // default `.rsct/audit.log` since the config object is by definition
-  // untrusted at this point.
+  // Force enabled: true so a tamper event is never suppressed by the very
+  // config being rejected.
+  //
+  // The reason used to read "even when the attack vector was
+  // `audit.enabled: false`" — that state is UNREACHABLE: the schema at :154 is
+  // `z.literal(true).optional()`, so writing `false` rejects the whole config
+  // and the project reads as not-installed rather than audit-off. What the
+  // forced flag actually defends is the DEFAULT PATH: the config object is
+  // untrusted here, so `audit.path` is not consulted and the entry lands at the
+  // repository's default log (#92 — no longer the caller's `project_root`,
+  // which a crafted subdirectory could have supplied).
   appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true })
 }

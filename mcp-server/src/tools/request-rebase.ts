@@ -31,10 +31,11 @@ import {
   describeCrossCheck,
   crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
+import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 
 export const requestRebaseInputSchema = z
   .object({
-    project_root: z.string().optional().describe('Optional absolute path to override project root detection.'),
+    project_root: z.string().optional().describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     mode: z
       .enum(['rebase', 'squash'])
       .optional()
@@ -103,7 +104,7 @@ export const requestRebaseTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      project_root: { type: 'string', description: 'Optional absolute path to override project root detection.' },
+      project_root: { type: 'string', description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.' },
       mode: { type: 'string', enum: ['rebase', 'squash'], description: "'rebase' or 'squash' (default 'rebase')." },
       ref: { type: 'string', description: 'Upstream to rebase onto, or branch to squash-merge.' },
       dev_approval: { type: 'object', description: 'dev_approval payload.' },
@@ -148,8 +149,12 @@ export async function requestRebaseHandler(
     audit_error: null,
     anti_replay_persisted: null,
     anti_replay_error: null,
-    hints: [],
     ...over,
+    // #92 — the anchor facts ride EVERY return path, including the rejects.
+    // Spreading `over` first and then rebuilding `hints` is deliberate: a caller
+    // that passes its own hints must not drop the relocation notice, and a
+    // headless run has no dialog to carry it instead.
+    hints: [...anchorHints(projectRoot, config?.audit), ...(over.hints ?? [])],
   })
 
   // PH-5 ack gate (BEFORE the §C dialog). A rebase/squash rewrites history — an
@@ -232,10 +237,11 @@ export async function requestRebaseHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — rebase approval',
-      message: `Approve ${mode} of '${currentLabel}' ${mode === 'rebase' ? 'onto' : 'from'} '${input.ref}'? (history-rewriting)`,
+      message: `Approve ${mode} of '${currentLabel}' ${mode === 'rebase' ? 'onto' : 'from'} '${input.ref}'? (history-rewriting)` + gateDialogFooter(projectRoot, config),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -328,7 +334,7 @@ export async function requestRebaseHandler(
     })
   }
 
-  const record = recordApproval(approval, { projectRoot, now })
+  const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
   const audit = appendAudit(
     projectRoot,
     {

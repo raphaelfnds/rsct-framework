@@ -57,13 +57,14 @@ import {
   pushRefspecRejectReason,
   stripRefsPrefix,
 } from '../lib/push-refspec.js'
+import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 
 export const requestPushInputSchema = z
   .object({
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     remote: z
       .string()
       .optional()
@@ -157,7 +158,7 @@ export const requestPushTool: Tool = {
     properties: {
       project_root: {
         type: 'string',
-        description: 'Optional absolute path to override project root detection.',
+        description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
       },
       remote: {
         type: 'string',
@@ -206,6 +207,7 @@ export async function requestPushHandler(
   // rejected attempts too, and drained through `withAdvisories` on every return
   // path. Prepended: it outranks the routine hint tail.
   const advisories: string[] = []
+  advisories.push(...anchorHints(projectRoot, config?.audit))
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
   const installAdvisory = evaluateInstallAdvisory({
     projectRoot,
@@ -494,10 +496,11 @@ export async function requestPushHandler(
       message: [
         `Approve push of '${branchLabel}' to '${remote}'?`,
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
-      ].join('\n'),
+      ].join('\n') + gateDialogFooter(projectRoot, config),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+    auditConfig: config?.audit,
     promptFn,
     now,
   })
@@ -642,7 +645,7 @@ export async function requestPushHandler(
     }
   }
 
-  const record = recordApproval(approval, { projectRoot, now })
+  const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
   const audit = appendAudit(
     projectRoot,
     {
