@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { gateDialogFooter, anchorHints } from '../../src/lib/gate-dialog.js'
-import { repositoryDialogLine, clearAnchorCache } from '../../src/lib/repo-anchor.js'
+import { repositoryDialogLine, clearAnchorCache, canonicalPath } from '../../src/lib/repo-anchor.js'
 import {
   effectiveProtectedList,
   narrowedProtectionNotice,
@@ -44,7 +44,7 @@ function initRepo(dir: string): void {
 
 let box: string
 beforeEach(() => {
-  box = mkdtempSync(join(tmpdir(), 'rsct-dialog-'))
+  box = canonicalPath(mkdtempSync(join(tmpdir(), 'rsct-dialog-')))
   clearAnchorCache()
 })
 afterEach(() => {

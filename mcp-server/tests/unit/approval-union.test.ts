@@ -11,7 +11,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { validateDevApproval, recordConsumedApproval } from '../../src/lib/dev-approval.js'
-import { clearAnchorCache } from '../../src/lib/repo-anchor.js'
+import { clearAnchorCache, canonicalPath } from '../../src/lib/repo-anchor.js'
 import { clearAuditMigrationMemo } from '../../src/lib/audit-log.js'
 
 /**
@@ -57,7 +57,7 @@ const approval = {
 let box: string
 
 beforeEach(() => {
-  box = mkdtempSync(join(tmpdir(), 'rsct-union-'))
+  box = canonicalPath(mkdtempSync(join(tmpdir(), 'rsct-union-')))
   clearAnchorCache()
   clearAuditMigrationMemo()
 })

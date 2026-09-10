@@ -1,4 +1,5 @@
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, basename, join } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { readWorktreeInfo, safeGitRead } from './git.js'
 
 /**
@@ -18,10 +19,16 @@ import { readWorktreeInfo, safeGitRead } from './git.js'
  * where the others fail. The fix is to resolve the shared anchors at the
  * repository the mutation actually lands in.
  *
- * SCOPE (spec AUDIT-4): the derivation is GLOBAL — a repository has ONE audit
- * log, for every writer and reader. What is scoped to the five gated tools is
- * the DISAGREEMENT CHECK: they fail closed on `relocated`, while a read-only
- * tool degrades and reports.
+ * SCOPE: the derivation is GLOBAL — a repository has ONE audit log, for every
+ * writer and reader; scoping a shared file's LOCATION to some callers would give
+ * one project two logs. What is scoped to the five gated tools is REPORTING the
+ * relocation on the decision surface.
+ *
+ * A relocation is never a REJECTION. That is the developer's decision (D1), and
+ * refusing would break a monorepo package and a project nested in an unrelated
+ * repository — both measured legitimate. It is also pointless: once the anchors
+ * resolve at the repository, a crafted root cannot present its own budget, lock,
+ * history or approval store. The binding IS the enforcement.
  */
 
 /** Anchors that are per-checkout and must NOT follow the repository. */
@@ -48,26 +55,59 @@ export interface RepositoryAnchor {
 }
 
 /**
- * Normalize for comparison ONLY. Measured on Win11/NTFS across five legitimate
- * spellings of one root, a naive `===` passes 2 of 5 — it fails a trailing
- * separator, forward slashes, and a lowercase drive letter.
+ * Canonicalize a path so two spellings of the SAME directory compare equal.
  *
- * Which step earns which case, because a mutation run showed the obvious
- * reading is wrong: `resolve()` alone already absorbs the trailing separator,
- * the forward slashes and the `./` segments — removing the explicit trailing
- * strip reddened NOTHING. The step that actually carries the remaining case is
- * the CASEFOLD (the lowercase drive letter); mutating that away is what turns
- * the five-spelling test red. The trailing strip survives only for a drive
- * root, where `resolve('C:/')` keeps its separator.
+ * This is not defensive polish — MEASURED on CI, its absence broke 4 of 6 cells:
  *
- * Case is folded on Windows only. macOS volumes are case-INSENSITIVE by default
- * but can be created case-sensitive, and Linux is case-sensitive — so folding
- * there could call two genuinely different directories equal, which is the
- * SILENT direction. Comparing exactly can only produce a false `relocated`,
- * which is loud, reported, and recoverable. Fail loud, never silent.
+ *   macOS   tmpdir() -> /var/folders/…        git -> /private/var/folders/…   (/var is a symlink)
+ *   Windows tmpdir() -> C:\Users\RUNNER~1\…   git -> C:\Users\runneradmin\…   (8.3 short name)
+ *
+ * Both pairs are one directory, and without `realpath` the binding called them
+ * different and reported a spurious `relocated` — on macOS that is the DEFAULT
+ * for anything under the temp dir, and on Windows for any profile whose name
+ * exceeds 8 characters. Linux passed, which is exactly why this had to be caught
+ * by CI rather than locally.
+ *
+ * `realpathSync.native` is required for the Windows case: the JS implementation
+ * does not expand 8.3 names. It also needs the path to EXIST, and a containment
+ * candidate (an `audit.path` target) often does not yet — so we resolve the
+ * nearest existing ancestor and re-attach the remainder. When nothing resolves
+ * (a `//wsl.localhost/` UNC that throws, per the spec's own risk note), the
+ * plain absolute form is returned so the comparison degrades instead of failing.
+ */
+export function canonicalPath(p: string): string {
+  let current = resolve(p)
+  const tail: string[] = []
+  for (;;) {
+    try {
+      const real = (realpathSync.native ?? realpathSync)(current)
+      return tail.length > 0 ? join(real, ...tail.reverse()) : real
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return resolve(p)
+      tail.push(basename(current))
+      current = parent
+    }
+  }
+}
+
+/**
+ * Normalize for comparison ONLY.
+ *
+ * Two layers, and a mutation run showed which one earns what. `resolve()` alone
+ * already absorbs a trailing separator, forward slashes and `./` segments —
+ * removing the explicit trailing strip reddened NOTHING (it survives only for a
+ * drive root, where `resolve('C:/')` keeps its separator). The load-bearing
+ * steps are {@link canonicalPath} (symlinks and 8.3 names — 4 of 6 CI cells) and
+ * the CASEFOLD (a lowercase drive letter).
+ *
+ * Case is folded on Windows ONLY. `realpath` already canonicalizes the case of
+ * an EXISTING path, but a candidate that does not exist yet keeps whatever the
+ * caller typed, and on Windows that still names the same file. Folding on Linux
+ * would call two genuinely different directories equal — the silent direction.
  */
 function comparable(p: string): string {
-  const abs = resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
+  const abs = canonicalPath(p).replace(/\\/g, '/').replace(/\/+$/, '')
   return process.platform === 'win32' ? abs.toLowerCase() : abs
 }
 
@@ -100,7 +140,7 @@ const anchorCache = new Map<string, RepositoryAnchor>()
  * land there rather than in the parent — so the escape closes itself.
  */
 export function anchorFor(projectRoot: string, deps: AnchorDeps = {}): RepositoryAnchor {
-  const key = resolve(projectRoot)
+  const key = canonicalPath(projectRoot)
   const hit = anchorCache.get(key)
   if (hit) return hit
   const computed = resolveRepositoryAnchor(projectRoot, deps)
@@ -172,7 +212,7 @@ export function resolveRepositoryAnchor(
   if (!info.in_git_repo) {
     return {
       status: 'not-applicable',
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail:
         'not a git repository — no repository identity exists, so the shared anchors stay at the project root',
@@ -183,7 +223,7 @@ export function resolveRepositoryAnchor(
   if (commonRaw === null) {
     return {
       status: 'unavailable',
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail:
         'git could not report the repository identity (absent, unreadable, or an unsupported version) — anchors stay at the project root and the binding is not enforced',
@@ -206,16 +246,16 @@ export function resolveRepositoryAnchor(
   if (anchorRoot === null || anchorRoot.length === 0) {
     return {
       status: 'unavailable',
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity,
       detail:
         'git reported a repository but no usable working root — anchors stay at the project root and the binding is not enforced',
     }
   }
 
-  const resolved = resolve(anchorRoot)
+  const resolved = canonicalPath(anchorRoot)
   if (sameDirectory(resolved, projectRoot)) {
-    return { status: 'same', root: resolve(projectRoot), identity, detail: null }
+    return { status: 'same', root: canonicalPath(projectRoot), identity, detail: null }
   }
   return {
     status: 'relocated',

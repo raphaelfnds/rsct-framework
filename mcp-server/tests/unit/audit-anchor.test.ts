@@ -15,7 +15,7 @@ import {
   resolveAuditPath,
   clearAuditMigrationMemo,
 } from '../../src/lib/audit-log.js'
-import { clearAnchorCache, sameDirectory } from '../../src/lib/repo-anchor.js'
+import { clearAnchorCache, sameDirectory, canonicalPath } from '../../src/lib/repo-anchor.js'
 import { sanitize } from '../../src/scripts/sanitize-permissions.js'
 
 /**
@@ -58,7 +58,7 @@ const LOCKED = JSON.stringify({
 let box: string
 
 beforeEach(() => {
-  box = mkdtempSync(join(tmpdir(), 'rsct-auditanchor-'))
+  box = canonicalPath(mkdtempSync(join(tmpdir(), 'rsct-auditanchor-')))
   clearAnchorCache()
   clearAuditMigrationMemo()
 })

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { resolve, isAbsolute, join, dirname } from 'path';
+import { resolve, isAbsolute, join, dirname, basename } from 'path';
 import { cwd } from 'process';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
@@ -4099,8 +4099,23 @@ function safeGitRaw(cwd2, args) {
 }
 
 // src/lib/repo-anchor.ts
+function canonicalPath(p) {
+  let current = resolve(p);
+  const tail = [];
+  for (; ; ) {
+    try {
+      const real = (realpathSync.native ?? realpathSync)(current);
+      return tail.length > 0 ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(p);
+      tail.push(basename(current));
+      current = parent;
+    }
+  }
+}
 function comparable(p) {
-  const abs = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  const abs = canonicalPath(p).replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? abs.toLowerCase() : abs;
 }
 function sameDirectory(a, b) {
@@ -4108,7 +4123,7 @@ function sameDirectory(a, b) {
 }
 var anchorCache = /* @__PURE__ */ new Map();
 function anchorFor(projectRoot, deps = {}) {
-  const key = resolve(projectRoot);
+  const key = canonicalPath(projectRoot);
   const hit = anchorCache.get(key);
   if (hit) return hit;
   const computed = resolveRepositoryAnchor(projectRoot, deps);
@@ -4122,7 +4137,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (!info.in_git_repo) {
     return {
       status: "not-applicable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
     };
@@ -4131,7 +4146,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (commonRaw === null) {
     return {
       status: "unavailable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
     };
@@ -4149,14 +4164,14 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (anchorRoot === null || anchorRoot.length === 0) {
     return {
       status: "unavailable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity,
       detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
     };
   }
-  const resolved = resolve(anchorRoot);
+  const resolved = canonicalPath(anchorRoot);
   if (sameDirectory(resolved, projectRoot)) {
-    return { status: "same", root: resolve(projectRoot), identity, detail: null };
+    return { status: "same", root: canonicalPath(projectRoot), identity, detail: null };
   }
   return {
     status: "relocated",

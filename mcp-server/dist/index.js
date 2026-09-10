@@ -8938,7 +8938,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join27 } = __require("path");
+    var { join: join28 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -8981,7 +8981,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join27(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join28(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9384,7 +9384,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join27, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join28, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9447,7 +9447,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join27(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join28(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9465,7 +9465,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join27(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join28(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9487,7 +9487,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join27(__dirname$1, "..", "file.js");
+          return join28(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10477,7 +10477,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join27 = ",";
+            let join28 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10491,7 +10491,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join27 = `,
+                join28 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10499,13 +10499,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join27;
+                res += join28;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join28}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10526,7 +10526,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join27 = `,
+              join28 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10540,13 +10540,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join27;
+                separator = join28;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join27;
+              separator = join28;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10587,7 +10587,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join27 = ",";
+            let join28 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10600,7 +10600,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join27 = `,
+                join28 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10608,13 +10608,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join27;
+                res += join28;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join27}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join28}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10627,7 +10627,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join27 = `,
+              join28 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10636,7 +10636,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join27;
+                separator = join28;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10694,20 +10694,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join28 = `,
+              const join29 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join28;
+                res2 += join29;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join28}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join29}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -10723,16 +10723,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join27 = `,
+            const join28 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join27, maximumBreadth);
+              res += stringifyTypedArray(value, join28, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join27;
+              separator = join28;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -10743,13 +10743,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join27;
+                separator = join28;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join27;
+              separator = join28;
             }
             if (separator !== "") {
               res = `
@@ -22888,8 +22888,23 @@ function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
 }
 
 // src/lib/repo-anchor.ts
+function canonicalPath(p) {
+  let current = resolve(p);
+  const tail = [];
+  for (; ; ) {
+    try {
+      const real = (realpathSync.native ?? realpathSync)(current);
+      return tail.length > 0 ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(p);
+      tail.push(basename(current));
+      current = parent;
+    }
+  }
+}
 function comparable(p) {
-  const abs = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  const abs = canonicalPath(p).replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? abs.toLowerCase() : abs;
 }
 function sameDirectory(a, b) {
@@ -22897,7 +22912,7 @@ function sameDirectory(a, b) {
 }
 var anchorCache = /* @__PURE__ */ new Map();
 function anchorFor(projectRoot, deps = {}) {
-  const key = resolve(projectRoot);
+  const key = canonicalPath(projectRoot);
   const hit = anchorCache.get(key);
   if (hit) return hit;
   const computed = resolveRepositoryAnchor(projectRoot, deps);
@@ -22922,7 +22937,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (!info.in_git_repo) {
     return {
       status: "not-applicable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
     };
@@ -22931,7 +22946,7 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (commonRaw === null) {
     return {
       status: "unavailable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity: null,
       detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
     };
@@ -22949,14 +22964,14 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   if (anchorRoot === null || anchorRoot.length === 0) {
     return {
       status: "unavailable",
-      root: projectRoot,
+      root: canonicalPath(projectRoot),
       identity,
       detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
     };
   }
-  const resolved = resolve(anchorRoot);
+  const resolved = canonicalPath(anchorRoot);
   if (sameDirectory(resolved, projectRoot)) {
-    return { status: "same", root: resolve(projectRoot), identity, detail: null };
+    return { status: "same", root: canonicalPath(projectRoot), identity, detail: null };
   }
   return {
     status: "relocated",
@@ -25929,12 +25944,12 @@ function parseEnvFileAt(projectRoot, relPath) {
   } catch {
     return null;
   }
-  const basename2 = relPath.split("/").pop() ?? relPath;
-  const isProperties = /\.properties$/i.test(basename2);
-  const isEnv = /^\.env/.test(basename2);
+  const basename3 = relPath.split("/").pop() ?? relPath;
+  const isProperties = /\.properties$/i.test(basename3);
+  const isEnv = /^\.env/.test(basename3);
   if (!isProperties && !isEnv) return null;
   const format = isProperties ? "properties" : "env";
-  const profile = isProperties ? getProfileFromBasename(basename2) : null;
+  const profile = isProperties ? getProfileFromBasename(basename3) : null;
   const entries = isProperties ? parseProperties(content) : parseDotEnv(content);
   return { path: relPath, format, profile, entries };
 }

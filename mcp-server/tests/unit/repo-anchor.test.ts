@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, sep, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
-import { resolveRepositoryAnchor, sameDirectory, LOCAL_ANCHORS } from '../../src/lib/repo-anchor.js'
+import { resolveRepositoryAnchor, sameDirectory, LOCAL_ANCHORS, canonicalPath } from '../../src/lib/repo-anchor.js'
 import { phaseStatePath } from '../../src/lib/phase-scope.js'
 
 /**
@@ -43,7 +43,7 @@ function initRepo(dir: string): void {
 let box: string
 
 beforeEach(() => {
-  box = mkdtempSync(join(tmpdir(), 'rsct-anchor-'))
+  box = canonicalPath(mkdtempSync(join(tmpdir(), 'rsct-anchor-')))
 })
 afterEach(() => {
   if (existsSync(box)) rmSync(box, { recursive: true, force: true })
@@ -224,6 +224,39 @@ describe.runIf(GIT)('D2 is pinned — the per-checkout anchors must NOT follow t
     expect([...LOCAL_ANCHORS].sort()).toEqual(
       ['phase-state.json', 'phase-state.lock', 'scripts'].sort(),
     )
+  })
+})
+
+describe('canonicalPath — the class that broke 4 of 6 CI cells', () => {
+  it('resolves a path whose TAIL does not exist yet', () => {
+    // Mutation that reddens: call realpathSync on the full path and return the
+    // input when it throws. A containment candidate (an `audit.path` target)
+    // usually does not exist yet, and without the ancestor walk it would keep
+    // the caller's spelling while the base kept the canonical one — the two
+    // sides of one comparison canonicalized differently.
+    const target = join(box, 'does-not-exist', 'a.log')
+    expect(canonicalPath(target)).toBe(join(canonicalPath(box), 'does-not-exist', 'a.log'))
+  })
+
+  it('two spellings of one non-existent path compare equal', () => {
+    // Mutation that reddens: drop canonicalPath from `comparable`.
+    expect(sameDirectory(join(box, 'x', 'y'), join(box, '.', 'x', 'y'))).toBe(true)
+  })
+
+  it('a SYMLINKED directory compares equal to its target', () => {
+    // This is the macOS CI failure in portable form: `/var` is a symlink to
+    // `/private/var`, so `tmpdir()` and git disagreed about the same directory
+    // and every anchor test read `relocated`. Windows needs privileges for
+    // directory symlinks, so a refusal here is skipped rather than failed.
+    const target = join(box, 'real')
+    const link = join(box, 'link')
+    mkdirSync(target, { recursive: true })
+    try {
+      symlinkSync(target, link, 'junction')
+    } catch {
+      return
+    }
+    expect(sameDirectory(link, target)).toBe(true)
   })
 })
 
