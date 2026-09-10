@@ -18,7 +18,7 @@ export const getTopologyInputSchema = z
     project_root: z
       .string()
       .optional()
-      .describe('Optional absolute path to override project root detection.'),
+      .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
   })
   .strict()
 
@@ -47,7 +47,7 @@ export const getTopologyTool: Tool = {
     properties: {
       project_root: {
         type: 'string',
-        description: 'Optional absolute path to override project root detection.',
+        description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
       },
     },
     additionalProperties: false,

@@ -820,6 +820,30 @@ All §C-gated tools and the SessionStart hook write structured JSONL
 entries to `.rsct/audit.log` (configurable via `.rsct.json` `audit.path`;
 disabled when `audit.enabled: false`).
 
+**Where that resolves (#92).** The log — and the §C anti-reuse store — live at the
+**git repository the action lands in**, not at the `project_root` a caller passed.
+The two only differ in three shapes, and in all of them the repository is where the
+commits actually go:
+
+| setup | `.rsct/` resolves at |
+|---|---|
+| repository whose root carries `.rsct.json` (the common case) | unchanged |
+| submodule | its own working root |
+| **linked worktree** | the **main** worktree — so the free-commit ceiling survives `git worktree add` |
+| **monorepo package with its own `.rsct.json`** | the repository root |
+| **project nested inside an unrelated repository** | that repository's root |
+| not a git repository | unchanged; the binding reports `not-applicable` |
+
+When it relocates, every §C dialog and the tool's `hints[]` say so — a relocation is
+never silent, and it is never a rejection. A configured `audit.path` that resolves
+**outside** that base is refused (the log falls back to the default) and reported,
+because a log outside the repository can be swapped for a blank one without touching
+the project.
+
+> **Known limitation.** `/rsct-uninstall` and the `.gitignore` block are still
+> project-relative, so in the three relocating shapes above they do not follow the
+> log. Tracked on [#82](https://github.com/raphaelfnds/rsct-framework/issues/82).
+
 Event naming convention: `<tool>.<outcome>` where outcome ∈
 {`rejected`, `override_invoked`, `committed`, `pushed`, `merged`,
 `mutation_failed`, `stripped`, `malformed`}.

@@ -10,7 +10,7 @@ import {
   type DialogOptions,
   type DialogResult,
 } from './os-dialog.js'
-import type { RsctApprovalModes } from './project-root.js'
+import type { RsctApprovalModes, RsctAuditConfig } from './project-root.js'
 
 /**
  * The §C orchestrator. Every §C-gated tool delegates the "is this dev_approval
@@ -67,6 +67,12 @@ export interface GateOptions {
   dialog: DialogOptions
   projectRoot: string
   approvalModes?: RsctApprovalModes
+  /**
+   * `.rsct.json` `audit` block. Forwarded to validation so the audit half of
+   * the #92 anti-reuse union reads the same file the consumption was written
+   * to — the two halves must never resolve to different logs.
+   */
+  auditConfig?: RsctAuditConfig | undefined
   /** Injectable for unit tests (defaults to {@link promptYesNo}). */
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   /** Injectable for unit tests (defaults to current time). */
@@ -80,6 +86,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   }
   if (opts.approvalModes !== undefined) validateOpts.approvalModes = opts.approvalModes
   if (opts.now !== undefined) validateOpts.now = opts.now
+  if (opts.auditConfig !== undefined) validateOpts.auditConfig = opts.auditConfig
 
   const validation = validateDevApproval(opts.approval, validateOpts)
 

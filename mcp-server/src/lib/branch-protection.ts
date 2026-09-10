@@ -27,6 +27,20 @@ export interface BranchProtectionConfig {
 export interface EffectiveProtectedList {
   list: string[]
   source: ProtectedListSource
+  /**
+   * #92 defect A — built-in defaults the config dropped.
+   *
+   * Narrowing stays LEGAL: `.rsct.json` replacing the default is deliberate and
+   * documented, and `prompts/01-setup.md:247` already writes a UNION at install
+   * time so the accidental case is handled. The defect is that narrowing is
+   * SILENT — MEASURED, `protected_branches: ["release/*"]` drops `main`,
+   * `master`, `test` and `dev`, and the schema's `.min(1)` guard only ever
+   * caught the empty array.
+   *
+   * So this is not a capability being removed; it is the fact being surfaced at
+   * the moment it matters — the OS dialog the developer reads, and the audit.
+   */
+  narrowed: string[]
 }
 
 /**
@@ -58,7 +72,27 @@ export function effectiveProtectedList(
   else if (usingConfig) source = 'config'
   else source = 'default'
 
-  return { list: merged, source }
+  const narrowed = DEFAULT_PROTECTED_BRANCHES.filter((d) => !merged.includes(d))
+  return { list: merged, source, narrowed: [...narrowed] }
+}
+
+/**
+ * One line for the OS dialog and the audit entry when the config protects less
+ * than the built-in default. Empty string when nothing was dropped, so a caller
+ * can concatenate it unconditionally.
+ *
+ * This is the only channel that reaches the human before they click, and #92
+ * defect F is that no dialog names the repository either — the two belong in
+ * the same sentence, because "protects less than default" is only meaningful
+ * once you know WHICH repository is about to be written to.
+ */
+export function narrowedProtectionNotice(effective: EffectiveProtectedList): string {
+  if (effective.narrowed.length === 0) return ''
+  return (
+    `⚠ This project's .rsct.json protects FEWER branches than the built-in default — ` +
+    `dropped: ${effective.narrowed.join(', ')}. Protecting now: ` +
+    `${effective.list.join(', ')}.`
+  )
 }
 
 /**

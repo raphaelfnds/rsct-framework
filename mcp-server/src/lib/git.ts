@@ -411,6 +411,13 @@ function safeGit(cwd: string, args: string[]): string | null {
 }
 
 /**
+ * The trimmed read above, exported for `lib/repo-anchor.ts` (#92). Kept as a
+ * re-export rather than widening `safeGit` itself so the timeout, the
+ * failure-to-null contract and the single spawn site stay in one module.
+ */
+export const safeGitRead = safeGit
+
+/**
  * Wall-clock bound for the READ helpers below.
  *
  * `execFileSync` blocks the event loop, so a wedged git child holds the whole

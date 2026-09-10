@@ -1,13 +1,174 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync } from 'fs';
 import { resolve, isAbsolute, join, dirname } from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 
 createRequire(import.meta.url);
 function stripBom(text) {
   return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
+}
+function ensureParentDir(filePath) {
+  mkdirSync(dirname(filePath), { recursive: true });
+}
+function readWorktreeInfo(projectRoot) {
+  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
+  }
+  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
+  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
+  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
+  let isWorktree = false;
+  let name = null;
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
+    if (m) {
+      isWorktree = true;
+      name = m[1] ?? null;
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
+}
+function safeGit(cwd, args) {
+  const raw = safeGitRaw(cwd, args);
+  return raw !== null ? raw.trim() : null;
+}
+var safeGitRead = safeGit;
+var GIT_READ_TIMEOUT_MS = 3e4;
+function safeGitRaw(cwd, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS
+    });
+  } catch {
+    return null;
+  }
+}
+
+// src/lib/repo-anchor.ts
+function comparable(p) {
+  const abs = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+function sameDirectory(a, b) {
+  return comparable(a) === comparable(b);
+}
+var anchorCache = /* @__PURE__ */ new Map();
+function anchorFor(projectRoot, deps = {}) {
+  const key = resolve(projectRoot);
+  const hit = anchorCache.get(key);
+  if (hit) return hit;
+  const computed = resolveRepositoryAnchor(projectRoot, deps);
+  anchorCache.set(key, computed);
+  return computed;
+}
+function resolveRepositoryAnchor(projectRoot, deps = {}) {
+  const gitRead = deps.gitRead ?? safeGitRead;
+  const worktreeInfo = deps.worktreeInfo ?? readWorktreeInfo;
+  const info = worktreeInfo(projectRoot);
+  if (!info.in_git_repo) {
+    return {
+      status: "not-applicable",
+      root: projectRoot,
+      identity: null,
+      detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
+    };
+  }
+  const commonRaw = gitRead(projectRoot, ["rev-parse", "--git-common-dir"]);
+  if (commonRaw === null) {
+    return {
+      status: "unavailable",
+      root: projectRoot,
+      identity: null,
+      detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const identity = resolve(projectRoot, commonRaw).replace(/\\/g, "/");
+  let anchorRoot;
+  if (info.is_worktree) {
+    const first = gitRead(projectRoot, ["worktree", "list", "--porcelain"]);
+    const line = first?.split("\n")[0]?.trim() ?? "";
+    anchorRoot = line.startsWith("worktree ") ? line.slice("worktree ".length).trim() : null;
+    if (anchorRoot === null || anchorRoot.length === 0) anchorRoot = dirname(identity);
+  } else {
+    anchorRoot = info.toplevel;
+  }
+  if (anchorRoot === null || anchorRoot.length === 0) {
+    return {
+      status: "unavailable",
+      root: projectRoot,
+      identity,
+      detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const resolved = resolve(anchorRoot);
+  if (sameDirectory(resolved, projectRoot)) {
+    return { status: "same", root: resolve(projectRoot), identity, detail: null };
+  }
+  return {
+    status: "relocated",
+    root: resolved,
+    identity,
+    detail: `shared RSCT state resolves at ${resolved.replace(/\\/g, "/")}, the repository this action lands in \u2014 not at the declared project root`
+  };
+}
+
+// src/lib/audit-log.ts
+var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
+var migrationAttempted = /* @__PURE__ */ new Set();
+function migrateLegacyLog(projectRoot, base, target) {
+  if (sameDirectory(projectRoot, base)) return;
+  const key = resolve(projectRoot);
+  if (migrationAttempted.has(key)) return;
+  migrationAttempted.add(key);
+  const legacy = join(resolve(projectRoot), DEFAULT_RELATIVE_PATH);
+  try {
+    if (!existsSync(legacy) || existsSync(target)) return;
+    ensureParentDir(target);
+    copyFileSync(legacy, target);
+    appendFileSync(
+      target,
+      JSON.stringify({
+        ts: (/* @__PURE__ */ new Date()).toISOString(),
+        event: "audit_log.migrated",
+        from: legacy.replace(/\\/g, "/"),
+        to: target.replace(/\\/g, "/"),
+        reason: "anchor bound to the repository (#92); history carried forward"
+      }) + "\n",
+      "utf8"
+    );
+  } catch {
+  }
+}
+function decideAuditPath(projectRoot, config) {
+  const anchor = anchorFor(projectRoot);
+  const base = anchor.root;
+  const fallback = join(base, DEFAULT_RELATIVE_PATH);
+  migrateLegacyLog(projectRoot, base, fallback);
+  const configured = config?.path;
+  if (configured && configured.length > 0) {
+    const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
+    if (!isInside(base, candidate)) {
+      return { path: fallback, base, escaped: candidate, anchor: anchor.status };
+    }
+    return { path: candidate, base, escaped: null, anchor: anchor.status };
+  }
+  return { path: fallback, base, escaped: null, anchor: anchor.status };
+}
+function isInside(base, candidate) {
+  if (sameDirectory(base, candidate)) return true;
+  const b = resolve(base).replace(/\\/g, "/").replace(/\/+$/, "");
+  const c = resolve(candidate).replace(/\\/g, "/");
+  const prefix = process.platform === "win32" ? b.toLowerCase() + "/" : b + "/";
+  const target = process.platform === "win32" ? c.toLowerCase() : c;
+  return target.startsWith(prefix);
 }
 function hashSettingsContent(text) {
   return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
@@ -234,16 +395,16 @@ function sanitize(projectRoot, options = {}) {
   return result;
 }
 function resolveAuditLogPath(projectRoot) {
+  let configured;
   try {
     const raw = stripBom(readFileSync(join(projectRoot, ".rsct.json"), "utf8"));
     const cfg = JSON.parse(raw);
-    const configured = cfg.audit?.path;
-    if (typeof configured === "string" && configured.length > 0) {
-      return isAbsolute(configured) ? configured : resolve(projectRoot, configured);
+    if (typeof cfg.audit?.path === "string" && cfg.audit.path.length > 0) {
+      configured = cfg.audit.path;
     }
   } catch {
   }
-  return join(projectRoot, ".rsct", "audit.log");
+  return decideAuditPath(projectRoot, configured === void 0 ? void 0 : { path: configured }).path;
 }
 function defaultAuditWriter(projectRoot, entry, now) {
   try {
