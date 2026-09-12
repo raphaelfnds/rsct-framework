@@ -15,18 +15,17 @@ import {
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { findPlanBySlug, phaseSpecExists } from '../lib/plan.js'
+import {
+  evaluateEvidenceGate,
+  gateCeremonyBypass,
+  type CeremonyBypass,
+} from '../lib/ceremony-gate.js'
+import type { GateRejectKind } from '../lib/request-gate.js'
+import type { DialogOptions, DialogResult } from '../lib/os-dialog.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
 
-/**
- * CAP-28 / PH-1: tiers that bypass the ceremony gates. Trivial + small tasks
- * intentionally skip the V phase AND the plan-tracking gate per the canonical
- * RSCT tier table (see rules/B-architect-plan.md). Standard + complex must run
- * V (or `override_verification_skip=true`) and have plan_/progress_ tracking
- * (or `override_plan_tracking=true`), each with an audit trail. Shared by
- * evaluateVerificationGate + evaluatePlanTrackingGate — one source of truth.
- */
 const TIERS_BYPASSING_CEREMONY: ReadonlySet<Tier> = new Set(['trivial', 'small'])
 
 export const phaseCodeStartInputSchema = z
@@ -46,13 +45,13 @@ export const phaseCodeStartInputSchema = z
       .boolean()
       .default(false)
       .describe(
-        'When true, allows code phase to start without a completed verification block for tier ∈ {standard, complex}. The override is logged to audit; use sparingly when the dev has explicitly chosen to bypass V.',
+        'When true, allows code phase to start without a completed verification block for tier ∈ {standard, complex}. Requires dev_approval and always forces the OS dialog. The override is logged to audit.',
       ),
     override_classify_downgrade: z
       .boolean()
       .default(false)
       .describe(
-        'CAP-30: when true, allows spec_tier lower than the highest tier ever returned by rsct_classify_task (`last_classify.tier_max` in phase-state). Override is audit-logged. Use only when the dev has explicitly chosen to downgrade.',
+        'CAP-30: when true, allows spec_tier lower than the highest tier ever returned by rsct_classify_task (`last_classify.tier_max` in phase-state). Requires dev_approval and always forces the OS dialog. Override is audit-logged.',
       ),
     plan_slug: z
       .string()
@@ -64,7 +63,13 @@ export const phaseCodeStartInputSchema = z
       .boolean()
       .default(false)
       .describe(
-        'PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Override is audit-logged. Use only when the dev has explicitly chosen to proceed without the tracking docs.',
+        'PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Requires dev_approval and always forces the OS dialog. Override is audit-logged.',
+      ),
+    dev_approval: z
+      .unknown()
+      .optional()
+      .describe(
+        'Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V/REVIEW/plan tracking is a per-call decision, not a pre-authorised tool.',
       ),
   })
   .strict()
@@ -92,11 +97,14 @@ export interface PhaseCodeStartGateRejectedOutput {
     | 'verification_gate_rejected'
     | 'classify_gate_rejected'
     | 'plan_tracking_gate_rejected'
+    | 'bypass_gate_rejected'
   reject_kind:
     | 'verification_required'
     | 'verification_incomplete'
     | 'classify_downgrade'
+    | 'classify_evidence_absent'
     | 'plan_tracking'
+    | GateRejectKind
   reason: string
   spec_ref: string
   verification_gate: VerificationGate
@@ -111,6 +119,7 @@ export interface PhaseCodeStartGateRejectedOutput {
 
 export type ClassifyGateStatus =
   | 'no_record'
+  | 'not_evaluated'
   | 'satisfied'
   | 'overridden'
   | 'rejected_downgrade'
@@ -138,11 +147,9 @@ export interface PlanTrackingGate {
   status: PlanTrackingGateStatus
   spec_tier: Tier
   plan_slug: string | null
-  /** Multi-phase = plan_slug present AND spec_slug present AND spec_slug≠plan_slug. */
   is_multi_phase: boolean
   plan_present: boolean
   progress_present: boolean
-  /** null = not applicable (single-phase — no per-phase spec file required). */
   phase_spec_present: boolean | null
   hint: string
 }
@@ -159,7 +166,7 @@ export type PhaseCodeStartOutput =
 export const phaseCodeStartTool: Tool = {
   name: 'rsct_phase_code_start',
   description:
-    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass (override is audit-logged). **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass (audit-logged). **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
+    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, REVIEW or plan tracking is a per-call decision. **Evidence gate** — `spec_tier ∈ {trivial, small}` skips V, REVIEW and plan tracking, so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -197,22 +204,18 @@ export const phaseCodeStartTool: Tool = {
         type: 'boolean',
         default: false,
         description:
-          'PH-1: when true, bypass the plan-tracking gate (audit-logged).',
+          'PH-1: when true, bypass the plan-tracking gate. Requires dev_approval and forces the OS dialog (audit-logged).',
+      },
+      dev_approval: {
+        type: 'object',
+        description:
+          'The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags is true.',
       },
     },
     additionalProperties: false,
   },
 }
 
-/**
- * CAP-28 hard gate. Determines if code phase may proceed based on:
- *  - tier (trivial/small bypass)
- *  - presence of a completed verification block matching spec_ref
- *  - dev's explicit override flag
- *
- * Pure function — does not write state or audit; caller wires up audit
- * events after deciding.
- */
 export function evaluateVerificationGate(args: {
   projectRoot: string
   specRef: string
@@ -282,12 +285,6 @@ export function evaluateVerificationGate(args: {
   }
 }
 
-/**
- * CAP-30 classify-downgrade gate. Reads `last_classify.tier_max` from
- * phase-state and rejects when `spec_tier` is strictly lower (ranks
- * defined by `tierRank` in lib/phase-scope). Pure function — caller
- * wires audit events.
- */
 export function evaluateClassifyGate(args: {
   projectRoot: string
   specTier: Tier
@@ -334,7 +331,6 @@ export function evaluateClassifyGate(args: {
   }
 }
 
-/** Slug charset guard — blocks `/`, `..`, etc. before any filesystem read. */
 const SLUG_RE = /^[A-Za-z0-9._-]+$/
 
 const PLAN_TRACKING_REJECTS: ReadonlySet<PlanTrackingGateStatus> = new Set([
@@ -345,21 +341,6 @@ const PLAN_TRACKING_REJECTS: ReadonlySet<PlanTrackingGateStatus> = new Set([
   'rejected_phase_spec_missing',
 ])
 
-/**
- * PH-1 plan-tracking gate. For tier ∈ {standard, complex}, requires the plan's
- * tracking docs to exist on disk before Code starts:
- *   - plan_<plan_slug>.md      (via findPlanBySlug — plan_ or its spec_ alias)
- *   - progress_<plan_slug>.md
- *   - spec_<spec_slug>.md       ONLY when multi-phase (spec_slug present & ≠ plan_slug)
- *
- * `plan_slug` is REQUIRED for standard/complex and the gate keys on the PLAN
- * slug, never the phase slug — so a per-phase spec_ file can never masquerade
- * as the plan. The only self-attested choices are declaring single-phase (omit
- * spec_slug, or set it equal to plan_slug → skips the per-phase spec file) and
- * the tier (trivial/small bypass) — the same trust model the V gate already
- * uses; plan_+progress_ stay mechanically enforced. Pure function — the caller
- * wires audit events.
- */
 export function evaluatePlanTrackingGate(args: {
   projectRoot: string
   planSlug: string | undefined
@@ -386,9 +367,6 @@ export function evaluatePlanTrackingGate(args: {
 
   const specSlugGiven =
     specSlug !== undefined && specSlug.length > 0 ? specSlug : null
-  // Multi-phase also requires a usable plan_slug, so the invariant
-  // "is_multi_phase ⇒ plan_slug present" holds even on the override path
-  // where plan_slug is absent (REVIEW P2 — telemetry consistency).
   const isMultiPhase =
     planSlug !== undefined &&
     planSlug.length > 0 &&
@@ -498,14 +476,18 @@ export function evaluatePlanTrackingGate(args: {
   }
 }
 
+export interface PhaseCodeStartInternal {
+  promptFn?: (options: DialogOptions) => Promise<DialogResult>
+  now?: Date
+}
+
 export async function phaseCodeStartHandler(
   rawInput: unknown,
+  internal: PhaseCodeStartInternal = {},
 ): Promise<PhaseCodeStartOutput> {
   const input = phaseCodeStartInputSchema.parse(rawInput ?? {})
   const resolution = resolveProjectRoot(input.project_root)
 
-  // Placeholder plan-tracking gate for uniform reject envelopes when an
-  // earlier gate (classify) short-circuits before plan-tracking is evaluated.
   const notEvaluatedPlanTracking: PlanTrackingGate = {
     status: 'not_evaluated',
     spec_tier: input.spec_tier,
@@ -517,10 +499,116 @@ export async function phaseCodeStartHandler(
     hint: 'plan-tracking gate not evaluated (an earlier gate rejected first).',
   }
 
-  // CAP-30 classify-downgrade gate runs FIRST. A downgrade attempt is
-  // higher-severity than a missing V — it tries to bypass the V gate
-  // by lying about the tier. We surface it before V semantics so the
-  // dev sees the most-actionable error in the response payload.
+  const evidenceGate = evaluateEvidenceGate({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    specTier: input.spec_tier,
+    toolName: 'rsct_phase_code_start',
+  })
+
+  if (evidenceGate.status === 'absent') {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: 'code.start.rejected',
+        tool: 'rsct_phase_code_start',
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: 'classify_evidence_absent',
+      },
+      resolution.config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'classify_gate_rejected',
+      reject_kind: 'classify_evidence_absent',
+      reason: evidenceGate.hint,
+      spec_ref: input.spec_ref,
+      verification_gate: {
+        status: 'bypassed_tier',
+        spec_tier: input.spec_tier,
+        v_block_found: false,
+        v_spec_ref: null,
+        v_completed_at: null,
+        hint: 'evidence gate rejected before V evaluation',
+      },
+      classify_gate: {
+        status: 'no_record',
+        spec_tier: input.spec_tier,
+        tier_max_recorded: null,
+        classified_at: null,
+        hint: evidenceGate.hint,
+      },
+      plan_tracking_gate: notEvaluatedPlanTracking,
+      phase_state_path: '',
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [evidenceGate.hint],
+    }
+  }
+
+  const requestedBypasses: CeremonyBypass[] = []
+  if (input.override_verification_skip) requestedBypasses.push('verification_skip')
+  if (input.override_classify_downgrade) requestedBypasses.push('classify_downgrade')
+  if (input.override_plan_tracking) requestedBypasses.push('plan_tracking')
+
+  const bypassGate = await gateCeremonyBypass({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    toolName: 'rsct_phase_code_start',
+    specRef: input.spec_ref,
+    specTier: input.spec_tier,
+    bypasses: requestedBypasses,
+    devApproval: input.dev_approval,
+    ...(internal.promptFn !== undefined && { promptFn: internal.promptFn }),
+    ...(internal.now !== undefined && { now: internal.now }),
+  })
+
+  if (bypassGate.status === 'rejected') {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: 'code.start.rejected',
+        tool: 'rsct_phase_code_start',
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: bypassGate.reject_kind,
+        reason: bypassGate.reason,
+        bypasses_requested: requestedBypasses,
+      },
+      resolution.config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'bypass_gate_rejected',
+      reject_kind: bypassGate.reject_kind,
+      reason: bypassGate.reason,
+      spec_ref: input.spec_ref,
+      verification_gate: {
+        status: 'bypassed_tier',
+        spec_tier: input.spec_tier,
+        v_block_found: false,
+        v_spec_ref: null,
+        v_completed_at: null,
+        hint: 'bypass gate rejected before V evaluation',
+      },
+      classify_gate: {
+        status: 'not_evaluated',
+        spec_tier: input.spec_tier,
+        tier_max_recorded: null,
+        classified_at: null,
+        hint: 'classify gate not evaluated (the bypass gate rejected first).',
+      },
+      plan_tracking_gate: notEvaluatedPlanTracking,
+      phase_state_path: '',
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [bypassGate.reason],
+    }
+  }
+
   const classifyGate = evaluateClassifyGate({
     projectRoot: resolution.root,
     specTier: input.spec_tier,
@@ -542,8 +630,6 @@ export async function phaseCodeStartHandler(
       resolution.config?.audit,
     )
     const fields = auditFields(audit)
-    // Build a placeholder verification_gate for the rejected envelope
-    // so the output shape stays uniform across reject paths.
     const placeholderVGate: VerificationGate = {
       status: 'bypassed_tier',
       spec_tier: input.spec_tier,
@@ -582,9 +668,6 @@ export async function phaseCodeStartHandler(
     )
   }
 
-  // PH-1 plan-tracking gate — after classify, before V (the plan is a
-  // prerequisite to verifying the plan). Requires plan_/progress_ (+ per-phase
-  // spec_ when multi-phase) for standard/complex; trivial/small bypass.
   const planTrackingGate = evaluatePlanTrackingGate({
     projectRoot: resolution.root,
     planSlug: input.plan_slug,
@@ -706,8 +789,6 @@ export async function phaseCodeStartHandler(
     )
   }
 
-  // CAP-31 bootstrap visibility — surfaces warning (not reject) if §0
-  // was skipped or stale. Audit-logged for forensic trail.
   const bootstrap = evaluateBootstrapMarker({ projectRoot: resolution.root })
   if (bootstrap.status !== 'fresh') {
     appendAuditEntry(

@@ -44,6 +44,17 @@ function alwaysYes(): (opts: DialogOptions) => Promise<DialogResult> {
   return async () => ({ response: 'yes', channel: 'windows' })
 }
 
+function writeClassifyVerdict(tier: string): void {
+  mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+  const line = JSON.stringify({
+    ts: '2026-06-07T17:00:00.000Z',
+    event: 'classify.verdict',
+    tool: 'rsct_classify_task',
+    tier,
+  })
+  writeFileSync(join(tmpRoot, '.rsct/audit.log'), `${line}\n`, 'utf8')
+}
+
 function setActivePhase(phase: string, specSlug: string): void {
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
   writeFileSync(
@@ -84,10 +95,7 @@ describe('phase-spec start + complete', () => {
 
 describe('phase-code start + complete', () => {
   it('start writes phase=code with scope_globs (tier=trivial bypasses V gate)', async () => {
-    // CAP-28: default tier=standard requires V completion; this smoke
-    // uses tier=trivial to bypass the gate since the focus is the
-    // phase-state write + scope_globs handling, not V gate semantics
-    // (V gate has dedicated coverage in phase-code-start.test.ts).
+    writeClassifyVerdict('trivial')
     const r = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-code-smoke',
@@ -129,10 +137,7 @@ describe('phase-code start + complete', () => {
 
 describe('phase-test start + complete (terminal)', () => {
   it('start writes phase=test (tier=trivial bypasses review gate)', async () => {
-    // DX-4: default tier=standard requires an honored review decision;
-    // this smoke uses tier=trivial to bypass the gate since the focus is
-    // the phase-state write, not review-gate semantics (the gate has
-    // dedicated coverage in phase-review.test.ts).
+    writeClassifyVerdict('trivial')
     const r = await phaseTestStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-test-smoke',

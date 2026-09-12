@@ -12,28 +12,6 @@ import {
 } from './os-dialog.js'
 import type { RsctApprovalModes, RsctAuditConfig } from './project-root.js'
 
-/**
- * The §C orchestrator. Every §C-gated tool delegates the "is this dev_approval
- * good enough to proceed?" decision here so the rules (INV-2, INV-2.1, INV-2.2)
- * land in one place and changes propagate everywhere.
- *
- * Flow:
- *  1. {@link validateDevApproval} (schema / skew / anti-reuse / fabrication)
- *  2. If `must_force_dialog`, the OS dialog is COMPULSORY:
- *      - yes -> approved (channel = dialog channel)
- *      - no  -> rejected (`dialog_no`)
- *      - no-channel -> rejected (`force_dialog_no_channel`).
- *        `trust_allowed_for[]` is IGNORED here on purpose: once fabrication
- *        signals fire, raising bypass cost matters more than CI ergonomics.
- *  3. Otherwise (no fabrication signals), try the OS dialog and fall back to
- *     `trust_allowed_for[]` only when no dialog channel exists.
- *
- * The approval is NOT consumed here. Callers consume via
- * {@link recordConsumedApproval} only AFTER a successful mutation, so a
- * failed git op or a downstream INV-5/INV-6 rejection doesn't burn the
- * approval — dev can add an override and retry with the same payload.
- */
-
 export type GateChannel = DialogChannel | 'trust'
 
 export type GateRejectKind =
@@ -59,23 +37,14 @@ export type GateResult =
     }
 
 export interface GateOptions {
-  /** Tool name used to match against `trust_allowed_for[]` in headless mode. */
   toolName: string
-  /** Raw `dev_approval` payload from the tool's input. */
   approval: unknown
-  /** Title + message rendered in the OS dialog when one is shown. */
   dialog: DialogOptions
   projectRoot: string
   approvalModes?: RsctApprovalModes
-  /**
-   * `.rsct.json` `audit` block. Forwarded to validation so the audit half of
-   * the #92 anti-reuse union reads the same file the consumption was written
-   * to — the two halves must never resolve to different logs.
-   */
   auditConfig?: RsctAuditConfig | undefined
-  /** Injectable for unit tests (defaults to {@link promptYesNo}). */
+  forceDialog?: boolean
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
-  /** Injectable for unit tests (defaults to current time). */
   now?: Date
 }
 
@@ -102,7 +71,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   const promptFn = opts.promptFn ?? promptYesNo
   const dialog = await promptFn(opts.dialog)
 
-  if (validation.must_force_dialog) {
+  if (validation.must_force_dialog || opts.forceDialog === true) {
     if (dialog.response === 'yes') {
       return {
         status: 'approved',
@@ -111,17 +80,20 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
         fabrication_signals: validation.fabrication_signals,
       }
     }
+    const why = validation.must_force_dialog
+      ? `the approval looked auto-generated (signals: ${validation.fabrication_signals.join(',')})`
+      : 'this call bypasses a phase the tier requires'
     if (dialog.response === 'no') {
       return {
         status: 'rejected',
-        reason: 'dev declined the approval dialog (it was forced because the approval looked auto-generated)',
+        reason: `dev declined the approval dialog (it was forced because ${why})`,
         reject_kind: 'dialog_no',
         fabrication_signals: validation.fabrication_signals,
       }
     }
     return {
       status: 'rejected',
-      reason: `dialog channel unavailable (${dialog.error ?? 'no channel'}); fabrication signals [${validation.fabrication_signals.join(',')}] require forced dialog — trust_allowed_for is ignored`,
+      reason: `dialog channel unavailable (${dialog.error ?? 'no channel'}); ${why} — the dialog is required and trust_allowed_for is ignored`,
       reject_kind: 'force_dialog_no_channel',
       fabrication_signals: validation.fabrication_signals,
     }

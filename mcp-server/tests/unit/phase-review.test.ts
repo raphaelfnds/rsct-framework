@@ -72,7 +72,6 @@ function reviewBlock(over: Partial<PhaseReviewBlock> = {}): PhaseReviewBlock {
   return { spec_ref: 'feat-x', decision: 'yes', ...over }
 }
 
-// ── evaluateReviewGate (pure) — all states + the stale-poison guard ──────────
 describe('evaluateReviewGate — tier bypass', () => {
   it('bypassed_tier for trivial + small', () => {
     for (const tier of ['trivial', 'small'] as const) {
@@ -137,7 +136,6 @@ describe('evaluateReviewGate — standard/complex decision states', () => {
   })
 
   it('overridden bypasses BOTH undecided and incomplete', () => {
-    // undecided → overridden
     const g1 = evaluateReviewGate({
       projectRoot: tmpRoot,
       specRef: 'feat-x',
@@ -145,7 +143,6 @@ describe('evaluateReviewGate — standard/complex decision states', () => {
       overrideReviewSkip: true,
     })
     expect(g1.status).toBe('overridden')
-    // incomplete → overridden
     writeState({ review: reviewBlock({ decision: 'yes' }) })
     const g2 = evaluateReviewGate({
       projectRoot: tmpRoot,
@@ -183,7 +180,6 @@ describe('evaluateReviewGate — stale-poison guard (re-plan / different spec_re
   })
 })
 
-// ── stampReviewDecision — additive upsert + carry-guard ──────────────────────
 describe('stampReviewDecision', () => {
   it('records the decision, then merges completed_at without clobbering it', () => {
     stampReviewDecision(tmpRoot, {
@@ -208,12 +204,11 @@ describe('stampReviewDecision', () => {
       decided_at: VALID_TS,
       completed_at: FIXED_NOW.toISOString(),
     })
-    // re-plan to Y, decline it
     stampReviewDecision(tmpRoot, { spec_ref: 'feat-Y', decision: 'no', decided_at: VALID_TS })
     const r = readPhaseState(tmpRoot).state?.review
     expect(r?.spec_ref).toBe('feat-Y')
     expect(r?.decision).toBe('no')
-    expect(r?.completed_at).toBeUndefined() // X's completed_at did NOT carry over
+    expect(r?.completed_at).toBeUndefined()
   })
 
   it('preserves other phase-state sub-blocks (additive)', () => {
@@ -226,7 +221,6 @@ describe('stampReviewDecision', () => {
   })
 })
 
-// ── spec_complete include_review → records the decision (on success only) ────
 describe('phase_spec_complete include_review', () => {
   function specComplete(includeReview: boolean | undefined) {
     writeState({ phase: 'spec', spec_slug: 'feat-x' })
@@ -266,7 +260,6 @@ describe('phase_spec_complete include_review', () => {
   })
 })
 
-// ── review_start / review_complete ───────────────────────────────────────────
 describe('phase_review start + complete', () => {
   it('review_start writes phase=review', async () => {
     const r = await phaseReviewStartHandler({
@@ -299,10 +292,10 @@ describe('phase_review start + complete', () => {
     expect(r.status).toBe('completed')
     expect(r.next_recommended_phase).toBe('test')
     const s = readState()
-    expect(s.phase).toBeUndefined() // active phase cleared
+    expect(s.phase).toBeUndefined()
     const review = s.review as Record<string, unknown>
-    expect(review.decision).toBe('yes') // preserved
-    expect(review.completed_at).toBe(FIXED_NOW.toISOString()) // stamped
+    expect(review.decision).toBe('yes')
+    expect(review.completed_at).toBe(FIXED_NOW.toISOString())
   })
 
   it('flags scope_mismatch when the action_scope prefix is wrong (INV-2.2 registered)', async () => {
@@ -313,7 +306,7 @@ describe('phase_review start + complete', () => {
         spec_ref: 'feat-x',
         dev_approval: {
           timestamp: VALID_TS,
-          action_scope: 'code_complete:spec_ref=feat-x', // wrong prefix for review_complete
+          action_scope: 'code_complete:spec_ref=feat-x',
           reason: 'mismatched scope — should raise scope_mismatch',
         },
       },
@@ -323,7 +316,6 @@ describe('phase_review start + complete', () => {
   })
 })
 
-// ── test_start handler — gate enforcement end-to-end ─────────────────────────
 describe('phase_test_start review gate', () => {
   it('rejects (review_gate_rejected) with no state write when undecided (standard)', async () => {
     const r = (await phaseTestStartHandler({
@@ -369,12 +361,20 @@ describe('phase_test_start review gate', () => {
     expect(r.review_gate.status).toBe('passed')
   })
 
-  it('proceeds with override_review_skip even when undecided (audit-logged)', async () => {
-    const r = await phaseTestStartHandler({
-      project_root: tmpRoot,
-      spec_ref: 'feat-x',
-      override_review_skip: true,
-    })
+  it('proceeds with override_review_skip when undecided AND the dev approves (audit-logged)', async () => {
+    const r = await phaseTestStartHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-x',
+        override_review_skip: true,
+        dev_approval: {
+          timestamp: VALID_TS,
+          action_scope: 'test_start:bypass_review',
+          reason: 'dev chose to skip the review for this task',
+        },
+      },
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )
     if (r.status !== 'started') throw new Error(`expected started, got ${r.status}`)
     expect(r.review_gate.status).toBe('overridden')
     const audit = readFileSync(join(tmpRoot, '.rsct/audit.log'), 'utf8')
@@ -382,7 +382,6 @@ describe('phase_test_start review gate', () => {
   })
 })
 
-// ── phase_status surfaces the review summary ─────────────────────────────────
 describe('phase_status review summary', () => {
   it('returns the review decision + completion state', async () => {
     writeState({
@@ -395,13 +394,7 @@ describe('phase_status review summary', () => {
       completed: true,
       decided_at: VALID_TS,
       completed_at: FIXED_NOW.toISOString(),
-      // #40: a completed review has no pending findings — the block is pruned at
-      // _complete, and the test gate reads that emptiness as an invariant.
       open_findings: [],
-      // #75: and because it was pruned there is no baseline left to weigh, so the
-      // mix is UNMEASURABLE rather than a row of zeros. "Nothing to count" and
-      // "counted nothing" are different claims, and only the second would be a
-      // statement about the review's evidence.
       evidence_mix: {
         measurable: false,
         measured: 0,
@@ -422,7 +415,6 @@ describe('phase_status review summary', () => {
   })
 })
 
-// ── phase_abandon wipes the review block ─────────────────────────────────────
 describe('phase_abandon clears the review block', () => {
   it('wipes review along with the rest of phase-state', async () => {
     writeState({
@@ -471,9 +463,6 @@ describe('phase-review-complete — findings_actions (#19)', () => {
   }
 
   it('records one audit entry per finding and summarises the actions', async () => {
-    // Before #19 a review that found residue had nowhere to put it: the tool took
-    // only spec_ref + dev_approval, so the whole phase rested on the agent
-    // remembering the description.
     activeReview()
     const r = await phaseReviewCompleteHandler(
       {
@@ -502,8 +491,6 @@ describe('phase-review-complete — findings_actions (#19)', () => {
   })
 
   it('a blocking finding aborts BEFORE the dialog, and the phase stays open', async () => {
-    // Popping a dialog for a completion already refused wastes an approval and
-    // teaches the dev to click through. Mirrors the V phase.
     activeReview()
     let dialogShown = false
     const r = await phaseReviewCompleteHandler(
@@ -528,11 +515,9 @@ describe('phase-review-complete — findings_actions (#19)', () => {
     expect(r.status).toBe('rejected')
     expect(r.reject_kind).toBe('block_actions_present')
     expect(dialogShown).toBe(false)
-    // The phase is still active — nothing was cleared or stamped.
     const s = readState()
     expect(s.phase).toBe('review')
     expect((s.review as Record<string, unknown>).completed_at).toBeUndefined()
-    // And no per-finding action was logged: those record APPROVED decisions.
     expect(auditEvents().some((e) => e.event === 'review.action')).toBe(false)
     expect(auditEvents().some((e) => e.event === 'review.complete.rejected')).toBe(true)
   })

@@ -58,7 +58,8 @@ NEVER edit code without first presenting the user a plan containing:
    code* — write two files at the project root. Do not defer this: the MCP
    gate `rsct_phase_code_start` mechanically **rejects** the Code phase for
    `standard`/`complex` tasks when `plan_<slug>.md` + `progress_<slug>.md`
-   are absent (pass `plan_slug`; override only with `override_plan_tracking`).
+   are absent (pass `plan_slug`; override only with `override_plan_tracking`,
+   which needs a `dev_approval` and forces an OS dialog).
    - `plan_<slug>.md` — the approved plan, using the framework template
      `~/.rsct/doc-templates/plan_slug.md.template`.
    - `progress_<slug>.md` — execution log, using the framework template

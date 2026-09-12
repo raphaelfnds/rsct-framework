@@ -42,8 +42,11 @@ forgotten) against the project's institutional context. Tier table:
 trivial+small skip V; standard+complex run V. The **Review** phase
 (a code review of the diff, between Code and Test) is opt-in and asked
 once at spec-approval; when included, the test phase will not start until
-the review has run (standard+complex; trivial+small skip it) — bypassable
-with an audit-logged `override_review_skip`.
+the review has run (standard+complex; trivial+small skip it). Bypassing it
+needs `override_review_skip` **plus a `dev_approval` and the OS dialog** — a
+skipped review is a decision the dev makes per call, never a flag the agent
+sets. A `trivial`/`small` tier only skips the review when an
+`rsct_classify_task` verdict on record supports it.
 
 Both phases **bind on their findings**: every finding raised needs a
 decision (`block` / `address-now` / `capture-as-issue` / `defer` /

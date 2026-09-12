@@ -10,6 +10,95 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.10.0] - 2026-09-12
+
+The gates that decide whether a phase may be skipped stop accepting the agent's word for
+it. Nothing here changes a call that skips nothing: a `code_start` or `test_start` with no
+override, at a tier backed by a classification, behaves exactly as it did in 2.9.1.
+
+### Fixed — a phase could be deleted by typing `true`, with no dialog anywhere
+
+MEASURED against the shipped server over stdio, in throwaway repositories: in the same tool
+family, **closing** a phase demanded a `dev_approval` (`rsct_phase_code_complete` with none
+rejects, `reject_kind=schema`) while `rsct_phase_code_start` with
+`override_verification_skip`, `override_classify_downgrade` and `override_plan_tracking` all
+`true` returned `status=started` in **186 ms** — no approval, no dialog, nothing the
+developer could see at the time. The same held for `override_review_skip` at
+`rsct_phase_test_start`. The overrides were audit-logged, which tells the developer
+afterwards and only if they look. No other mechanism covered them: the installed
+`PreToolUse` hook matches `^(Edit|Write|MultiEdit|NotebookEdit)$` and never sees an MCP
+call.
+
+Every `override_*` flag now requires a `dev_approval` **and forces the OS dialog**, reusing
+the posture `request-gate.ts` already applies to approvals that look auto-generated:
+`trust_allowed_for` is ignored, and a machine with no dialog channel is refused
+(`force_dialog_no_channel`). Several bypasses in one call ask **once**.
+
+Deliberately breaking: a project with no dialog channel can no longer override. That is the
+point — a bypass of V or REVIEW is exactly the decision that must not be self-service.
+Adding the `_start` tools to `trust_allowed_for` was rejected: trust matches on the tool
+name, so it would pre-authorise every code start rather than the bypass.
+
+### Fixed — the quiet bypass that needed no flag at all
+
+Found by auditing the fix above, before it shipped. `trivial` and `small` skip the V phase,
+the REVIEW phase and plan tracking **by design**, and `spec_tier` is declared by the caller
+on every `_start` call. MEASURED, with **zero** override flags: a fresh project that never
+called `rsct_classify_task` started the Code phase at `spec_tier=trivial`; so did the Test
+phase, skipping REVIEW; and a task classified `complex` started as `trivial` after `.rsct/`
+was wiped. None of it left an override event in the audit log — the flags at least leave a
+record, this left none.
+
+Gating only the flags would therefore have closed the loud door and left the quiet one open,
+which is worse than it looks: it makes the class appear closed. So the gate keys on the
+**effect**, not the keyword. A tier that bypasses ceremony is refused
+(`classify_evidence_absent`) unless an `rsct_classify_task` verdict is on record, read from
+the audit log and phase-state together. The sanctioned flow already mandates
+`rsct_classify_task` (`rules/B-architect-plan.md`), so this rejects only the shortcut. A tier
+that bypasses nothing is untouched and pays no log read.
+
+**Not closed, stated plainly:** a full `.rsct/` wipe removes the verdict with everything
+else, and the agent can classify again with softer words. That residual surface is #89.
+What closes here is the bypass that needed no call at all.
+
+### Fixed — one config line could switch the whole framework off
+
+`rsct_phase_review_complete` was the only gated `_complete` tool missing from
+`TRUST_ALLOWED_TOOL_NAMES`. MEASURED: a `.rsct.json` listing it is rejected whole —
+`rsct_installed: false`, `bounds_violation` — so a developer on a machine with no dialog,
+trying to make the REVIEW phase completable, turned off every gate and got one stderr line.
+Drift, not design: the list was created at v1.0.0, `phase-review-complete.ts` arrived later
+with DX-4, the name was never in it, and `rsct_plan_authorize` **was** added when it
+shipped. The enum now carries it; the fail-closed posture for genuinely unknown names is
+unchanged and pinned by its own test.
+
+### Changed — source code carries no comments
+
+New project rule. A comment sits beside code, is never checked against it, drifts, and
+becomes a confident false statement — the same failure class the framework exists to prevent
+in an agent. Decisions, ADRs, anti-decisions and conventions move to their own files, and
+`docs/decisions.md` is added to hold them for this repository (the framework is deliberately
+not installed in itself, so it has no `documentation/decisions.md`).
+
+317 comment lines were removed from the 10 files this release touches, and every measured
+fact they carried was migrated rather than deleted. Two declarations that a linter reports as
+unused are **kept**: `_KeysMissingFromSchema` and `_KeysMissingFromInterface` in
+`project-root.ts` exist precisely to fail compilation, which is the case where an unused-code
+tool is wrong and the call graph is right.
+
+This also simplifies #62. Detecting a comment that disagrees with the code needed a
+heuristic, and #33 measured that at 163 findings and zero true positives; "no comments at
+all" makes the same check a lexical sweep with no false positives.
+
+### Tests
+
+1808 → **1822** passing. New coverage: each of the four overrides rejected without an
+approval; rejection when the developer declines; `trust_allowed_for` ignored with no dialog
+channel; one dialog for several bypasses; no dialog when nothing is bypassed; the evidence
+gate at both tools; a verdict honoured from phase-state alone; and a non-bypassing tier left
+alone. Two mutations confirmed the suite is not decoration: removing the `forceDialog` branch
+reddens the trust-ignored test by name, and disabling the evidence gate reddens three.
+
 ## [2.9.1] - 2026-09-12
 
 Security patch. Every one of the six open advisories is closed and `npm audit` reports
