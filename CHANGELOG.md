@@ -10,6 +10,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [2.9.1] - 2026-09-12
+
+Security patch. Every one of the six open advisories is closed and `npm audit` reports
+**0 vulnerabilities**. No behaviour change: nothing under `mcp-server/src/` is touched,
+the tool catalog stays at **40**, and the marker schema id stays `v=1.0.0`. The only
+line of `dist/index.js` that differs for reasons other than the dependency itself is
+the version literal.
+
+### Fixed
+
+- **`fast-uri` 3.1.5 → 3.1.7** (#87) — the four HIGH advisories: IDN canonicalization
+  skipped on scheme-relative references, SSRF via malformed IPv6 normalization, SSRF via
+  repeated hostname percent-decoding, and host confusion via percent-encoded scheme
+  normalization. This is the one bumped package that is **bundled** into the tracked
+  `dist/`, so the lockfile change alone would have left the vulnerable code in the
+  shipped artifact — the same trap recorded under 2.5.1. The bundle is rebuilt in the
+  same PR, and the rebuild is confined to `require_utils`, `require_schemes` and
+  `require_fast_uri`: 53 hunks, no other module touched.
+- **`hono` 4.13.0 → 4.13.7** (#88), **`vitest` 4.1.8 → 4.1.11 with `@vitest/mocker`**
+  (#90), **`nanoid` → 3.3.18** (transitively, via `postcss`), and **`qs` → 6.16.0**.
+  None of these is bundled, so none ever shipped. `qs` needed forcing: `npm audit fix`
+  will not move a pinned indirect dependency even when the parent's own range admits
+  the fix.
+
+### Measured — is the vulnerable `fast-uri` code reachable?
+
+Worth recording so the next audit does not re-open it. The answer is **yes, it executes,
+and no, it is not exposed** — and the first half refutes what this repository previously
+assumed.
+
+With every `fast-uri` export instrumented and the SDK's own `Ajv` configuration fed the
+40 tool schemas read back from the running server: `parse` is called **81 times**, so the
+code is not dead. But it is called with exactly two constant strings — `""` (80×) and
+`"http://json-schema.org/draft-07/schema"` (1×). Caller-supplied values never reach it:
+no RSCT tool schema declares `format`, `$ref`, `$id` or `$schema`, and the one server-side
+path that would hand a third party's schema to Ajv is elicitation, which this server never
+calls. A control schema declaring `$id` and `$ref` does move the counters, so the zero is
+a real measurement rather than a probe that never ran.
+
+The upgrade stands on its own regardless: one future tool declaring `format: "uri"` would
+re-open the path with no signal.
+
+### Changed
+
+- `mcp-server/README.md` corrects the shipped artifact sizes, stale since 2.9.0:
+  ~1.28 MB server, ~19 KB sanitize-permissions hook, ~152 KB edit-scope guard.
+
 ## [2.9.0] - 2026-09-10
 
 ### Fixed — the trust anchor is no longer addressed by a string the agent supplies (#92)
