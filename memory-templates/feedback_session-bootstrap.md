@@ -51,7 +51,8 @@ After step 3, branch on the returned tier:
   rsct_phase_review_complete) →
   rsct_phase_test_start({ spec_tier: 'standard' }) → rsct_phase_test_complete.
 - complex: same chain as standard; V phase is mandatory (skipping
-  requires explicit override_verification_skip=true).
+  requires override_verification_skip=true PLUS a dev_approval and an
+  OS dialog).
 
 The full cycle is R→S→V→C→REVIEW→T (REVIEW audits the diff, V audits the spec).
 
@@ -59,16 +60,23 @@ The full cycle is R→S→V→C→REVIEW→T (REVIEW audits the diff, V audits t
 when `spec_tier ∈ {standard, complex}` and no completed V block
 matches `spec_ref` in phase-state.json. Pass `spec_tier` from your
 earlier rsct_classify_task; to bypass V intentionally on a
-standard/complex task, pass `override_verification_skip: true` —
-override is audit-logged.
+standard/complex task, pass `override_verification_skip: true`
+TOGETHER WITH a `dev_approval`. The tool forces an OS dialog and
+ignores `trust_allowed_for`; the override is audit-logged.
+
+A `trivial` or `small` tier skips V, REVIEW and plan tracking, so it
+is only accepted when an rsct_classify_task verdict is on record.
+Declaring a low tier without classifying first is refused
+(`classify_evidence_absent`) — classify, then pass what it returned.
 
 **REVIEW gate (DX-4)**: at spec-closure, pass `include_review` to
 rsct_phase_spec_complete (recorded by spec_ref). For `spec_tier ∈
 {standard, complex}`, rsct_phase_test_start then enforces it:
 include_review=yes requires a completed rsct_phase_review_* for that
 spec_ref; =no skips REVIEW; no decision rejects (record one).
-trivial/small bypass. Pass `override_review_skip: true` to bypass
-intentionally — audit-logged.
+trivial/small bypass (with a classify verdict on record). Pass
+`override_review_skip: true` PLUS a `dev_approval` to bypass
+intentionally — forces an OS dialog; audit-logged.
 
 For standard and complex, also call
 `mcp__rsct__rsct_auto_persona({ task_description })` after classify

@@ -170,7 +170,10 @@ Before any `Edit` / `Write` to executable behavior files
   verification gate; `tier='standard'|'complex'` **rejects unless V
   phase was completed for the same `spec_ref`** (CAP-28). To skip V
   intentionally on a standard/complex task (rare), pass
-  `override_verification_skip: true` — the override is audit-logged.
+  `override_verification_skip: true` **together with a `dev_approval`** —
+  the tool forces an OS dialog and the override is audit-logged. Also pass
+  `spec_tier` only after `rsct_classify_task` has run: a `trivial`/`small`
+  tier with no verdict on record is refused.
 - Before each `Edit` call:
   `mcp__rsct__rsct_check_edit_scope({ file_path })` — returns
   `in_scope` / `out_of_scope` / `unknown` / `stale_context`. If
@@ -194,7 +197,8 @@ After code phase closes (and the REVIEW phase, when included):
   `rsct_phase_review_complete` ran for the same `spec_ref`**; no recorded
   decision rejects (record one first). `tier='trivial'|'small'` bypasses
   the gate. To bypass intentionally (rare), pass `override_review_skip:
-  true` — the override is audit-logged.
+  true` **together with a `dev_approval`** — the tool forces an OS dialog
+  and the override is audit-logged.
 - Run / add tests; check results.
 - `mcp__rsct__rsct_phase_test_complete` — the §C gate that closes
   the task.

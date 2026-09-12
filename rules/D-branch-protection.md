@@ -121,7 +121,8 @@ The Code phase (§B-approved plan moving into execution) is wrapped by:
    verification gate; `standard`/`complex` are rejected unless the V
    phase was completed for the same `spec_ref` (CAP-28). To skip V
    intentionally on a standard/complex task, pass
-   `override_verification_skip: true` — the override is audit-logged.
+   `override_verification_skip: true` **with a `dev_approval`** — the tool
+   forces an OS dialog and the override is audit-logged.
 2. Before each `Edit` / `Write`:
    `mcp__rsct__rsct_check_edit_scope({ file_path })` returns
    `in_scope` / `out_of_scope` / `unknown`. If `out_of_scope`, STOP
@@ -135,7 +136,8 @@ The Code phase (§B-approved plan moving into execution) is wrapped by:
    `rsct_phase_review_complete`. Then `rsct_phase_test_start({ spec_ref,
    spec_tier })` — for `standard`/`complex` it rejects unless the review
    decision is honored (completed, or `include_review:false`), bypassable
-   with `override_review_skip: true` (audit-logged). The recommended
+   with `override_review_skip: true` **plus a `dev_approval`** (forces the
+   OS dialog; audit-logged). The recommended
    cycle is R→S→V→C→REVIEW→T.
 
 The branch derivation step above is INDEPENDENT of and PRECEDES the

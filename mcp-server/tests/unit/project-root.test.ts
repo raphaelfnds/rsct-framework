@@ -17,9 +17,6 @@ beforeEach(() => {
   originalEnvRoot = process.env.RSCT_PROJECT_ROOT
   originalClaudeDir = process.env.CLAUDE_PROJECT_DIR
   process.env.RSCT_PROJECT_ROOT = tmpRoot
-  // Clean baseline: tests that exercise CLAUDE_PROJECT_DIR opt in explicitly.
-  // Deleting here also shields the override-based tests from a CLAUDE_PROJECT_DIR
-  // that may be present in the runner's own environment.
   delete process.env.CLAUDE_PROJECT_DIR
   __resetPlaceholderWarnings()
   stderrSpy = spyStderr()
@@ -114,7 +111,6 @@ describe('lib/project-root — readRsctConfig happy path', () => {
     const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(true)
     expect(r.config?.install?.create_universe_declined_at).toBe('2026-06-24T10:00:00Z')
-    // No tamper event — it's a known optional field, not an unknown-key strip.
     expect(readAuditEntries()).toHaveLength(0)
   })
 
@@ -123,7 +119,6 @@ describe('lib/project-root — readRsctConfig happy path', () => {
     const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(true)
     expect((r.config as Record<string, unknown> | null)?.future_field).toBeUndefined()
-    // No tamper event for a stripped-unknown field — it's a benign extension.
     expect(readAuditEntries()).toHaveLength(0)
   })
 
@@ -178,6 +173,20 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
     expect(errs.some((e) => e.path.includes('protected_branches'))).toBe(true)
   })
 
+  it('accepts rsct_phase_review_complete in trust_allowed_for', () => {
+    writeConfig({
+      ...VALID_MIN,
+      approval_modes: {
+        trust_allowed_for: ['rsct_phase_code_complete', 'rsct_phase_review_complete'],
+      },
+    })
+    const r = resolveProjectRoot()
+    expect(r.rsct_installed).toBe(true)
+    expect(r.config?.approval_modes?.trust_allowed_for).toContain(
+      'rsct_phase_review_complete',
+    )
+  })
+
   it('rejects trust_allowed_for with values outside the enum', () => {
     writeConfig({
       ...VALID_MIN,
@@ -199,10 +208,6 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
     expect(errs.some((e) => e.path.includes('audit'))).toBe(true)
   })
 
-  // plan-lifecycle-v2 Fork 3/A: approval_modes RELAXED .strict() → .strip().
-  // An unknown/typo'd key is now dropped to its safe default (fail-CLOSED for
-  // forward-compat) INSTEAD of nulling the whole config. The per-field bounds
-  // (below) keep the HIGH-4 dangerous-value defense intact.
   it('STRIPS unknown fields inside approval_modes (forward-compat) — config stays valid', () => {
     writeConfig({
       ...VALID_MIN,
@@ -211,14 +216,13 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
     const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(true)
     expect(r.config?.approval_modes?.trust_allowed_for).toEqual([])
-    // the unknown key did not survive onto the parsed config
     expect((r.config?.approval_modes as Record<string, unknown>)?.magic_bypass).toBeUndefined()
   })
 
   it('still NULLS the config on an OUT-OF-BOUNDS known approval_modes field (HIGH-4 preserved)', () => {
     writeConfig({
       ...VALID_MIN,
-      approval_modes: { free_commit_max: 9999 }, // bound is 1–50
+      approval_modes: { free_commit_max: 9999 },
     })
     const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(false)
@@ -244,8 +248,6 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
   it('forces the audit event even when the attacker tried to disable audit', () => {
     writeConfig({ ...VALID_MIN, audit: { enabled: false } })
     resolveProjectRoot()
-    // Audit was written despite enabled:false in the rejected config —
-    // tamper events must outlive the very vector they document.
     expect(existsSync(join(tmpRoot, '.rsct', 'audit.log'))).toBe(true)
   })
 })
@@ -273,11 +275,11 @@ describe('lib/project-root — malformed JSON', () => {
 
 describe('lib/project-root — CAP-49 precedence + ${...} placeholder defense', () => {
   it('honors explicit input.project_root over the launch override', () => {
-    writeConfig(VALID_MIN) // .rsct.json lives in tmpRoot
+    writeConfig(VALID_MIN)
     const otherDir = mkdtempSync(join(tmpdir(), 'rsct-other-'))
     try {
-      process.env.RSCT_PROJECT_ROOT = otherDir // override points at a config-less dir
-      const r = resolveProjectRoot(tmpRoot) // explicit arg must win
+      process.env.RSCT_PROJECT_ROOT = otherDir
+      const r = resolveProjectRoot(tmpRoot)
       expect(r.rsct_installed).toBe(true)
       expect(r.root).toBe(tmpRoot)
     } finally {
@@ -324,10 +326,10 @@ describe('lib/project-root — CAP-49 precedence + ${...} placeholder defense', 
 
 describe('lib/project-root — CAP-50 path hardening', () => {
   it('rejects a relative explicit project_root (schema requires absolute)', () => {
-    writeConfig(VALID_MIN) // .rsct.json in tmpRoot (absolute)
-    process.env.RSCT_PROJECT_ROOT = tmpRoot // valid absolute override as fallback
-    const r = resolveProjectRoot('../somewhere') // relative explicit → ignored
-    expect(r.rsct_installed).toBe(true) // falls through to the absolute override
+    writeConfig(VALID_MIN)
+    process.env.RSCT_PROJECT_ROOT = tmpRoot
+    const r = resolveProjectRoot('../somewhere')
+    expect(r.rsct_installed).toBe(true)
     expect(r.root).toBe(tmpRoot)
     expect(stderrSpy.calls.join('')).toContain('relative path')
   })
@@ -335,7 +337,7 @@ describe('lib/project-root — CAP-50 path hardening', () => {
   it('rejects a whitespace-only path value', () => {
     writeConfig(VALID_MIN)
     process.env.RSCT_PROJECT_ROOT = tmpRoot
-    const r = resolveProjectRoot('   ') // whitespace-only explicit → ignored
+    const r = resolveProjectRoot('   ')
     expect(r.rsct_installed).toBe(true)
     expect(r.root).toBe(tmpRoot)
   })
@@ -349,6 +351,6 @@ describe('lib/project-root — CAP-50 path hardening', () => {
     const joined = stderrSpy.calls.join('')
     expect(joined).toContain('CLAUDE_PROJECT_DIR')
     const count = joined.split('resolving project root from CLAUDE_PROJECT_DIR').length - 1
-    expect(count).toBe(1) // one-time, not per-call
+    expect(count).toBe(1)
   })
 })

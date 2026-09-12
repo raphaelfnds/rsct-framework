@@ -12,8 +12,9 @@ declare the files this phase intends to mutate AND the task tier, and
 `mcp__rsct__rsct_check_edit_scope({ file_path })` before each Edit.
 The CAP-28 verification gate (v0.7.8+) rejects code-start when tier ∈
 {standard, complex} without a completed V phase for the same
-spec_ref; pass `override_verification_skip: true` to bypass with
-audit trail. The branch-derivation step below PRECEDES the phase
+spec_ref; to bypass, pass `override_verification_skip: true`
+TOGETHER WITH a `dev_approval` — the tool forces an OS dialog and
+`trust_allowed_for` is ignored, so the bypass cannot be pre-authorised. The branch-derivation step below PRECEDES the phase
 machine — derive the feature branch first, THEN open the code phase.
 See feedback_session-bootstrap.md for the full bootstrap chain.
 

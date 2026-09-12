@@ -9,16 +9,13 @@ import {
 } from '../lib/phase-machine.js'
 import { readPhaseState } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { evaluateEvidenceGate, gateCeremonyBypass } from '../lib/ceremony-gate.js'
+import type { GateRejectKind } from '../lib/request-gate.js'
+import type { DialogOptions, DialogResult } from '../lib/os-dialog.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
 
-/**
- * DX-4: tiers that bypass the REVIEW gate. Mirrors the V gate's tier
- * table — trivial + small skip the review decision entirely; standard +
- * complex must have a recorded review decision (yes → completed, or no →
- * skipped) before tests can start.
- */
 const TIERS_BYPASSING_REVIEW_GATE: ReadonlySet<Tier> = new Set([
   'trivial',
   'small',
@@ -41,7 +38,13 @@ export const phaseTestStartInputSchema = z
       .boolean()
       .default(false)
       .describe(
-        'When true, allows the test phase to start without honoring the review decision for tier ∈ {standard, complex}. The override is logged to audit; use sparingly when the dev has explicitly chosen to bypass the review gate.',
+        'When true, allows the test phase to start without honoring the review decision for tier ∈ {standard, complex}. Requires dev_approval and always forces the OS dialog. The override is logged to audit.',
+      ),
+    dev_approval: z
+      .unknown()
+      .optional()
+      .describe(
+        'Required only when override_review_skip is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because skipping the REVIEW phase is a per-call decision, not a pre-authorised tool.',
       ),
   })
   .strict()
@@ -49,6 +52,7 @@ export const phaseTestStartInputSchema = z
 export type PhaseTestStartInput = z.infer<typeof phaseTestStartInputSchema>
 
 export type ReviewGateStatus =
+  | 'not_evaluated'
   | 'bypassed_tier'
   | 'bypassed_declined'
   | 'passed'
@@ -68,7 +72,11 @@ export interface ReviewGate {
 
 export interface PhaseTestStartGateRejectedOutput {
   status: 'review_gate_rejected'
-  reject_kind: 'review_undecided' | 'review_incomplete'
+  reject_kind:
+    | 'review_undecided'
+    | 'review_incomplete'
+    | 'classify_evidence_absent'
+    | GateRejectKind
   reason: string
   spec_ref: string
   review_gate: ReviewGate
@@ -86,7 +94,7 @@ export type PhaseTestStartOutput =
 export const phaseTestStartTool: Tool = {
   name: 'rsct_phase_test_start',
   description:
-    'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after the code (and review) phase is complete to add unit/integration tests + run the suite end-to-end before sign-off. **DX-4: review gate** — for spec_tier ∈ {standard, complex} this tool reads the review decision recorded at rsct_phase_spec_complete (include_review) and rejects unless it is honored: decision=no proceeds (review skipped); decision=yes requires a completed rsct_phase_review_complete for this spec_ref; no decision → rejects asking you to record one. Pass override_review_skip=true to bypass (audit-logged). For spec_tier ∈ {trivial, small} the gate is automatically bypassed.',
+    'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after the code (and review) phase is complete to add unit/integration tests + run the suite end-to-end before sign-off. **DX-4: review gate** — for spec_tier ∈ {standard, complex} this tool reads the review decision recorded at rsct_phase_spec_complete (include_review) and rejects unless it is honored: decision=no proceeds (review skipped); decision=yes requires a completed rsct_phase_review_complete for this spec_ref; no decision → rejects asking you to record one. Pass override_review_skip=true to bypass — it requires `dev_approval` and FORCES the OS dialog (`trust_allowed_for` is ignored), because skipping a review is a per-call decision. For spec_tier ∈ {trivial, small} the gate is automatically bypassed, but only when an rsct_classify_task verdict is on record; a low tier declared with no classification is refused (`classify_evidence_absent`).',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -107,31 +115,18 @@ export const phaseTestStartTool: Tool = {
         type: 'boolean',
         default: false,
         description:
-          'When true, bypass the review gate for standard+complex (audit-logged).',
+          'When true, bypass the review gate for standard+complex. Requires dev_approval and forces the OS dialog (audit-logged).',
+      },
+      dev_approval: {
+        type: 'object',
+        description:
+          'The dev_approval payload (timestamp, action_scope, reason). Required only when override_review_skip is true.',
       },
     },
     additionalProperties: false,
   },
 }
 
-/**
- * DX-4 hard gate, mirroring the code-start verification gate
- * (evaluateVerificationGate). Determines if the test phase may proceed
- * based on the recorded REVIEW decision:
- *  - tier (trivial/small bypass)
- *  - a review block whose spec_ref STRICTLY matches (a stale block from a
- *    re-planned spec_ref is ignored — same keying as the V gate's
- *    vMatchesSpec)
- *  - decision=no → proceed (review intentionally skipped, never run)
- *  - decision=yes + completed_at → proceed
- *  - decision=yes + not completed → reject (run the review first)
- *  - no matching decision → reject (record one at spec_complete)
- *  - override_review_skip=true is a universal escape over both reject
- *    cases (allow + audit)
- *
- * Pure function — does not write state or audit; caller wires up audit
- * events after deciding.
- */
 export function evaluateReviewGate(args: {
   projectRoot: string
   specRef: string
@@ -155,8 +150,6 @@ export function evaluateReviewGate(args: {
   const stateRead = readPhaseState(args.projectRoot)
   const review = stateRead.state?.review
   const reviewSpecRef = review?.spec_ref ?? null
-  // Strict spec_ref match — a review block for a DIFFERENT spec_ref (a
-  // re-plan) must NOT satisfy or poison this gate. Mirrors vMatchesSpec.
   const matchesSpec = reviewSpecRef !== null && reviewSpecRef === specRef
   const decision = matchesSpec ? (review?.decision ?? null) : null
   const completedAt = matchesSpec ? (review?.completed_at ?? null) : null
@@ -173,18 +166,10 @@ export function evaluateReviewGate(args: {
     }
   }
 
-  // #40: a completed review has no pending findings — `review_complete` prunes them.
-  // So findings still sitting here alongside a `completed_at` mean the completion did
-  // not go through this binary's gate: an older rsct-mcp stamped it (the global
-  // binary is a symlink to a worktree, so checking out an older branch swaps it), or
-  // the prune failed. Either way the findings were never answered, and reporting
-  // `passed` would let the hole this closes reopen through a downgrade.
   const pendingFindings = matchesSpec
     ? ((stateRead.state?.review_findings?.findings as unknown[] | undefined)?.length ?? 0)
     : 0
 
-  // Note the ordering: this only suppresses `passed`, it does not return. The
-  // override below is a universal escape and must stay reachable from here too.
   if (decision === 'yes' && completedAt !== null && pendingFindings === 0) {
     return {
       status: 'passed',
@@ -197,7 +182,6 @@ export function evaluateReviewGate(args: {
     }
   }
 
-  // From here the gate would reject; the override is a universal escape.
   if (overrideReviewSkip) {
     return {
       status: 'overridden',
@@ -210,11 +194,6 @@ export function evaluateReviewGate(args: {
     }
   }
 
-  // #40: stamped complete, but findings are still pending. A completed review prunes
-  // them, so this state means the completion did not pass through this binary's
-  // gate — an older rsct-mcp stamped it (the global binary is a symlink to a
-  // worktree, so checking out an older branch swaps it in), or the prune failed.
-  // Either way nobody answered them.
   if (decision === 'yes' && completedAt !== null && pendingFindings > 0) {
     return {
       status: 'rejected_incomplete',
@@ -223,10 +202,6 @@ export function evaluateReviewGate(args: {
       review_spec_ref: reviewSpecRef,
       review_decision: 'yes',
       review_completed_at: completedAt,
-      // NOTE the recovery named here. By the time this state exists the phase label
-      // is gone (a successful complete clears it), so re-running
-      // rsct_phase_review_complete returns no_active_phase and can never work —
-      // it has to go back through _start. rsct_phase_status lists the open ids.
       hint: `The review for spec_ref='${specRef}' is stamped complete but still holds ${pendingFindings} unanswered finding(s). Re-open it with rsct_phase_review_start (pass the same findings — rsct_phase_status lists them), then rsct_phase_review_complete with an action for each. OR pass override_review_skip=true to bypass.`,
     }
   }
@@ -254,11 +229,107 @@ export function evaluateReviewGate(args: {
   }
 }
 
+export interface PhaseTestStartInternal {
+  promptFn?: (options: DialogOptions) => Promise<DialogResult>
+  now?: Date
+}
+
 export async function phaseTestStartHandler(
   rawInput: unknown,
+  internal: PhaseTestStartInternal = {},
 ): Promise<PhaseTestStartOutput> {
   const input = phaseTestStartInputSchema.parse(rawInput ?? {})
   const resolution = resolveProjectRoot(input.project_root)
+
+  const evidenceGate = evaluateEvidenceGate({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    specTier: input.spec_tier,
+    toolName: 'rsct_phase_test_start',
+  })
+
+  if (evidenceGate.status === 'absent') {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: 'test.start.rejected',
+        tool: 'rsct_phase_test_start',
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: 'classify_evidence_absent',
+      },
+      resolution.config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'review_gate_rejected',
+      reject_kind: 'classify_evidence_absent',
+      reason: evidenceGate.hint,
+      spec_ref: input.spec_ref,
+      review_gate: {
+        status: 'not_evaluated',
+        spec_tier: input.spec_tier,
+        review_block_found: false,
+        review_spec_ref: null,
+        review_decision: null,
+        review_completed_at: null,
+        hint: evidenceGate.hint,
+      },
+      phase_state_path: '',
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [evidenceGate.hint],
+    }
+  }
+
+  const bypassGate = await gateCeremonyBypass({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    toolName: 'rsct_phase_test_start',
+    specRef: input.spec_ref,
+    specTier: input.spec_tier,
+    bypasses: input.override_review_skip ? ['review_skip'] : [],
+    devApproval: input.dev_approval,
+    ...(internal.promptFn !== undefined && { promptFn: internal.promptFn }),
+    ...(internal.now !== undefined && { now: internal.now }),
+  })
+
+  if (bypassGate.status === 'rejected') {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: 'test.start.rejected',
+        tool: 'rsct_phase_test_start',
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: bypassGate.reject_kind,
+        reason: bypassGate.reason,
+      },
+      resolution.config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'review_gate_rejected',
+      reject_kind: bypassGate.reject_kind,
+      reason: bypassGate.reason,
+      spec_ref: input.spec_ref,
+      review_gate: {
+        status: 'not_evaluated',
+        spec_tier: input.spec_tier,
+        review_block_found: false,
+        review_spec_ref: null,
+        review_decision: null,
+        review_completed_at: null,
+        hint: bypassGate.reason,
+      },
+      phase_state_path: '',
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [bypassGate.reason],
+    }
+  }
 
   const gate = evaluateReviewGate({
     projectRoot: resolution.root,

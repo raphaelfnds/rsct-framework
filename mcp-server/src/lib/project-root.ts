@@ -8,19 +8,12 @@ export interface RsctApprovalModes {
   timestamp_skew_seconds?: number
   fabrication_signal_threshold_ms?: number
   trust_allowed_for?: string[]
-  /** T3: default TTL (minutes) for a plan-authorization token. Bounds 5–480. */
   plan_token_ttl_minutes?: number
-  /** T3: default max commits a plan-authorization token covers. Bounds 1–100. */
   plan_token_max_actions?: number
-  /** plan-lifecycle-v2: max free (dialog-free) commits per plan before lock. Bounds 1–50. */
   free_commit_max?: number
-  /** plan-lifecycle-v2: cumulative file cap for the free lane before lock. Bounds 1–500. */
   free_commit_max_files?: number
-  /** plan-lifecycle-v2: cumulative changed-line cap for the free lane before lock. Bounds 1–100000. */
   free_commit_max_lines?: number
-  /** plan-lifecycle-v2: sliding-window re-arm width (minutes) for a plan token. Bounds 5–1440. */
   plan_token_ttl_slide_minutes?: number
-  /** plan-lifecycle-v2: absolute hard cap (minutes) a plan token can ever live. Bounds 5–10080. */
   plan_token_ttl_abs_minutes?: number
 }
 
@@ -37,11 +30,6 @@ export interface RsctConfig {
     local?: string
     remote?: string
   }
-  /**
-   * T2 — the repo topology, confirmed by the dev at /rsct-setup. The
-   * contract-surface gate (INV-7) diverges ONLY on `mode === 'multi-repo'`.
-   * Additive (Zod top-level `.strip()` keeps older servers tolerant).
-   */
   topology?: {
     mode: 'mono' | 'monorepo' | 'multi-repo'
     confirmed_at?: string
@@ -49,28 +37,13 @@ export interface RsctConfig {
   }
   protected_branches?: string[]
   test_framework?: string
-  /**
-   * plan-lifecycle-v2 toggle: how the branch-local plan tracking artifacts are
-   * treated. `ephemeral` (default / absent) = today's behavior (gitignored,
-   * cleaned at integration). `documented` = `spec_<slug>.md` is tracked at the
-   * project ROOT and never suggested for deletion (progress_ stays gitignored).
-   * NB: named `plan_file_retention`, NOT `plan_tracking` — the latter is the
-   * PH-1 code-start gate vocabulary and would collide.
-   */
   plan_file_retention?: 'ephemeral' | 'documented'
-  /**
-   * Maximum non-empty lines in a commit message (issue #20). Absent = the
-   * built-in default. TOP-LEVEL by design, not under `approval_modes`: that
-   * sub-object only became `.strip()` in 2.2.0, so a key placed there would null
-   * the ENTIRE config on any downgrade below that version.
-   */
   commit_message_max_lines?: number
   install?: {
     applied_at?: string
     mode?: string
     setup_commit_sha_before?: string
     canonical_source_added?: boolean
-    /** DX-1b: ISO timestamp set when the dev declines the create-universe offer (ask-once). */
     create_universe_declined_at?: string
   }
   mcp?: {
@@ -90,15 +63,6 @@ export interface ProjectRootResolution {
   config: RsctConfig | null
 }
 
-// Bounds for HIGH-4 defense (M2 audit). Defends against `.rsct.json`
-// config-side bypass: an attacker (Claude itself, a malicious dep, a
-// supply-chain hook) edits the config to disable enforcement (audit off,
-// skew=infinity, protected_branches=[], or trust_allowed_for=*) and the
-// loader trusts it. Strict bounds on every dangerous field; out-of-bounds
-// load is rejected (returns null = same surface as missing config) AND a
-// `rsct_json.bounds_violation` event is forced into the audit log so the
-// dev can see what happened.
-
 const TRUST_ALLOWED_TOOL_NAMES = [
   'rsct_request_commit',
   'rsct_request_push',
@@ -107,6 +71,7 @@ const TRUST_ALLOWED_TOOL_NAMES = [
   'rsct_phase_research_complete',
   'rsct_phase_spec_complete',
   'rsct_phase_code_complete',
+  'rsct_phase_review_complete',
   'rsct_phase_test_complete',
   'rsct_phase_abandon',
   'rsct_capture_issue',
@@ -118,39 +83,18 @@ const RsctApprovalModesSchema = z
     timestamp_skew_seconds: z.number().int().min(60).max(600).optional(),
     fabrication_signal_threshold_ms: z.number().int().min(100).max(5000).optional(),
     trust_allowed_for: z.array(z.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
-    // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
-    // rejects the whole config (rsct_installed=false) rather than silently
-    // granting an over-wide batch window.
     plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
     plan_token_max_actions: z.number().int().min(1).max(100).optional(),
-    // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
-    // still nulls the whole config, so a config-side attempt to grant an
-    // over-wide free-commit window is rejected loudly.
     free_commit_max: z.number().int().min(1).max(50).optional(),
     free_commit_max_files: z.number().int().min(1).max(500).optional(),
     free_commit_max_lines: z.number().int().min(1).max(100000).optional(),
     plan_token_ttl_slide_minutes: z.number().int().min(5).max(1440).optional(),
-    // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
-    // enforced at the re-arm use-site via min(now+slide, abs).
     plan_token_ttl_abs_minutes: z.number().int().min(5).max(10080).optional(),
   })
-  // plan-lifecycle-v2 Fork 3/A: RELAXED from `.strict()` to `.strip()`. The
-  // old `.strict()` rejected the ENTIRE config on any unknown approval_modes
-  // key, which (a) broke forward-compat — a config written by a newer server
-  // and read by an older one nulled out, silently dropping the dev's custom
-  // protected_branches/secrets_extra_patterns to DEFAULT — and (b) created a
-  // hard downgrade cliff. `.strip()` drops an unknown/typo'd key to its safe
-  // DEFAULT (fail-CLOSED) while the per-field bounds above keep the HIGH-4
-  // dangerous-value defense intact. .strip() >= .strict() enforcement in every
-  // unknown-key case. RELEASE NOTE: downgrading below plan-lifecycle-v2 still
-  // requires stripping the new keys first (an already-shipped `.strict()`
-  // server can't be patched retroactively).
   .strip()
 
 const RsctAuditConfigSchema = z
   .object({
-    // `false` is the documented bypass vector — schema literal blocks it.
-    // Absent or `true` are equivalent (audit defaults on).
     enabled: z.literal(true).optional(),
     path: z.string().min(1).optional(),
   })
@@ -170,11 +114,6 @@ const RsctConfigSchema = z
         remote: z.string().min(1).optional(),
       })
       .optional(),
-    // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
-    // rejects the whole config (rsct_installed=false → the contract gate can't
-    // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
-    // (a silently dropped `mode` would turn enforcement OFF with no signal —
-    // worse); the rejection surfaces via the forced `bounds_violation` audit.
     topology: z
       .object({
         mode: z.enum(['mono', 'monorepo', 'multi-repo']),
@@ -183,19 +122,9 @@ const RsctConfigSchema = z
       })
       .strict()
       .optional(),
-    // `.min(1)`: empty array disables the default protection wholesale and
-    // is the HIGH-4 vector. If a project genuinely wants zero protected
-    // branches, it should uninstall `.rsct.json`.
     protected_branches: z.array(z.string().min(1)).min(1).optional(),
     test_framework: z.string().optional(),
-    // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
-    // tolerant of its presence). Absent ⇒ 'ephemeral'.
     plan_file_retention: z.enum(['ephemeral', 'documented']).optional(),
-    // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
-    // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
-    // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
-    // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
-    // "unset"; the resolver clamps the range at the point of use.
     commit_message_max_lines: z.number().optional().catch(undefined),
     install: z
       .object({
@@ -203,8 +132,6 @@ const RsctConfigSchema = z
         mode: z.string().optional(),
         setup_commit_sha_before: z.string().optional(),
         canonical_source_added: z.boolean().optional(),
-        // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
-        // create-universe offer, so /rsct-setup doesn't re-ask every run.
         create_universe_declined_at: z.string().min(1).optional(),
       })
       .optional(),
@@ -220,20 +147,8 @@ const RsctConfigSchema = z
     protected_patterns_extra: z.array(z.string().min(1)).optional(),
     secrets_extra_patterns: z.array(z.string().min(1)).optional(),
   })
-  // `.strip()`: silently drop unknown top-level keys so adding new
-  // optional fields in a future version doesn't break installs running
-  // older mcp-servers. Dangerous fields above are individually `.strict()`.
   .strip()
 
-/**
- * Compile-time parity between the hand-written `RsctConfig` interface and the
- * schema that actually validates the file. They are maintained separately and
- * joined by an unchecked `as RsctConfig` cast in `readRsctConfig`, so a key added
- * to only ONE of them fails silently in the worst direction: `.strip()` drops it
- * at runtime while the cast tells TypeScript it is there, and the feature reading
- * it is dead forever. Assignability alone does not catch this (every field is
- * optional, so both directions pass), hence the key-set comparison.
- */
 type ExpectNever<T extends never> = T
 type _KeysMissingFromSchema = ExpectNever<
   Exclude<keyof RsctConfig, keyof z.infer<typeof RsctConfigSchema>>
@@ -242,47 +157,15 @@ type _KeysMissingFromInterface = ExpectNever<
   Exclude<keyof z.infer<typeof RsctConfigSchema>, keyof RsctConfig>
 >
 
-/**
- * Locate the rsct project root.
- *
- * Resolution precedence (highest first):
- *   1. `explicitRoot` — the `input.project_root` tool argument. The schema
- *      documents it as "overrides project root detection", so it wins.
- *   2. Launch override — `--project-root <path>` CLI arg or `RSCT_PROJECT_ROOT`
- *      env var (how the server process was started). Taken as the root directly.
- *   3. `CLAUDE_PROJECT_DIR` env var (set by Claude Code) — the START of an
- *      upward walk. This is what lets the server find the project on
- *      WSL-from-Windows, where the MCP server's cwd is `C:\Windows` (Windows
- *      rejects a UNC cwd) so a plain cwd walk could never reach a
- *      `//wsl.localhost/...` project.
- *   4. `process.cwd()` — final fallback; walk up looking for `.rsct.json`.
- *
- * Any source whose value still carries an unsubstituted `${...}` placeholder
- * (e.g. a `.mcp.json` `args:["--project-root","${workspaceFolder}"]` the
- * launcher never expanded) is REJECTED with a one-time stderr warning rather
- * than `path.resolve`d against the cwd — that silent resolution produced the
- * `C:\Windows\${workspaceFolder}` false-negative (CAP-49 field report).
- *
- * Returns the resolved root even if `.rsct.json` is not found — the tool
- * surface should degrade gracefully (`rsct_installed: false`) rather than fail.
- */
 export function resolveProjectRoot(explicitRoot?: string): ProjectRootResolution {
-  // 1 + 2: explicit tool arg, then launch override — both taken as the root
-  // directly (the historical contract for the override path; tests rely on it).
   const direct =
     sanitizeRoot(explicitRoot, 'project_root argument') ??
     sanitizeRoot(readLaunchOverride(), 'launch override (--project-root / RSCT_PROJECT_ROOT)')
   if (direct) return buildResolution(direct)
 
-  // 3 + 4: CLAUDE_PROJECT_DIR, else cwd — used as the START of an upward walk.
   const claudeDir = sanitizeRoot(process.env.CLAUDE_PROJECT_DIR, 'CLAUDE_PROJECT_DIR')
   const startDir = claudeDir ?? resolve(cwd())
   if (claudeDir) {
-    // CAP-50 (audit F13): one-time diagnostic so a WSL developer can confirm
-    // (in the rsct-mcp stderr log) that auto-detection used CLAUDE_PROJECT_DIR
-    // rather than the unreliable cwd (C:\Windows when the server is launched
-    // against a //wsl.localhost/... project). Whether Claude Code exposes this
-    // var to MCP servers is environment-dependent; this makes the path observable.
     warnOnce(
       'CLAUDE_PROJECT_DIR:used',
       `resolving project root from CLAUDE_PROJECT_DIR ("${claudeDir}"). Pass an explicit project_root if this is wrong.`,
@@ -316,14 +199,6 @@ function warnOnce(key: string, message: string): void {
   process.stderr.write(`[rsct] ${message}\n`)
 }
 
-/**
- * Normalize a candidate root path. Returns `undefined` for empty/whitespace-only
- * values, for values carrying an unsubstituted `${...}` placeholder, and for
- * RELATIVE paths — the schema contract is an ABSOLUTE path, and a relative one
- * would silently resolve against the server cwd (e.g. C:\Windows on WSL), which
- * is never what the caller meant. Each rejection warns once per source so a
- * misconfigured launcher is visible without log spam (CAP-50 audit F4/F6/F14).
- */
 function sanitizeRoot(value: string | undefined, sourceLabel: string): string | undefined {
   if (!value || value.trim().length === 0) return undefined
   if (PLACEHOLDER_RE.test(value)) {
@@ -356,11 +231,6 @@ function readLaunchOverride(): string | undefined {
   return undefined
 }
 
-/**
- * @internal test-only — clears the one-time warn-dedup set (placeholder,
- * relative-path, and CLAUDE_PROJECT_DIR diagnostics) so each test starts from a
- * clean state (the set is process-lived in production).
- */
 export function __resetPlaceholderWarnings(): void {
   warnedSources.clear()
 }
@@ -413,16 +283,5 @@ function emitConfigViolation(
   process.stderr.write(
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.\n`,
   )
-  // Force enabled: true so a tamper event is never suppressed by the very
-  // config being rejected.
-  //
-  // The reason used to read "even when the attack vector was
-  // `audit.enabled: false`" — that state is UNREACHABLE: the schema at :154 is
-  // `z.literal(true).optional()`, so writing `false` rejects the whole config
-  // and the project reads as not-installed rather than audit-off. What the
-  // forced flag actually defends is the DEFAULT PATH: the config object is
-  // untrusted here, so `audit.path` is not consulted and the entry lands at the
-  // repository's default log (#92 — no longer the caller's `project_root`,
-  // which a crafted subdirectory could have supplied).
   appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true })
 }

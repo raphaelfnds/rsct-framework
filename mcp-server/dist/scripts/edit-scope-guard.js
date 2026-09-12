@@ -4265,6 +4265,7 @@ var TRUST_ALLOWED_TOOL_NAMES = [
   "rsct_phase_research_complete",
   "rsct_phase_spec_complete",
   "rsct_phase_code_complete",
+  "rsct_phase_review_complete",
   "rsct_phase_test_complete",
   "rsct_phase_abandon",
   "rsct_capture_issue",
@@ -4274,25 +4275,15 @@ var RsctApprovalModesSchema = external_exports.object({
   timestamp_skew_seconds: external_exports.number().int().min(60).max(600).optional(),
   fabrication_signal_threshold_ms: external_exports.number().int().min(100).max(5e3).optional(),
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
-  // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
-  // rejects the whole config (rsct_installed=false) rather than silently
-  // granting an over-wide batch window.
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
   plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
-  // still nulls the whole config, so a config-side attempt to grant an
-  // over-wide free-commit window is rejected loudly.
   free_commit_max: external_exports.number().int().min(1).max(50).optional(),
   free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
   free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
   plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
-  // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
-  // enforced at the re-arm use-site via min(now+slide, abs).
   plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
 }).strip();
 var RsctAuditConfigSchema = external_exports.object({
-  // `false` is the documented bypass vector — schema literal blocks it.
-  // Absent or `true` are equivalent (audit defaults on).
   enabled: external_exports.literal(true).optional(),
   path: external_exports.string().min(1).optional()
 }).strict();
@@ -4307,37 +4298,20 @@ var RsctConfigSchema = external_exports.object({
     local: external_exports.string().min(1).optional(),
     remote: external_exports.string().min(1).optional()
   }).optional(),
-  // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
-  // rejects the whole config (rsct_installed=false → the contract gate can't
-  // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
-  // (a silently dropped `mode` would turn enforcement OFF with no signal —
-  // worse); the rejection surfaces via the forced `bounds_violation` audit.
   topology: external_exports.object({
     mode: external_exports.enum(["mono", "monorepo", "multi-repo"]),
     confirmed_at: external_exports.string().optional(),
     detected_signals: external_exports.array(external_exports.string().min(1)).optional()
   }).strict().optional(),
-  // `.min(1)`: empty array disables the default protection wholesale and
-  // is the HIGH-4 vector. If a project genuinely wants zero protected
-  // branches, it should uninstall `.rsct.json`.
   protected_branches: external_exports.array(external_exports.string().min(1)).min(1).optional(),
   test_framework: external_exports.string().optional(),
-  // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
-  // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
-  // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
-  // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
-  // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
-  // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
-  // "unset"; the resolver clamps the range at the point of use.
   commit_message_max_lines: external_exports.number().optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
     setup_commit_sha_before: external_exports.string().optional(),
     canonical_source_added: external_exports.boolean().optional(),
-    // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
-    // create-universe offer, so /rsct-setup doesn't re-ask every run.
     create_universe_declined_at: external_exports.string().min(1).optional()
   }).optional(),
   mcp: external_exports.object({
