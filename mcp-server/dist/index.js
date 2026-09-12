@@ -23356,6 +23356,7 @@ var TRUST_ALLOWED_TOOL_NAMES = [
   "rsct_phase_research_complete",
   "rsct_phase_spec_complete",
   "rsct_phase_code_complete",
+  "rsct_phase_review_complete",
   "rsct_phase_test_complete",
   "rsct_phase_abandon",
   "rsct_capture_issue",
@@ -23365,25 +23366,15 @@ var RsctApprovalModesSchema = external_exports.object({
   timestamp_skew_seconds: external_exports.number().int().min(60).max(600).optional(),
   fabrication_signal_threshold_ms: external_exports.number().int().min(100).max(5e3).optional(),
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
-  // T3: strict bounds mirror the HIGH-4 posture — an out-of-range value
-  // rejects the whole config (rsct_installed=false) rather than silently
-  // granting an over-wide batch window.
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
   plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  // plan-lifecycle-v2: same HIGH-4 per-field bounds — an out-of-range value
-  // still nulls the whole config, so a config-side attempt to grant an
-  // over-wide free-commit window is rejected loudly.
   free_commit_max: external_exports.number().int().min(1).max(50).optional(),
   free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
   free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
   plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
-  // NB: the slide<=abs invariant is not Zod-expressible per-field; it is
-  // enforced at the re-arm use-site via min(now+slide, abs).
   plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
 }).strip();
 var RsctAuditConfigSchema = external_exports.object({
-  // `false` is the documented bypass vector — schema literal blocks it.
-  // Absent or `true` are equivalent (audit defaults on).
   enabled: external_exports.literal(true).optional(),
   path: external_exports.string().min(1).optional()
 }).strict();
@@ -23398,37 +23389,20 @@ var RsctConfigSchema = external_exports.object({
     local: external_exports.string().min(1).optional(),
     remote: external_exports.string().min(1).optional()
   }).optional(),
-  // T2: `.strict()` mirrors the HIGH-4 posture — a malformed topology block
-  // rejects the whole config (rsct_installed=false → the contract gate can't
-  // run) rather than silently mis-driving enforcement. V FV7: keep `.strict()`
-  // (a silently dropped `mode` would turn enforcement OFF with no signal —
-  // worse); the rejection surfaces via the forced `bounds_violation` audit.
   topology: external_exports.object({
     mode: external_exports.enum(["mono", "monorepo", "multi-repo"]),
     confirmed_at: external_exports.string().optional(),
     detected_signals: external_exports.array(external_exports.string().min(1)).optional()
   }).strict().optional(),
-  // `.min(1)`: empty array disables the default protection wholesale and
-  // is the HIGH-4 vector. If a project genuinely wants zero protected
-  // branches, it should uninstall `.rsct.json`.
   protected_branches: external_exports.array(external_exports.string().min(1)).min(1).optional(),
   test_framework: external_exports.string().optional(),
-  // plan-lifecycle-v2 toggle (top-level, so `.strip()` keeps older servers
-  // tolerant of its presence). Absent ⇒ 'ephemeral'.
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
-  // Deliberately UNBOUNDED and type-forgiving. The HIGH-4 posture nulls the
-  // ENTIRE config on a schema violation, which for a cosmetic cap would mean a
-  // JSON typo (`"20"` instead of `20`) silently disarms the edit guard and
-  // drops secrets_extra_patterns. `.catch(undefined)` degrades a bad value to
-  // "unset"; the resolver clamps the range at the point of use.
   commit_message_max_lines: external_exports.number().optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
     setup_commit_sha_before: external_exports.string().optional(),
     canonical_source_added: external_exports.boolean().optional(),
-    // DX-1b: ask-once flag — ISO timestamp set when the dev declines the
-    // create-universe offer, so /rsct-setup doesn't re-ask every run.
     create_universe_declined_at: external_exports.string().min(1).optional()
   }).optional(),
   mcp: external_exports.object({
@@ -23920,7 +23894,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.9.1";
+var RSCT_MCP_VERSION = "2.10.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -28683,7 +28657,7 @@ async function gateRequest(opts) {
   }
   const promptFn = opts.promptFn ?? promptYesNo;
   const dialog = await promptFn(opts.dialog);
-  if (validation.must_force_dialog) {
+  if (validation.must_force_dialog || opts.forceDialog === true) {
     if (dialog.response === "yes") {
       return {
         status: "approved",
@@ -28692,17 +28666,18 @@ async function gateRequest(opts) {
         fabrication_signals: validation.fabrication_signals
       };
     }
+    const why = validation.must_force_dialog ? `the approval looked auto-generated (signals: ${validation.fabrication_signals.join(",")})` : "this call bypasses a phase the tier requires";
     if (dialog.response === "no") {
       return {
         status: "rejected",
-        reason: "dev declined the approval dialog (it was forced because the approval looked auto-generated)",
+        reason: `dev declined the approval dialog (it was forced because ${why})`,
         reject_kind: "dialog_no",
         fabrication_signals: validation.fabrication_signals
       };
     }
     return {
       status: "rejected",
-      reason: `dialog channel unavailable (${dialog.error ?? "no channel"}); fabrication signals [${validation.fabrication_signals.join(",")}] require forced dialog \u2014 trust_allowed_for is ignored`,
+      reason: `dialog channel unavailable (${dialog.error ?? "no channel"}); ${why} \u2014 the dialog is required and trust_allowed_for is ignored`,
       reject_kind: "force_dialog_no_channel",
       fabrication_signals: validation.fabrication_signals
     };
@@ -33941,6 +33916,79 @@ async function phaseSpecCompleteHandler(rawInput, internal = {}) {
 
 // src/tools/phase-code-start.ts
 init_esm_shims();
+
+// src/lib/ceremony-gate.ts
+init_esm_shims();
+var CEREMONY_BYPASS_LABELS = {
+  verification_skip: "skip the verification (V) phase",
+  classify_downgrade: "run at a lower tier than the recorded classification",
+  plan_tracking: "start without plan_/progress_ tracking files",
+  review_skip: "skip the code review (REVIEW) phase"
+};
+function readClassifyEvidence(projectRoot, config2) {
+  const ceiling = deriveAuditCeiling(projectRoot, config2, "");
+  const stateMax = readPhaseState(projectRoot).state?.last_classify?.tier_max;
+  return {
+    present: ceiling.classifyEvidencePresent || stateMax !== void 0,
+    tierMax: higherTier(stateMax, ceiling.auditTierMax) ?? null
+  };
+}
+function evaluateEvidenceGate(args) {
+  const { specTier, toolName } = args;
+  if (!isFreeTier(specTier)) {
+    return {
+      status: "satisfied",
+      spec_tier: specTier,
+      tier_max_recorded: null,
+      hint: `tier='${specTier}' does not bypass any phase \u2014 no classification evidence required.`
+    };
+  }
+  const evidence = readClassifyEvidence(args.projectRoot, args.config);
+  if (evidence.present) {
+    return {
+      status: "satisfied",
+      spec_tier: specTier,
+      tier_max_recorded: evidence.tierMax,
+      hint: `tier='${specTier}' is backed by a recorded rsct_classify_task verdict.`
+    };
+  }
+  return {
+    status: "absent",
+    spec_tier: specTier,
+    tier_max_recorded: null,
+    hint: `tier='${specTier}' skips the verification, review and plan-tracking gates, and no rsct_classify_task verdict is on record to support it. Run rsct_classify_task first \u2014 ${toolName} will then honour whatever tier it returns. A tier declared with no classification is the one bypass that leaves no trace, which is why it is refused.`
+  };
+}
+async function gateCeremonyBypass(args) {
+  if (args.bypasses.length === 0) return { status: "not_required" };
+  const asked = args.bypasses.map((b) => `\u2022 ${CEREMONY_BYPASS_LABELS[b]}`).join("\n");
+  const gate = await gateRequest({
+    toolName: args.toolName,
+    approval: args.devApproval,
+    forceDialog: true,
+    dialog: {
+      title: `RSCT \u2014 bypass requested (${args.specTier})`,
+      message: `Spec '${args.specRef}' asks to:
+
+${asked}
+
+These are the checks that catch a task being treated as smaller than it is.` + gateDialogFooter(args.projectRoot)
+    },
+    projectRoot: args.projectRoot,
+    ...args.config?.approval_modes !== void 0 && {
+      approvalModes: args.config.approval_modes
+    },
+    auditConfig: args.config?.audit,
+    ...args.promptFn !== void 0 && { promptFn: args.promptFn },
+    ...args.now !== void 0 && { now: args.now }
+  });
+  if (gate.status === "rejected") {
+    return { status: "rejected", reject_kind: gate.reject_kind, reason: gate.reason };
+  }
+  return { status: "approved", channel: gate.channel };
+}
+
+// src/tools/phase-code-start.ts
 var TIER_VALUES2 = ["trivial", "small", "standard", "complex"];
 var TIERS_BYPASSING_CEREMONY = /* @__PURE__ */ new Set(["trivial", "small"]);
 var phaseCodeStartInputSchema = external_exports.object({
@@ -33953,21 +34001,24 @@ var phaseCodeStartInputSchema = external_exports.object({
     "Tier per rsct_classify_task. trivial+small bypass the verification gate; standard+complex require a completed V phase OR override_verification_skip=true."
   ),
   override_verification_skip: external_exports.boolean().default(false).describe(
-    "When true, allows code phase to start without a completed verification block for tier \u2208 {standard, complex}. The override is logged to audit; use sparingly when the dev has explicitly chosen to bypass V."
+    "When true, allows code phase to start without a completed verification block for tier \u2208 {standard, complex}. Requires dev_approval and always forces the OS dialog. The override is logged to audit."
   ),
   override_classify_downgrade: external_exports.boolean().default(false).describe(
-    "CAP-30: when true, allows spec_tier lower than the highest tier ever returned by rsct_classify_task (`last_classify.tier_max` in phase-state). Override is audit-logged. Use only when the dev has explicitly chosen to downgrade."
+    "CAP-30: when true, allows spec_tier lower than the highest tier ever returned by rsct_classify_task (`last_classify.tier_max` in phase-state). Requires dev_approval and always forces the OS dialog. Override is audit-logged."
   ),
   plan_slug: external_exports.string().optional().describe(
     "PH-1: the master-plan slug. Required for tier \u2208 {standard, complex} \u2014 the plan-tracking gate verifies plan_<slug>.md + progress_<slug>.md exist at the project root. When spec_slug is also present and differs from plan_slug, the plan is treated as multi-phase and spec_<spec_slug>.md is additionally required."
   ),
   override_plan_tracking: external_exports.boolean().default(false).describe(
-    "PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Override is audit-logged. Use only when the dev has explicitly chosen to proceed without the tracking docs."
+    "PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Requires dev_approval and always forces the OS dialog. Override is audit-logged."
+  ),
+  dev_approval: external_exports.unknown().optional().describe(
+    "Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V/REVIEW/plan tracking is a per-call decision, not a pre-authorised tool."
   )
 }).strict();
 var phaseCodeStartTool = {
   name: "rsct_phase_code_start",
-  description: 'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass (override is audit-logged). **CAP-30: classify gate** \u2014 also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass (audit-logged). **CAP-31: bootstrap visibility** \u2014 warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier \u2208 {trivial, small} the V gate is automatically bypassed.',
+  description: 'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** \u2014 also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, REVIEW or plan tracking is a per-call decision. **Evidence gate** \u2014 `spec_tier \u2208 {trivial, small}` skips V, REVIEW and plan tracking, so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** \u2014 warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier \u2208 {trivial, small} the V gate is automatically bypassed.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -34000,7 +34051,11 @@ var phaseCodeStartTool = {
       override_plan_tracking: {
         type: "boolean",
         default: false,
-        description: "PH-1: when true, bypass the plan-tracking gate (audit-logged)."
+        description: "PH-1: when true, bypass the plan-tracking gate. Requires dev_approval and forces the OS dialog (audit-logged)."
+      },
+      dev_approval: {
+        type: "object",
+        description: "The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags is true."
       }
     },
     additionalProperties: false
@@ -34218,7 +34273,7 @@ function evaluatePlanTrackingGate(args) {
     hint: isMultiPhase ? `plan_${planSlug}.md + progress + spec_${specSlugGiven}.md present. Plan-tracking gate satisfied.` : `plan_${planSlug}.md + progress present (single-phase; spec in memory/chat). Plan-tracking gate satisfied.`
   };
 }
-async function phaseCodeStartHandler(rawInput) {
+async function phaseCodeStartHandler(rawInput, internal = {}) {
   const input = phaseCodeStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
   const notEvaluatedPlanTracking = {
@@ -34231,6 +34286,111 @@ async function phaseCodeStartHandler(rawInput) {
     phase_spec_present: null,
     hint: "plan-tracking gate not evaluated (an earlier gate rejected first)."
   };
+  const evidenceGate = evaluateEvidenceGate({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    specTier: input.spec_tier,
+    toolName: "rsct_phase_code_start"
+  });
+  if (evidenceGate.status === "absent") {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "code.start.rejected",
+        tool: "rsct_phase_code_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: "classify_evidence_absent"
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "classify_gate_rejected",
+      reject_kind: "classify_evidence_absent",
+      reason: evidenceGate.hint,
+      spec_ref: input.spec_ref,
+      verification_gate: {
+        status: "bypassed_tier",
+        spec_tier: input.spec_tier,
+        v_block_found: false,
+        v_spec_ref: null,
+        v_completed_at: null,
+        hint: "evidence gate rejected before V evaluation"
+      },
+      classify_gate: {
+        status: "no_record",
+        spec_tier: input.spec_tier,
+        tier_max_recorded: null,
+        classified_at: null,
+        hint: evidenceGate.hint
+      },
+      plan_tracking_gate: notEvaluatedPlanTracking,
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [evidenceGate.hint]
+    };
+  }
+  const requestedBypasses = [];
+  if (input.override_verification_skip) requestedBypasses.push("verification_skip");
+  if (input.override_classify_downgrade) requestedBypasses.push("classify_downgrade");
+  if (input.override_plan_tracking) requestedBypasses.push("plan_tracking");
+  const bypassGate = await gateCeremonyBypass({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    toolName: "rsct_phase_code_start",
+    specRef: input.spec_ref,
+    specTier: input.spec_tier,
+    bypasses: requestedBypasses,
+    devApproval: input.dev_approval,
+    ...internal.promptFn !== void 0 && { promptFn: internal.promptFn },
+    ...internal.now !== void 0 && { now: internal.now }
+  });
+  if (bypassGate.status === "rejected") {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "code.start.rejected",
+        tool: "rsct_phase_code_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: bypassGate.reject_kind,
+        reason: bypassGate.reason,
+        bypasses_requested: requestedBypasses
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "bypass_gate_rejected",
+      reject_kind: bypassGate.reject_kind,
+      reason: bypassGate.reason,
+      spec_ref: input.spec_ref,
+      verification_gate: {
+        status: "bypassed_tier",
+        spec_tier: input.spec_tier,
+        v_block_found: false,
+        v_spec_ref: null,
+        v_completed_at: null,
+        hint: "bypass gate rejected before V evaluation"
+      },
+      classify_gate: {
+        status: "not_evaluated",
+        spec_tier: input.spec_tier,
+        tier_max_recorded: null,
+        classified_at: null,
+        hint: "classify gate not evaluated (the bypass gate rejected first)."
+      },
+      plan_tracking_gate: notEvaluatedPlanTracking,
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [bypassGate.reason]
+    };
+  }
   const classifyGate = evaluateClassifyGate({
     projectRoot: resolution.root,
     specTier: input.spec_tier,
@@ -34858,12 +35018,15 @@ var phaseTestStartInputSchema = external_exports.object({
     "Tier per rsct_classify_task. trivial+small bypass the review gate; standard+complex require a recorded review decision (from rsct_phase_spec_complete include_review). Missing \u2192 standard \u2192 gated."
   ),
   override_review_skip: external_exports.boolean().default(false).describe(
-    "When true, allows the test phase to start without honoring the review decision for tier \u2208 {standard, complex}. The override is logged to audit; use sparingly when the dev has explicitly chosen to bypass the review gate."
+    "When true, allows the test phase to start without honoring the review decision for tier \u2208 {standard, complex}. Requires dev_approval and always forces the OS dialog. The override is logged to audit."
+  ),
+  dev_approval: external_exports.unknown().optional().describe(
+    "Required only when override_review_skip is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because skipping the REVIEW phase is a per-call decision, not a pre-authorised tool."
   )
 }).strict();
 var phaseTestStartTool = {
   name: "rsct_phase_test_start",
-  description: 'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after the code (and review) phase is complete to add unit/integration tests + run the suite end-to-end before sign-off. **DX-4: review gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads the review decision recorded at rsct_phase_spec_complete (include_review) and rejects unless it is honored: decision=no proceeds (review skipped); decision=yes requires a completed rsct_phase_review_complete for this spec_ref; no decision \u2192 rejects asking you to record one. Pass override_review_skip=true to bypass (audit-logged). For spec_tier \u2208 {trivial, small} the gate is automatically bypassed.',
+  description: 'Start the T (Test) phase. Writes phase="test" into .rsct/phase-state.json and emits test.start audit. Use after the code (and review) phase is complete to add unit/integration tests + run the suite end-to-end before sign-off. **DX-4: review gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads the review decision recorded at rsct_phase_spec_complete (include_review) and rejects unless it is honored: decision=no proceeds (review skipped); decision=yes requires a completed rsct_phase_review_complete for this spec_ref; no decision \u2192 rejects asking you to record one. Pass override_review_skip=true to bypass \u2014 it requires `dev_approval` and FORCES the OS dialog (`trust_allowed_for` is ignored), because skipping a review is a per-call decision. For spec_tier \u2208 {trivial, small} the gate is automatically bypassed, but only when an rsct_classify_task verdict is on record; a low tier declared with no classification is refused (`classify_evidence_absent`).',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -34882,7 +35045,11 @@ var phaseTestStartTool = {
       override_review_skip: {
         type: "boolean",
         default: false,
-        description: "When true, bypass the review gate for standard+complex (audit-logged)."
+        description: "When true, bypass the review gate for standard+complex. Requires dev_approval and forces the OS dialog (audit-logged)."
+      },
+      dev_approval: {
+        type: "object",
+        description: "The dev_approval payload (timestamp, action_scope, reason). Required only when override_review_skip is true."
       }
     },
     additionalProperties: false
@@ -34949,10 +35116,6 @@ function evaluateReviewGate(args) {
       review_spec_ref: reviewSpecRef,
       review_decision: "yes",
       review_completed_at: completedAt,
-      // NOTE the recovery named here. By the time this state exists the phase label
-      // is gone (a successful complete clears it), so re-running
-      // rsct_phase_review_complete returns no_active_phase and can never work —
-      // it has to go back through _start. rsct_phase_status lists the open ids.
       hint: `The review for spec_ref='${specRef}' is stamped complete but still holds ${pendingFindings} unanswered finding(s). Re-open it with rsct_phase_review_start (pass the same findings \u2014 rsct_phase_status lists them), then rsct_phase_review_complete with an action for each. OR pass override_review_skip=true to bypass.`
     };
   }
@@ -34977,9 +35140,95 @@ function evaluateReviewGate(args) {
     hint: `tier='${specTier}' needs a recorded review decision for spec_ref='${specRef}' before tests. Re-run rsct_phase_spec_complete with include_review=true (do a code review \u2014 strongly recommended) or include_review=false (skip it), OR pass override_review_skip=true (logged to audit).`
   };
 }
-async function phaseTestStartHandler(rawInput) {
+async function phaseTestStartHandler(rawInput, internal = {}) {
   const input = phaseTestStartInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
+  const evidenceGate = evaluateEvidenceGate({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    specTier: input.spec_tier,
+    toolName: "rsct_phase_test_start"
+  });
+  if (evidenceGate.status === "absent") {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "test.start.rejected",
+        tool: "rsct_phase_test_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: "classify_evidence_absent"
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "review_gate_rejected",
+      reject_kind: "classify_evidence_absent",
+      reason: evidenceGate.hint,
+      spec_ref: input.spec_ref,
+      review_gate: {
+        status: "not_evaluated",
+        spec_tier: input.spec_tier,
+        review_block_found: false,
+        review_spec_ref: null,
+        review_decision: null,
+        review_completed_at: null,
+        hint: evidenceGate.hint
+      },
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [evidenceGate.hint]
+    };
+  }
+  const bypassGate = await gateCeremonyBypass({
+    projectRoot: resolution.root,
+    config: resolution.config,
+    toolName: "rsct_phase_test_start",
+    specRef: input.spec_ref,
+    specTier: input.spec_tier,
+    bypasses: input.override_review_skip ? ["review_skip"] : [],
+    devApproval: input.dev_approval,
+    ...internal.promptFn !== void 0 && { promptFn: internal.promptFn },
+    ...internal.now !== void 0 && { now: internal.now }
+  });
+  if (bypassGate.status === "rejected") {
+    const audit = appendAuditEntry(
+      resolution.root,
+      {
+        event: "test.start.rejected",
+        tool: "rsct_phase_test_start",
+        spec_ref: input.spec_ref,
+        spec_tier: input.spec_tier,
+        reject_kind: bypassGate.reject_kind,
+        reason: bypassGate.reason
+      },
+      resolution.config?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "review_gate_rejected",
+      reject_kind: bypassGate.reject_kind,
+      reason: bypassGate.reason,
+      spec_ref: input.spec_ref,
+      review_gate: {
+        status: "not_evaluated",
+        spec_tier: input.spec_tier,
+        review_block_found: false,
+        review_spec_ref: null,
+        review_decision: null,
+        review_completed_at: null,
+        hint: bypassGate.reason
+      },
+      phase_state_path: "",
+      phase_state_written: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [bypassGate.reason]
+    };
+  }
   const gate = evaluateReviewGate({
     projectRoot: resolution.root,
     specRef: input.spec_ref,

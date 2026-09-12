@@ -48,16 +48,21 @@ between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
 {standard, complex}`, `rsct_phase_test_start` then enforces the decision —
 `decision=no` proceeds (review skipped), `decision=yes` requires a completed
 `rsct_phase_review_{start,complete}` for that `spec_ref`, and no decision rejects
-(asking you to record one); `override_review_skip=true` bypasses (audit-logged).
-`trivial`/`small` bypass the gate. NOTE: the REVIEW *phase* is distinct from
+(asking you to record one); `override_review_skip=true` bypasses, and since
+2.10.0 it requires a `dev_approval` and **forces** the OS dialog —
+`trust_allowed_for` is ignored, so a headless project cannot skip a review.
+`trivial`/`small` bypass the gate, but only when an `rsct_classify_task` verdict
+is on record: a tier declared with no classification is refused
+(`classify_evidence_absent`). NOTE: the REVIEW *phase* is distinct from
 `rsct_persona_review` (a stateless advisory lens).
 
 **Plan-tracking gate (PH-1)** — symmetrically, `rsct_phase_code_start` refuses
 the Code phase for `spec_tier ∈ {standard, complex}` unless the plan is tracked
 on disk: `plan_<slug>.md` + `progress_<slug>.md` must exist (a multi-phase plan
 also needs the per-phase `spec_<slug>.md`). Pass `plan_slug` to name the plan the
-gate checks; `override_plan_tracking=true` bypasses (audit-logged). `trivial`/
-`small` skip it. A well-behaved §B flow creates these files at planning, so it
+gate checks; `override_plan_tracking=true` bypasses, and like every other
+`override_*` flag it requires a `dev_approval` and forces the OS dialog.
+`trivial`/`small` skip it when a classify verdict backs the tier. A well-behaved §B flow creates these files at planning, so it
 never trips the gate.
 
 ## Status

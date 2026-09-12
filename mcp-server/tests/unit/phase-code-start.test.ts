@@ -15,6 +15,37 @@ import {
   phaseCodeStartInputSchema,
   phaseCodeStartTool,
 } from '../../src/tools/phase-code-start.js'
+import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+
+const FIXED_NOW = new Date('2026-06-07T18:00:00.000Z')
+const VALID_TS = '2026-06-07T17:59:45.000Z'
+
+function alwaysYes(): (opts: DialogOptions) => Promise<DialogResult> {
+  return async () => ({ response: 'yes', channel: 'windows' })
+}
+
+function approval(overrides: Record<string, unknown> = {}) {
+  return {
+    timestamp: VALID_TS,
+    action_scope: 'code_start:bypass',
+    reason: 'dev chose to bypass the phase for this task',
+    ...overrides,
+  }
+}
+
+function writeClassifyVerdict(tier: string): void {
+  const line = JSON.stringify({
+    ts: '2026-06-07T17:00:00.000Z',
+    event: 'classify.verdict',
+    tool: 'rsct_classify_task',
+    tier,
+  })
+  const full = join(tmpRoot, '.rsct', 'audit.log')
+  mkdirSync(join(full, '..'), { recursive: true })
+  writeFileSync(full, `${line}\n`, 'utf8')
+}
+
+const OK = { now: FIXED_NOW, promptFn: alwaysYes() }
 
 let tmpRoot: string
 
@@ -42,8 +73,6 @@ function writeRsctConfig(): void {
   )
 }
 
-// PH-1: standard/complex tasks now require plan_<slug>.md + progress_<slug>.md
-// to exist (the plan-tracking gate). Helper writes both for a single-phase plan.
 function writePlanTracking(slug: string): void {
   writeFile(`plan_${slug}.md`, `| Status | in-progress |\n`)
   writeFile(`progress_${slug}.md`, `# progress\n`)
@@ -92,6 +121,7 @@ function readAuditLines(): Array<Record<string, unknown>> {
 describe('phase-code-start — CAP-28 verification gate', () => {
   it('bypasses gate for spec_tier=trivial (no V record required)', async () => {
     writeRsctConfig()
+    writeClassifyVerdict('trivial')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'fix-typo',
@@ -106,6 +136,7 @@ describe('phase-code-start — CAP-28 verification gate', () => {
 
   it('bypasses gate for spec_tier=small (no V record required)', async () => {
     writeRsctConfig()
+    writeClassifyVerdict('small')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'small-fix',
@@ -184,16 +215,20 @@ describe('phase-code-start — CAP-28 verification gate', () => {
     ).toBe(true)
   })
 
-  it('proceeds with audit when override_verification_skip=true', async () => {
+  it('proceeds with audit when override_verification_skip=true AND the dev approves', async () => {
     writeRsctConfig()
     writePlanTracking('feat-bar')
-    const out = await phaseCodeStartHandler({
-      project_root: tmpRoot,
-      spec_ref: 'feat-bar',
-      spec_tier: 'standard',
-      plan_slug: 'feat-bar',
-      override_verification_skip: true,
-    })
+    const out = await phaseCodeStartHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-bar',
+        spec_tier: 'standard',
+        plan_slug: 'feat-bar',
+        override_verification_skip: true,
+        dev_approval: approval(),
+      },
+      OK,
+    )
     expect(out.status).toBe('started')
     if (out.status !== 'started') return
     expect(out.verification_gate.status).toBe('overridden')
@@ -290,7 +325,6 @@ describe('phase-code-start — CAP-30 classify-downgrade gate', () => {
   it('proceeds when spec_tier >= recorded tier_max', async () => {
     writeRsctConfig()
     writeClassifyVerdict('standard', 'standard')
-    // V completed for this spec, so V gate also passes; classify_gate satisfied
     writeFile(
       '.rsct/phase-state.json',
       JSON.stringify({
@@ -333,12 +367,16 @@ describe('phase-code-start — CAP-30 classify-downgrade gate', () => {
         bootstrap_at: new Date().toISOString(),
       }),
     )
-    const out = await phaseCodeStartHandler({
-      project_root: tmpRoot,
-      spec_ref: 'feat-override',
-      spec_tier: 'small',
-      override_classify_downgrade: true,
-    })
+    const out = await phaseCodeStartHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-override',
+        spec_tier: 'small',
+        override_classify_downgrade: true,
+        dev_approval: approval(),
+      },
+      OK,
+    )
     expect(out.status).toBe('started')
     if (out.status !== 'started') return
     expect(out.classify_gate.status).toBe('overridden')
@@ -349,13 +387,37 @@ describe('phase-code-start — CAP-30 classify-downgrade gate', () => {
     ).toBe(true)
   })
 
-  it('falls through to no_record (gate inactive) when no classify verdict on file', async () => {
+  it('rejects a ceremony-bypassing tier when no classify verdict is on record', async () => {
     writeRsctConfig()
-    // No last_classify in phase-state — gate inactive, falls through to V
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-noclassify',
-      spec_tier: 'trivial', // would bypass V gate too
+      spec_tier: 'trivial',
+    })
+    expect(out.status).toBe('classify_gate_rejected')
+    if (out.status !== 'classify_gate_rejected') return
+    expect(out.reject_kind).toBe('classify_evidence_absent')
+    expect(out.reason).toContain('rsct_classify_task')
+
+    const audit = readAuditLines()
+    expect(
+      audit.some(
+        (l) =>
+          l.event === 'code.start.rejected' &&
+          l.reject_kind === 'classify_evidence_absent',
+      ),
+    ).toBe(true)
+  })
+
+  it('leaves the gate inactive for a tier that bypasses nothing, with no verdict on record', async () => {
+    writeRsctConfig()
+    writePlanTracking('feat-noclassify')
+    writeCompletedVerification('feat-noclassify')
+    const out = await phaseCodeStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-noclassify',
+      spec_tier: 'standard',
+      plan_slug: 'feat-noclassify',
     })
     expect(out.status).toBe('started')
     if (out.status !== 'started') return
@@ -366,7 +428,7 @@ describe('phase-code-start — CAP-30 classify-downgrade gate', () => {
 describe('phase-code-start — CAP-31 bootstrap marker', () => {
   it('surfaces missing bootstrap warning + audit when bootstrap_at absent', async () => {
     writeRsctConfig()
-    // tier=trivial bypasses V gate; no classify record; no bootstrap stamp
+    writeClassifyVerdict('trivial')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-no-bootstrap',
@@ -396,6 +458,7 @@ describe('phase-code-start — CAP-31 bootstrap marker', () => {
       '.rsct/phase-state.json',
       JSON.stringify({ bootstrap_at: fiveHoursAgo }),
     )
+    writeClassifyVerdict('trivial')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-stale-boot',
@@ -414,6 +477,7 @@ describe('phase-code-start — CAP-31 bootstrap marker', () => {
       '.rsct/phase-state.json',
       JSON.stringify({ bootstrap_at: oneMinuteAgo }),
     )
+    writeClassifyVerdict('trivial')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-fresh-boot',
@@ -429,6 +493,7 @@ describe('phase-code-start — CAP-31 bootstrap marker', () => {
 describe('phase-code-start — PH-1 plan-tracking gate', () => {
   it('bypasses the gate for spec_tier=trivial (no plan files required)', async () => {
     writeRsctConfig()
+    writeClassifyVerdict('trivial')
     const out = await phaseCodeStartHandler({
       project_root: tmpRoot,
       spec_ref: 'tiny',
@@ -450,8 +515,6 @@ describe('phase-code-start — PH-1 plan-tracking gate', () => {
     if (out.status !== 'plan_tracking_gate_rejected') return
     expect(out.reject_kind).toBe('plan_tracking')
     expect(out.plan_tracking_gate.status).toBe('rejected_slug_indeterminate')
-    // plan-tracking runs BEFORE V: a missing-plan rejection surfaces even
-    // though V is also unsatisfied here.
     const audit = readAuditLines()
     expect(
       audit.some(
@@ -509,7 +572,7 @@ describe('phase-code-start — PH-1 plan-tracking gate', () => {
       spec_ref: 'feat-mp',
       spec_tier: 'standard',
       plan_slug: 'planx',
-      spec_slug: 'ph-1', // ≠ plan_slug → multi-phase
+      spec_slug: 'ph-1',
     })
     expect(out.status).toBe('plan_tracking_gate_rejected')
     if (out.status !== 'plan_tracking_gate_rejected') return
@@ -519,7 +582,7 @@ describe('phase-code-start — PH-1 plan-tracking gate', () => {
 
   it('multi-phase satisfied when plan+progress+phase-spec all present', async () => {
     writeRsctConfig()
-    writeCompletedVerification('feat-mp2') // V passes for this spec_ref
+    writeCompletedVerification('feat-mp2')
     writePlanTracking('planx')
     writeFile('spec_ph-2.md', '# phase spec\n')
     const out = await phaseCodeStartHandler({
@@ -553,16 +616,20 @@ describe('phase-code-start — PH-1 plan-tracking gate', () => {
     expect(out.plan_tracking_gate.phase_spec_present).toBe(null)
   })
 
-  it('override_plan_tracking=true proceeds + audits (no plan files)', async () => {
+  it('override_plan_tracking=true proceeds + audits when the dev approves (no plan files)', async () => {
     writeRsctConfig()
-    const out = await phaseCodeStartHandler({
-      project_root: tmpRoot,
-      spec_ref: 'feat-ovr',
-      spec_tier: 'standard',
-      plan_slug: 'gone',
-      override_plan_tracking: true,
-      override_verification_skip: true, // let V pass too so we reach 'started'
-    })
+    const out = await phaseCodeStartHandler(
+      {
+        project_root: tmpRoot,
+        spec_ref: 'feat-ovr',
+        spec_tier: 'standard',
+        plan_slug: 'gone',
+        override_plan_tracking: true,
+        override_verification_skip: true,
+        dev_approval: approval(),
+      },
+      OK,
+    )
     expect(out.status).toBe('started')
     if (out.status !== 'started') return
     expect(out.plan_tracking_gate.status).toBe('overridden')
@@ -581,7 +648,7 @@ describe('phase-code-start — PH-1 plan-tracking gate', () => {
       spec_ref: 'feat-eq',
       spec_tier: 'standard',
       plan_slug: 'feat-eq',
-      spec_slug: 'feat-eq', // === plan_slug → single-phase, no spec file required
+      spec_slug: 'feat-eq',
     })
     expect(out.status).toBe('started')
     if (out.status !== 'started') return
