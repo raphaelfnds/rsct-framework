@@ -1,0 +1,50 @@
+{
+  "tree-sitter.wasm": {
+    "package": "web-tree-sitter",
+    "version": "0.25.10",
+    "license": "MIT",
+    "sha256": "f38dcc4b43b818f9a0785bc1c6d5611a75ac4cdd428ff3f02757c34ca4e46d7f"
+  },
+  "tree-sitter-javascript.wasm": {
+    "package": "tree-sitter-javascript",
+    "version": "0.25.0",
+    "license": "MIT",
+    "sha256": "5fb488d0cabb4775a594bab85682de5ad6ce83c0d6ac997a9f82dd084d571240"
+  },
+  "tree-sitter-typescript.wasm": {
+    "package": "tree-sitter-typescript",
+    "version": "0.23.2",
+    "license": "MIT",
+    "sha256": "778025db5a8be0e70f8ccc3671e486dfeddd048c25d9e8a70c26de2e1bf6f97d"
+  },
+  "tree-sitter-tsx.wasm": {
+    "package": "tree-sitter-typescript",
+    "version": "0.23.2",
+    "license": "MIT",
+    "sha256": "79e5da75ea62855a0cd67177685f0164eac87d5f630b3cbe1e0a099751ad30f8"
+  },
+  "tree-sitter-java.wasm": {
+    "package": "tree-sitter-java",
+    "version": "0.23.5",
+    "license": "MIT",
+    "sha256": "4fdeac4ca6ca089f06c6f7e562abcac1733cd465728cc7031ebb73c2019122c4"
+  },
+  "tree-sitter-python.wasm": {
+    "package": "tree-sitter-python",
+    "version": "0.25.0",
+    "license": "MIT",
+    "sha256": "16108b50df4ee9a30168794252ab55e7c93bfc5765d7fa0aa3e335752c515f47"
+  },
+  "tree-sitter-php.wasm": {
+    "package": "tree-sitter-php",
+    "version": "0.24.2",
+    "license": "MIT",
+    "sha256": "d4df6a6ff08c87c3ec4f9cbb785fe09998a0cb570e03f57d7b19b3acfb146aa7"
+  },
+  "tree-sitter-css.wasm": {
+    "package": "tree-sitter-css",
+    "version": "0.25.0",
+    "license": "MIT",
+    "sha256": "8a23977fe271357cce6f254ef88c9bebf3854602d8046605aef6a45c02135c59"
+  }
+}
