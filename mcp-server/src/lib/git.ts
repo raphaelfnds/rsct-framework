@@ -448,6 +448,20 @@ function safeGitRaw(cwd: string, args: string[]): string | null {
   }
 }
 
+export function safeGitBuffer(cwd: string, args: string[], input?: string): Buffer | null {
+  try {
+    return execFileSync('git', args, {
+      cwd,
+      input: input ?? '',
+      stdio: ['pipe', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS,
+    })
+  } catch {
+    return null
+  }
+}
+
 /**
  * Result envelope for the injectable git executor used by mutating ops.
  * Distinct from `safeGit` / `safeGitRaw` (string|null) because mutating

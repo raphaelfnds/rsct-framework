@@ -9,6 +9,7 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "grammars",
     "README.md",
     "LICENSE"
   ],
