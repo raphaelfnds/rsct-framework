@@ -30,31 +30,34 @@ BEFORE doing anything else.
 3. `mcp__rsct__rsct_classify_task({ task_description })` — for any
    request above pure-docs/typo, classify FIRST. Returns tier
    (trivial | small | standard | complex) + recommended_phases[].
-   tier=trivial is the canonical "skip the phase machine" signal —
-   you do not bypass classify_task; classify_task tells you when to
-   skip.
+   tier=trivial means no spec or code phases — you do not bypass
+   classify_task; classify_task tells you what to skip. REVIEW is
+   never skipped for a change that touches code.
 
 After step 3, branch on the returned tier:
-- trivial: §B exception applies; proceed with the edit directly.
+- trivial: §B exception applies; proceed with the edit directly. If it
+  touches code, run rsct_phase_review_start → rsct_phase_review_complete
+  before rsct_request_commit.
 - small: rsct_phase_spec_start → §B plan → rsct_phase_spec_complete →
   rsct_phase_code_start({ scope_globs, spec_tier: 'small' }) → edits
   gated by rsct_check_edit_scope → rsct_phase_code_complete →
-  rsct_phase_test_*.
+  rsct_phase_test_* → **REVIEW phase**.
 - standard: rsct_phase_research_start → research → _complete →
-  rsct_phase_spec_start → §B plan → rsct_phase_spec_complete({
-  include_review }) → **V phase** (rsct_phase_verification_start({
+  rsct_phase_spec_start → §B plan → rsct_phase_spec_complete →
+  **V phase** (rsct_phase_verification_start({
   declared_paths, spec_claims }) → answer EVERY finding →
   rsct_phase_verification_complete) →
   rsct_phase_code_start({ scope_globs, spec_tier: 'standard' }) →
-  edits → rsct_phase_code_complete → **REVIEW phase** (when include_review:
-  rsct_phase_review_start({ findings }) → answer EVERY declared finding →
-  rsct_phase_review_complete) →
-  rsct_phase_test_start({ spec_tier: 'standard' }) → rsct_phase_test_complete.
+  edits → rsct_phase_code_complete →
+  rsct_phase_test_start → rsct_phase_test_complete → **REVIEW phase**
+  (rsct_phase_review_start({ findings }) → answer EVERY declared finding
+  and every removed comment → rsct_phase_review_complete).
 - complex: same chain as standard; V phase is mandatory (skipping
   requires override_verification_skip=true PLUS a dev_approval and an
   OS dialog).
 
-The full cycle is R→S→V→C→REVIEW→T (REVIEW audits the diff, V audits the spec).
+The full cycle is R→S→V→C→T→REVIEW (REVIEW audits code and tests together
+on a green suite, V audits the spec).
 
 **CAP-28 verification gate (v0.7.8+)**: rsct_phase_code_start REJECTS
 when `spec_tier ∈ {standard, complex}` and no completed V block
@@ -64,19 +67,27 @@ standard/complex task, pass `override_verification_skip: true`
 TOGETHER WITH a `dev_approval`. The tool forces an OS dialog and
 ignores `trust_allowed_for`; the override is audit-logged.
 
-A `trivial` or `small` tier skips V, REVIEW and plan tracking, so it
+A `trivial` or `small` tier skips V and plan tracking, so it
 is only accepted when an rsct_classify_task verdict is on record.
 Declaring a low tier without classifying first is refused
 (`classify_evidence_absent`) — classify, then pass what it returned.
 
-**REVIEW gate (DX-4)**: at spec-closure, pass `include_review` to
-rsct_phase_spec_complete (recorded by spec_ref). For `spec_tier ∈
-{standard, complex}`, rsct_phase_test_start then enforces it:
-include_review=yes requires a completed rsct_phase_review_* for that
-spec_ref; =no skips REVIEW; no decision rejects (record one).
-trivial/small bypass (with a classify verdict on record). Pass
-`override_review_skip: true` PLUS a `dev_approval` to bypass
-intentionally — forces an OS dialog; audit-logged.
+**REVIEW is mandatory at every tier (2.11.0)**: rsct_request_commit
+refuses any staged code file that no completed rsct_phase_review_complete
+stamped, whatever authorizes the commit. There is no include_review and
+no override_review_skip — both are rejected as removed options.
+rsct_phase_review_complete sweeps the touched files: remove EVERY comment
+(never write one either); a comment that carried a measured fact moves
+to documentation/decisions.md or documentation/knowledge/anti-decisions.md
+first, and each removed comment gets a disposition (migrated with its
+destination, or discarded) — pending_dispositions lists them. Functional
+comments (shebang, licence header, tool directives such as
+@ts-expect-error or # noqa) stay. A file the sweep cannot verify
+(unsupported language, undeclared sql_dialect, parse error) or a
+generated/vendored file you list in exempt_files goes to a dialog only
+the dev answers. Stage exactly the reviewed bytes: an edit after the
+REVIEW needs a new REVIEW, and a pre-commit hook that slips in
+unreviewed code blocks further commits (review_drift) until one runs.
 
 For standard and complex, also call
 `mcp__rsct__rsct_auto_persona({ task_description })` after classify

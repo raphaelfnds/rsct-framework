@@ -204,29 +204,23 @@ planning. It writes nothing and edits nothing on its own.
 
 **How it differs from the other review surfaces.** `/rsct-clean-code` is a
 *pre-Research* sweep of **existing** code that feeds a **new** cycle. The **REVIEW
-phase** is a *post-Code* audit of a **diff inside** an open cycle.
-`rsct_persona_review` is a *stateless* consultative lens (focus areas + questions
-+ anti-patterns). Three distinct tools; this one is the "should we open a cycle to
-clean this up?" entry point.
+phase** is the *post-Test* audit of the code and tests **inside** an open cycle,
+mandatory at every tier. `rsct_persona_review` is a *stateless* consultative lens
+(focus areas + questions + anti-patterns). Three distinct tools; this one is the
+"should we open a cycle to clean this up?" entry point.
 
-**Where the cleanup sweep is practised, recorded and enforced — three different
-points.** Do not collapse them:
+**Where the cleanup sweep is practised, recorded and enforced.** Two halves, two
+anchors:
 
-- **Practised** at the refactor moment, right after the code works and while the
-  context is still warm. That is where a sweep is cheap and where the literature
-  puts it; nothing about the machinery below changes that.
-- **Recorded** in `findings_actions[]` on `rsct_phase_review_complete`, where a
-  record already exists.
-- **Enforced** at the **integration boundary**, by the `hygiene_swept` item of
-  `pre_merge_ack` — on a merge, a rebase/squash, and a push to a protected
-  branch. Not inside a phase: no phase always runs, and a `trivial` task may
-  legitimately skip the phase machine entirely, so an obligation created there
-  binds only the agents that opted in. Residue is paid for by every task after
-  it, so the obligation applies at **every tier**, with no exemption.
-
-The enforcement checks **coverage** — that the paths the integration carries were
-*claimed* as swept. It does not verify that a sweep happened, or that one found
-anything.
+- **Comments** — practised and recorded in the REVIEW phase: `rsct_phase_review_complete`
+  sweeps every touched code file, requires a disposition for each removed comment and
+  stamps the exact file versions it covered. **Enforced at every commit**:
+  `rsct_request_commit` refuses staged code that no completed REVIEW stamped. This is
+  a lexical fact about the file, checked mechanically, at every tier.
+- **Dead code** — still attested at the **integration boundary**, by the
+  `hygiene_swept` item of `pre_merge_ack` (merge, rebase/squash, push to a protected
+  branch). That check verifies **coverage** — that the carried paths were *claimed* as
+  swept — not that a sweep happened. A mechanical dead-code check waits for #76/#77.
 
 **When to use it.** In any repo, when you want a structured pass for duplication,
 scalability, or stale/loose dependencies — before committing to a refactor. Works

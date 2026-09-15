@@ -128,19 +128,20 @@ misbehaves, that's a bug worth filing.
 Beyond scaffolding files, RSCT runs every non-trivial change through a fixed
 engineering cycle, enforced by the `rsct-mcp` phase tools:
 
-**R → S → V → C → REVIEW → T** — Research → Specification → **Verification** →
-Code → **REVIEW** → Test.
+**R → S → V → C → T → REVIEW** — Research → Specification → **Verification** →
+Code → Test → **REVIEW**.
 
 - **V (Verification)** audits the *spec/plan* **before** any code is written — a
   reverse-dependency and gap scan against the approved spec.
-- **REVIEW** audits the *code/diff* **after** it's written and before tests — a
-  correctness / security / regression pass over what actually changed.
+- **REVIEW** audits the *code and its tests* **after** the suite is green — a
+  correctness / security / regression pass over what actually changed, plus a
+  mechanical sweep that removes every comment from the files you touched.
 
-They're distinct: V checks the plan, REVIEW checks the diff. At spec-closure RSCT
-asks **once** whether to include the code REVIEW; the choice is recorded and
-honored — for `standard`/`complex` tasks the Test phase won't start until that
-decision is settled (`trivial`/`small` tasks skip it). You don't memorize the
-phases; the tools prompt you through them.
+They're distinct: V checks the plan, REVIEW checks the diff. REVIEW is mandatory
+at every tier — a commit that carries code no completed REVIEW covers is refused.
+Anything the sweep cannot read with certainty (an unsupported language, a generated
+file, an undeclared SQL dialect) goes to a dialog that only you answer. You don't
+memorize the phases; the tools prompt you through them.
 
 The cycle is bracketed by a **plan-tracking gate**: for `standard`/`complex`
 tasks the **Code** phase won't start until the plan is written to disk

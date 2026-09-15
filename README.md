@@ -40,13 +40,11 @@ between spec-approval and code-edit, walking reverse dependencies +
 running a four-category checklist (gap / breakage / redundancy /
 forgotten) against the project's institutional context. Tier table:
 trivial+small skip V; standard+complex run V. The **Review** phase
-(a code review of the diff, between Code and Test) is opt-in and asked
-once at spec-approval; when included, the test phase will not start until
-the review has run (standard+complex; trivial+small skip it). Bypassing it
-needs `override_review_skip` **plus a `dev_approval` and the OS dialog** — a
-skipped review is a decision the dev makes per call, never a flag the agent
-sets. A `trivial`/`small` tier only skips the review when an
-`rsct_classify_task` verdict on record supports it.
+(code and tests reviewed together, after Test) is mandatory at every tier since
+2.11.0: `rsct_request_commit` refuses code that no completed review stamped, on
+every authorization path. The review removes every comment from the touched
+files — a measured fact moves to the decisions file first — and anything it
+cannot verify goes to a dialog only the dev answers. There is no flag to skip it.
 
 Both phases **bind on their findings**: every finding raised needs a
 decision (`block` / `address-now` / `capture-as-issue` / `defer` /
@@ -587,7 +585,7 @@ The source and the installed copy are decoupled — you edit the source, run
 
 ## RSCT → Development phases mapping
 
-The full cycle is **R → S → V → C → REVIEW → T**:
+The full cycle is **R → S → V → C → T → REVIEW**:
 
 | RSCT Phase | Real development | Guardrails |
 |---|---|---|
@@ -595,8 +593,8 @@ The full cycle is **R → S → V → C → REVIEW → T**:
 | Specification | Plan with 2+ options + approval | §B (plan), §F (IDA/VOLTA), §G (tests in plan) |
 | Verification | Audit the approved spec — reverse-dep walk + gap scan, before any code | §B (plan); enforced at code-start |
 | Code | Execution | §C (reauthorize), §D (branches) |
-| REVIEW | Code review of the diff — correctness / security / regression, before tests | §G (testing); asked once at spec-closure, enforced at test-start |
 | Test | Automated or manual + approval | §G (testing) |
+| REVIEW | Review of code and tests on a green suite — correctness / security / regression, plus a mechanical sweep that removes every comment from the touched files | §G (testing); mandatory at every tier, enforced at every commit |
 | — | Commit + Push | §C, §D, §E (leak review) |
 
 ## Versioning
@@ -740,7 +738,7 @@ quiet for good.
   the mechanical recall + enforcement layer: **40 tools + 5 resources** spanning
   Recall (M1), Enforcement (M2: §C-gated commit/push/merge + the SessionStart
   sanitizer hook + the append-only `.rsct/audit.log`), the
-  **R→S→V→C→REVIEW→T** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
+  **R→S→V→C→T→REVIEW** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
   topology & the contract-surface gate (T2), guided onboarding (DX-1), and
   plan-authorization batch tokens (T3). The per-tool catalog, the boot-log tool
   list, and the full milestone history live in

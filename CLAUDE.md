@@ -95,26 +95,25 @@ início da fase Code. A fase V é parte da camada mecânica via
 
 ## Acréscimo ao ciclo — fase REVIEW (code review)
 
-Após a fase Code, esta implementação introduz uma fase **REVIEW** (revisão
-do código produzido) entre Code e Test:
+Após a fase Test, esta implementação introduz uma fase **REVIEW** (revisão
+do código e dos testes produzidos), que fecha o ciclo:
 
 ```
-R → S → V → C → REVIEW → T
+R → S → V → C → T → REVIEW
 ```
 
 A distinção em relação à fase V: a **V audita a especificação/plano**
-(antes de escrever código); a **REVIEW audita o código/diff já escrito**
-(antes dos testes) — buscando bugs de correção, brechas de segurança,
-regressões e quebras cross-OS no que foi efetivamente implementado.
+(antes de escrever código); a **REVIEW audita o código e os testes já
+escritos, com a suíte verde** — buscando bugs de correção, brechas de
+segurança, regressões e quebras cross-OS no que foi efetivamente implementado.
 
-A decisão é **perguntada uma única vez**, no fechamento da especificação:
-a IA recomenda **fortemente** incluir um code review antes dos testes e o
-desenvolvedor escolhe sim/não (parâmetro `include_review` em
-`rsct_phase_spec_complete`). A escolha é gravada e **não é re-perguntada**;
-se recusada, a REVIEW **não é executada**. Para tarefas `standard` e
-`complex`, a fase Test não inicia até a decisão ser honrada — a revisão é
-mecânica via `rsct_phase_review_start` / `_complete`, com um gate em
-`rsct_phase_test_start` (tarefas `trivial`/`small` dispensam a REVIEW). Não
+Desde a 2.11.0 (#62) a REVIEW é **obrigatória em todo tier**, sem pergunta e
+sem exceção: `include_review` e `override_review_skip` foram removidos. A
+âncora é mecânica — `rsct_request_commit` recusa código que nenhuma REVIEW
+concluída cobre. Na REVIEW, `rsct_phase_review_complete` faz a limpeza
+mecânica: todo comentário dos arquivos tocados sai, e o fato medido que morava
+num comentário migra para o arquivo de decisões. Uma correção feita durante a
+REVIEW que mude comportamento pede T de novo e depois REVIEW de novo. Não
 confundir a fase REVIEW com `rsct_persona_review` (uma lente consultiva,
 sem estado).
 
@@ -143,7 +142,7 @@ catálogo das ferramentas do `rsct-mcp`, fluxo de uso e estado de
 versão — consulte o **[README.md](README.md)** na raiz do projeto.
 
 Para **como conduzir uma sessão de trabalho neste repositório** — protocolo
-de bootstrap, classificação de tier, o ciclo R → S → V → C → Rv → T,
+de bootstrap, classificação de tier, o ciclo R → S → V → C → T → Rv,
 semântica de autorização e disciplina de plan-tracking — consulte o
 **[AGENTS.md](AGENTS.md)**. Ele é o contrato que substitui os gates
 mecânicos, já que o framework não está instalado no próprio repositório.

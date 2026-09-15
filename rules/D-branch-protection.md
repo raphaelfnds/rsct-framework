@@ -131,14 +131,12 @@ The Code phase (§B-approved plan moving into execution) is wrapped by:
    every Edit, not just the first one.
 3. `mcp__rsct__rsct_phase_code_complete({ spec_ref, dev_approval })`
    — §C gate after all edits land.
-4. The REVIEW phase (when `include_review:true` was recorded at
-   spec_complete): `rsct_phase_review_start` → review the diff →
-   `rsct_phase_review_complete`. Then `rsct_phase_test_start({ spec_ref,
-   spec_tier })` — for `standard`/`complex` it rejects unless the review
-   decision is honored (completed, or `include_review:false`), bypassable
-   with `override_review_skip: true` **plus a `dev_approval`** (forces the
-   OS dialog; audit-logged). The recommended
-   cycle is R→S→V→C→REVIEW→T.
+4. `rsct_phase_test_start({ spec_ref })` → tests →
+   `rsct_phase_test_complete`, then the mandatory REVIEW phase:
+   `rsct_phase_review_start` → review code and tests, remove every comment
+   from the touched files → `rsct_phase_review_complete`. At every tier,
+   `rsct_request_commit` refuses staged code no completed REVIEW covers.
+   The cycle is R→S→V→C→T→REVIEW.
 
 The branch derivation step above is INDEPENDENT of and PRECEDES the
 phase machine: derive `feat/<slug>` (or equivalent) FIRST, then open

@@ -49,8 +49,8 @@ a known task, recommend the working branch from `plan_<slug>.md`.
 integration — a merge, a rebase/squash, or a push to a protected branch — answer
 four items and confirm them with the dev: is the work **complete**; are the
 pertinent **ADRs recorded**; are the associated **issues resolved**; have the
-files this integration carries been **swept** for dead code and for comments that
-no longer match the code. When ADRs, issues or the sweep are attested true, a
+files this integration carries been **swept** for dead code (comments are removed
+mechanically in the REVIEW phase and enforced at every commit). When ADRs, issues or the sweep are attested true, a
 non-empty `note` must say what.
 
 The fourth item also carries `files_swept[]`, the paths you swept. When
@@ -64,8 +64,9 @@ It checks **coverage**,
 that the carried paths were claimed as swept; not that a sweep happened or found
 anything. No tier exemption: residue reaches the codebase at every task size.
 
-Practise the sweep at the refactor moment while the context is warm; it is
-enforced later, at the integration boundary, where residue would become permanent.
+Practise the sweep in the REVIEW phase, after the tests, while the context is warm;
+the comment half is enforced at every commit, the dead-code half at the
+integration boundary, where residue would become permanent.
 
 Why: Protected branches are shared truth for the team; accidental direct
 mutation affects everyone and is hard to undo cleanly. Derived branches isolate

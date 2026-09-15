@@ -35,14 +35,14 @@ The vectors this closes: audit off, skew set to infinity, `protected_branches: [
 
 ### #2 — A phase bypass is a per-call decision, never a pre-authorised tool
 
-Anything that removes the V phase, the REVIEW phase or plan tracking must reach the
-developer through the OS dialog on the call that does it. `trust_allowed_for` is ignored
+Anything that removes the V phase or plan tracking must reach the developer through the
+OS dialog on the call that does it. REVIEW cannot be removed at all (ADR-011). `trust_allowed_for` is ignored
 on those paths. Recording a bypass in the audit log is not a substitute: the developer
 learns only afterwards, and only if they think to look.
 
 ### #3 — A tier that skips phases needs evidence, not a declaration
 
-`trivial` and `small` skip V, REVIEW and plan tracking by design. Because `spec_tier` is
+`trivial` and `small` skip V and plan tracking by design (never REVIEW, ADR-011). Because `spec_tier` is
 declared by the caller on every `_start` call, that declaration is refused unless an
 `rsct_classify_task` verdict is on record for the project.
 
@@ -70,7 +70,7 @@ be kept honest; an entry that stops being true is worse here than in a comment, 
 this file is where people will look.
 
 ### ADR-002 — Tier `trivial`/`small` bypasses ceremony; `standard`/`complex` does not (ref: CAP-28, PH-1, DX-4)
-**Status**: active
+**Status**: active for V and plan tracking; the REVIEW part is superseded by ADR-011 (2.11.0)
 **Tags**: gates, tiers
 **Context**: The canonical RSCT tier table (`rules/B-architect-plan.md`) makes ceremony
 proportional to risk.
@@ -94,7 +94,7 @@ and the tier; `plan_` and `progress_` stay mechanically enforced.
 override path — the invariant telemetry depends on.
 
 ### ADR-004 — The REVIEW gate matches `spec_ref` strictly (ref: #40)
-**Status**: active
+**Status**: superseded by ADR-011 (2.11.0) — the test-start review gate, its decision block and its override no longer exist
 **Tags**: gates, review
 **Context**: A re-planned task produces a new `spec_ref` while an old review block is
 still in phase-state.
@@ -187,6 +187,109 @@ adding it here in the same change.
 pinned by a test — widening the enum by one known name must not become widening it to
 `z.string()`.
 
+### ADR-011 — REVIEW is mandatory, runs after the tests, and is anchored at the commit gate (#62, 2.11.0)
+**Status**: active
+**Tags**: gates, review, comments
+**Context**: REVIEW was opt-in end to end. MEASURED on `ed648d9`: `rsct_request_commit`,
+`_push`, `_merge` and `lib/request-gate.ts` never read review state, and a trivial task
+never entered the phase machine, so no REVIEW ran unless the agent chose to and ADR-001 was
+enforced by nothing. Two earlier placements failed in the field: a hygiene ack at the
+integration boundary (`pre_merge_ack`) passes without a file being opened, because it can
+only check that paths were claimed.
+**Alternatives considered**: (1) keep REVIEW between Code and Test — rejected: tests are
+written after it, so every commit carrying tests would need a second REVIEW; code review is
+normally done on a green suite, tests included. (2) a push/merge backstop over the commit
+range — rejected for this release: it blocks the first push of every new branch (the range
+base does not exist yet, the reason push already fails open), can never be re-stamped for
+code committed on another machine, and adds nothing for commits that already passed the
+commit gate. (3) a project-level list of excluded paths for generated code — rejected: an
+agent-editable list is a hiding place.
+**Decision**: The cycle is R→S→V→C→T→REVIEW. `include_review` and `override_review_skip`
+are removed (and `spec_tier` / `dev_approval` from `rsct_phase_test_start`, which no
+longer gates anything); old callers get `review_option_removed`. `rsct_phase_review_complete`
+sweeps every touched code file for comments, requires a disposition per removed comment,
+checks each migration against the lines added to a decisions file, sends unverifiable and
+exempt files to a developer-only dialog and stamps a ledger of git blob ids.
+`rsct_request_commit` refuses any staged code file that is not in that ledger or still has a
+comment, on every authorization path, before any dialog and again right before `git commit`.
+**Consequences**:
+- The free lane survives, but carries only reviewed bytes. A ledger entry with channel
+  `trust` means no dialog was shown anywhere: a clean sweep with nothing removed can be
+  trust-approved (ADR-010), so the claim is "the bytes were swept", not "the developer saw
+  them".
+- Residual, not closed: phase-state and the audit log are writable by a same-user agent.
+  Always re-scanning the staged blob makes a forged `clean` entry useless for supported
+  languages; a forged `unverified_authorized` entry plus a forged audit line still passes.
+  Same Fork 1/A limit as `deriveAuditCeiling`: this raises the cost, there is no privilege
+  boundary to close it.
+- Residual, not closed: a commit made outside `rsct_request_commit` (a developer-accepted
+  permission prompt, or the developer's own terminal) is not checked. The SessionStart
+  sanitizer keeps the agent from holding a standing allow for `git commit`.
+- A pre-commit hook can change the index after the check. The committed blobs are compared
+  after `git commit`: a clean reformat is re-stamped (`review.commit_hook_rewrite`),
+  anything else returns `committed_with_drift` and blocks further commits (`review_drift`)
+  until a REVIEW covers those paths.
+- Outside a git repository the commit check is skipped (the commit itself needs a
+  repository); `rsct_phase_review_complete` rejects with `not_git_repo`.
+- A behaviour fix made during the REVIEW changes stamped blobs: the commit gate forces a new
+  REVIEW, re-running the tests is instruction.
+- The sweep ledger survives `rsct_phase_abandon` and ignores the `spec_ref` carry guard:
+  it is bound to bytes, not to a task.
+- `review_findings` are pruned only after `completed_at` is stamped — if the stamp fails the
+  findings stay, which is the recoverable direction.
+- Every REVIEW rejection (findings gate, block actions, sweep) happens before any dialog, so
+  a rejected completion never spends an approval; phase/spec checks run first.
+- The approval dialog detail is set after the caller's `internal` options, so a test
+  injecting `internal` cannot shadow the production text it asserts on.
+- `review.evidence_mix` stays its own audit line rather than extending the generic
+  `review.complete` event, which four other phases share; per-finding `review.action`
+  entries are written only after the gate approves.
+- HEAD moving between declaring findings and completing is marked (`head_stale`), never
+  rejected: committing the fixes a review found is the normal reason for it.
+
+### ADR-012 — Comment engines per language (#62, 2.11.0)
+**Status**: active
+**Tags**: review, comments, packaging, cross-os
+**Context**: A text search corrupts source (`'https://x//y'`, a `//` inside a template
+literal or a regex). Engines were measured against independent reference lexers on real
+code, Windows, 0 extra / 0 missed: TS/JS 5,730 comments (TypeScript scanner, 284 files),
+Python 40,769 (`tokenize`, 400), PHP 4,480 (`token_get_all`, 400), Java 2,464 (javac
+scanner, 400), CSS 1,162 (css-tree, 232). Dropping one comment per file was reported as a
+miss in every language, so the zeros are not a comparator that never ran.
+**Decision**:
+- tree-sitter 0.25 (`web-tree-sitter` 0.25.10) with the official grammar packages
+  (javascript 0.25.0, typescript/tsx 0.23.2, java 0.23.5, python 0.25.0, php 0.24.2,
+  css 0.25.0), vendored in `mcp-server/grammars/` and pinned by a sha256 manifest test —
+  not installed from npm, because those packages run a native `node-gyp-build` install
+  script. `tree-sitter-wasms` is not used (different licence, 0.20-era grammars).
+- parse5 7 for HTML; inline `<script>`/`<style>` text goes through the JS/CSS grammars;
+  PHP inline HTML goes through parse5; `<?xml … ?>` and CDATA are not comments.
+- A dialect-parameterised SQL lexer written here (see AD-005), dialect declared in
+  `.rsct.json` `sql_dialect` and never inferred.
+- Any tree-sitter parse error, a NUL byte, a UTF-16 BOM or invalid UTF-8 → `unverified`:
+  a UTF-16 file read as UTF-8 parses with errors and zero comments in every grammar, which
+  would otherwise read as clean. Measured cost: TS 9/284 and 2/196 files, CSS 16/232,
+  Python/PHP/Java 0. Comments stayed correct in every error file measured (423/423 TS, 5/5
+  CSS, 18 synthetic probes) — the rule is a safety margin, paid for with a dialog.
+- Engines load lazily; the runtime WASM is read and checked with `WebAssembly.validate`
+  first. MEASURED: a missing or corrupt runtime through the default loader aborts the whole
+  MCP process uncatchably. Emscripten output goes to stderr (stdout is the MCP stream).
+- Unknown extensions go to the developer; `not_code` is a closed list. MEASURED: Node
+  executes `require('./payload.txt')` as JavaScript.
+- The allowlist is full-body patterns, never prefixes: `// @ts-expect-error <paragraph>`
+  would otherwise carry any prose. Python docstrings and JS/PHP bare string statements are
+  runtime values (`__doc__`, directives), not comments, and are not swept — a residual.
+- Git reads run from the top level with `:(top,literal)` pathspecs. MEASURED:
+  `git ls-files -s -- 'app/[id]/page.tsx'` returns three entries (glob);
+  `git rev-parse :0:<path>` returns one. With `project_root` below the top level,
+  `hash-object --path` resolves the file relative to cwd and `ls-files -s` returns empty
+  with rc 0. Blob ids from `hash-object --path`, `:0:<p>` and `HEAD:<p>` were identical
+  across autocrlf true/false/input and `eol` attributes. A path with a `filter` attribute is
+  `unverified` (LFS pointers, clean filters).
+**Consequences**: About 5.5 MB of WASM ships in the package. The standalone-dist test runs
+the packaged `dist/index.js` beside `grammars/` and sweeps one file per engine, which is what
+makes CI exercise Linux and macOS.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -210,6 +313,20 @@ It requires git ≥ 2.31 and the project declares no minimum git version anywher
 capability failure would fail closed and brick every commit. The bare form returns a
 relative `.git` for a plain repository and an absolute path elsewhere; resolving it against
 the root yields the identical answer with no version floor.
+
+### AD-004 — Do not use tree-sitter-html for the comment sweep
+`tree-sitter-html` 0.20 and 0.23.2 report `<!-- -->` inside a quoted attribute value and
+inside `<textarea>` as comments; removing them would cut real content. parse5 7
+(spec-compliant) gets both right.
+
+### AD-005 — Do not use tree-sitter-sql for the comment sweep
+`tree-sitter-sql` 0.3.11 (no published WASM; built with `emscripten/emsdk:4.0.4`, 2.4 MB)
+fails to parse 655 of 927 real `.sql` files, fails dollar-quoted bodies, nested block
+comments, MySQL `#` and backtick identifiers, and reports
+`-- inside body $$ LANGUAGE sql; -- real1` as one comment — deleting code. Comments in SQL
+are lexical but dialect-specific: `#` only in MySQL, nested blocks only in PostgreSQL, MySQL
+`--` needs a following space (`SELECT 1--1` is arithmetic), `/*! … */` is executable
+code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function bodies.
 
 ---
 
@@ -238,11 +355,13 @@ the root yields the identical answer with no version floor.
   `$ref`, `$id` or `$schema`, and the one server-side path that hands a third party's schema
   to Ajv is elicitation, which this server never calls. A schema declaring `$id` and `$ref`
   does move the counters, so the zero is a measurement rather than a probe that never ran.
-- **Only 18 packages reach `dist/index.js`.** Measured from the sourcemap: `ajv`,
-  `zod-to-json-schema`, `zod`, `pino`, `@modelcontextprotocol/sdk`, `pino-std-serializers`,
-  `thread-stream`, `fast-uri`, `ajv-formats`, `tsup`, `fast-deep-equal`,
-  `json-schema-traverse`, `@pinojs/redact`, `quick-format-unescaped`, `atomic-sleep`,
-  `sonic-boom`, `on-exit-leak-free`, `safe-stable-stringify`. A dependency advisory matters
+- **Only 21 packages reach `dist/index.js`** (2.11.0; 18 before the comment engines).
+  Measured from the sourcemap: `ajv`, `zod-to-json-schema`, `zod`, `pino`,
+  `@modelcontextprotocol/sdk`, `pino-std-serializers`, `thread-stream`, `fast-uri`,
+  `ajv-formats`, `tsup`, `fast-deep-equal`, `json-schema-traverse`, `@pinojs/redact`,
+  `quick-format-unescaped`, `atomic-sleep`, `sonic-boom`, `on-exit-leak-free`,
+  `safe-stable-stringify`, `web-tree-sitter`, `parse5`, `entities` (BSD-2-Clause). The
+  grammar WASMs are not bundled; they ship beside `dist/` in `grammars/`. A dependency advisory matters
   to users only if the package is on that list; everything else is build- or test-time.
   Counting a package's name in the bundle text does not work — "nanoid" appears 13 times as
   a zod validator name.

@@ -79,7 +79,7 @@ export const preMergeAckJsonSchema = {
     'the dev; when adr_confirmed, issues_resolved or hygiene_swept is true, `note` must ' +
     'state what (e.g. "ADR-012 recorded; issue #7 closed; swept 4 files"). ' +
     'files_swept lists every path this integration carries that you swept for dead code ' +
-    'and stale comments — obtain it from `git diff --name-only <base>...<head>`. A ' +
+    '(comments are enforced at every commit by the REVIEW sweep) — obtain it from `git diff --name-only <base>...<head>`. A ' +
     'carried path missing from it rejects regardless of the booleans. This checks ' +
     'COVERAGE (the carried paths were claimed as swept), never that a sweep happened.',
 }
@@ -312,7 +312,7 @@ export function preMergeAckHint(decision: {
       'machine-checked). When adr_confirmed, issues_resolved or hygiene_swept is ' +
       'true, add a non-empty `note` stating WHAT (e.g. "ADR-012 recorded; issue #7 ' +
       'closed; swept 4 files"). files_swept must list every path this integration ' +
-      'carries that you swept for dead code and stale comments — get it from ' +
+      'carries that you swept for dead code — get it from ' +
       '`git diff --name-only <base>...<head>`. No OS dialog was shown — nothing ran.'
     )
   }
@@ -320,7 +320,7 @@ export function preMergeAckHint(decision: {
     'Pre-integration hygiene checklist (pre_merge_ack) is incomplete — you ' +
     `declared/omitted: ${(decision.failing ?? []).join(', ')}. Resolve each item ` +
     '(finish the work, record pending ADRs via §H, close associated issues, sweep ' +
-    'the carried files for dead code and stale comments) and re-attest. Booleans ' +
+    'the carried files for dead code) and re-attest. Booleans ' +
     'you mark false mean "not ready" and are honored as a stop. Paths are compared ' +
     'case-sensitively after normalizing separators and Unicode form, so copy them ' +
     'back exactly as listed.'
