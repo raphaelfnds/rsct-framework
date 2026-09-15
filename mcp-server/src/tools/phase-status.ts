@@ -43,9 +43,7 @@ export interface PhaseStatusVerificationSummary {
 
 export interface PhaseStatusReviewSummary {
   spec_ref: string | null
-  decision: 'yes' | 'no' | null
   completed: boolean
-  decided_at: string | null
   completed_at: string | null
   /** #40: findings declared at review_start and not yet answered. */
   open_findings: StoredFinding[]
@@ -85,7 +83,7 @@ export interface PhaseStatusOutput {
 export const phaseStatusTool: Tool = {
   name: 'rsct_phase_status',
   description:
-    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the recorded review decision when present, and the next recommended phase per the canonical R→S→V→C→REVIEW→T order. Use to check where the task is mid-session before starting a new phase.',
+    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, and the next recommended phase per the canonical R→S→V→C→T→REVIEW order. Use to check where the task is mid-session before starting a new phase.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -163,9 +161,7 @@ export async function phaseStatusHandler(
   if (state?.review || state?.review_findings) {
     review = {
       spec_ref: state.review?.spec_ref ?? state.review_findings?.spec_ref ?? null,
-      decision: state.review?.decision ?? null,
       completed: state.review?.completed_at != null,
-      decided_at: state.review?.decided_at ?? null,
       completed_at: state.review?.completed_at ?? null,
       open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
       evidence_mix: summarizeEvidence(readFindingsBaseline(state.review_findings?.findings)),

@@ -11,7 +11,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       task_description: 'fix typo in error message in handler',
     })) as ClassifyTaskOutput
     expect(r.tier).toBe('trivial')
-    expect(r.recommended_phases).toEqual([])
+    expect(r.recommended_phases).toEqual(['review'])
   })
 
   it('returns complex for architecture / security keywords', async () => {
@@ -24,8 +24,8 @@ describe('rsct_classify_task — heuristic per tier', () => {
       'spec',
       'verification',
       'code',
-      'review',
       'test',
+      'review',
     ])
   })
 
@@ -46,7 +46,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       task_description: 'add a new field to the OrderResponse DTO',
     })) as ClassifyTaskOutput
     expect(r.tier).toBe('small')
-    expect(r.recommended_phases).toEqual(['spec', 'code', 'test'])
+    expect(r.recommended_phases).toEqual(['spec', 'code', 'test', 'review'])
   })
 
   it('defaults to standard when no signal hits', async () => {

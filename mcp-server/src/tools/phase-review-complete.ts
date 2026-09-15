@@ -10,7 +10,7 @@ import {
 import {
   headStaleness,
   readPhaseState,
-  stampReviewDecision,
+  stampReviewCompleted,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
@@ -97,7 +97,7 @@ export type PhaseReviewCompleteOutput = CompletePhaseResult & {
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion, and the rejection returns open_findings so you can answer them without re-running _start (rsct_phase_status also lists them). Unknown ids, duplicates and a stale findings_run_id reject the same way. Dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+    '§C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review block. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion, and the rejection returns open_findings so you can answer them without re-running _start (rsct_phase_status also lists them). Unknown ids, duplicates and a stale findings_run_id reject the same way. Dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". REVIEW is the last phase of the cycle (R→S→V→C→T→REVIEW).',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -264,13 +264,13 @@ export async function phaseReviewCompleteHandler(
   // upsert (preserves the decision/decided_at recorded at spec_complete).
   if (result.status === 'completed') {
     const completedAt = (internal.now ?? new Date()).toISOString()
-    const stamp = stampReviewDecision(projectRoot, {
+    const stamp = stampReviewCompleted(projectRoot, {
       spec_ref: input.spec_ref,
       completed_at: completedAt,
     })
     if (!stamp.ok) {
       result.hints.push(
-        `⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start will report the review as incomplete. This completion already cleared the phase label, so re-running rsct_phase_review_complete returns no_active_phase — re-open with rsct_phase_review_start (same findings) and complete again, or inspect .rsct/phase-state.json.`,
+        `⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_status will not show this review as completed. This completion already cleared the phase label, so re-running rsct_phase_review_complete returns no_active_phase — re-open with rsct_phase_review_start (same findings) and complete again, or inspect .rsct/phase-state.json.`,
       )
     }
 
@@ -291,7 +291,7 @@ export async function phaseReviewCompleteHandler(
       const pruned = writePhaseState(projectRoot, next)
       if (!pruned.ok) {
         result.hints.push(
-          `⚠ review completed but the declared findings could not be pruned from phase state (${pruned.reason}) — rsct_phase_test_start will report the review as incomplete until they are. Re-open with rsct_phase_review_start (same findings) and complete again; re-running rsct_phase_review_complete alone returns no_active_phase, because this completion already cleared the phase label.`,
+          `⚠ review completed but the declared findings could not be pruned from phase state (${pruned.reason}) — rsct_phase_status keeps listing them until they are. Re-open with rsct_phase_review_start (same findings) and complete again; re-running rsct_phase_review_complete alone returns no_active_phase, because this completion already cleared the phase label.`,
         )
       }
     }

@@ -234,9 +234,26 @@ export interface FreeCommitBudget {
  */
 export interface PhaseReviewBlock {
   spec_ref: string
-  decision: 'yes' | 'no'
-  decided_at?: string
   completed_at?: string
+}
+
+export type SweepVerdict = 'clean' | 'unverified_authorized'
+
+export interface SweepLedgerEntry {
+  blob: string
+  verdict: SweepVerdict
+  migrations: Array<{ destination: string; body_sha: string }>
+  channel: string
+  spec_ref: string
+  at: string
+}
+
+export type SweepLedger = Record<string, SweepLedgerEntry[]>
+
+export interface ReviewDriftBlock {
+  sha: string
+  paths: string[]
+  at: string
 }
 
 /**
@@ -299,6 +316,8 @@ export interface PhaseState {
   review?: PhaseReviewBlock
   /** #40: findings declared by the REVIEW phase, pending an action each (see PhaseFindingsBlock). */
   review_findings?: PhaseFindingsBlock
+  review_sweep?: SweepLedger
+  review_drift?: ReviewDriftBlock
   /** CAP-30: most-recent classify_task verdict (with tier_max ratchet). */
   last_classify?: LastClassifyBlock
   /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */
@@ -368,6 +387,8 @@ export function headStaleness(
 export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'bootstrap_at',
   'context_stale',
+  'review_sweep',
+  'review_drift',
 ]
 
 /** Copy one key when the source actually carries it (exactOptionalPropertyTypes). */
@@ -898,27 +919,16 @@ export function stampClassifyVerdict(
  * completed_at. Never throws — returns the WritePhaseStateResult like the
  * other stampers; the caller surfaces `!ok` as a hint.
  */
-export function stampReviewDecision(
+export function stampReviewCompleted(
   projectRoot: string,
-  patch: {
-    spec_ref: string
-    decision?: 'yes' | 'no'
-    decided_at?: string
-    completed_at?: string
-  },
+  patch: { spec_ref: string; completed_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
-  const prev = baseState.review
-  const carry = prev && prev.spec_ref === patch.spec_ref ? prev : undefined
-  const merged: PhaseReviewBlock = {
-    ...carry,
-    spec_ref: patch.spec_ref,
-    decision: patch.decision ?? carry?.decision ?? 'no',
-  }
-  if (patch.decided_at !== undefined) merged.decided_at = patch.decided_at
-  if (patch.completed_at !== undefined) merged.completed_at = patch.completed_at
-  return writePhaseState(projectRoot, { ...baseState, review: merged })
+  return writePhaseState(projectRoot, {
+    ...baseState,
+    review: { spec_ref: patch.spec_ref, completed_at: patch.completed_at },
+  })
 }
 
 /**

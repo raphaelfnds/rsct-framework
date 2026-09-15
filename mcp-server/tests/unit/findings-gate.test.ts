@@ -22,7 +22,6 @@ import {
 } from '../../src/tools/phase-review-complete.js'
 import { phaseStatusHandler } from '../../src/tools/phase-status.js'
 import { phaseVerificationStartHandler } from '../../src/tools/phase-verification-start.js'
-import { evaluateReviewGate } from '../../src/tools/phase-test-start.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
 // #40. The gate that makes V and REVIEW bind: ids must be real, every finding must
@@ -389,18 +388,11 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
   // The trap the V phase caught: stampReviewDecision defaults decision to 'no', and
   // evaluateReviewGate reads 'no' as bypassed_declined — which needs no completed_at.
   // Starting the review must never be able to disarm the review gate.
-  it('never invents a review decision', async () => {
+  it('starting a review never stamps a review block or a sweep ledger', async () => {
     writeFile('.rsct/phase-state.json', JSON.stringify({ spec_slug: 'feat-foo' }))
     await startReview([R1])
     expect(readState().review).toBeUndefined()
-
-    const gate = evaluateReviewGate({
-      projectRoot: tmpRoot,
-      specRef: 'feat-foo',
-      specTier: 'standard',
-      overrideReviewSkip: false,
-    })
-    expect(gate.status).not.toBe('bypassed_declined')
+    expect(readState().review_sweep).toBeUndefined()
   })
 
   it('re-running replaces the set, clears completed_at, and warns that answers are stale', async () => {
@@ -549,7 +541,6 @@ describe('rsct_phase_review_complete — coverage and prune (#40)', () => {
     const s = readState()
     expect(s.review_findings).toBeUndefined() // pruned
     expect(s.review.completed_at).toBe(FIXED_NOW.toISOString())
-    expect(s.review.decision).toBe('yes') // decision survives the prune
     expect(auditEvents().filter((e) => e === 'review.action')).toHaveLength(2)
   })
 
@@ -571,63 +562,5 @@ describe('rsct_phase_review_complete — coverage and prune (#40)', () => {
     )
     const out = await completeReview([])
     expect(out.status).toBe('completed')
-  })
-})
-
-describe('evaluateReviewGate — a completed review has no pending findings (#40)', () => {
-  const R1 = { id: 'r-bug-1', category: 'correctness', title: 'Off-by-one' }
-
-  // The downgrade path: the global rsct-mcp is a symlink to a worktree, so checking
-  // out an older branch swaps in a binary with no coverage check. It stamps
-  // completed_at and carries the findings forward untouched.
-  it('rejects when completed_at is stamped but findings are still pending', () => {
-    writeFile(
-      '.rsct/phase-state.json',
-      JSON.stringify({
-        review: { spec_ref: 'feat-foo', decision: 'yes', completed_at: FIXED_NOW.toISOString() },
-        review_findings: { spec_ref: 'feat-foo', run_id: 'x', findings: [R1], declared_at: VALID_TS },
-      }),
-    )
-    const gate = evaluateReviewGate({
-      projectRoot: tmpRoot,
-      specRef: 'feat-foo',
-      specTier: 'standard',
-      overrideReviewSkip: false,
-    })
-    expect(gate.status).toBe('rejected_incomplete')
-    expect(gate.hint).toContain('1 unanswered')
-  })
-
-  it('passes once they are pruned — the same state minus the findings', () => {
-    writeFile(
-      '.rsct/phase-state.json',
-      JSON.stringify({
-        review: { spec_ref: 'feat-foo', decision: 'yes', completed_at: FIXED_NOW.toISOString() },
-      }),
-    )
-    const gate = evaluateReviewGate({
-      projectRoot: tmpRoot,
-      specRef: 'feat-foo',
-      specTier: 'standard',
-      overrideReviewSkip: false,
-    })
-    expect(gate.status).toBe('passed')
-  })
-
-  it('the override still escapes', () => {
-    writeFile(
-      '.rsct/phase-state.json',
-      JSON.stringify({
-        review: { spec_ref: 'feat-foo', decision: 'yes', completed_at: FIXED_NOW.toISOString() },
-        review_findings: { spec_ref: 'feat-foo', run_id: 'x', findings: [R1], declared_at: VALID_TS },
-      }),
-    )
-    const gate = evaluateReviewGate({
-      projectRoot: tmpRoot,
-      specRef: 'feat-foo',
-      specTier: 'standard',
-      overrideReviewSkip: true,
-    })
-    expect(gate.status).toBe('overridden')
   })
 })

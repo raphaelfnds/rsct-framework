@@ -41,8 +41,8 @@ export const RSCT_PHASES = [
   'spec',
   'verification',
   'code',
-  'review',
   'test',
+  'review',
 ] as const
 
 export type RsctPhase = (typeof RSCT_PHASES)[number]
@@ -63,8 +63,8 @@ const PHASE_ORDER: readonly RsctPhase[] = [
   'spec',
   'verification',
   'code',
-  'review',
   'test',
+  'review',
 ]
 
 export function nextPhase(current: RsctPhase): RsctPhase | null {
@@ -331,18 +331,15 @@ export interface CompletePhaseInternal {
    * The other four callers of `gatePhaseComplete` are unaffected.
    */
   dialogDetail?: string
+  forceDialog?: boolean
 }
 
-export async function gatePhaseComplete(
+export function precheckPhaseComplete(
   input: CompletePhaseInput,
   config: RsctConfig | null,
   internal: CompletePhaseInternal = {},
-): Promise<CompletePhaseResult> {
-  const promptFn = internal.promptFn ?? promptYesNo
-  const now = internal.now ?? new Date()
+): CompletePhaseResult | null {
   const appendAudit = internal.auditWriter ?? appendAuditEntry
-  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
-
   const existing = readPhaseState(input.projectRoot)
   if (!existing.exists || !existing.state?.phase) {
     return {
@@ -434,9 +431,27 @@ export async function gatePhaseComplete(
     }
   }
 
+  return null
+}
+
+export async function gatePhaseComplete(
+  input: CompletePhaseInput,
+  config: RsctConfig | null,
+  internal: CompletePhaseInternal = {},
+): Promise<CompletePhaseResult> {
+  const promptFn = internal.promptFn ?? promptYesNo
+  const now = internal.now ?? new Date()
+  const appendAudit = internal.auditWriter ?? appendAuditEntry
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
+
+  const precheck = precheckPhaseComplete(input, config, internal)
+  if (precheck) return precheck
+  const state = readPhaseState(input.projectRoot).state as PhaseState
+
   const gate = await gateRequest({
     toolName: `rsct_phase_${input.phase}_complete`,
     approval: input.devApproval,
+    ...(internal.forceDialog === true && { forceDialog: true }),
     dialog: {
       title: `RSCT — ${input.phase} complete`,
       message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${

@@ -96,7 +96,7 @@ export type PhaseReviewStartOutput = StartPhaseResult & {
 export const phaseReviewStartTool: Tool = {
   name: 'rsct_phase_review_start',
   description:
-    'Start the REVIEW phase — an adversarial code review of the diff, between Code and Test (cycle: R→S→V→C→REVIEW→T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code — e.g. via the qa + senior-dev personas or /code-review), then declare what you found via findings[] and call rsct_phase_review_complete. DECLARING A FINDING COMMITS YOU TO RESOLVING IT: every declared finding needs an action at _complete or the phase will not close. Re-running this tool REPLACES the declared set and reopens the review. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+    'Start the REVIEW phase — an adversarial code review of the diff, code and tests together, as the last phase of the cycle (R→S→V→C→T→REVIEW). Mandatory at every tier: rsct_request_commit refuses code that no completed REVIEW covers. Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_test_complete. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code — e.g. via the qa + senior-dev personas or /code-review), then declare what you found via findings[] and call rsct_phase_review_complete. DECLARING A FINDING COMMITS YOU TO RESOLVING IT: every declared finding needs an action at _complete or the phase will not close. Re-running this tool REPLACES the declared set and reopens the review. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -105,7 +105,7 @@ export const phaseReviewStartTool: Tool = {
       spec_ref: {
         type: 'string',
         description:
-          'The spec this review covers. Must match the spec_ref the REVIEW decision was recorded under at rsct_phase_spec_complete, and the one you pass to rsct_phase_review_complete.',
+          'The spec this review covers. Must match the one you pass to rsct_phase_review_complete.',
       },
       spec_slug: { type: 'string', description: 'Plan slug, when it differs from spec_ref.' },
       scope_globs: {

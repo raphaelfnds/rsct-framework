@@ -441,7 +441,7 @@ function classify(description: string): {
     return {
       tier: 'complex',
       signals,
-      reasoning: `Architecture / security keywords detected (${archHits.join(', ')}). Treat as complex — likely cross-cutting, deserves full R→S→V→C→REVIEW→T cycle.`,
+      reasoning: `Architecture / security keywords detected (${archHits.join(', ')}). Treat as complex — likely cross-cutting, deserves full R→S→V→C→T→REVIEW cycle.`,
     }
   }
   if (multiHits.length > 0) {
@@ -462,7 +462,7 @@ function classify(description: string): {
     return {
       tier: 'trivial',
       signals,
-      reasoning: `Trivial shape (${trivialHits.join(', ')}) and short description (${wordCount} words). Skip phase machine entirely.`,
+      reasoning: `Trivial shape (${trivialHits.join(', ')}) and short description (${wordCount} words). No spec or code phases; any code change still owes the mandatory REVIEW before it can be committed.`,
     }
   }
   // CAP-29: orchestration signals — multi-step plan or multi-concern.
@@ -470,7 +470,7 @@ function classify(description: string): {
     return {
       tier: 'complex',
       signals,
-      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex — multi-step orchestration warrants R→S→V→C→REVIEW→T.`,
+      reasoning: `Multi-step plan detected (${stepCount} numbered steps). Treat as complex — multi-step orchestration warrants R→S→V→C→T→REVIEW.`,
     }
   }
   if (concerns.size >= 3) {
@@ -491,26 +491,26 @@ function classify(description: string): {
     return {
       tier: 'small',
       signals,
-      reasoning: `Single mutation verb (${mutationHits.join(', ')}) in a short description (${wordCount} words). Small — collapse R into S; run S→C→T.`,
+      reasoning: `Single mutation verb (${mutationHits.join(', ')}) in a short description (${wordCount} words). Small — collapse R into S; run S→C→T→REVIEW.`,
     }
   }
   return {
     tier: 'standard',
     signals,
-    reasoning: `Defaulting to standard — no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R→S→C→REVIEW→T cycle recommended; consider verification phase if the change touches code with many importers.`,
+    reasoning: `Defaulting to standard — no architecture / multi-file / trivial signals matched the description (${wordCount} words). Full R→S→C→T→REVIEW cycle recommended; consider verification phase if the change touches code with many importers.`,
   }
 }
 
 const RECOMMENDED_PHASES: Record<Tier, RsctPhase[]> = {
-  trivial: [],
-  small: ['spec', 'code', 'test'],
+  trivial: ['review'],
+  small: ['spec', 'code', 'test', 'review'],
   // NOTE: 'verification' is deliberately omitted from the standard array
   // (a pre-existing choice — V is still ENFORCED for standard at
   // rsct_phase_code_start regardless of this hint). DX-4 adds 'review'
   // (the code review of the diff) for standard + complex; the recommended
   // cycle is R→S→V→C→REVIEW→T.
-  standard: ['research', 'spec', 'code', 'review', 'test'],
-  complex: ['research', 'spec', 'verification', 'code', 'review', 'test'],
+  standard: ['research', 'spec', 'code', 'test', 'review'],
+  complex: ['research', 'spec', 'verification', 'code', 'test', 'review'],
 }
 
 export async function classifyTaskHandler(
@@ -555,19 +555,19 @@ export async function classifyTaskHandler(
   const hints: string[] = []
   if (tier === 'trivial') {
     hints.push(
-      'Trivial tier — you can skip the phase machine and edit directly (trivial doc-only fixes).',
+      'Trivial tier — no spec or code phases needed. A change that touches code still needs rsct_phase_review_start / _complete before rsct_request_commit accepts it; a docs-only change does not.',
     )
   } else if (tier === 'small') {
     hints.push(
-      'Small tier — research can be folded into the spec phase. Start with rsct_phase_spec_start.',
+      'Small tier — research can be folded into the spec phase. Start with rsct_phase_spec_start; finish with the tests and then the mandatory REVIEW.',
     )
   } else if (tier === 'standard') {
     hints.push(
-      'Standard tier — start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it).',
+      'Standard tier — start with rsct_phase_research_start. The verification step is required before coding: rsct_phase_code_start will refuse until you run rsct_phase_verification_start + _complete (or pass override_verification_skip=true). After the tests, the REVIEW is mandatory: rsct_request_commit refuses code that no completed REVIEW covers.',
     )
   } else {
     hints.push(
-      'Complex tier — run the full cycle (research → spec → verification → code → review → test). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). A code review before tests is strongly recommended: record the decision at rsct_phase_spec_complete via include_review (rsct_phase_test_start enforces it).',
+      'Complex tier — run the full cycle (research → spec → verification → code → test → review). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). After the tests, the REVIEW is mandatory: rsct_request_commit refuses code that no completed REVIEW covers.',
     )
     // PH-3: worktree-orchestration nudge. Advisory only, complex-tier only. The
     // threshold "how many phases" belongs to the §B prose question, NOT here —

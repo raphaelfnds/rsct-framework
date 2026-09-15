@@ -24,7 +24,7 @@ export type PhaseTestCompleteOutput = CompletePhaseResult
 export const phaseTestCompleteTool: Tool = {
   name: 'rsct_phase_test_complete',
   description:
-    '§C-gated T phase closure — the task-completion event. Reads .rsct/phase-state.json (must hold phase="test" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "test_complete:spec_ref=<X>". This is the last phase in the cycle — next_recommended_phase will be null.',
+    '§C-gated T phase closure. Reads .rsct/phase-state.json (must hold phase="test" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "test_complete:spec_ref=<X>". Next recommended phase: review — the mandatory REVIEW over code and tests together closes the cycle (R→S→V→C→T→REVIEW).',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],

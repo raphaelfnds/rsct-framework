@@ -120,20 +120,17 @@ describe('ceremony bypass gate — the override booleans need a per-call decisio
     expect(out.status).toBe('bypass_gate_rejected')
   })
 
-  it('rejects override_review_skip with no dev_approval', async () => {
+  it('rejects override_review_skip as a removed option', async () => {
     writeConfig()
-    const out = await phaseTestStartHandler(
-      {
-        project_root: tmpRoot,
-        spec_ref: 'feat-d',
-        spec_tier: 'standard',
-        override_review_skip: true,
-      },
-      { now: FIXED_NOW, promptFn: yes() },
-    )
-    expect(out.status).toBe('review_gate_rejected')
-    if (out.status !== 'review_gate_rejected') return
-    expect(out.reject_kind).toBe('schema')
+    const out = await phaseTestStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-d',
+      override_review_skip: true,
+    })
+    expect(out.status).toBe('rejected')
+    if (out.status !== 'rejected') return
+    expect(out.reject_kind).toBe('review_option_removed')
+    expect(out.removed_options).toEqual(['override_review_skip'])
   })
 
   it('rejects when the dev declines the dialog', async () => {
@@ -252,16 +249,17 @@ describe('ceremony bypass gate — a tier that skips phases needs evidence', () 
     expect(out.reject_kind).toBe('classify_evidence_absent')
   })
 
-  it('rejects spec_tier=trivial at test_start with no classify verdict', async () => {
+  it('rejects spec_tier at test_start as a removed option', async () => {
     writeConfig()
     const out = await phaseTestStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-j',
       spec_tier: 'trivial',
     })
-    expect(out.status).toBe('review_gate_rejected')
-    if (out.status !== 'review_gate_rejected') return
-    expect(out.reject_kind).toBe('classify_evidence_absent')
+    expect(out.status).toBe('rejected')
+    if (out.status !== 'rejected') return
+    expect(out.reject_kind).toBe('review_option_removed')
+    expect(out.removed_options).toEqual(['spec_tier'])
   })
 
   it('accepts spec_tier=trivial once a verdict is on record', async () => {

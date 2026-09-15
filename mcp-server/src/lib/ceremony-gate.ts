@@ -9,7 +9,6 @@ export const CEREMONY_BYPASS_LABELS = {
   verification_skip: 'skip the verification (V) phase',
   classify_downgrade: 'run at a lower tier than the recorded classification',
   plan_tracking: 'start without plan_/progress_ tracking files',
-  review_skip: 'skip the code review (REVIEW) phase',
 } as const
 
 export type CeremonyBypass = keyof typeof CEREMONY_BYPASS_LABELS
@@ -67,7 +66,7 @@ export function evaluateEvidenceGate(args: {
     spec_tier: specTier,
     tier_max_recorded: null,
     hint:
-      `tier='${specTier}' skips the verification, review and plan-tracking gates, and no ` +
+      `tier='${specTier}' skips the verification and plan-tracking gates, and no ` +
       `rsct_classify_task verdict is on record to support it. Run rsct_classify_task first — ` +
       `${toolName} will then honour whatever tier it returns. A tier declared with no ` +
       `classification is the one bypass that leaves no trace, which is why it is refused.`,

@@ -65,8 +65,8 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
       'spec',
       'verification',
       'code',
-      'review',
       'test',
+      'review',
     ])
   })
 
@@ -74,12 +74,12 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
     expect(nextPhase('research')).toBe('spec')
     expect(nextPhase('spec')).toBe('verification')
     expect(nextPhase('verification')).toBe('code')
-    expect(nextPhase('code')).toBe('review')
-    expect(nextPhase('review')).toBe('test')
+    expect(nextPhase('code')).toBe('test')
+    expect(nextPhase('test')).toBe('review')
   })
 
   it('nextPhase returns null for the terminal phase', () => {
-    expect(nextPhase('test')).toBeNull()
+    expect(nextPhase('review')).toBeNull()
   })
 })
 
@@ -273,15 +273,15 @@ describe('phase-machine — gatePhaseComplete', () => {
     expect(state.spec_slug).toBe('feat-foo')
   })
 
-  it('terminal phase (test) returns null next_recommended_phase', async () => {
-    writeActivePhase('test', 'feat-foo')
+  it('terminal phase (review) returns null next_recommended_phase', async () => {
+    writeActivePhase('review', 'feat-foo')
     const r = (await gatePhaseComplete(
       {
         projectRoot: tmpRoot,
-        phase: 'test',
+        phase: 'review',
         specRef: 'feat-foo',
         devApproval: approval({
-          action_scope: 'test_complete:spec_ref=feat-foo',
+          action_scope: 'review_complete:spec_ref=feat-foo',
         }),
       },
       null,
