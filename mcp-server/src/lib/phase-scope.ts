@@ -242,7 +242,7 @@ export type SweepVerdict = 'clean' | 'unverified_authorized'
 export interface SweepLedgerEntry {
   blob: string
   verdict: SweepVerdict
-  migrations: Array<{ destination: string; body_sha: string }>
+  migrations: Array<{ destination: string; body_sha: string; body: string }>
   channel: string
   spec_ref: string
   at: string

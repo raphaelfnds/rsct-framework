@@ -18,6 +18,7 @@ import { phaseAbandonHandler } from '../../src/tools/phase-abandon.js'
 import { stampReviewCompleted, readPhaseState } from '../../src/lib/phase-scope.js'
 import type { CompletePhaseResult } from '../../src/lib/phase-machine.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { initSweepRepo } from '../sweep-repo.js'
 
 let tmpRoot: string
 
@@ -26,6 +27,7 @@ const VALID_TS = '2026-06-07T17:59:45.000Z'
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'rsct-review-'))
+  initSweepRepo(tmpRoot)
   writeFileSync(
     join(tmpRoot, '.rsct.json'),
     JSON.stringify({

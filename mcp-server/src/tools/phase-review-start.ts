@@ -19,6 +19,7 @@ import {
 } from '../lib/findings.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { getHeadShaFull } from '../lib/git.js'
+import { computeWorkingSweep } from '../lib/comment-sweep/review.js'
 import {
   readPhaseState,
   type PhaseFindingsBlock,
@@ -91,6 +92,17 @@ export type PhaseReviewStartOutput = StartPhaseResult & {
   findings_run_id: string | null
   /** #75. The class mix of what was just declared, so it is visible before actions are chosen. */
   evidence_mix: EvidenceMix
+  comment_sweep: {
+    files: Array<{
+      path: string
+      status: string
+      kind: string
+      language: string | null
+      reason: string | null
+      comments: Array<{ id: string; line: number; body: string }>
+      removed: Array<{ id: string; head_line: number; body: string }>
+    }>
+  } | null
 }
 
 export const phaseReviewStartTool: Tool = {
@@ -248,10 +260,32 @@ export async function phaseReviewStartHandler(
   if (persisted && declared.length > 0) {
     result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
   }
+  const sweep = await computeWorkingSweep(resolution.root, { sqlDialect: resolution.config?.sql_dialect })
+  const comment_sweep = sweep.ok
+    ? {
+        files: sweep.files.map((f) => ({
+          path: f.path,
+          status: f.status,
+          kind: f.kind,
+          language: f.language,
+          reason: f.reason,
+          comments: f.comments.map((c) => ({ id: c.id, line: c.line, body: c.body })),
+          removed: f.removed.map((c) => ({ id: c.id, head_line: c.line, body: c.body })),
+        })),
+      }
+    : null
+  if (!sweep.ok) {
+    result.hints.push(`Comment sweep unavailable (${sweep.detail}) — rsct_phase_review_complete will reject until it can read git.`)
+  } else {
+    const remaining = comment_sweep!.files.filter((f) => f.kind === 'comments_present').length
+    const removed = comment_sweep!.files.reduce((n, f) => n + f.removed.length, 0)
+    result.hints.push(`Comment sweep: ${comment_sweep!.files.length} touched code file(s), ${remaining} still with comments, ${removed} comment(s) removed so far (each needs a disposition at _complete).`)
+  }
   return {
     ...result,
     findings: persisted ? declared : [],
     findings_run_id: persisted ? runId : null,
     evidence_mix,
+    comment_sweep,
   }
 }

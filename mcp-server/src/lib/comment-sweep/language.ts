@@ -51,7 +51,7 @@ const NOT_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.md', '.markdown', '.mdx', '.template', '.txt', '.json', '.jsonc', '.lock', '.yml', '.yaml',
   '.toml', '.ini', '.properties', '.env', '.xml', '.gradle', '.csv', '.tsv', '.svg', '.png',
   '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.woff', '.woff2', '.ttf', '.eot', '.wasm',
-  '.zip', '.gz', '.map',
+  '.zip', '.gz', '.map', '.log', '.gitkeep', '.keep',
 ])
 
 const NOT_CODE_BASENAMES: ReadonlySet<string> = new Set([

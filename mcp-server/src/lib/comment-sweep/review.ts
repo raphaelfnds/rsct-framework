@@ -1,0 +1,491 @@
+import { createHash } from 'node:crypto'
+import { readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import type { SweepLedger, SweepLedgerEntry, SweepVerdict } from '../phase-scope.js'
+import {
+  hasGitFilter,
+  openSweepRepo,
+  readBlob,
+  readCommitBlobId,
+  readCommitPaths,
+  readHeadContent,
+  readKnownPaths,
+  readStagedBlobId,
+  readStagedPaths,
+  readTouchedPaths,
+  readWorkingBlobId,
+  type SweepRepo,
+  type TouchedStatus,
+} from './git-reads.js'
+import { scanFile, type ConfiguredSqlDialect, type ScanResult, type SweepComment, type UnverifiedReason } from './index.js'
+
+export type ExemptReason = 'generated' | 'vendored'
+export type SweepFileReason = UnverifiedReason | ExemptReason | 'head_unverified'
+
+export interface SweepFile {
+  path: string
+  status: TouchedStatus
+  blob: string | null
+  kind: 'not_code' | 'clean' | 'comments_present' | 'unverified' | 'deleted'
+  language: string | null
+  reason: SweepFileReason | null
+  comments: SweepComment[]
+  allowlist_changes: SweepComment[]
+  removed: Array<SweepComment & { path: string }>
+}
+
+export type WorkingSweep =
+  | { ok: true; repo: SweepRepo; files: SweepFile[] }
+  | { ok: false; reason: 'not_git_repo' | 'git_read_failed'; detail: string }
+
+export interface SweepOptions {
+  sqlDialect?: ConfiguredSqlDialect | undefined
+  grammarsDir?: string | null | undefined
+  exempt?: ReadonlyMap<string, ExemptReason> | undefined
+}
+
+export const MIGRATION_DESTINATIONS = [
+  'documentation/decisions.md',
+  'documentation/knowledge/anti-decisions.md',
+  'docs/decisions.md',
+] as const
+
+export const MIGRATION_MIN_BODY = 20
+export const LEDGER_ENTRIES_PER_PATH = 20
+
+export interface Disposition {
+  comment_id: string
+  action: 'migrated' | 'discarded'
+  destination?: string | undefined
+}
+
+export interface PendingDisposition {
+  comment_id: string
+  path: string
+  head_line: number
+  body: string
+}
+
+export type DispositionCheck =
+  | { ok: true; migrations: Map<string, Array<{ destination: string; body: string }>>; migrated: number; discarded: number }
+  | {
+      ok: false
+      reject_kind: 'dispositions_missing' | 'disposition_unknown' | 'disposition_duplicate' | 'migration_missing'
+      reason: string
+      pending: PendingDisposition[]
+    }
+
+async function scanWithFilter(
+  repo: SweepRepo,
+  path: string,
+  bytes: Uint8Array,
+  options: SweepOptions,
+): Promise<ScanResult> {
+  const result = await scanFile(path, bytes, { sqlDialect: options.sqlDialect, grammarsDir: options.grammarsDir })
+  if (result.kind === 'not_code') return result
+  const filtered = hasGitFilter(repo, path)
+  if (filtered === null || filtered) {
+    return { kind: 'unverified', language: result.language, reason: 'git_filter' }
+  }
+  return result
+}
+
+function readWorkingBytes(repo: SweepRepo, path: string): Uint8Array | null {
+  const full = join(repo.toplevel, path)
+  try {
+    if (!statSync(full).isFile()) return null
+    return new Uint8Array(readFileSync(full))
+  } catch {
+    return null
+  }
+}
+
+export async function computeWorkingSweep(projectRoot: string, options: SweepOptions): Promise<WorkingSweep> {
+  const repo = openSweepRepo(projectRoot)
+  if (!repo) return { ok: false, reason: 'not_git_repo', detail: 'project_root is not inside a git work tree' }
+  const touched = readTouchedPaths(repo)
+  if (!touched) return { ok: false, reason: 'git_read_failed', detail: 'could not list the touched paths' }
+
+  const files: SweepFile[] = []
+  for (const { path, status } of touched) {
+    const head = readHeadContent(repo, path)
+    const headScan = head ? await scanWithFilter(repo, path, head, options) : null
+    const headComments = headScan?.kind === 'scanned' ? headScan.comments : []
+
+    if (status === 'deleted') {
+      if (headScan === null || headScan.kind === 'not_code') continue
+      files.push({
+        path,
+        status,
+        blob: null,
+        kind: 'deleted',
+        language: headScan.language,
+        reason: null,
+        comments: [],
+        allowlist_changes: [],
+        removed: headComments.map((c) => ({ ...c, path })),
+      })
+      continue
+    }
+
+    const bytes = readWorkingBytes(repo, path)
+    if (bytes === null) continue
+    const blob = readWorkingBlobId(repo, path)
+    if (!blob) return { ok: false, reason: 'git_read_failed', detail: `could not hash ${path}` }
+    const scan = await scanWithFilter(repo, path, bytes, options)
+    if (scan.kind === 'not_code') continue
+
+    const base = { path, status, blob, comments: [], allowlist_changes: [], removed: [] }
+    const exempt = options.exempt?.get(path)
+    if (exempt) {
+      files.push({ ...base, kind: 'unverified', language: scan.language, reason: exempt })
+      continue
+    }
+    if (scan.kind === 'unverified') {
+      files.push({ ...base, kind: 'unverified', language: scan.language, reason: scan.reason })
+      continue
+    }
+    if (headScan?.kind === 'unverified') {
+      files.push({ ...base, kind: 'unverified', language: scan.language, reason: 'head_unverified' })
+      continue
+    }
+    const nowIds = new Set([...scan.comments, ...scan.allowlisted].map((c) => c.id))
+    const headAllowIds = new Set(headScan?.kind === 'scanned' ? headScan.allowlisted.map((c) => c.id) : [])
+    files.push({
+      ...base,
+      kind: scan.comments.length > 0 ? 'comments_present' : 'clean',
+      language: scan.language,
+      reason: null,
+      comments: scan.comments,
+      allowlist_changes: scan.allowlisted.filter((c) => !headAllowIds.has(c.id)),
+      removed: headComments.filter((c) => !nowIds.has(c.id)).map((c) => ({ ...c, path })),
+    })
+  }
+  return { ok: true, repo, files }
+}
+
+function collapse(text: string): string {
+  return text.replace(/\r/g, '').replace(/\s+/g, ' ').trim()
+}
+
+export function addedText(headText: string | null, currentText: string): string {
+  const remaining = new Map<string, number>()
+  for (const line of (headText ?? '').replace(/\r/g, '').split('\n')) {
+    remaining.set(line, (remaining.get(line) ?? 0) + 1)
+  }
+  const added: string[] = []
+  for (const line of currentText.replace(/\r/g, '').split('\n')) {
+    const n = remaining.get(line) ?? 0
+    if (n > 0) remaining.set(line, n - 1)
+    else added.push(line)
+  }
+  return collapse(added.join('\n'))
+}
+
+function destinationTexts(repo: SweepRepo, destination: string): { head: string | null; current: string | null } {
+  const repoPath = `${repo.prefix}${destination}`
+  const head = readHeadContent(repo, repoPath)
+  const bytes = readWorkingBytes(repo, repoPath)
+  return {
+    head: head ? head.toString('utf8') : null,
+    current: bytes ? Buffer.from(bytes).toString('utf8') : null,
+  }
+}
+
+export function checkDispositions(repo: SweepRepo, files: SweepFile[], dispositions: readonly Disposition[]): DispositionCheck {
+  const removed = new Map<string, SweepComment & { path: string }>()
+  for (const f of files) for (const c of f.removed) removed.set(c.id, c)
+  const pendingOf = (ids: Iterable<string>): PendingDisposition[] =>
+    [...ids].map((id) => {
+      const c = removed.get(id)!
+      return { comment_id: id, path: c.path, head_line: c.line, body: c.body }
+    })
+
+  const seen = new Set<string>()
+  for (const d of dispositions) {
+    if (!removed.has(d.comment_id)) {
+      return {
+        ok: false,
+        reject_kind: 'disposition_unknown',
+        reason: `comment_dispositions names '${d.comment_id}', which is not a comment this change removed`,
+        pending: pendingOf(removed.keys()),
+      }
+    }
+    if (seen.has(d.comment_id)) {
+      return {
+        ok: false,
+        reject_kind: 'disposition_duplicate',
+        reason: `comment_dispositions names '${d.comment_id}' more than once`,
+        pending: pendingOf(removed.keys()),
+      }
+    }
+    seen.add(d.comment_id)
+  }
+  const missing = [...removed.keys()].filter((id) => !seen.has(id))
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reject_kind: 'dispositions_missing',
+      reason: `${missing.length} removed comment(s) have no disposition — classify each as migrated or discarded`,
+      pending: pendingOf(missing),
+    }
+  }
+
+  const texts = new Map<string, string>()
+  const migrations = new Map<string, Array<{ destination: string; body: string }>>()
+  let migrated = 0
+  let discarded = 0
+  for (const d of dispositions) {
+    const comment = removed.get(d.comment_id)!
+    if (d.action === 'discarded') {
+      discarded++
+      continue
+    }
+    const destination = d.destination ?? ''
+    const known = (MIGRATION_DESTINATIONS as readonly string[]).includes(destination)
+    if (!known || comment.body.length < MIGRATION_MIN_BODY) {
+      return {
+        ok: false,
+        reject_kind: 'migration_missing',
+        reason: !known
+          ? `'${d.comment_id}' is migrated to '${destination}', which is not one of ${MIGRATION_DESTINATIONS.join(', ')}`
+          : `'${d.comment_id}' is too short to verify as migrated (${comment.body.length} < ${MIGRATION_MIN_BODY} chars) — discard it or migrate a longer statement of the fact`,
+        pending: pendingOf([d.comment_id]),
+      }
+    }
+    let added = texts.get(destination)
+    if (added === undefined) {
+      const { head, current } = destinationTexts(repo, destination)
+      added = current === null ? '' : addedText(head, current)
+      texts.set(destination, added)
+    }
+    if (!added.includes(comment.body)) {
+      return {
+        ok: false,
+        reject_kind: 'migration_missing',
+        reason: `'${d.comment_id}' is marked migrated, but its text is not among the lines added to ${destination}`,
+        pending: pendingOf([d.comment_id]),
+      }
+    }
+    migrated++
+    const list = migrations.get(comment.path) ?? []
+    list.push({ destination, body: comment.body })
+    migrations.set(comment.path, list)
+  }
+  return { ok: true, migrations, migrated, discarded }
+}
+
+function isLedgerEntry(value: unknown): value is SweepLedgerEntry {
+  if (!value || typeof value !== 'object') return false
+  const e = value as Record<string, unknown>
+  return (
+    typeof e.blob === 'string' &&
+    (e.verdict === 'clean' || e.verdict === 'unverified_authorized') &&
+    Array.isArray(e.migrations) &&
+    typeof e.channel === 'string' &&
+    typeof e.spec_ref === 'string' &&
+    typeof e.at === 'string'
+  )
+}
+
+export function ledgerEntries(ledger: unknown, path: string): SweepLedgerEntry[] {
+  if (!ledger || typeof ledger !== 'object') return []
+  const list = (ledger as Record<string, unknown>)[path]
+  return Array.isArray(list) ? list.filter(isLedgerEntry) : []
+}
+
+export function stampLedger(
+  ledger: unknown,
+  stamps: ReadonlyArray<{ path: string; entry: SweepLedgerEntry }>,
+  known: ReadonlySet<string> | null,
+): SweepLedger {
+  const next: SweepLedger = {}
+  const stamped = new Set(stamps.map((s) => s.path))
+  if (ledger && typeof ledger === 'object') {
+    for (const path of Object.keys(ledger as Record<string, unknown>)) {
+      if (known && !known.has(path) && !stamped.has(path)) continue
+      const entries = ledgerEntries(ledger, path)
+      if (entries.length > 0) next[path] = entries
+    }
+  }
+  for (const { path, entry } of stamps) {
+    const kept = (next[path] ?? []).filter((e) => e.blob !== entry.blob)
+    next[path] = [entry, ...kept].slice(0, LEDGER_ENTRIES_PER_PATH)
+  }
+  return next
+}
+
+export function sweepEntry(
+  blob: string,
+  verdict: SweepVerdict,
+  migrations: Array<{ destination: string; body: string }>,
+  channel: string,
+  specRef: string,
+  at: string,
+): SweepLedgerEntry {
+  return {
+    blob,
+    verdict,
+    migrations: migrations.map((m) => ({ destination: m.destination, body_sha: bodySha(m.body), body: m.body })),
+    channel,
+    spec_ref: specRef,
+    at,
+  }
+}
+
+export function bodySha(body: string): string {
+  return createHash('sha256').update(body).digest('hex')
+}
+
+export function decisionKey(path: string, blob: string): string {
+  return `${path}\0${blob}`
+}
+
+export type StagedSweepCheck =
+  | { ok: true; skipped: 'not_git_repo' | null; checked: Array<{ path: string; blob: string }> }
+  | {
+      ok: false
+      reject_kind: 'review_missing' | 'comments_present' | 'migration_reverted' | 'review_drift' | 'review_unreadable'
+      reason: string
+      paths: string[]
+    }
+
+export async function checkStagedSweep(args: {
+  projectRoot: string
+  options: SweepOptions
+  ledger: unknown
+  drift: { paths: string[] } | undefined
+  unverifiedDecisions: ReadonlySet<string>
+}): Promise<StagedSweepCheck> {
+  const repo = openSweepRepo(args.projectRoot)
+  if (!repo) return { ok: true, skipped: 'not_git_repo', checked: [] }
+  if (args.drift && args.drift.paths.length > 0) {
+    return {
+      ok: false,
+      reject_kind: 'review_drift',
+      reason: `a previous commit landed code that no review covers (${args.drift.paths.join(', ')}) — run rsct_phase_review_start / _complete over those paths before committing again`,
+      paths: args.drift.paths,
+    }
+  }
+  const staged = readStagedPaths(repo)
+  if (staged === null) {
+    return { ok: false, reject_kind: 'review_unreadable', reason: 'could not read the staged paths from git', paths: [] }
+  }
+
+  const checked: Array<{ path: string; blob: string }> = []
+  const missing: string[] = []
+  const withComments: string[] = []
+  const reverted: string[] = []
+  const destinationCache = new Map<string, string>()
+
+  for (const path of staged) {
+    const blob = readStagedBlobId(repo, path)
+    const bytes = blob ? readBlob(repo, blob) : null
+    if (!blob || !bytes) {
+      return { ok: false, reject_kind: 'review_unreadable', reason: `could not read the staged content of ${path}`, paths: [path] }
+    }
+    const scan = await scanWithFilter(repo, path, bytes, args.options)
+    if (scan.kind === 'not_code') continue
+    const entry = ledgerEntries(args.ledger, path).find((e) => e.blob === blob)
+    const authorized =
+      entry?.verdict === 'unverified_authorized' && args.unverifiedDecisions.has(decisionKey(path, blob))
+    if (scan.kind === 'scanned' && scan.comments.length > 0 && !authorized) {
+      withComments.push(path)
+      continue
+    }
+    if (!entry || (scan.kind === 'unverified' && !authorized)) {
+      missing.push(path)
+      continue
+    }
+    for (const m of entry.migrations) {
+      if (typeof m.body !== 'string') {
+        reverted.push(path)
+        break
+      }
+      let text = destinationCache.get(m.destination)
+      if (text === undefined) {
+        const repoPath = `${repo.prefix}${m.destination}`
+        const stagedDest = readStagedBlobId(repo, repoPath)
+        const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath)
+        text = destBytes ? collapse(destBytes.toString('utf8')) : ''
+        destinationCache.set(m.destination, text)
+      }
+      if (!text.includes(m.body)) {
+        reverted.push(path)
+        break
+      }
+    }
+    checked.push({ path, blob })
+  }
+
+  if (withComments.length > 0) {
+    return {
+      ok: false,
+      reject_kind: 'comments_present',
+      reason: `staged code still carries comments: ${withComments.join(', ')} — remove them in a REVIEW (rsct_phase_review_start / _complete)`,
+      paths: withComments,
+    }
+  }
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reject_kind: 'review_missing',
+      reason: `no completed REVIEW covers the staged version of: ${missing.join(', ')} — run rsct_phase_review_start / _complete over the final code, then stage it unchanged`,
+      paths: missing,
+    }
+  }
+  if (reverted.length > 0) {
+    return {
+      ok: false,
+      reject_kind: 'migration_reverted',
+      reason: `a fact migrated out of ${reverted.join(', ')} is no longer in its destination file — restore it before committing`,
+      paths: reverted,
+    }
+  }
+  return { ok: true, skipped: null, checked }
+}
+
+export type CommittedSweep =
+  | { drift: false; rewrites: Array<{ path: string; blob: string }> }
+  | { drift: true; paths: string[]; rewrites: Array<{ path: string; blob: string }> }
+
+export async function verifyCommittedSweep(args: {
+  projectRoot: string
+  options: SweepOptions
+  commit: string
+  checked: ReadonlyArray<{ path: string; blob: string }>
+}): Promise<CommittedSweep> {
+  const repo = openSweepRepo(args.projectRoot)
+  if (!repo) return { drift: false, rewrites: [] }
+  const expected = new Map(args.checked.map((c) => [c.path, c.blob]))
+  const paths = readCommitPaths(repo, args.commit)
+  if (paths === null) return { drift: true, paths: [...expected.keys()], rewrites: [] }
+  const drifted: string[] = []
+  const rewrites: Array<{ path: string; blob: string }> = []
+  for (const path of paths) {
+    const blob = readCommitBlobId(repo, args.commit, path)
+    if (!blob) {
+      drifted.push(path)
+      continue
+    }
+    if (expected.get(path) === blob) continue
+    const bytes = readBlob(repo, blob)
+    if (!bytes) {
+      drifted.push(path)
+      continue
+    }
+    const scan = await scanWithFilter(repo, path, bytes, args.options)
+    if (scan.kind === 'not_code') continue
+    if (scan.kind === 'scanned' && scan.comments.length === 0 && expected.has(path)) {
+      rewrites.push({ path, blob })
+      continue
+    }
+    drifted.push(path)
+  }
+  return drifted.length > 0 ? { drift: true, paths: drifted, rewrites } : { drift: false, rewrites }
+}
+
+export function knownPaths(projectRoot: string): ReadonlySet<string> | null {
+  const repo = openSweepRepo(projectRoot)
+  return repo ? readKnownPaths(repo) : null
+}

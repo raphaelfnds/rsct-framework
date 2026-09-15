@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { phaseReviewStartHandler } from '../../src/tools/phase-review-start.js'
 import { phaseReviewCompleteHandler } from '../../src/tools/phase-review-complete.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { initSweepRepo } from '../sweep-repo.js'
 
 /**
  * #75, REVIEW side. Unlike the V phase, REVIEW findings are 100% agent-declared —
@@ -18,6 +19,7 @@ const VALID_TS = '2026-06-07T17:59:45.000Z'
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'rsct-rev-'))
+  initSweepRepo(tmpRoot)
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
   writeFileSync(join(tmpRoot, '.rsct.json'), JSON.stringify({ version: '1' }), 'utf8')
 })

@@ -103,6 +103,7 @@ export interface AuditCeiling {
   auditLocked: boolean
   /** False ⇒ the log could not be read ⇒ callers MUST fail-closed. */
   readable: boolean
+  unverifiedDecisions: Set<string>
 }
 
 /**
@@ -127,6 +128,7 @@ export function deriveAuditCeiling(
     freeCommitsUsed: 0,
     auditLocked: false,
     readable: false,
+    unverifiedDecisions: new Set<string>(),
   }
   const auditPath = resolveAuditPath(projectRoot, config?.audit)
   let raw: string
@@ -142,6 +144,7 @@ export function deriveAuditCeiling(
   let auditTierMax: string | null = null
   let freeCommitsUsed = 0
   let auditLocked = false
+  const unverifiedDecisions = new Set<string>()
 
   for (const line of raw.split('\n')) {
     const clean = line.replace(/\r/g, '').trim()
@@ -166,10 +169,17 @@ export function deriveAuditCeiling(
       freeCommitsUsed += 1
     } else if (event === 'free_commit.locked' && entry.plan_slug === planSlug) {
       auditLocked = true
+    } else if (
+      event === 'review.unverified_decision' &&
+      entry.answer === 'yes' &&
+      typeof entry.path === 'string' &&
+      typeof entry.blob === 'string'
+    ) {
+      unverifiedDecisions.add(`${entry.path}\0${entry.blob}`)
     }
   }
 
-  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true }
+  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true, unverifiedDecisions }
 }
 
 export interface ReserveFreeResult {

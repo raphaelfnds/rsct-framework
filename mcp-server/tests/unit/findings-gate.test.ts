@@ -23,6 +23,7 @@ import {
 import { phaseStatusHandler } from '../../src/tools/phase-status.js'
 import { phaseVerificationStartHandler } from '../../src/tools/phase-verification-start.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { initSweepRepo } from '../sweep-repo.js'
 
 // #40. The gate that makes V and REVIEW bind: ids must be real, every finding must
 // get an action, and an answer set from a previous run is rejected as a set.
@@ -126,6 +127,7 @@ async function completeV(
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'rsct-fgate-'))
+  initSweepRepo(tmpRoot)
   dialogShown = false
   writeRsctConfig()
 })

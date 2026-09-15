@@ -99,6 +99,26 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
   return id ? readBlob(repo, id) : null
 }
 
+export function readKnownPaths(repo: SweepRepo): Set<string> | null {
+  const index = nulList(safeGitBuffer(repo.toplevel, ['ls-files', '-z', '--full-name']))
+  if (index === null) return null
+  const known = new Set(index)
+  if (repo.headCommit) {
+    const tree = nulList(safeGitBuffer(repo.toplevel, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', repo.headCommit]))
+    if (tree === null) return null
+    for (const p of tree) known.add(p)
+  }
+  return known
+}
+
+export function readCommitPaths(repo: SweepRepo, commit: string): string[] | null {
+  return nulList(
+    safeGitBuffer(repo.toplevel, [
+      'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', '--root', '--diff-filter=d', commit, ...scopeArgs(repo),
+    ]),
+  )
+}
+
 export function hasGitFilter(repo: SweepRepo, path: string): boolean | null {
   const out = nulList(safeGitBuffer(repo.toplevel, ['check-attr', '-z', 'filter', '--', path]))
   if (out === null) return null

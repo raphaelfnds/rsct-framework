@@ -16,10 +16,20 @@ import {
   type StagedStats,
 } from '../lib/git.js'
 import {
+  deriveAuditCeiling,
   evaluateFreeEligibility,
   reserveFreeBudget,
   resolveFreeBudgetLimits,
 } from '../lib/free-commit.js'
+import {
+  checkStagedSweep,
+  knownPaths,
+  ledgerEntries,
+  stampLedger,
+  sweepEntry,
+  verifyCommittedSweep,
+  type StagedSweepCheck,
+} from '../lib/comment-sweep/review.js'
 import {
   effectiveProtectedList,
   isProtectedBranch,
@@ -104,7 +114,7 @@ export const requestCommitInputSchema = z
 
 export type RequestCommitInput = z.infer<typeof requestCommitInputSchema>
 
-export type RequestCommitStatus = 'committed' | 'rejected' | 'mutation_failed'
+export type RequestCommitStatus = 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'
 
 export type RequestCommitRejectKind =
   | GateRejectKind
@@ -114,6 +124,11 @@ export type RequestCommitRejectKind =
   | 'plan_token_invalid'
   | 'free_budget_reserve_failed'
   | 'message_too_long'
+  | 'review_missing'
+  | 'comments_present'
+  | 'migration_reverted'
+  | 'review_drift'
+  | 'review_unreadable'
 
 /**
  * How the commit was authorized: a per-action dev_approval, a plan token, or
@@ -246,7 +261,7 @@ export interface RequestCommitInternal {
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -404,6 +419,52 @@ export async function requestCommitHandler(
       hints: withAdvisories([messageCheck.reason ?? 'commit message too long']),
     }
   }
+
+  const runSweepCheck = async (): Promise<StagedSweepCheck> => {
+    const sweepState = readPhaseState(projectRoot).state
+    return checkStagedSweep({
+      projectRoot,
+      options: { sqlDialect: config?.sql_dialect },
+      ledger: sweepState?.review_sweep,
+      drift: sweepState?.review_drift,
+      unverifiedDecisions: deriveAuditCeiling(projectRoot, config ?? null, '').unverifiedDecisions,
+    })
+  }
+  const rejectSweep = (check: Extract<StagedSweepCheck, { ok: false }>, stage: 'before_authorization' | 'before_commit'): RequestCommitOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: check.reject_kind,
+        reason: check.reason,
+        branch: gitState.branch,
+        paths: check.paths,
+        stage,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: check.reject_kind,
+      reason: check.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([check.reason]),
+    }
+  }
+  const sweepBefore = await runSweepCheck()
+  if (!sweepBefore.ok) return rejectSweep(sweepBefore, 'before_authorization')
 
   // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
   let channel: CommitChannel
@@ -790,6 +851,9 @@ export async function requestCommitHandler(
   // write failure authorize unbounded commits within the TTL window.) On a
   // later commit failure we best-effort refund so a failed commit doesn't waste
   // a slot.
+  const sweepAtCommit = await runSweepCheck()
+  if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
+
   let reservedToken: PlanAuthorizationBlock | null = null
   let reservedFreeBudget: FreeCommitBudget | null = null
   let freeNewlyLocked = false
@@ -998,6 +1062,49 @@ export async function requestCommitHandler(
   let freeSummary: RequestCommitOutput['free_commit'] = null
   const bookkeepingHints: string[] = []
 
+  let sweepDrift: string[] = []
+  if (commit.sha_after && sweepAtCommit.skipped === null) {
+    const committed = await verifyCommittedSweep({
+      projectRoot,
+      options: { sqlDialect: config?.sql_dialect },
+      commit: commit.sha_after,
+      checked: sweepAtCommit.checked,
+    })
+    const state = readPhaseState(projectRoot).state ?? {}
+    const at = now.toISOString()
+    const stamps = committed.rewrites.map((r) => {
+      const original = ledgerEntries(state.review_sweep, r.path).find(
+        (e) => e.blob === sweepAtCommit.checked.find((c) => c.path === r.path)?.blob,
+      )
+      appendAudit(
+        projectRoot,
+        { event: 'review.commit_hook_rewrite', tool: 'rsct_request_commit', path: r.path, blob: r.blob, sha_after: commit.sha_after },
+        config?.audit,
+      )
+      return { path: r.path, entry: sweepEntry(r.blob, 'clean', [], 'hook_rewrite', original?.spec_ref ?? 'hook_rewrite', at) }
+    })
+    const next: PhaseState = { ...state }
+    if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, knownPaths(projectRoot))
+    if (committed.drift) {
+      sweepDrift = committed.paths
+      next.review_drift = { sha: commit.sha_after, paths: committed.paths, at }
+      appendAudit(
+        projectRoot,
+        { event: 'review.commit_drift', tool: 'rsct_request_commit', paths: committed.paths, sha_after: commit.sha_after },
+        config?.audit,
+      )
+      bookkeepingHints.push(
+        `⚠ the commit landed code no REVIEW covers (${committed.paths.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
+      )
+    }
+    if (stamps.length > 0 || committed.drift) {
+      const w = writePhaseState(projectRoot, next)
+      if (!w.ok) {
+        bookkeepingHints.push(`⚠ could not record the post-commit sweep result in phase-state (${w.reason}).`)
+      }
+    }
+  }
+
   if (approval) {
     const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
     antiReplayPersisted = record.ok
@@ -1172,7 +1279,7 @@ export async function requestCommitHandler(
   }
 
   return {
-    status: 'committed',
+    status: sweepDrift.length > 0 ? 'committed_with_drift' : 'committed',
     branch: gitState.branch,
     channel,
     authorized_via: authorizedVia,

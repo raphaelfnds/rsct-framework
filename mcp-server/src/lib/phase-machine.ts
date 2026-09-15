@@ -332,6 +332,7 @@ export interface CompletePhaseInternal {
    */
   dialogDetail?: string
   forceDialog?: boolean
+  forceDialogReason?: string
 }
 
 export function precheckPhaseComplete(
@@ -452,6 +453,7 @@ export async function gatePhaseComplete(
     toolName: `rsct_phase_${input.phase}_complete`,
     approval: input.devApproval,
     ...(internal.forceDialog === true && { forceDialog: true }),
+    ...(internal.forceDialogReason !== undefined && { forceDialogReason: internal.forceDialogReason }),
     dialog: {
       title: `RSCT — ${input.phase} complete`,
       message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${
