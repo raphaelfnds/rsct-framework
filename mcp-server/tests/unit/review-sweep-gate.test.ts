@@ -294,12 +294,14 @@ describe('rsct_request_commit — REVIEW gate', () => {
   })
 
   it('checks a staged rename', async () => {
-    write('src/a.ts', 'export const a = 1\n')
+    const body = Array.from({ length: 12 }, (_, i) => `export const value${i} = ${i}`).join('\n')
+    write('src/a.ts', `${body}\n`)
     expect((await completeReview()).status).toBe('completed')
     commitAll(root, 'reviewed a')
     git(root, 'mv', 'src/a.ts', 'src/renamed.ts')
-    write('src/renamed.ts', 'export const a = 1 // moved\n')
+    write('src/renamed.ts', `${body} // moved\n`)
     git(root, 'add', 'src/renamed.ts')
+    expect(git(root, 'diff', '--cached', '--name-status', '-M')).toMatch(/^R\d+\s+src\/a\.ts\s+src\/renamed\.ts/m)
     expect((await commit()).reject_kind).toBe('comments_present')
   })
 
