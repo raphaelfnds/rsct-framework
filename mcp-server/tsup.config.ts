@@ -17,7 +17,7 @@ export default defineConfig({
   // `node_modules` (prevents the npm-link/copied-dist boot crash). pino does a
   // dynamic `require('node:os')` that ESM output can't resolve, so the banner
   // restores a real `require` via createRequire (the shebang stays line 1).
-  noExternal: ['@modelcontextprotocol/sdk', 'pino', 'zod'],
+  noExternal: ['@modelcontextprotocol/sdk', 'pino', 'zod', 'web-tree-sitter', 'parse5'],
   banner: {
     js: "#!/usr/bin/env node\nimport { createRequire } from 'module';\nconst require = createRequire(import.meta.url);",
   },
