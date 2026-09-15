@@ -1778,3 +1778,154 @@ describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3,
     expect(hasIn(r, local)).toBe(false)
   }, 60_000)
 })
+
+const SQL_RESOLVE_ANCHOR = 'CHECKPOINT: Phase 3 resolving SQL dialect'
+const SQL_BACKFILL_ANCHOR = 'CHECKPOINT: Phase 4.4 executing canonical sql_dialect backfill'
+const dialectOf = (raw: string): unknown => (JSON.parse(raw.replace(/^﻿/, '')) as { sql_dialect?: unknown }).sql_dialect
+
+describe.skipIf(!BASH)('block: SQL dialect resolution (01-setup Phase 3, #62)', () => {
+  const resolved = (preamble: string): string => {
+    const r = run({ promptBasename: '01-setup.md', anchor: SQL_RESOLVE_ANCHOR, preamble })
+    const m = /sql dialect: (\S+)/.exec(r.out)
+    return m?.[1] ?? `NO MATCH: ${r.out}`
+  }
+
+  it('keeps only the three valid values, case-folded', () => {
+    expect(resolved('RSCT_JSON_SQL_DIALECT=""\nSQL_DIALECT=PostgreSQL')).toBe('postgresql')
+    expect(resolved('RSCT_JSON_SQL_DIALECT=""\nSQL_DIALECT=mysql')).toBe('mysql')
+    expect(resolved('RSCT_JSON_SQL_DIALECT=""\nSQL_DIALECT=none')).toBe('none')
+  })
+
+  it('an unknown or empty answer is not declared', () => {
+    for (const bad of ['postgres', '""', 'sqlite']) {
+      expect(resolved(`RSCT_JSON_SQL_DIALECT=""\nSQL_DIALECT=${bad}`)).toBe('not')
+    }
+  })
+
+  it('an existing project value wins (ask-once)', () => {
+    expect(resolved('RSCT_JSON_SQL_DIALECT=mysql\nSQL_DIALECT=postgresql')).toBe('mysql')
+  })
+})
+
+describe.skipIf(!BASH || !NODE)('block: sql_dialect backfill (01-setup 4.4, #62)', () => {
+  it('splices a valid dialect into an .rsct.json that lacks the key', () => {
+    const r = run({
+      promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR,
+      preamble: 'SQL_DIALECT=postgresql',
+      seedFiles: { '.rsct.json': MINIMAL_RSCT_JSON },
+    })
+    expect(dialectOf(readIn(r, '.rsct.json'))).toBe('postgresql')
+  })
+
+  it('writes nothing for an invalid or empty dialect', () => {
+    for (const bad of ['postgres', '']) {
+      const r = run({
+        promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR,
+        preamble: `SQL_DIALECT="${bad}"`,
+        seedFiles: { '.rsct.json': MINIMAL_RSCT_JSON },
+      })
+      expect(readIn(r, '.rsct.json')).toBe(MINIMAL_RSCT_JSON)
+    }
+  })
+
+  it('preserves an existing value and is idempotent', () => {
+    const seeded = JSON.stringify({ rsct_version: '1.0.0', sql_dialect: 'mysql', app: { name: 'a', org: 'o' } }, null, 2) + '\n'
+    const kept = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=postgresql', seedFiles: { '.rsct.json': seeded } })
+    expect(readIn(kept, '.rsct.json')).toBe(seeded)
+    const twice = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=none', seedFiles: { '.rsct.json': MINIMAL_RSCT_JSON }, runs: 2 })
+    expect(readIn(twice, '.rsct.json').match(/sql_dialect/g)).toHaveLength(1)
+  })
+
+  it('handles CRLF and a UTF-8 BOM', () => {
+    const crlf = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=mysql', seedFiles: { '.rsct.json': MINIMAL_RSCT_JSON.replace(/\n/g, '\r\n') } })
+    const rawCrlf = readIn(crlf, '.rsct.json')
+    expect(dialectOf(rawCrlf)).toBe('mysql')
+    expect(rawCrlf).toContain('"sql_dialect": "mysql",\r\n')
+    const bom = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=none', seedFiles: { '.rsct.json': `﻿${MINIMAL_RSCT_JSON}` } })
+    expect(dialectOf(readIn(bom, '.rsct.json'))).toBe('none')
+  })
+})
+
+describe.skipIf(!BASH || !NODE)('block: .rsct.json CREATE render carries sql_dialect (01-setup 4.4, #62)', () => {
+  const render = (dialect: string): string => {
+    const template = readFileSync(resolve(ROOT, 'doc-templates/rsct.json.template'), 'utf8')
+    const r = run({
+      promptBasename: '01-setup.md',
+      anchor: 'CHECKPOINT: Phase 4.4 executing canonical .rsct.json CREATE render',
+      preamble: [
+        'APP_NAME=acme-api', 'ORG_SLUG=acme', 'TEST_FRAMEWORK="Vitest"', 'APPLIED_AT=2026-01-01T00:00:00Z',
+        'MODE=CREATE', 'SETUP_COMMIT_SHA_BEFORE=abc1234', 'PROTECTED_BRANCHES="main"', 'COMMIT_MSG_MAX_LINES=15',
+        `SQL_DIALECT="${dialect}"`,
+      ].join('\n'),
+      seedFiles: { '.rsct/doc-templates/rsct.json.template': template },
+    })
+    return readIn(r, '.rsct.json')
+  }
+
+  it('renders a declared dialect', () => {
+    expect(dialectOf(render('postgresql'))).toBe('postgresql')
+  }, 60_000)
+
+  it('drops the key entirely when no dialect was declared, keeping valid JSON', () => {
+    const raw = render('')
+    expect(raw).not.toContain('sql_dialect')
+    expect(raw).not.toContain('[SQL_DIALECT]')
+    expect(() => JSON.parse(raw)).not.toThrow()
+  }, 60_000)
+})
+
+describe.skipIf(!BASH)('block: gitignore backfill adds .rsct/reports/ (01-setup 4.4b, #62)', () => {
+  it('fresh block lists it', () => {
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR })
+    expect(inMarkerRange(readIn(r, '.gitignore'), '.rsct/reports/')).toBe(true)
+  }, 60_000)
+
+  it('an old block gets it inside the markers, once, and a CRLF file stays readable', () => {
+    const old = [
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md', 'progress_*.md', 'spec_*.md',
+      '.rsct/audit.log', '.rsct/approvals-seen.json', '.rsct/phase-state.json', '.rsct/phase-state.lock',
+      '/rsct-framework/', '', '.claude/settings.local.json',
+      '# RSCT-END', '',
+    ].join('\r\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old }, runs: 2 })
+    const gi = readIn(r, '.gitignore')
+    expect(inMarkerRange(gi, '.rsct/reports/')).toBe(true)
+    expect(gi.replace(/\r/g, '').split('\n').filter((l) => l === '.rsct/reports/')).toHaveLength(1)
+  }, 60_000)
+
+  it('a dev who already ignores it elsewhere gets no second copy', () => {
+    const old = [
+      '.rsct/reports/', '',
+      '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
+      'plan_*.md', 'progress_*.md', 'spec_*.md',
+      '.rsct/audit.log', '.rsct/approvals-seen.json', '.rsct/phase-state.json', '.rsct/phase-state.lock',
+      '/rsct-framework/', '', '.claude/settings.local.json',
+      '# RSCT-END', '',
+    ].join('\n')
+    const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
+    expect(readIn(r, '.gitignore').split('\n').filter((l) => l === '.rsct/reports/')).toHaveLength(1)
+  }, 60_000)
+})
+
+describe.skipIf(!BASH)('block: uninstall removes REVIEW sweep reports only (03-uninstall 4.V.c, #62)', () => {
+  it('deletes review-comments reports, counts them, keeps other files', () => {
+    const r = run({
+      promptBasename: '03-uninstall.md', anchor: 'REPORTS_REMOVED=0',
+      seedFiles: {
+        '.rsct/reports/review-comments-aaaa.md': 'a\n',
+        '.rsct/reports/review-comments-bbbb.md': 'b\n',
+        '.rsct/reports/dev-notes.md': 'mine\n',
+      },
+    })
+    expect(r.out).toContain('REVIEW sweep reports removed: 2')
+    expect(hasIn(r, '.rsct/reports/review-comments-aaaa.md')).toBe(false)
+    expect(hasIn(r, '.rsct/reports/dev-notes.md')).toBe(true)
+  }, 60_000)
+
+  it('drops the empty reports directory', () => {
+    const r = run({ promptBasename: '03-uninstall.md', anchor: 'REPORTS_REMOVED=0', seedFiles: { '.rsct/reports/review-comments-cccc.md': 'c\n' } })
+    expect(r.out).toContain('REVIEW sweep reports removed: 1')
+    expect(existsSync(join(r.dir, '.rsct', 'reports'))).toBe(false)
+  }, 60_000)
+})

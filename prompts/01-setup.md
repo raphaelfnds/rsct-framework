@@ -579,6 +579,8 @@ RSCT_JSON_PROTECTED_BRANCHES=$(extract_json_array "protected_branches")
 RSCT_JSON_COMMIT_MAX_LINES=$(tr -d '\r' < .rsct.json 2>/dev/null \
   | grep -o '"commit_message_max_lines"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
   | sed 's/^.*[^0-9]//')
+# #62 ask-once: the declared SQL dialect for the REVIEW comment sweep.
+RSCT_JSON_SQL_DIALECT=$(extract_json_string "sql_dialect")
 RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 RSCT_JSON_CANONICAL_SOURCE_ADDED=$(extract_json_string "canonical_source_added")
 # DX-1b ask-once: PRESENCE (not value) of install.create_universe_declined_at —
@@ -818,6 +820,40 @@ esac
 if [ "$COMMIT_MSG_MAX_LINES" -lt 1 ] 2>/dev/null; then COMMIT_MSG_MAX_LINES=1; fi
 if [ "$COMMIT_MSG_MAX_LINES" -gt 500 ] 2>/dev/null; then COMMIT_MSG_MAX_LINES=500; fi
 echo "  commit-message cap: $COMMIT_MSG_MAX_LINES non-empty lines"
+```
+
+✍️ SQL DIALECT (#62) — present ONLY when `RSCT_JSON_SQL_DIALECT` is empty
+  (ask-once). Omit when the MCP isn't installed — the dialect is read by the
+  REVIEW comment sweep in `rsct_phase_review_complete` and `rsct_request_commit`.
+  [Present as ONE plain-language question, Recommended (§B item 1):]
+  "Which SQL database does this project's `.sql` code target? REVIEW removes
+   comments from touched code, and SQL comments are read differently per database
+   (`#` is a comment only in MySQL; block comments nest only in PostgreSQL). RSCT
+   never guesses it.
+   ✅ Recommended: `none` when the project has no `.sql` files — a `.sql` file that
+      shows up later goes to a developer-only dialog instead of being swept.
+   Options: `postgresql` · `mysql` · `none`."
+  - Store the answer as `SQL_DIALECT`. The block below keeps only the three valid
+    values; anything else (a typo such as `postgres`, an empty answer) leaves it
+    empty, and an empty value means the key is NOT written — never `""`, because
+    an unknown value makes `.rsct.json` fail validation as a whole.
+  - On an UPDATE run where the key already exists, do NOT ask and do NOT overwrite.
+
+```bash
+echo "  CHECKPOINT: Phase 3 resolving SQL dialect (ask-once, validated)"
+if [ -n "$RSCT_JSON_SQL_DIALECT" ]; then
+  SQL_DIALECT="$RSCT_JSON_SQL_DIALECT"
+fi
+SQL_DIALECT=$(printf '%s' "${SQL_DIALECT:-}" | tr -d '\r' | tr 'A-Z' 'a-z')
+case "$SQL_DIALECT" in
+  postgresql|mysql|none) ;;
+  *) SQL_DIALECT="" ;;
+esac
+if [ -n "$SQL_DIALECT" ]; then
+  echo "  sql dialect: $SQL_DIALECT"
+else
+  echo "  sql dialect: not declared — .sql files will go to the developer dialog at REVIEW"
+fi
 ```
 
 ```bash
@@ -1618,7 +1654,12 @@ PROTECTED_JSON="[${PROTECTED_JSON_INNER}]"
 # Render with one sed per placeholder. Pipe delimiter (|) avoids collisions
 # with URLs / paths that contain `/`. Quote every replacement to keep shells
 # from re-tokenizing values that contain spaces.
+SQL_DIALECT_LINE_RULE="s|\[SQL_DIALECT\]|${SQL_DIALECT}|g"
+if [ -z "${SQL_DIALECT:-}" ]; then
+  SQL_DIALECT_LINE_RULE="/\[SQL_DIALECT\]/d"
+fi
 sed -E \
+  -e "$SQL_DIALECT_LINE_RULE" \
   -e "s|\[APP_NAME\]|${APP_NAME}|g" \
   -e "s|\[ORG_SLUG\]|${ORG_SLUG}|g" \
   -e "s|\[TEST_FRAMEWORK\]|${TEST_FRAMEWORK}|g" \
@@ -1634,7 +1675,7 @@ sed -E \
 # (macOS). The earlier BRE form (`grep -q '\[\(...\|...\)\]'`) relied on
 # GNU's `\|` extension for alternation, which BSD grep in BRE mode does
 # not support — caught by the v0.7.3 CAP-17 audit sweep (AUDIT-C).
-if grep -qE '\[(APP_NAME|ORG_SLUG|TEST_FRAMEWORK|APPLIED_AT|MODE|SETUP_COMMIT_SHA_BEFORE|PROTECTED_BRANCHES_JSON_ARRAY|COMMIT_MSG_MAX_LINES)\]' "$RSCT_JSON"; then
+if grep -qE '\[(APP_NAME|ORG_SLUG|TEST_FRAMEWORK|APPLIED_AT|MODE|SETUP_COMMIT_SHA_BEFORE|PROTECTED_BRANCHES_JSON_ARRAY|COMMIT_MSG_MAX_LINES|SQL_DIALECT)\]' "$RSCT_JSON"; then
   echo "  ERROR: one or more placeholders left unsubstituted in $RSCT_JSON — inspect manually" >&2
   exit 1
 fi
@@ -1738,6 +1779,45 @@ if [ -f "$RSCT_JSON" ] && ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>
   # and continue. A hard failure here would abort a healthy install.
   if ! grep -q '"commit_message_max_lines"' "$RSCT_JSON" 2>/dev/null; then
     echo "  ⚠ commit-cap not backfilled — the project keeps the framework default (15). Add \"commit_message_max_lines\" to .rsct.json by hand to change it." >&2
+  fi
+fi
+```
+
+**Canonical bash — UPDATE mode: backfill `sql_dialect` (#62):**
+
+Same shape as the commit-cap backfill above: top-level, TEXT-SPLICE, preserve-on-update,
+validate before writing. The value comes from the Phase 3 question and is written only
+when it is one of `postgresql`, `mysql`, `none`; an empty answer writes nothing, because
+an unknown value makes `.rsct.json` fail validation as a whole.
+
+```bash
+echo "  CHECKPOINT: Phase 4.4 executing canonical sql_dialect backfill"
+RSCT_JSON="$(pwd)/.rsct.json"
+case "${SQL_DIALECT:-}" in
+  postgresql|mysql|none) SQL_DIALECT_OK="yes" ;;
+  *) SQL_DIALECT_OK="no" ;;
+esac
+if [ "$SQL_DIALECT_OK" = "yes" ] && [ -f "$RSCT_JSON" ] && ! grep -q '"sql_dialect"' "$RSCT_JSON" 2>/dev/null; then
+  node -e '
+    var fs = require("fs");
+    var f = process.argv[1], dialect = process.argv[2];
+    if (["postgresql", "mysql", "none"].indexOf(dialect) < 0) { process.exit(0); }
+    var s;
+    try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — sql_dialect not recorded."); process.exit(0); }
+    if (s.charCodeAt(0) === 65279) s = s.slice(1);
+    if (/"sql_dialect"/.test(s)) { process.exit(0); }
+    var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
+    if (!m) { console.error("  WARN: .rsct.json root object not found — sql_dialect not recorded."); process.exit(0); }
+    var eol = /\r\n/.test(s) ? "\r\n" : "\n";
+    var at = m[0].length;
+    var sep = (s.charAt(at) === "}") ? "" : "," + eol + "  ";
+    var out = s.slice(0, at) + "\"sql_dialect\": \"" + dialect + "\"" + sep + s.slice(at);
+    try { JSON.parse(out); } catch (e) { console.error("  WARN: sql_dialect splice would produce invalid JSON — aborted, .rsct.json untouched."); process.exit(0); }
+    fs.writeFileSync(f, out, "utf8");
+    console.log("  sql_dialect backfilled: " + dialect);
+  ' "$RSCT_JSON" "$SQL_DIALECT"
+  if ! grep -q '"sql_dialect"' "$RSCT_JSON" 2>/dev/null; then
+    echo "  ⚠ sql_dialect not backfilled — .sql files will go to the developer dialog at REVIEW. Add \"sql_dialect\" to .rsct.json by hand to declare it." >&2
   fi
 fi
 ```
@@ -2087,6 +2167,7 @@ spec_*.md
 .rsct/approvals-seen.json
 .rsct/phase-state.json
 .rsct/phase-state.lock
+.rsct/reports/
 
 # RSCT framework source clone — if the framework repo is cloned INTO the
 # project (a top-level "rsct-framework" dir) to invoke its prompts, ignore it
@@ -2256,6 +2337,25 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  CAP-25 backfill: added .rsct/phase-state.lock to existing RSCT .gitignore block"
     else
       echo "  ⚠ CAP-25 backfill: .rsct/phase-state.lock insertion did not land — inspect $GITIGNORE manually" >&2
+    fi
+  fi
+  # #62 backfill: .rsct/reports/ holds the REVIEW comment-sweep reports. Same
+  # guard/splice split as the #73 clause below: whole-file exact-line guard,
+  # block-scoped splice right after .rsct/phase-state.lock (guaranteed present:
+  # the CAP-25 lock clause above just ran), LF out, sanity check inside the block.
+  if ! tr -d '\r' < "$GITIGNORE" \
+       | awk '$0==".rsct/reports/"{f=1} END{exit f?0:1}'; then
+    tr -d '\r' < "$GITIGNORE" \
+      | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+          '$0==b{inblk=1} $0==e{inblk=0} {print}
+           inblk && $0==".rsct/phase-state.lock" && !done {print ".rsct/reports/"; done=1}' \
+      > "${GITIGNORE}.tmp" && mv "${GITIGNORE}.tmp" "$GITIGNORE"
+    if tr -d '\r' < "$GITIGNORE" \
+       | awk -v b="$BEGIN_MARKER" -v e="$END_MARKER" \
+           '$0==b{inblk=1} inblk && $0==".rsct/reports/"{f=1} $0==e{inblk=0} END{exit f?0:1}'; then
+      echo "  #62 backfill: added .rsct/reports/ to existing RSCT .gitignore block"
+    else
+      echo "  ⚠ #62 backfill: .rsct/reports/ insertion did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
   # framework-clone backfill: pre-1.1.x RSCT blocks did not list /rsct-framework/
