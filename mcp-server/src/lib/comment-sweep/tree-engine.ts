@@ -68,7 +68,10 @@ function initRuntime(grammarsDir: string): Promise<boolean> {
     printErr: (text: string) => process.stderr.write(`${text}\n`),
   } as unknown as Parameters<typeof Parser.init>[0])
     .then(() => true)
-    .catch(() => false)
+    .catch(() => {
+      runtime = null
+      return false
+    })
   return runtime
 }
 
@@ -76,9 +79,11 @@ function loadLanguage(grammarsDir: string, language: TreeLanguage): Promise<Lang
   const cached = languages.get(language)
   if (cached) return cached
   const bytes = readWasm(join(grammarsDir, GRAMMAR_FILES[language]))
-  const loading = bytes
-    ? Language.load(bytes).catch(() => null)
-    : Promise.resolve(null)
+  if (!bytes) return Promise.resolve(null)
+  const loading = Language.load(bytes).catch(() => {
+    languages.delete(language)
+    return null
+  })
   languages.set(language, loading)
   return loading
 }

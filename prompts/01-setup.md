@@ -822,8 +822,9 @@ if [ "$COMMIT_MSG_MAX_LINES" -gt 500 ] 2>/dev/null; then COMMIT_MSG_MAX_LINES=50
 echo "  commit-message cap: $COMMIT_MSG_MAX_LINES non-empty lines"
 ```
 
-✍️ SQL DIALECT (#62) — present ONLY when `RSCT_JSON_SQL_DIALECT` is empty
-  (ask-once). Omit when the MCP isn't installed — the dialect is read by the
+✍️ SQL DIALECT (#62) — present ONLY when `RSCT_JSON_SQL_DIALECT` is empty, or holds
+  a value other than `postgresql`, `mysql`, `none` (ask-once; an invalid value rejects the
+  whole `.rsct.json`, so tell the dev that and ask again — the backfill below repairs it). Omit when the MCP isn't installed — the dialect is read by the
   REVIEW comment sweep in `rsct_phase_review_complete` and `rsct_request_commit`.
   [Present as ONE plain-language question, Recommended (§B item 1):]
   "Which SQL database does this project's `.sql` code target? REVIEW removes
@@ -837,13 +838,17 @@ echo "  commit-message cap: $COMMIT_MSG_MAX_LINES non-empty lines"
     values; anything else (a typo such as `postgres`, an empty answer) leaves it
     empty, and an empty value means the key is NOT written — never `""`, because
     an unknown value makes `.rsct.json` fail validation as a whole.
-  - On an UPDATE run where the key already exists, do NOT ask and do NOT overwrite.
+  - On an UPDATE run where the key already holds a valid value, do NOT ask and do NOT
+    overwrite.
 
 ```bash
 echo "  CHECKPOINT: Phase 3 resolving SQL dialect (ask-once, validated)"
-if [ -n "$RSCT_JSON_SQL_DIALECT" ]; then
-  SQL_DIALECT="$RSCT_JSON_SQL_DIALECT"
-fi
+EXISTING_SQL_DIALECT=$(printf '%s' "${RSCT_JSON_SQL_DIALECT:-}" | tr -d '\r' | tr 'A-Z' 'a-z')
+case "$EXISTING_SQL_DIALECT" in
+  postgresql|mysql|none) SQL_DIALECT="$EXISTING_SQL_DIALECT" ;;
+  '') ;;
+  *) echo "  ⚠ .rsct.json holds an invalid sql_dialect ('$RSCT_JSON_SQL_DIALECT') — the whole config is rejected until it is replaced" >&2 ;;
+esac
 SQL_DIALECT=$(printf '%s' "${SQL_DIALECT:-}" | tr -d '\r' | tr 'A-Z' 'a-z')
 case "$SQL_DIALECT" in
   postgresql|mysql|none) ;;
@@ -1654,6 +1659,11 @@ PROTECTED_JSON="[${PROTECTED_JSON_INNER}]"
 # Render with one sed per placeholder. Pipe delimiter (|) avoids collisions
 # with URLs / paths that contain `/`. Quote every replacement to keep shells
 # from re-tokenizing values that contain spaces.
+SQL_DIALECT=$(printf '%s' "${SQL_DIALECT:-}" | tr -d '\r' | tr 'A-Z' 'a-z')
+case "$SQL_DIALECT" in
+  postgresql|mysql|none) ;;
+  *) SQL_DIALECT="" ;;
+esac
 SQL_DIALECT_LINE_RULE="s|\[SQL_DIALECT\]|${SQL_DIALECT}|g"
 if [ -z "${SQL_DIALECT:-}" ]; then
   SQL_DIALECT_LINE_RULE="/\[SQL_DIALECT\]/d"
@@ -1786,7 +1796,8 @@ fi
 **Canonical bash — UPDATE mode: backfill `sql_dialect` (#62):**
 
 Same shape as the commit-cap backfill above: top-level, TEXT-SPLICE, preserve-on-update,
-validate before writing. The value comes from the Phase 3 question and is written only
+validate before writing. An existing INVALID value is replaced in place — left alone it
+rejects the whole config. The value comes from the Phase 3 question and is written only
 when it is one of `postgresql`, `mysql`, `none`; an empty answer writes nothing, because
 an unknown value makes `.rsct.json` fail validation as a whole.
 
@@ -1797,7 +1808,7 @@ case "${SQL_DIALECT:-}" in
   postgresql|mysql|none) SQL_DIALECT_OK="yes" ;;
   *) SQL_DIALECT_OK="no" ;;
 esac
-if [ "$SQL_DIALECT_OK" = "yes" ] && [ -f "$RSCT_JSON" ] && ! grep -q '"sql_dialect"' "$RSCT_JSON" 2>/dev/null; then
+if [ "$SQL_DIALECT_OK" = "yes" ] && [ -f "$RSCT_JSON" ]; then
   node -e '
     var fs = require("fs");
     var f = process.argv[1], dialect = process.argv[2];
@@ -1805,7 +1816,16 @@ if [ "$SQL_DIALECT_OK" = "yes" ] && [ -f "$RSCT_JSON" ] && ! grep -q '"sql_diale
     var s;
     try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.error("  WARN: .rsct.json unreadable — sql_dialect not recorded."); process.exit(0); }
     if (s.charCodeAt(0) === 65279) s = s.slice(1);
-    if (/"sql_dialect"/.test(s)) { process.exit(0); }
+    var current = s.match(/"sql_dialect"[ \t\r\n]*:[ \t\r\n]*"([^"]*)"/);
+    if (current && ["postgresql", "mysql", "none"].indexOf(current[1]) >= 0) { process.exit(0); }
+    if (current) {
+      var fixed = s.slice(0, current.index) + "\"sql_dialect\": \"" + dialect + "\"" + s.slice(current.index + current[0].length);
+      try { JSON.parse(fixed); } catch (e) { console.error("  WARN: sql_dialect repair would produce invalid JSON — aborted, .rsct.json untouched."); process.exit(0); }
+      fs.writeFileSync(f, fixed, "utf8");
+      console.log("  sql_dialect repaired: " + dialect);
+      process.exit(0);
+    }
+    if (/"sql_dialect"/.test(s)) { console.error("  WARN: sql_dialect is not a string in .rsct.json — fix it by hand."); process.exit(0); }
     var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
     if (!m) { console.error("  WARN: .rsct.json root object not found — sql_dialect not recorded."); process.exit(0); }
     var eol = /\r\n/.test(s) ? "\r\n" : "\n";

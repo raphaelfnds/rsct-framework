@@ -1561,6 +1561,10 @@ describe.skipIf(!BASH)('block: SQL dialect resolution (01-setup Phase 3, #62)', 
   it('an existing project value wins (ask-once)', () => {
     expect(resolved('RSCT_JSON_SQL_DIALECT=mysql\nSQL_DIALECT=postgresql')).toBe('mysql')
   })
+
+  it('an invalid existing value does not win over a valid answer', () => {
+    expect(resolved('RSCT_JSON_SQL_DIALECT=postgres\nSQL_DIALECT=postgresql')).toBe('postgresql')
+  })
 })
 
 describe.skipIf(!BASH || !NODE)('block: sql_dialect backfill (01-setup 4.4, #62)', () => {
@@ -1590,6 +1594,14 @@ describe.skipIf(!BASH || !NODE)('block: sql_dialect backfill (01-setup 4.4, #62)
     expect(readIn(kept, '.rsct.json')).toBe(seeded)
     const twice = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=none', seedFiles: { '.rsct.json': MINIMAL_RSCT_JSON }, runs: 2 })
     expect(readIn(twice, '.rsct.json').match(/sql_dialect/g)).toHaveLength(1)
+  })
+
+  it('repairs an invalid existing value in place', () => {
+    const seeded = JSON.stringify({ rsct_version: '1.0.0', sql_dialect: 'Postgres', app: { name: 'a', org: 'o' } }, null, 2) + '\n'
+    const r = run({ promptBasename: '01-setup.md', anchor: SQL_BACKFILL_ANCHOR, preamble: 'SQL_DIALECT=postgresql', seedFiles: { '.rsct.json': seeded } })
+    const raw = readIn(r, '.rsct.json')
+    expect(dialectOf(raw)).toBe('postgresql')
+    expect(raw.match(/sql_dialect/g)).toHaveLength(1)
   })
 
   it('handles CRLF and a UTF-8 BOM', () => {
@@ -1627,6 +1639,11 @@ describe.skipIf(!BASH || !NODE)('block: .rsct.json CREATE render carries sql_dia
     expect(raw).not.toContain('sql_dialect')
     expect(raw).not.toContain('[SQL_DIALECT]')
     expect(() => JSON.parse(raw)).not.toThrow()
+  }, 60_000)
+
+  it('re-validates the dialect instead of rendering an invalid value', () => {
+    expect(dialectOf(render('PostgreSQL'))).toBe('postgresql')
+    expect(render('postgres')).not.toContain('sql_dialect')
   }, 60_000)
 })
 

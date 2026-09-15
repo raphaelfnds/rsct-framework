@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isAllowlistedBody, isLicenceText, LICENCE_MAX_LINES, type AllowlistFamily } from './allowlist.js'
+import { isAllowlistedBody, isLicenceLine, isLicenceText, LICENCE_MAX_LINES, type AllowlistFamily } from './allowlist.js'
 import { scanHtml } from './html-engine.js'
 import { classifyPath, type SweepLanguage } from './language.js'
 import { lexSqlComments, type SqlDialect } from './sql-lexer.js'
@@ -77,7 +77,11 @@ export function commentBody(text: string): string {
   } else if (body.startsWith('#')) {
     body = body.replace(/^#+/, '')
   }
-  return body.replace(/\r/g, '').replace(/\s+/g, ' ').trim()
+  return collapseWhitespace(body)
+}
+
+export function collapseWhitespace(text: string): string {
+  return text.replace(/\r/g, '').replace(/\s+/g, ' ').trim()
 }
 
 function treeFamily(language: TreeLanguage): AllowlistFamily {
@@ -105,7 +109,8 @@ async function collectHtml(
   const spans: Span[] = []
   for (const c of scan.comments) {
     const text = source.slice(c.start, c.end)
-    if (text.startsWith('<?') || text.startsWith('<![CDATA[')) continue
+    if (text.startsWith('<![CDATA[')) return { ok: false, reason: 'parse_error', language: 'html' }
+    if (/^<\?xml[\s?]/i.test(text)) continue
     spans.push({ start: base + c.start, end: base + c.end, family: 'html' })
   }
   for (const inline of scan.inline) {
@@ -193,7 +198,15 @@ function licenceGroup(source: string, spans: Span[], starts: number[]): Set<numb
   const last = spans[members[members.length - 1]!]!
   const lines = lineAt(starts, last.end) - lineAt(starts, first.start) + 1
   const groupText = source.slice(first.start, last.end)
-  if (lines <= LICENCE_MAX_LINES && isLicenceText(groupText)) for (const m of members) allowed.add(m)
+  if (lines > LICENCE_MAX_LINES || !isLicenceText(groupText)) return allowed
+  if (members.length === 1 && (firstText.startsWith('/*') || firstText.startsWith('<!--'))) {
+    allowed.add(k)
+    return allowed
+  }
+  for (const m of members) {
+    const span = spans[m]!
+    if (isLicenceLine(commentBody(source.slice(span.start, span.end)))) allowed.add(m)
+  }
   return allowed
 }
 

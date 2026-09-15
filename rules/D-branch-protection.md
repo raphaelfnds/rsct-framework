@@ -50,18 +50,18 @@ checklist and confirm it with the dev:
 2. Are the pertinent **ADRs recorded** (→ §H)? (Confirm the ones already
    surfaced this session are written — this is not a new proposal round.)
 3. Are the associated **issues resolved**?
-4. Have the files this integration carries been **swept** for dead code and for
-   comments that no longer match the code? List them.
+4. Have the files this integration carries been **swept** for dead code? List them.
+   (Comments are removed in the REVIEW phase and enforced at every commit.)
 
 Item 4 applies at **every tier** — there is no `trivial`/`small` exemption. An
 agent produces residue at every size of task, and residue that reaches the
 codebase is paid for by every task after it.
 
 Where the sweep is **practised** and where it is **enforced** are different
-points, deliberately. Practise it at the refactor moment, right after the code
-works and while the context is still warm. It is enforced later, at the
-integration boundary, because that is where residue would otherwise become
-permanent.
+points, deliberately. Practise it in the REVIEW phase, after the tests, while the
+context is still warm. The comment half is enforced at every commit; the dead-code
+half at the integration boundary, because that is where residue would otherwise
+become permanent.
 
 When `rsct-mcp` is installed, `rsct_request_merge` (always), `rsct_request_push`
 (when the branch is protected), and `rsct_request_rebase` (local rebase/squash,

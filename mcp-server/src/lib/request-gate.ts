@@ -134,7 +134,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   }
 }
 
-function inferRejectKind(reason: string): GateRejectKind {
+export function inferRejectKind(reason: string): GateRejectKind {
   if (reason.includes('reused')) return 'reused'
   if (reason.includes('skew') || reason.includes('future')) return 'expired'
   return 'schema'

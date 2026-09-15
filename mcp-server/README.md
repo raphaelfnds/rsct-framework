@@ -66,7 +66,8 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   MySQL `/*+ hint */`, HTML conditional comments, …).
 - Files the sweep cannot verify (`unsupported_language`, `unknown_extension`,
   `sql_dialect_missing`, `parse_error`, `binary_or_encoding`,
-  `engine_unavailable`, `git_filter`) and files listed in `exempt_files`
+  `engine_unavailable`, `git_filter`, `head_unverified` — the HEAD version could not be
+  scanned) and files listed in `exempt_files`
   (generated / vendored) go to one forced OS dialog only the dev answers: Yes
   makes those exact file versions committable without a mechanical check, No
   rejects the REVIEW (`unverified_declined`), no channel rejects
@@ -399,8 +400,8 @@ supplies it.
 
 Findings also record `head_sha` (full, never an abbreviation) and `observed_at` at the
 phase start; `_complete` compares against HEAD and reports `head_stale`. It **marks,
-never rejects** — committing the fixes a review found is the normal reason for HEAD to
-move. Unknown is `null`, never `true`.
+never rejects** — HEAD moves while a review is open when non-code changes, or code an
+earlier REVIEW stamped, are committed (unstamped code cannot be committed at all). Unknown is `null`, never `true`.
 
 ### `rsct_load_context`
 

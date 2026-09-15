@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { phaseReviewCompleteHandler, type PhaseReviewCompleteOutput } from '../../src/tools/phase-review-complete.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
+import { appendAuditEntry } from '../../src/lib/audit-log.js'
+import { stampLedger, sweepEntry } from '../../src/lib/comment-sweep/review.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
 
@@ -81,6 +83,14 @@ async function completeReview(extra: Record<string, unknown> = {}, p: Prompts = 
     { project_root: root, spec_ref: 'feat-sweep', dev_approval: approval('review_complete:spec_ref=feat-sweep'), ...extra },
     { promptFn: p.fn },
   )
+}
+
+function installHook(body: string): void {
+  mkdirSync(join(root, 'hooks'), { recursive: true })
+  const hook = join(root, 'hooks', 'pre-commit')
+  writeFileSync(hook, `#!/bin/sh\n${body}`)
+  chmodSync(hook, 0o755)
+  git(root, 'config', 'core.hooksPath', 'hooks')
 }
 
 async function commit(p: Prompts = prompts()): Promise<RequestCommitOutput> {
@@ -339,34 +349,209 @@ describe('rsct_request_commit — REVIEW gate', () => {
     expect(auditEvents().some((e) => e.event === 'review.commit_hook_rewrite')).toBe(true)
   })
 
-  it('a review covering the drifted paths clears the drift', async () => {
+  it('drift left by a hook on an unchanged file is cleared by the next REVIEW', async () => {
     write('src/a.ts', 'export const a = 1\n')
-    mkdirSync(join(root, '.rsct'), { recursive: true })
-    writeFileSync(join(root, '.rsct', 'phase-state.json'), JSON.stringify({ review_drift: { sha: 'x', paths: ['src/a.ts'], at: 'now' } }))
     expect((await completeReview()).status).toBe('completed')
-    expect(readJson('.rsct/phase-state.json').review_drift).toBeUndefined()
     git(root, 'add', 'src/a.ts')
+    installHook('printf "package main // generated\\n" > tool.go\ngit add tool.go\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    expect(git(root, 'status', '--porcelain', '--', 'tool.go')).toBe('')
+    const review = await completeReview({}, prompts('yes', 'yes'))
+    expect(review.status).toBe('completed')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeUndefined()
+    write('NOTES.md', 'docs only\n')
+    git(root, 'add', 'NOTES.md')
     expect((await commit()).status).toBe('committed')
+  })
+
+  it('a clean file added by a hook is stamped, not flagged as drift', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const gen = 1\\n" > src/gen.ts\ngit add src/gen.ts\n')
+    expect((await commit()).status).toBe('committed')
+    const ledger = readJson('.rsct/phase-state.json').review_sweep as Record<string, unknown>
+    expect(Object.keys(ledger)).toContain('src/gen.ts')
+  })
+
+  it('a project subdirectory as project_root does not narrow the commit gate', async () => {
+    write('app/.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
+    write('lib/other.ts', 'export const o = 1 // outside the subdirectory\n')
+    git(root, 'add', 'lib/other.ts')
+    const out = await requestCommitHandler(
+      { project_root: join(root, 'app'), message: 'feat: sweep test', dev_approval: approval('commit:feat/sweep:sweep') },
+      { promptFn: prompts().fn },
+    )
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('comments_present')
+  })
+
+  it('a staged submodule bump is not code and does not block the commit', async () => {
+    const head = git(root, 'rev-parse', 'HEAD').trim()
+    git(root, 'update-index', '--add', '--cacheinfo', `160000,${head},libs/lib`)
+    expect((await commit()).status).toBe('committed')
+  })
+
+  it('a CRLF blob under text=auto stays committable after its REVIEW', async () => {
+    git(root, 'config', 'core.autocrlf', 'false')
+    write('src/a.ts', 'export const a = 1\r\n')
+    expect((await completeReview()).status).toBe('completed')
+    commitAll(root, 'crlf blob')
+    write('.gitattributes', '* text=auto\n')
+    write('src/a.ts', 'export const a = 2\r\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts', '.gitattributes')
+    expect((await commit()).status).toBe('committed')
+  })
+
+  it('deleting a file that carries comments needs its REVIEW', async () => {
+    write('src/gone.ts', '// a fact that lived here long enough to matter\nexport const g = 1\n')
+    commitAll(root, 'with comment')
+    git(root, 'rm', '-q', 'src/gone.ts')
+    expect((await commit()).reject_kind).toBe('review_missing')
+    const id = (await completeReview()).pending_dispositions![0]!.comment_id
+    expect((await completeReview({ comment_dispositions: [{ comment_id: id, action: 'discarded' }] })).status).toBe('completed')
+    expect((await commit()).status).toBe('committed')
+  })
+
+  it('a hook re-stamp keeps ledger entries for reviewed files that are not tracked yet', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    write('src/b.ts', 'export const b = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a  =  1\\n" > src/a.ts\ngit add src/a.ts\n')
+    expect((await commit()).status).toBe('committed')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    git(root, 'add', 'src/b.ts')
+    expect((await commit()).status).toBe('committed')
+  })
+
+  it('shows no unverified dialog when the approval itself is invalid', async () => {
+    write('tool.go', 'package main\n')
+    openReview()
+    const p = prompts('yes', 'yes')
+    const out = await phaseReviewCompleteHandler(
+      { project_root: root, spec_ref: 'feat-sweep', dev_approval: { timestamp: 'garbage', action_scope: 'x', reason: 'y' } },
+      { promptFn: p.fn },
+    )
+    expect(out.status).toBe('rejected')
+    expect(p.seen).toHaveLength(0)
+  })
+
+  it('lists every unverified file in the dialog and every kept allowlisted comment in the approval', async () => {
+    for (let i = 0; i < 18; i++) write(`gen/f${String(i).padStart(2, '0')}.go`, 'package main\n')
+    write('src/x.ts', '// eslint-disable-next-line no-console\nconsole.log(1)\n')
+    const p = prompts('yes', 'yes')
+    expect((await completeReview({}, p)).status).toBe('completed')
+    expect(p.seen[0]!.message).toContain('gen/f17.go')
+    expect(p.seen[1]!.message).toContain('src/x.ts:1 kept: eslint-disable-next-line no-console')
+  })
+
+  it('normalises exempt_files paths given with backslashes or relative to the project', async () => {
+    write('gen/client.ts', '// generated by a tool\nexport const c = 1\n')
+    const out = await completeReview({ exempt_files: [{ path: 'gen\\client.ts', reason: 'generated' }] }, prompts('yes', 'yes'))
+    expect(out.status).toBe('completed')
+    expect(out.comment_sweep?.unverified).toEqual(['gen/client.ts'])
+  })
+
+  it('stamps nothing when the audit log cannot record the sweep', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    openReview()
+    const out = await phaseReviewCompleteHandler(
+      { project_root: root, spec_ref: 'feat-sweep', dev_approval: approval('review_complete:spec_ref=feat-sweep') },
+      {
+        promptFn: prompts().fn,
+        auditWriter: (projectRoot, entry, config) =>
+          entry.event === 'review.sweep_stamped'
+            ? { ok: false, reason: 'write_failed', error: 'disk full' }
+            : appendAuditEntry(projectRoot, entry, config),
+      },
+    )
+    expect(out.status).toBe('completed')
+    expect(readJson('.rsct/phase-state.json').review_sweep).toBeUndefined()
   })
 })
 
-describe('rsct_request_commit — REVIEW gate on the dialog-free lane', () => {
-  it('the free lane cannot carry unreviewed code', async () => {
-    write('plan_p.md', '# Plan p\n\n- **Branch:** feat/sweep\n- **Status:** in-progress\n')
+describe('rsct_request_commit — REVIEW gate on the other authorization paths', () => {
+  function eligibleFreeLane(): void {
+    write('plan_p.md', '# Plan\n\n| Status | in progress |\n')
     mkdirSync(join(root, '.rsct', 'scripts'), { recursive: true })
+    for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
+      writeFileSync(join(root, '.rsct', 'scripts', name), 'export {}\n')
+    }
     writeFileSync(join(root, '.rsct', 'audit.log'), `${JSON.stringify({ event: 'classify.verdict', tier: 'small' })}\n`)
+    const statePath = join(root, '.rsct', 'phase-state.json')
+    const prev = existsSync(statePath) ? readJson('.rsct/phase-state.json') : {}
     writeFileSync(
-      join(root, '.rsct', 'phase-state.json'),
-      JSON.stringify({ last_classify: { tier: 'small', tier_max: 'small', classified_at: new Date().toISOString() } }),
+      statePath,
+      JSON.stringify({ ...prev, last_classify: { tier: 'small', tier_max: 'small', classified_at: new Date().toISOString() } }),
     )
+  }
+
+  it('the free lane carries reviewed code and refuses unreviewed code', async () => {
     write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    eligibleFreeLane()
     git(root, 'add', 'src/a.ts')
+    const ok = await requestCommitHandler({ project_root: root, message: 'free checkpoint' }, { promptFn: prompts().fn })
+    expect(ok.authorized_via).toBe('free_commit')
+    expect(ok.status).toBe('committed')
+
+    write('src/b.ts', 'export const b = 1\n')
+    git(root, 'add', 'src/b.ts')
     const p = prompts()
-    const out = await requestCommitHandler({ project_root: root, message: 'free checkpoint' }, { promptFn: p.fn })
-    expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('review_missing')
-    expect(out.authorized_via).toBeNull()
+    const refused = await requestCommitHandler({ project_root: root, message: 'free checkpoint 2' }, { promptFn: p.fn })
+    expect(refused.reject_kind).toBe('review_missing')
     expect(p.seen).toHaveLength(0)
-    expect(auditEvents().some((e) => e.event === 'free_commit.committed')).toBe(false)
+  })
+
+  it('the plan-token path is gated, and its token re-arm keeps a recorded drift', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    write('plan_t3.md', '# Plan\n\n| Status | in progress |\n')
+    const now = Date.now()
+    const statePath = join(root, '.rsct', 'phase-state.json')
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        ...readJson('.rsct/phase-state.json'),
+        plan_authorization: {
+          plan_slug: 't3',
+          branch: 'feat/sweep',
+          covers: ['commit'],
+          authorized_at: new Date(now - 60_000).toISOString(),
+          expires_at: new Date(now + 10 * 60_000).toISOString(),
+          absolute_expires_at: new Date(now + 600 * 60_000).toISOString(),
+          slide_minutes: 480,
+          max_actions: 5,
+          actions_used: 0,
+          approval_ref: { action_scope: 'plan_authorize:t3', timestamp: new Date(now - 60_000).toISOString() },
+        },
+      }),
+    )
+    write('src/unreviewed.ts', 'export const u = 1\n')
+    git(root, 'add', 'src/unreviewed.ts')
+    expect((await requestCommitHandler({ project_root: root, message: 'token commit' }, {})).reject_kind).toBe('review_missing')
+    git(root, 'reset', '-q', 'src/unreviewed.ts')
+
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a = 1 // hook\\n" > src/a.ts\ngit add src/a.ts\n')
+    const out = await requestCommitHandler({ project_root: root, message: 'token commit' }, {})
+    expect(out.authorized_via).toBe('plan_token')
+    expect(out.status).toBe('committed_with_drift')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeDefined()
+  })
+})
+
+describe('sweep ledger bookkeeping', () => {
+  it('keeps at most 20 entries per path and prunes paths git no longer knows', () => {
+    const entry = (blob: string) => sweepEntry(blob, 'clean', [], 'windows', 'x', 'now')
+    let ledger: unknown = { 'gone.ts': [entry('old')] }
+    for (let i = 0; i < 25; i++) ledger = stampLedger(ledger, [{ path: 'a.ts', entry: entry(`b${i}`) }], new Set(['a.ts']))
+    const result = ledger as Record<string, Array<{ blob: string }>>
+    expect(result['a.ts']).toHaveLength(20)
+    expect(result['a.ts']![0]!.blob).toBe('b24')
+    expect(result['gone.ts']).toBeUndefined()
   })
 })

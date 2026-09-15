@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { lstatSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SweepLedger, SweepLedgerEntry, SweepVerdict } from '../phase-scope.js'
+import { decisionKey, deletionBlob } from './decision-key.js'
 import {
   hasGitFilter,
   openSweepRepo,
@@ -11,37 +11,43 @@ import {
   readHeadContent,
   readKnownPaths,
   readStagedBlobId,
-  readStagedPaths,
+  readStagedEntries,
   readTouchedPaths,
-  readWorkingBlobId,
+  readWorkingBlobIds,
   type SweepRepo,
   type TouchedStatus,
 } from './git-reads.js'
-import { scanFile, type ConfiguredSqlDialect, type ScanResult, type SweepComment, type UnverifiedReason } from './index.js'
+import {
+  collapseWhitespace,
+  scanFile,
+  type ConfiguredSqlDialect,
+  type ScanResult,
+  type SweepComment,
+  type UnverifiedReason,
+} from './index.js'
 
 export type ExemptReason = 'generated' | 'vendored'
-export type SweepFileReason = UnverifiedReason | ExemptReason | 'head_unverified'
 
 export interface SweepFile {
   path: string
   status: TouchedStatus
   blob: string | null
-  kind: 'not_code' | 'clean' | 'comments_present' | 'unverified' | 'deleted'
+  kind: 'clean' | 'comments_present' | 'unverified' | 'deleted'
   language: string | null
-  reason: SweepFileReason | null
+  reason: UnverifiedReason | ExemptReason | 'head_unverified' | null
   comments: SweepComment[]
   allowlist_changes: SweepComment[]
   removed: Array<SweepComment & { path: string }>
 }
 
-export type WorkingSweep =
+type WorkingSweep =
   | { ok: true; repo: SweepRepo; files: SweepFile[] }
   | { ok: false; reason: 'not_git_repo' | 'git_read_failed'; detail: string }
 
 export interface SweepOptions {
   sqlDialect?: ConfiguredSqlDialect | undefined
-  grammarsDir?: string | null | undefined
   exempt?: ReadonlyMap<string, ExemptReason> | undefined
+  extraPaths?: readonly string[] | undefined
 }
 
 export const MIGRATION_DESTINATIONS = [
@@ -50,8 +56,8 @@ export const MIGRATION_DESTINATIONS = [
   'docs/decisions.md',
 ] as const
 
-export const MIGRATION_MIN_BODY = 20
-export const LEDGER_ENTRIES_PER_PATH = 20
+const MIGRATION_MIN_BODY = 20
+const LEDGER_ENTRIES_PER_PATH = 20
 
 export interface Disposition {
   comment_id: string
@@ -66,7 +72,7 @@ export interface PendingDisposition {
   body: string
 }
 
-export type DispositionCheck =
+type DispositionCheck =
   | { ok: true; migrations: Map<string, Array<{ destination: string; body: string }>>; migrated: number; discarded: number }
   | {
       ok: false
@@ -81,22 +87,35 @@ async function scanWithFilter(
   bytes: Uint8Array,
   options: SweepOptions,
 ): Promise<ScanResult> {
-  const result = await scanFile(path, bytes, { sqlDialect: options.sqlDialect, grammarsDir: options.grammarsDir })
+  const result = await scanFile(path, bytes, { sqlDialect: options.sqlDialect })
   if (result.kind === 'not_code') return result
   const filtered = hasGitFilter(repo, path)
-  if (filtered === null || filtered) {
-    return { kind: 'unverified', language: result.language, reason: 'git_filter' }
-  }
+  if (filtered === null || filtered) return { kind: 'unverified', language: result.language, reason: 'git_filter' }
   return result
 }
 
 function readWorkingBytes(repo: SweepRepo, path: string): Uint8Array | null {
   const full = join(repo.toplevel, path)
   try {
-    if (!statSync(full).isFile()) return null
+    if (!lstatSync(full).isFile()) return null
     return new Uint8Array(readFileSync(full))
   } catch {
     return null
+  }
+}
+
+export function normalizeRepoPath(repo: SweepRepo, path: string): string {
+  const forward = path.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (repo.prefix.length === 0 || forward.startsWith(repo.prefix)) return forward
+  return lstatExists(repo, forward) ? forward : `${repo.prefix}${forward}`
+}
+
+function lstatExists(repo: SweepRepo, path: string): boolean {
+  try {
+    lstatSync(join(repo.toplevel, path))
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -105,19 +124,28 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
   if (!repo) return { ok: false, reason: 'not_git_repo', detail: 'project_root is not inside a git work tree' }
   const touched = readTouchedPaths(repo)
   if (!touched) return { ok: false, reason: 'git_read_failed', detail: 'could not list the touched paths' }
+  const byPath = new Map(touched.map((t) => [t.path, t.status]))
+  for (const extra of options.extraPaths ?? []) {
+    if (!byPath.has(extra) && lstatExists(repo, extra)) byPath.set(extra, 'modified')
+  }
+
+  const present = [...byPath.entries()].filter(([, s]) => s !== 'deleted').map(([p]) => p)
+  const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null))
+  if (!blobs) return { ok: false, reason: 'git_read_failed', detail: 'could not hash the touched files' }
 
   const files: SweepFile[] = []
-  for (const { path, status } of touched) {
+  for (const [path, status] of [...byPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const head = readHeadContent(repo, path)
     const headScan = head ? await scanWithFilter(repo, path, head, options) : null
     const headComments = headScan?.kind === 'scanned' ? headScan.comments : []
 
     if (status === 'deleted') {
       if (headScan === null || headScan.kind === 'not_code') continue
+      const headBlob = repo.headCommit ? readCommitBlobId(repo, repo.headCommit, path) : null
       files.push({
         path,
         status,
-        blob: null,
+        blob: headBlob ? deletionBlob(headBlob) : null,
         kind: 'deleted',
         language: headScan.language,
         reason: null,
@@ -130,7 +158,7 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
 
     const bytes = readWorkingBytes(repo, path)
     if (bytes === null) continue
-    const blob = readWorkingBlobId(repo, path)
+    const blob = blobs.get(path)
     if (!blob) return { ok: false, reason: 'git_read_failed', detail: `could not hash ${path}` }
     const scan = await scanWithFilter(repo, path, bytes, options)
     if (scan.kind === 'not_code') continue
@@ -164,11 +192,11 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
   return { ok: true, repo, files }
 }
 
-function collapse(text: string): string {
-  return text.replace(/\r/g, '').replace(/\s+/g, ' ').trim()
+export function workingBlobIds(repo: SweepRepo, paths: readonly string[]): Map<string, string> | null {
+  return readWorkingBlobIds(repo, paths)
 }
 
-export function addedText(headText: string | null, currentText: string): string {
+function addedText(headText: string | null, currentText: string): string {
   const remaining = new Map<string, number>()
   for (const line of (headText ?? '').replace(/\r/g, '').split('\n')) {
     remaining.set(line, (remaining.get(line) ?? 0) + 1)
@@ -179,7 +207,7 @@ export function addedText(headText: string | null, currentText: string): string 
     if (n > 0) remaining.set(line, n - 1)
     else added.push(line)
   }
-  return collapse(added.join('\n'))
+  return collapseWhitespace(added.join('\n'))
 }
 
 function destinationTexts(repo: SweepRepo, destination: string): { head: string | null; current: string | null } {
@@ -323,22 +351,7 @@ export function sweepEntry(
   specRef: string,
   at: string,
 ): SweepLedgerEntry {
-  return {
-    blob,
-    verdict,
-    migrations: migrations.map((m) => ({ destination: m.destination, body_sha: bodySha(m.body), body: m.body })),
-    channel,
-    spec_ref: specRef,
-    at,
-  }
-}
-
-export function bodySha(body: string): string {
-  return createHash('sha256').update(body).digest('hex')
-}
-
-export function decisionKey(path: string, blob: string): string {
-  return `${path}\0${blob}`
+  return { blob, verdict, migrations: migrations.map((m) => ({ ...m })), channel, spec_ref: specRef, at }
 }
 
 export type StagedSweepCheck =
@@ -363,11 +376,11 @@ export async function checkStagedSweep(args: {
     return {
       ok: false,
       reject_kind: 'review_drift',
-      reason: `a previous commit landed code that no review covers (${args.drift.paths.join(', ')}) — run rsct_phase_review_start / _complete over those paths before committing again`,
+      reason: `a previous commit landed code that no review covers (${args.drift.paths.join(', ')}) — run rsct_phase_review_start / _complete; it re-checks those paths even when they are unchanged`,
       paths: args.drift.paths,
     }
   }
-  const staged = readStagedPaths(repo)
+  const staged = readStagedEntries(repo)
   if (staged === null) {
     return { ok: false, reject_kind: 'review_unreadable', reason: 'could not read the staged paths from git', paths: [] }
   }
@@ -378,7 +391,18 @@ export async function checkStagedSweep(args: {
   const reverted: string[] = []
   const destinationCache = new Map<string, string>()
 
-  for (const path of staged) {
+  for (const { path, status, headBlob } of staged) {
+    if (status === 'deleted') {
+      if (!headBlob) continue
+      const headBytes = readBlob(repo, headBlob)
+      if (!headBytes) {
+        return { ok: false, reject_kind: 'review_unreadable', reason: `could not read the HEAD content of ${path}`, paths: [path] }
+      }
+      const headScan = await scanWithFilter(repo, path, headBytes, args.options)
+      if (headScan.kind !== 'scanned' || headScan.comments.length === 0) continue
+      if (!ledgerEntries(args.ledger, path).some((e) => e.blob === deletionBlob(headBlob))) missing.push(path)
+      continue
+    }
     const blob = readStagedBlobId(repo, path)
     const bytes = blob ? readBlob(repo, blob) : null
     if (!blob || !bytes) {
@@ -402,15 +426,15 @@ export async function checkStagedSweep(args: {
         reverted.push(path)
         break
       }
-      let text = destinationCache.get(m.destination)
-      if (text === undefined) {
+      let content = destinationCache.get(m.destination)
+      if (content === undefined) {
         const repoPath = `${repo.prefix}${m.destination}`
         const stagedDest = readStagedBlobId(repo, repoPath)
         const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath)
-        text = destBytes ? collapse(destBytes.toString('utf8')) : ''
-        destinationCache.set(m.destination, text)
+        content = destBytes ? collapseWhitespace(destBytes.toString('utf8')) : ''
+        destinationCache.set(m.destination, content)
       }
-      if (!text.includes(m.body)) {
+      if (!content.includes(m.body)) {
         reverted.push(path)
         break
       }
@@ -445,44 +469,44 @@ export async function checkStagedSweep(args: {
   return { ok: true, skipped: null, checked }
 }
 
-export type CommittedSweep =
-  | { drift: false; rewrites: Array<{ path: string; blob: string }> }
-  | { drift: true; paths: string[]; rewrites: Array<{ path: string; blob: string }> }
+type CommittedSweep = { drift: string[]; rewrites: Array<{ path: string; blob: string }>; full_sha: string | null }
 
 export async function verifyCommittedSweep(args: {
   projectRoot: string
   options: SweepOptions
-  commit: string
+  before: string | null
+  after: string
   checked: ReadonlyArray<{ path: string; blob: string }>
 }): Promise<CommittedSweep> {
   const repo = openSweepRepo(args.projectRoot)
-  if (!repo) return { drift: false, rewrites: [] }
+  if (!repo) return { drift: [], rewrites: [], full_sha: null }
+  const fullSha = repo.headCommit
   const expected = new Map(args.checked.map((c) => [c.path, c.blob]))
-  const paths = readCommitPaths(repo, args.commit)
-  if (paths === null) return { drift: true, paths: [...expected.keys()], rewrites: [] }
-  const drifted: string[] = []
+  const paths = readCommitPaths(repo, args.before, args.after)
+  if (paths === null) return { drift: [...expected.keys()], rewrites: [], full_sha: fullSha }
+  const drift: string[] = []
   const rewrites: Array<{ path: string; blob: string }> = []
   for (const path of paths) {
-    const blob = readCommitBlobId(repo, args.commit, path)
+    const blob = readCommitBlobId(repo, args.after, path)
     if (!blob) {
-      drifted.push(path)
+      drift.push(path)
       continue
     }
     if (expected.get(path) === blob) continue
     const bytes = readBlob(repo, blob)
     if (!bytes) {
-      drifted.push(path)
+      drift.push(path)
       continue
     }
     const scan = await scanWithFilter(repo, path, bytes, args.options)
     if (scan.kind === 'not_code') continue
-    if (scan.kind === 'scanned' && scan.comments.length === 0 && expected.has(path)) {
+    if (scan.kind === 'scanned' && scan.comments.length === 0) {
       rewrites.push({ path, blob })
       continue
     }
-    drifted.push(path)
+    drift.push(path)
   }
-  return drifted.length > 0 ? { drift: true, paths: drifted, rewrites } : { drift: false, rewrites }
+  return { drift, rewrites, full_sha: fullSha }
 }
 
 export function knownPaths(projectRoot: string): ReadonlySet<string> | null {

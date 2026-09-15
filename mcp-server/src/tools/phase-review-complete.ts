@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -39,14 +39,18 @@ import {
   checkDispositions,
   computeWorkingSweep,
   knownPaths,
+  normalizeRepoPath,
   stampLedger,
   sweepEntry,
+  workingBlobIds,
   type Disposition,
   type ExemptReason,
   type PendingDisposition,
   type SweepFile,
 } from '../lib/comment-sweep/review.js'
-import { openSweepRepo, readWorkingBlobId } from '../lib/comment-sweep/git-reads.js'
+import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
+import { validateDevApproval } from '../lib/dev-approval.js'
+import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 
 const findingActionSchema = z
   .object({
@@ -113,6 +117,7 @@ export type PhaseReviewSweepRejectKind =
   | 'unverified_undecided'
 
 export type PhaseReviewCompleteRejectKind =
+  | GateRejectKind
   | FindingsGateRejectKind
   | 'block_actions_present'
   | PhaseReviewSweepRejectKind
@@ -149,7 +154,7 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. On success it stamps a sweep ledger (path + git blob id) that rsct_request_commit requires for every staged code file. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -198,7 +203,7 @@ export const phaseReviewCompleteTool: Tool = {
       exempt_files: {
         type: 'array',
         description:
-          'Generated or vendored code files that keep their comments. Each goes to the developer-only unverified dialog, bound to its exact version.',
+          'Generated or vendored code files that keep their comments, as repository-relative or project-relative paths (either slash). Each goes to the developer-only unverified dialog, bound to its exact version.',
         items: {
           type: 'object',
           required: ['path', 'reason'],
@@ -352,7 +357,6 @@ export async function phaseReviewCompleteHandler(
     return reject({ ...base, rejectKind: 'sweep_input_invalid', reason, hints: [reason], comment_sweep: null })
   }
   const dispositions: Disposition[] = sweepInput.data.comment_dispositions ?? []
-  const exempt = new Map<string, ExemptReason>((sweepInput.data.exempt_files ?? []).map((e) => [e.path, e.reason]))
 
   const precheck = precheckPhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -400,7 +404,16 @@ export async function phaseReviewCompleteHandler(
     })
   }
 
-  const sweep = await computeWorkingSweep(projectRoot, { sqlDialect: config?.sql_dialect, exempt })
+  const sweepRepo = openSweepRepo(projectRoot)
+  const exempt = new Map<string, ExemptReason>(
+    (sweepInput.data.exempt_files ?? []).map((e) => [sweepRepo ? normalizeRepoPath(sweepRepo, e.path) : e.path, e.reason]),
+  )
+  const driftBefore = readPhaseState(projectRoot).state?.review_drift
+  const sweep = await computeWorkingSweep(projectRoot, {
+    sqlDialect: config?.sql_dialect,
+    exempt,
+    extraPaths: driftBefore?.paths ?? [],
+  })
   if (!sweep.ok) {
     const reason =
       sweep.reason === 'not_git_repo'
@@ -440,14 +453,27 @@ export async function phaseReviewCompleteHandler(
 
   const unverified = sweep.files.filter((f) => f.kind === 'unverified')
   if (unverified.length > 0) {
+    const validation = validateDevApproval(input.dev_approval, {
+      projectRoot,
+      toolName: 'rsct_phase_review_complete',
+      ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+      ...(internal.now !== undefined && { now: internal.now }),
+      auditConfig: config?.audit,
+    })
+    if (validation.status === 'rejected') {
+      return reject({
+        ...base,
+        rejectKind: inferRejectKind(validation.reason),
+        reason: validation.reason,
+        hints: [`Approval rejected before any dialog: ${validation.reason}`],
+        comment_sweep: summary,
+      })
+    }
     const dialog = await promptFn({
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
         `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:\n\n` +
-        listLines(
-          unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
-          15,
-        ) +
+        unverified.map((f) => `• ${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`).join('\n') +
         `\n\nYes = allow these versions. No = reject this REVIEW.`,
     })
     if (dialog.response !== 'yes') {
@@ -492,7 +518,13 @@ export async function phaseReviewCompleteHandler(
     )
     if (unverified.length > 0) detailParts.push(`Unverified files allowed: ${unverified.length}.`)
     if (summary.allowlist_changes.length > 0) {
-      detailParts.push(`Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`)
+      detailParts.push(
+        `Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`,
+        listLines(
+          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${c.body.slice(0, 120)}`),
+          10,
+        ),
+      )
     }
     detailParts.push(report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : 'Full list: report could not be written.')
   }
@@ -524,12 +556,16 @@ export async function phaseReviewCompleteHandler(
 
   const at = now.toISOString()
   const channel = result.channel ?? 'unknown'
-  const repo = openSweepRepo(projectRoot)
+  const present = sweep.files.filter((f) => f.kind !== 'deleted' && f.blob !== null).map((f) => f.path)
+  const currentIds = workingBlobIds(sweep.repo, present) ?? new Map<string, string>()
   const stamps: Array<{ path: string; entry: SweepLedgerEntry }> = []
   for (const f of sweep.files) {
-    if (f.blob === null || (f.kind !== 'clean' && f.kind !== 'unverified')) continue
-    const current = repo ? readWorkingBlobId(repo, f.path) : null
-    if (current !== f.blob) {
+    if (f.blob === null || f.kind === 'comments_present') continue
+    if (f.kind === 'deleted') {
+      stamps.push({ path: f.path, entry: sweepEntry(f.blob, 'clean', [], channel, input.spec_ref, at) })
+      continue
+    }
+    if (currentIds.get(f.path) !== f.blob) {
       summary.changed_during_dialog.push(f.path)
       continue
     }
@@ -566,7 +602,9 @@ export async function phaseReviewCompleteHandler(
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
     if (fresh.review_drift) {
       const stampedPaths = new Set(stamps.map((s) => s.path))
-      if (fresh.review_drift.paths.every((p) => stampedPaths.has(p))) delete next.review_drift
+      const covered = (p: string): boolean =>
+        stampedPaths.has(p) || !sweep.files.some((f) => f.path === p) && !existsSync(join(sweep.repo.toplevel, p))
+      if (fresh.review_drift.paths.every(covered)) delete next.review_drift
     }
     const w = writePhaseState(projectRoot, next)
     if (w.ok) summary.stamped = stamps.map((s) => s.path)
@@ -621,7 +659,7 @@ export async function phaseReviewCompleteHandler(
   output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
   if (staleness.head_stale === true) {
     output.hints.push(
-      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found — but any finding anchored to a line number was read against the earlier tree.`,
+      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That happens when non-code changes, or code an earlier REVIEW stamped, were committed while this review was open — any finding anchored to a line number was read against the earlier tree.`,
     )
   }
   return output

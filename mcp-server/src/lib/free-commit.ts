@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolveAuditPath } from './audit-log.js'
+import { decisionKey } from './comment-sweep/decision-key.js'
 import { evaluateMcpHealth, type McpHealth } from './health.js'
 import { tierRank, type FreeCommitBudget, type PhaseState } from './phase-scope.js'
 import type { StagedStats } from './git.js'
@@ -128,7 +129,7 @@ export function deriveAuditCeiling(
       typeof entry.path === 'string' &&
       typeof entry.blob === 'string'
     ) {
-      unverifiedDecisions.add(`${entry.path}\0${entry.blob}`)
+      unverifiedDecisions.add(decisionKey(entry.path, entry.blob))
     }
   }
 

@@ -23,7 +23,6 @@ import {
 } from '../lib/free-commit.js'
 import {
   checkStagedSweep,
-  knownPaths,
   ledgerEntries,
   stampLedger,
   sweepEntry,
@@ -920,7 +919,8 @@ export async function requestCommitHandler(
     const committed = await verifyCommittedSweep({
       projectRoot,
       options: { sqlDialect: config?.sql_dialect },
-      commit: commit.sha_after,
+      before: commit.sha_before,
+      after: commit.sha_after,
       checked: sweepAtCommit.checked,
     })
     const state = readPhaseState(projectRoot).state ?? {}
@@ -937,20 +937,20 @@ export async function requestCommitHandler(
       return { path: r.path, entry: sweepEntry(r.blob, 'clean', [], 'hook_rewrite', original?.spec_ref ?? 'hook_rewrite', at) }
     })
     const next: PhaseState = { ...state }
-    if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, knownPaths(projectRoot))
-    if (committed.drift) {
-      sweepDrift = committed.paths
-      next.review_drift = { sha: commit.sha_after, paths: committed.paths, at }
+    if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, null)
+    if (committed.drift.length > 0) {
+      sweepDrift = committed.drift
+      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at }
       appendAudit(
         projectRoot,
-        { event: 'review.commit_drift', tool: 'rsct_request_commit', paths: committed.paths, sha_after: commit.sha_after },
+        { event: 'review.commit_drift', tool: 'rsct_request_commit', paths: committed.drift, sha_after: committed.full_sha ?? commit.sha_after },
         config?.audit,
       )
       bookkeepingHints.push(
-        `⚠ the commit landed code no REVIEW covers (${committed.paths.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
+        `⚠ the commit landed code no REVIEW covers (${committed.drift.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
       )
     }
-    if (stamps.length > 0 || committed.drift) {
+    if (stamps.length > 0 || committed.drift.length > 0) {
       const w = writePhaseState(projectRoot, next)
       if (!w.ok) {
         bookkeepingHints.push(`⚠ could not record the post-commit sweep result in phase-state (${w.reason}).`)
@@ -978,7 +978,7 @@ export async function requestCommitHandler(
     const rearmed = rearmToken(reservedToken!, now)
     if (rearmed !== reservedToken!) {
       const w = writePhaseState(projectRoot, {
-        ...tokenCtx.baseState,
+        ...(readPhaseState(projectRoot).state ?? tokenCtx.baseState),
         plan_authorization: rearmed,
       })
       if (w.ok) {

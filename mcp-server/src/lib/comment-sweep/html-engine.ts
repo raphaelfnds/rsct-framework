@@ -58,8 +58,8 @@ function walk(node: Node, out: HtmlScan): void {
     return
   }
   if ((node.tagName === 'script' || node.tagName === 'style') && node.sourceCodeLocation) {
-    const text = node.childNodes?.find((c) => c.nodeName === '#text')
-    if (text?.sourceCodeLocation) {
+    for (const text of node.childNodes?.filter((c) => c.nodeName === '#text') ?? []) {
+      if (!text.sourceCodeLocation) continue
       out.inline.push({
         kind: node.tagName === 'style' ? 'style' : scriptKind(node),
         start: text.sourceCodeLocation.startOffset,

@@ -221,11 +221,17 @@ function safeGitRaw(cwd: string, args: string[]): string | null {
   }
 }
 
-export function safeGitBuffer(cwd: string, args: string[], input?: string): Buffer | null {
+export function safeGitBuffer(
+  cwd: string,
+  args: string[],
+  input?: string,
+  env?: Record<string, string>,
+): Buffer | null {
   try {
     return execFileSync('git', args, {
       cwd,
       input: input ?? '',
+      ...(env !== undefined && { env: { ...process.env, ...env } }),
       stdio: ['pipe', 'pipe', 'ignore'],
       maxBuffer: 64 * 1024 * 1024,
       timeout: GIT_READ_TIMEOUT_MS,

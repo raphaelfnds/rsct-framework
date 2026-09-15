@@ -28,7 +28,9 @@ developer can see what happened.
 Bounded fields and their ranges live in `mcp-server/src/lib/project-root.ts`:
 `plan_token_ttl_minutes` 5–480, `plan_token_max_actions` 1–100, `free_commit_max` 1–50,
 `free_commit_max_files` 1–500, `free_commit_max_lines` 1–100000,
-`plan_token_ttl_slide_minutes` 5–1440, `plan_token_ttl_abs_minutes` 5–10080.
+`plan_token_ttl_slide_minutes` 5–1440, `plan_token_ttl_abs_minutes` 5–10080. `sql_dialect`
+is a closed enum (`postgresql`, `mysql`, `none`): an unknown dialect would have the REVIEW
+sweep read SQL with the wrong comment syntax.
 
 The vectors this closes: audit off, skew set to infinity, `protected_branches: []`,
 `trust_allowed_for: *`.
@@ -43,8 +45,9 @@ learns only afterwards, and only if they think to look.
 ### #3 — A tier that skips phases needs evidence, not a declaration
 
 `trivial` and `small` skip V and plan tracking by design (never REVIEW, ADR-011). Because `spec_tier` is
-declared by the caller on every `_start` call, that declaration is refused unless an
-`rsct_classify_task` verdict is on record for the project.
+declared by the caller at `rsct_phase_code_start` (the only gate that still reads it —
+`rsct_phase_test_start` rejects it as a removed option), that declaration is refused unless
+an `rsct_classify_task` verdict is on record for the project.
 
 ---
 
@@ -193,7 +196,7 @@ pinned by a test — widening the enum by one known name must not become widenin
 **Context**: REVIEW was opt-in end to end. MEASURED on `ed648d9`: `rsct_request_commit`,
 `_push`, `_merge` and `lib/request-gate.ts` never read review state, and a trivial task
 never entered the phase machine, so no REVIEW ran unless the agent chose to and ADR-001 was
-enforced by nothing. Two earlier placements failed in the field: a hygiene ack at the
+enforced by nothing. The earlier placement failed in the field: a hygiene ack at the
 integration boundary (`pre_merge_ack`) passes without a file being opened, because it can
 only check that paths were claimed.
 **Alternatives considered**: (1) keep REVIEW between Code and Test — rejected: tests are
@@ -245,7 +248,23 @@ comment, on every authorization path, before any dialog and again right before `
   `review.complete` event, which four other phases share; per-finding `review.action`
   entries are written only after the gate approves.
 - HEAD moving between declaring findings and completing is marked (`head_stale`), never
-  rejected: committing the fixes a review found is the normal reason for it.
+  rejected: non-code changes, or code an earlier REVIEW stamped, can be committed while a
+  review is open.
+- The commit gate reads the whole repository index, not the `project_root` subdirectory —
+  `git commit` commits the whole index (measured: a subdirectory `project_root` let a staged
+  comment outside it through). Submodule gitlinks and symlinks are not content; a staged
+  deletion of a file whose HEAD version has comments needs a deletion stamp from a REVIEW.
+- Working-tree blob ids come from `git add` into a temporary copy of the index: measured,
+  `git hash-object --path` disagrees with the id `git add` stores for a file whose blob
+  already holds CRLF under `text=auto`, which made such files uncommittable forever.
+- Paths left as `review_drift` are re-checked by the next REVIEW even when unchanged, and a
+  comment-free file a hook adds or rewrites is re-stamped; the post-commit re-stamp never
+  prunes ledger entries, and the plan-token re-arm re-reads phase-state before writing
+  (measured: writing from the pre-commit snapshot erased a recorded drift).
+- The unverified-files dialog lists every file (no truncation) and appears only after the
+  approval itself validated; the approval dialog lists allowlisted comments added or
+  changed, and allowlist matching gives up on bodies over 400 characters (a mypy pattern
+  measured quadratic on agent-written input).
 
 ### ADR-012 — Comment engines per language (#62, 2.11.0)
 **Status**: active
@@ -500,8 +519,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### `tools/request-commit.ts`
 
-- Checks run before authorization when they can reject (message length #20, the REVIEW gate),
-  so a doomed commit never costs a dialog, a token action or free budget.
+- The message-length check (#20) and the REVIEW gate run before authorization, so a commit
+  they refuse never costs a dialog, a token action or free budget; the REVIEW gate runs again
+  right before the token or free-lane reserve. Branch protection, secrets and the contract
+  gate run after authorization.
 - `internal.*Override` seams (staged diff, paths, stats, git state, audit writer, approval
   recorder) are test-only; the MCP dispatch passes no `internal`, closing the fabricated-diff
   hole (A2).

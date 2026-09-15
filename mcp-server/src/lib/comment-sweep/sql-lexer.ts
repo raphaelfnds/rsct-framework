@@ -87,7 +87,7 @@ function lex(src: string, offset: number, dialect: SqlDialect, out: SqlCommentSp
       const inner = src.slice(body.innerStart, body.innerEnd)
       if (lexable) {
         lex(inner, offset + body.innerStart, dialect, out)
-      } else if (inner.includes('--') || inner.includes('/*')) {
+      } else if (/--|\/\*|#|\/\//.test(inner)) {
         throw new LexError()
       }
     }
