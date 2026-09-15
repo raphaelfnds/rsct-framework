@@ -13,15 +13,10 @@ import {
 } from './lib/block-harness.js'
 import { STAMP_RE, readScriptRegistration } from '../../src/lib/version-drift.js'
 
-// T0.c — curated smoke for 3 self-contained, high-risk prompt mutation blocks
-// (gitignore backfill, .rsct.json secrets merge, .mcp.json scrub). Each block is
-// extracted from the real prompt by anchor and run against a fixture in a temp
-// dir; assertions are on file state (see spec_t0c §9 V findings).
-
 const ROOT = repoRoot(__dirname)
 const BASH = bashAvailable()
 const NODE = nodeAvailable()
-const STRICT = !!process.env.RSCT_REQUIRE_BASH // CI strict mode (anti-silent-skip)
+const STRICT = !!process.env.RSCT_REQUIRE_BASH
 
 const dirs: string[] = []
 function run(opts: Parameters<typeof runBlock>[1]): RunBlockResult {
@@ -31,19 +26,14 @@ function run(opts: Parameters<typeof runBlock>[1]): RunBlockResult {
 }
 afterEach(() => {
   while (dirs.length) {
-    try { rmSync(dirs.pop()!, { recursive: true, force: true }) } catch { /* best effort */ }
+    try { rmSync(dirs.pop()!, { recursive: true, force: true }) } catch { }
   }
 })
 
 const countBegin = (s: string) => (s.match(/RSCT-BEGIN/g) ?? []).length
 
-// True iff `needle` appears on its own line strictly between the RSCT-BEGIN and
-// RSCT-END markers (proves a backfilled line lands INSIDE the block, not after END).
 const inMarkerRange = (s: string, needle: string) => markerRange(s).includes(needle)
 
-// The non-empty, trimmed lines strictly between RSCT-BEGIN and RSCT-END. Returned
-// rather than probed one needle at a time so a case can assert the EXACT set a
-// block emits — "X is absent" is satisfied by a typo, "the set is exactly Y" is not.
 const markerRange = (s: string): string[] => {
   const lines = s.replace(/\r/g, '').split('\n')
   const begin = lines.findIndex((l) => l.includes('RSCT-BEGIN'))
@@ -63,11 +53,10 @@ describe('block-harness self-test + node policy', () => {
   })
   it('node policy throws when required but absent; honours live policy', () => {
     expect(() => assertNodePolicy(true, false)).toThrow(/node is required/)
-    expect(() => assertNodePolicy(STRICT, NODE)).not.toThrow() // CI has node
+    expect(() => assertNodePolicy(STRICT, NODE)).not.toThrow()
   })
 })
 
-// --- Block 1: gitignore backfill (01-setup 4.4b) — pure bash ------------------
 const GI_ANCHOR = 'CHECKPOINT: Phase 4.4b executing'
 
 describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
@@ -101,12 +90,10 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect(gi).toContain('spec_*.md')
     expect(gi).toContain('.rsct/phase-state.json')
     expect(gi).toContain('.rsct/phase-state.lock')
-    expect(countBegin(gi)).toBe(1) // no duplicate block
+    expect(countBegin(gi)).toBe(1)
   }, 60_000)
 
   it('backfill — adds /rsct-framework/ to a pre-1.1.x block, inside the marker range', () => {
-    // Old block that already has phase-state.lock (the anchor) but lacks the
-    // framework-clone line; the new clause must backfill it INSIDE the markers.
     const old = [
       'node_modules/',
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
@@ -125,15 +112,12 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const gi = readIn(r, '.gitignore')
     expect(gi).toContain('/rsct-framework/')
     expect(inMarkerRange(gi, '/rsct-framework/'), 'must land INSIDE the marker range').toBe(true)
-    expect(countBegin(gi)).toBe(1) // no duplicate block
-    expect(gi).toContain('node_modules/') // user content preserved
+    expect(countBegin(gi)).toBe(1)
+    expect(gi).toContain('node_modules/')
     expect(gi).toContain('*.log')
   }, 60_000)
 
   it('backfill — chains lock + /rsct-framework/ on a block missing both', () => {
-    // Block predates BOTH the CAP-25 lock line and the framework-clone line.
-    // The CAP-25 clause inserts the lock anchor first; the framework clause then
-    // anchors on it. Validates the sequential-clause ordering (V FV1 / CASE 2).
     const old = [
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
       'plan_*.md',
@@ -157,36 +141,15 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect((gi.match(/\/rsct-framework\//g) ?? []).length).toBe(1)
   }, 60_000)
 
-  // #73 — Phase 4.V.c2 now writes the project's MCP approval into
-  // .claude/settings.local.json. That file is per-developer, so it must be
-  // ignored: option B was chosen over splicing the host's global config
-  // precisely because it does NOT dirty the developer's repository, and an
-  // untracked file showing up in `git status` on the first project-scope run
-  // would give that argument away.
   it('#73 fresh — the block ignores .claude/settings.local.json', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR })
     const gi = readIn(r, '.gitignore')
     expect(inMarkerRange(gi, '.claude/settings.local.json')).toBe(true)
-    // The SHARED settings file carries the RSCT hooks and stays trackable —
-    // ignoring the whole .claude/ directory would silently drop them.
-    //
-    // This was `expect(gi).not.toContain('.claude/settings.json\n')`, which is
-    // very nearly unfalsifiable: no edit to this block plausibly emits that
-    // exact string, and — worse — it does NOT catch the hazard the sentence
-    // above names. A bare `.claude/` line ignores settings.json without ever
-    // spelling it, and would sail straight through. Assert the exact set of
-    // .claude entries instead; then `.claude/`, `.claude/settings.json` and
-    // `.claude/*` are all red, and so is dropping the local one.
     expect(markerRange(gi).filter((l) => l.startsWith('.claude')), gi)
       .toEqual(['.claude/settings.local.json'])
   }, 60_000)
 
   it('#73 backfill — adds it to a block written before this release', () => {
-    // Every project set up before #73 has a block ending at /rsct-framework/.
-    // Without the backfill those repos get the untracked file on their next
-    // project-scope run. Mutation: delete the #73 backfill clause — this goes
-    // red while the "fresh" case above stays green, which is the whole point of
-    // testing the two paths separately.
     const old = [
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
       'plan_*.md',
@@ -205,18 +168,11 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect(r.out, r.out).toMatch(/#73 backfill: added \.claude\/settings\.local\.json/)
     expect(inMarkerRange(gi, '.claude/settings.local.json')).toBe(true)
     expect(countBegin(gi)).toBe(1)
-    // The lines it anchors on must survive the awk splice untouched.
     expect(inMarkerRange(gi, '/rsct-framework/')).toBe(true)
     expect(inMarkerRange(gi, 'plan_*.md')).toBe(true)
   }, 60_000)
 
   it('#73 backfill — anchors INSIDE the block when the dev wrote /rsct-framework/ themselves', () => {
-    // `/rsct-framework/` is the one anchor in this block that developers are
-    // actively told to add by hand (README, and the block's own comment). With
-    // an unscoped anchor and a whole-file guard, a dev who wrote it in their own
-    // section got the line spliced THERE — success reported, marker range wrong,
-    // and /rsct-uninstall (which excises only between the markers) could never
-    // remove it. Mutation: drop the -v b/-v e block scoping from the awk.
     const old = [
       '# my own rules',
       '/rsct-framework/',
@@ -237,20 +193,11 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
     const gi = readIn(r, '.gitignore')
     expect(inMarkerRange(gi, '.claude/settings.local.json'), gi).toBe(true)
-    // Exactly once — a duplicated anchor must not produce a duplicated insert.
     expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length, gi).toBe(1)
-    // The dev's own section is untouched.
     expect(gi.split('\n').slice(0, 4)).toEqual(['# my own rules', '/rsct-framework/', 'node_modules/', ''])
   }, 60_000)
 
   it('#73 backfill — does not duplicate a line the dev already ignores themselves', () => {
-    // The guard is WHOLE-FILE while the splice is block-scoped, and the two
-    // scopes are not interchangeable. With the guard also block-scoped (its
-    // first shape), a dev who already ignores this path in their own section
-    // got a SECOND copy inside the RSCT block. git dedups it, so nothing breaks
-    // and nothing is visible at runtime — a tracked file mutated to no effect
-    // by the one clause whose whole purpose is avoiding git churn.
-    // Mutation: re-scope the guard to the block.
     const old = [
       '# my own rules',
       '.claude/settings.local.json',
@@ -271,17 +218,12 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': old } })
     const gi = readIn(r, '.gitignore')
     expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length, gi).toBe(1)
-    // It stays the dev's line, in the dev's section — we neither copy nor move it.
     expect(gi.split('\n').slice(0, 4)).toEqual(['# my own rules', '.claude/settings.local.json', 'node_modules/', ''])
     expect(inMarkerRange(gi, '.claude/settings.local.json'), gi).toBe(false)
-    // And no success line for an insert that correctly never happened.
     expect(r.out, r.out).not.toMatch(/#73 backfill: added/)
   }, 60_000)
 
   it('#73 backfill — idempotent, and survives a CRLF .gitignore', () => {
-    // The awk clause anchors on /^\/rsct-framework\/$/, so a CRLF file would
-    // leave "/rsct-framework/\r" and the `$` would never match — the line would
-    // silently never be added (anti-pattern #4). `tr -d '\r'` guards it.
     const old = [
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
       'plan_*.md',
@@ -301,17 +243,11 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect((gi.match(/\.claude\/settings\.local\.json/g) ?? []).length).toBe(1)
   }, 60_000)
 
-  // #51 — the block used to instruct `git add --force`, the one action that defeats
-  // the ignore rule it sits under. Fresh installs must not emit it, and existing
-  // blocks (write-once: the body is never rewritten) get a targeted line removal.
   const FORCE_COMMENT = [
     '# Use `git add --force plan_<slug>.md progress_<slug>.md` (or spec_*) to',
     '# commit on feature branches. Verify they are absent before any merge to',
     '# main/test.',
   ]
-  // The line the block opens with. It carries the invariant the cleanup relies on
-  // ("removal only, nothing inserted"), so it must be in the fixture for the
-  // assertion that it survives to mean anything.
   const INVARIANT_LINE = '# RSCT plan tracking — branch-local files, NEVER track on main/test'
   const blockWithComment = (comment: string[], eol = '\n') => [
     'node_modules/',
@@ -345,10 +281,6 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const gi = readIn(r, '.gitignore')
     expect(gi).not.toContain('--force')
     for (const line of FORCE_COMMENT) expect(gi, `still present: ${line}`).not.toContain(line)
-    // Removal only — the invariant line, the ignore patterns and the dev's own
-    // content all survive. inMarkerRange, NOT toContain, for the patterns: the alias
-    // comment contains the substring `plan_*.md`, so toContain would pass even if
-    // the standalone ignore line had been deleted.
     expect(gi).toContain(INVARIANT_LINE)
     expect(inMarkerRange(gi, 'plan_*.md'), 'the ignore pattern must survive').toBe(true)
     expect(inMarkerRange(gi, 'progress_*.md')).toBe(true)
@@ -357,9 +289,6 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     expect(countBegin(gi)).toBe(1)
   }, 60_000)
 
-  // Editing ANY of the three lines must decline the WHOLE removal. Anchoring on the
-  // first line alone would delete the two the dev did not touch and leave the one
-  // they did as an orphaned sentence fragment.
   for (const idx of [0, 1, 2]) {
     it(`cleanup — declines when the dev edited comment line ${idx + 1} (#51)`, () => {
       const edited = FORCE_COMMENT.map((l, i) =>
@@ -376,8 +305,6 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
   }
 
   it('cleanup — declines when the block has no END marker (#51)', () => {
-    // Without END, `inblk` never clears: an unguarded removal would run to EOF and
-    // could take an identical line out of the dev's own content below the block.
     const seed = [
       '# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b',
       ...FORCE_COMMENT,
@@ -397,8 +324,6 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
   }, 60_000)
 
   it('cleanup — works on a CRLF .gitignore (#51)', () => {
-    // Without `tr -d '\r'` the exact-string match never fires on a Windows project
-    // with core.autocrlf=true, and the stale advice would persist in silence.
     const r = run({
       promptBasename: '01-setup.md',
       anchor: GI_ANCHOR,
@@ -427,13 +352,11 @@ describe.skipIf(!BASH)('block: gitignore backfill (01-setup 4.4b)', () => {
     const legacy = ['node_modules/', 'plan_*.md', 'progress_*.md', ''].join('\n')
     const r = run({ promptBasename: '01-setup.md', anchor: GI_ANCHOR, seedFiles: { '.gitignore': legacy } })
     expect(r.out).toMatch(/pre-marker plan-tracking block/)
-    expect(countBegin(readIn(r, '.gitignore'))).toBe(0) // no marker block injected
+    expect(countBegin(readIn(r, '.gitignore'))).toBe(0)
   }, 60_000)
 })
 
-// --- Block 2: .rsct.json secrets_extra_patterns merge (01-setup 4.4) ----------
 const SEC_ANCHOR = 'CHECKPOINT: Phase 4.4 executing canonical text-based secrets'
-// Hand-formatted seed: the single-line "app" object proves no whole-file reformat.
 const RSCT_JSON = `{
   "rsct_version": "1.0.0",
   "app": { "name": "demo", "org": "acme" },
@@ -500,7 +423,6 @@ describe.skipIf(!BASH || !NODE)('block: .rsct.json secrets_extra_patterns merge 
   }, 60_000)
 })
 
-// --- Block 3: .mcp.json rsct scrub (03-uninstall 4.V.a2) ----------------------
 const MCP_ANCHOR = 'CHECKPOINT: Phase 4.V.a2'
 const mcpServersOf = (r: RunBlockResult): Record<string, unknown> =>
   JSON.parse(readIn(r, '.mcp.json')).mcpServers ?? {}
@@ -538,14 +460,10 @@ describe.skipIf(!BASH || !NODE)('block: .mcp.json rsct scrub (03-uninstall 4.V.a
   }, 60_000)
 })
 
-// --- Block 4 (T1.b): universe app registration (01-setup 4.8) ------------------
 const REG_ANCHOR = 'CHECKPOINT: Phase 4.8'
 const APP_TEMPLATE = readFileSync(
   resolve(ROOT, 'universe-templates', 'applications', '_app.md.template'), 'utf8',
 )
-// Project .rsct.json: universe.local is a relative SUBDIR (resolves to native path
-// cross-OS). HOME defaults to the temp dir (hermetic), so seed the app template under
-// .rsct/universe-templates/ — exactly where the block reads it ($HOME/.rsct/...).
 const PROJECT_RSCT = JSON.stringify(
   { rsct_version: '1.0.0', app: { name: 'demo-app', org: 'acme' }, universe: { name: 'acme-universe', local: 'acme-universe' } },
   null, 2,
@@ -565,8 +483,8 @@ describe.skipIf(!BASH || !NODE)('block: universe app registration (01-setup 4.8 
   it('registers: renders the app README and indexes it in registered_apps[]', () => {
     const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: baseSeed() })
     const readme = readIn(r, 'acme-universe/applications/demo-app/README.md')
-    expect(readme).toContain('# demo-app') // [APP_NAME] substituted
-    expect(readme).toContain('acme') // [ORG_SLUG] substituted (Repository line)
+    expect(readme).toContain('# demo-app')
+    expect(readme).toContain('acme')
     expect(appsOf(r)).toContain('demo-app')
   }, 60_000)
 
@@ -580,7 +498,7 @@ describe.skipIf(!BASH || !NODE)('block: universe app registration (01-setup 4.8 
     const r = run({ promptBasename: '01-setup.md', anchor: REG_ANCHOR, seedFiles: seed })
     expect(readIn(r, 'acme-universe/applications/demo-app/README.md')).toBe('# CUSTOM dev content\n')
     expect(r.out).toMatch(/already exists/)
-    expect(appsOf(r)).toContain('demo-app') // index reconciled
+    expect(appsOf(r)).toContain('demo-app')
   }, 60_000)
 
   it('no universe configured → safe no-op', () => {
@@ -598,17 +516,12 @@ describe.skipIf(!BASH || !NODE)('block: universe app registration (01-setup 4.8 
   }, 60_000)
 
   it('never runs git against the universe (hands-off — §3.5)', () => {
-    // Structural guarantee: the block issues NO git command of any kind.
     const block = extractBlockByAnchor(ROOT, '01-setup.md', REG_ANCHOR)
     expect(block.code).not.toMatch(/\bgit\s/)
   })
 })
 
-// --- Block 4: display-version stamp (01-setup 4.4) — reads $HOME/.rsct/VERSION ----
-// HOME is hermetic (= temp dir), so seeding '.rsct/VERSION' provides the release
-// version source; '.rsct.json' / 'CLAUDE.md' are seeded into the same dir ($(pwd)).
 const VER_ANCHOR = 'CHECKPOINT: Phase 4.4 executing canonical display-version stamp'
-// Hand-formatted .rsct.json (single-line app object) → proves no whole-file reformat.
 const VER_RSCT_JSON = [
   '{',
   '  "rsct_version": "1.0.0",',
@@ -656,8 +569,8 @@ describe.skipIf(!BASH)('block: display-version stamp (01-setup 4.4)', () => {
     const cm = readIn(r, 'CLAUDE.md')
     expect(cm).toContain('<!-- RSCT_APP: demo | updated: 2026-06-12 -->')
     expect(cm).toContain('<!-- RSCT_UNIVERSE: bluelt-universe | updated: 2026-06-12 -->')
-    expect(cm).toContain('v=1.0.0') // marker schema id stays
-    expect(cm).not.toContain('v=1.1.0') // no marker drift
+    expect(cm).toContain('v=1.0.0')
+    expect(cm).not.toContain('v=1.1.0')
   }, 60_000)
 
   it('preserves the other .rsct.json fields (no whole-file reformat)', () => {
@@ -698,9 +611,6 @@ describe.skipIf(!BASH)('block: display-version stamp (01-setup 4.4)', () => {
   }, 60_000)
 })
 
-// --- Block 5: universe local-path probe w/ org→name inference (01-setup 1.9, T1.d) --
-// HOME is hermetic (= temp dir); the block probes $HOME/projetos/<name>-universe etc.
-// ORG_SLUG is injected via preamble (the shipped block uses `: "${ORG_SLUG:=…}"`).
 const UNI_ANCHOR = 'Phase 1.9 executing canonical universe local-path probe'
 const UNI_JSON = '{"name":"x","registered_apps":[]}\n'
 
@@ -747,12 +657,6 @@ describe.skipIf(!BASH)('block: universe discovery probe (01-setup 1.9 — T1.d)'
   }, 60_000)
 })
 
-// --- Block 6: update check, informational (01-setup 4.9 — #38) ---------------
-// Since the check consults by default, Phase 4.9 no longer asks and no longer
-// writes: it only reports the posture. The block must therefore touch NO file —
-// reading the cache from bash was the part that could not be made portable (BSD
-// grep reads `\s` as a literal `s`, and grep is line-oriented while the value may
-// sit on the next line). rsct_status owns state reporting.
 const CONSENT_ANCHOR = 'Phase 4.9 executing canonical update-check notice'
 const CC_FILE = '.rsct/update-check.json'
 
@@ -780,7 +684,6 @@ describe.skipIf(!BASH)('block: update check informational (01-setup 4.9 — #38)
   }, 60_000)
 })
 
-// --- Block 7: topology persistence (01-setup 4.10 — T2) ----------------------
 const TOPO_ANCHOR = 'Phase 4.10 executing canonical topology persistence'
 const TOPO_RSCT_JSON =
   JSON.stringify(
@@ -799,7 +702,7 @@ describe.skipIf(!BASH)('block: topology persistence (01-setup 4.10 — T2)', () 
     })
     const o = JSON.parse(readIn(r, '.rsct.json'))
     expect(o.topology.mode).toBe('multi-repo')
-    expect(o.install.mode).toBe('CREATE') // sibling "mode" key NOT clobbered
+    expect(o.install.mode).toBe('CREATE')
     expect(o.rsct_version).toBe('1.0.0')
   }, 60_000)
 
@@ -865,7 +768,6 @@ describe.skipIf(!BASH)('block: topology persistence (01-setup 4.10 — T2)', () 
   }, 60_000)
 })
 
-// --- Block: create-universe decline ask-once (01-setup Phase 3 — DX-1b) ---------
 const DECLINE_ANCHOR = 'CHECKPOINT: Phase 3 recording create-universe decline'
 const RSCT_WITH_INSTALL =
   JSON.stringify(
@@ -910,7 +812,6 @@ describe.skipIf(!BASH || !NODE)('block: create-universe decline ask-once (01-set
   }, 60_000)
 })
 
-// --- Block: contract additive-splice (01-setup Phase 4.11 — DX-1b) --------------
 const CONTRACT_ANCHOR = 'CHECKPOINT: Phase 4.11 executing contract additive-splice'
 const CONTRACTS_EMPTY =
   JSON.stringify(
@@ -956,7 +857,7 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
     expect(o.contracts[0].surface).toEqual(['openapi/payments.yaml', 'src/api/**'])
     expect(o.contracts[0].consumers).toEqual(['web', 'reporting'])
     expect(o.contracts[0].description).toBe('Payments REST API')
-    expect(o._example.id).toBe('billing-api') // decorative keys preserved
+    expect(o._example.id).toBe('billing-api')
   }, 60_000)
 
   it('populated array → entry appended; both present; valid JSON', () => {
@@ -991,7 +892,7 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
     })
     const o = JSON.parse(readIn(r, 'contracts.json'))
     expect(o.contracts.length).toBe(1)
-    expect(o.contracts[0].surface).toEqual(['openapi/orders.yaml']) // untouched
+    expect(o.contracts[0].surface).toEqual(['openapi/orders.yaml'])
     expect(r.out).toMatch(/already has id=orders-api/)
   }, 60_000)
 
@@ -1047,7 +948,7 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
       },
     })
     const o = JSON.parse(readIn(r, 'contracts.json'))
-    expect(o.contracts.length).toBe(1) // matched despite tab-around-colon → no dup
+    expect(o.contracts.length).toBe(1)
   }, 60_000)
 
   it('id check is field-scoped — a new id equal to an existing entry producer is still added', () => {
@@ -1065,7 +966,7 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
       },
     })
     const o = JSON.parse(readIn(r, 'contracts.json'))
-    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['web', 'web-api']) // producer value never false-matched as id
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['web', 'web-api'])
   }, 60_000)
 
   it('id check is value-scoped — a new id matching text inside a description is still added', () => {
@@ -1083,7 +984,7 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
       },
     })
     const o = JSON.parse(readIn(r, 'contracts.json'))
-    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['a-api', 'ghost']) // no false-match inside description
+    expect(o.contracts.map((c: { id: string }) => c.id).sort()).toEqual(['a-api', 'ghost'])
   }, 60_000)
 
   it('inline (single-line) empty array → entry added inline, valid JSON', () => {
@@ -1134,20 +1035,10 @@ describe.skipIf(!BASH || !NODE)('block: contract additive-splice (01-setup Phase
         'scratch/consumers/1': 'y',
       },
     })
-    // The WARN goes to stderr (success exit 0); the load-bearing guarantee is that the
-    // malformed file is left byte-for-byte untouched (no corruption / partial splice).
     expect(readIn(r, 'contracts.json')).toBe(broken)
   }, 60_000)
 })
 
-// ---------------------------------------------------------------------------
-// Phase 4.V.b / 4.V.d — the version stamp written onto line 2 of every script
-// installed under `.rsct/scripts/`. That line is a FORMAT CONTRACT: bash writes
-// it here, and `lib/version-drift.ts` reads it (issue #16). Nothing else pins
-// it, so an edit to either `echo` would break the reader with no failing test.
-// Both blocks are wrapped in `if [ -n "$SANITIZER_SRC" ]` and read
-// `$RSCT_MCP_VERSION` from block 4.V.a, so the preamble must supply both or the
-// block silently no-ops and the assertions prove nothing.
 const SANITIZER_ANCHOR = 'CHECKPOINT: Phase 4.V.b executing canonical sanitizer script copy'
 const GUARD_ANCHOR = 'CHECKPOINT: Phase 4.V.d executing canonical edit-scope guard install'
 
@@ -1170,8 +1061,6 @@ describe.skipIf(!BASH)('block: script version stamp (01-setup 4.V.b)', () => {
     })
     expect(lineOf(r, TARGET, 0)).toBe('#!/usr/bin/env node')
     expect(lineOf(r, TARGET, 1)).toBe('// rsct-mcp v=9.9.9 — installed by /rsct-setup')
-    // The reader drops lines 1-2 and compares the rest against the shipped body,
-    // so the source body must survive verbatim from line 3 on.
     expect(lineOf(r, TARGET, 2)).toBe("import { readFileSync } from 'node:fs'")
   }, 60_000)
 
@@ -1181,8 +1070,6 @@ describe.skipIf(!BASH)('block: script version stamp (01-setup 4.V.b)', () => {
       preamble: stampPreamble('2.3.0'),
       seedFiles: { 'fake-dist/sanitize-permissions.js': SRC_FILE },
     })
-    // The REAL pattern, imported — a local copy would stay green if the reader's
-    // pattern changed, which is exactly what this test exists to prevent.
     const m = STAMP_RE.exec(lineOf(r, TARGET, 1))
     expect(m?.[1]).toBe('2.3.0')
   }, 60_000)
@@ -1215,18 +1102,6 @@ describe.skipIf(!BASH || !NODE)('block: guard version stamp (01-setup 4.V.d)', (
   }, 60_000)
 })
 
-// ---------------------------------------------------------------------------
-// Phase 4.V.c / 4.V.d install + 03-uninstall 4.V.a / 4.V.a1 scrub — the HOOK
-// REGISTRATION contract (issue #24). Bash writes the entry, `lib/version-drift.ts`
-// reads it back, and the two agree on four separate things: the marker substring,
-// the event name, the `hooks.<Event>[].hooks[].command` nesting, and the writer's
-// serialization. Nothing else pins any of them — the TS side would otherwise hold
-// a fourth private copy of a contract that already lives in two prompts, free to
-// desynchronize with a green suite.
-//
-// So these tests never build a settings object: they run the REAL block and hand
-// the file bash produced to the REAL predicate. Same discipline as STAMP_RE
-// above, and the reason the content axis is tested against `dist/scripts/`.
 const SESSION_HOOK_ANCHOR =
   'CHECKPOINT: Phase 4.V.c executing canonical structured-merge SessionStart hook install'
 const SESSION_SCRUB_ANCHOR =
@@ -1247,7 +1122,6 @@ describe.skipIf(!BASH || !NODE)('block: hook registration round-trip (#24)', () 
       preamble: stampPreamble('2.3.0'),
       seedFiles: HOOK_SEED,
     })
-    // The REAL reader, against the REAL file bash just wrote.
     expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('registered')
   }, 60_000)
 
@@ -1261,11 +1135,6 @@ describe.skipIf(!BASH || !NODE)('block: hook registration round-trip (#24)', () 
   }, 60_000)
 
   it('re-running 4.V.c does not duplicate the entry', () => {
-    // The idempotency key is the MARKER, not the command string. Change the
-    // marker in the prompt without changing HOOK_CMD and every other test here
-    // still passes — the written command is unchanged, so the reader still says
-    // `registered` — while each /rsct-setup appends another SessionStart entry.
-    // Only a second run catches that.
     const r = run({
       promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
       preamble: stampPreamble('2.3.0'),
@@ -1296,20 +1165,15 @@ describe.skipIf(!BASH || !NODE)('block: hook registration round-trip (#24)', () 
   }, 90_000)
 
   it('an install that never ran reads as unregistered, not as a parse accident', () => {
-    // Guards the pair above: if the predicate returned 'registered' for any
-    // parseable file, both would pass while proving nothing.
     const r = run({
       promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
-      preamble: 'SANITIZER_SRC=""\nRSCT_MCP_VERSION=2.3.0', // block is gated on SANITIZER_SRC
+      preamble: 'SANITIZER_SRC=""\nRSCT_MCP_VERSION=2.3.0',
       seedFiles: HOOK_SEED,
     })
     expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('unregistered')
   }, 60_000)
 
   it('the uninstall scrub flips both hooks back to unregistered', () => {
-    // Install both, then scrub both, in ONE temp dir — the full lifecycle across
-    // all three surfaces. `runs` cannot express this (different blocks), so the
-    // dir is threaded manually via the harness's cwd semantics.
     const installed = run({
       promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
       preamble: stampPreamble('2.3.0'),
@@ -1331,34 +1195,17 @@ describe.skipIf(!BASH || !NODE)('block: hook registration round-trip (#24)', () 
       seedFiles: { '.claude/settings.json': both },
     })
     expect(readScriptRegistration(scrubbed.dir, 'sanitize-permissions.js')).toBe('unregistered')
-    // The guard entry must SURVIVE the SessionStart scrub — the two are scrubbed
-    // by separate blocks, and a scrub that took both would be a silent overreach.
     expect(readScriptRegistration(scrubbed.dir, 'edit-scope-guard.js')).toBe('registered')
 
     const guardScrubbed = run({
       promptBasename: '03-uninstall.md', anchor: GUARD_SCRUB_ANCHOR,
       seedFiles: { '.claude/settings.json': readIn(scrubbed, '.claude/settings.json') },
     })
-    // Scrubbing the LAST RSCT hook empties the document, so the uninstall deletes
-    // the file outright (03-uninstall.md 4.V.a, CAP-50) rather than leaving an
-    // orphaned `{}`. No settings file means no hook — evidence, not a gap — so
-    // the verdict is `unregistered`.
-    //
-    // That does NOT make a fully uninstalled project shout: 4.V.b runs
-    // `rm -rf .rsct/scripts` and 4.6 deletes `.rsct.json`, so `rsct_installed`
-    // is false and all three call sites skip the drift check entirely.
     expect(hasIn(guardScrubbed, '.claude/settings.json')).toBe(false)
     expect(readScriptRegistration(guardScrubbed.dir, 'edit-scope-guard.js')).toBe('unregistered')
   }, 120_000)
 })
 
-// ---------------------------------------------------------------------------
-// Phase 3 cap resolution + Phase 4.4 backfill (issue #26). The cap reaches
-// `.rsct.json` by two independent paths — the CREATE render's `sed` and the
-// UPDATE text-splice — and only the splice is exercised here plus in the render
-// test above. Both must emit a BARE JSON NUMBER: a quoted "15" fails
-// `z.number()` and `.catch(undefined)` swallows it silently, discarding the
-// dev's answer with no error anywhere.
 const CAP_RESOLVE_ANCHOR = 'CHECKPOINT: Phase 3 resolving commit-message cap'
 const CAP_BACKFILL_ANCHOR = 'CHECKPOINT: Phase 4.4 executing canonical commit-message-cap backfill'
 
@@ -1391,8 +1238,6 @@ describe.skipIf(!BASH)('block: commit-message cap resolution (01-setup Phase 3, 
   })
 
   it('degrades a non-numeric answer to the default instead of emitting it', () => {
-    // The whole point: a bare `,` or `abc` reaching the render produces invalid
-    // JSON and aborts the install at the structural check.
     for (const bad of ['abc', '1.5', '-3', '12x', '" "']) {
       expect(resolved(`RSCT_JSON_COMMIT_MAX_LINES=""\nCOMMIT_MSG_MAX_LINES=${bad}`)).toBe('15')
     }
@@ -1413,8 +1258,6 @@ describe.skipIf(!BASH || !NODE)('block: commit-message cap backfill (01-setup 4.
     })
     const raw = readIn(r, '.rsct.json')
     expect(capOf(raw)).toBe(40)
-    // A NUMBER, not a string — the schema is z.number() and a typo would be
-    // swallowed by .catch(undefined), discarding the answer silently.
     expect(typeof capOf(raw)).toBe('number')
     expect(raw).toContain('"commit_message_max_lines": 40')
   })
@@ -1453,8 +1296,6 @@ describe.skipIf(!BASH || !NODE)('block: commit-message cap backfill (01-setup 4.
     })
     const raw = readIn(r, '.rsct.json')
     expect(capOf(raw)).toBe(20)
-    // The file was CRLF, so the injected separator must be too — a lone \n here
-    // is the kind of mixed-ending drift that shows up as a whole-file diff later.
     expect(raw).toContain('"commit_message_max_lines": 20,\r\n')
   })
 
@@ -1464,15 +1305,12 @@ describe.skipIf(!BASH || !NODE)('block: commit-message cap backfill (01-setup 4.
       preamble: 'COMMIT_MSG_MAX_LINES=15',
       seedFiles: { '.rsct.json': '{}\n' },
     })
-    // No trailing comma before `}` — the empty-object guard.
     expect(capOf(readIn(r, '.rsct.json'))).toBe(15)
   })
 })
 
 describe.skipIf(!BASH || !NODE)('block: .rsct.json CREATE render carries the cap (01-setup 4.4, #26)', () => {
   it('renders the REAL template into valid JSON with a bare-number cap', () => {
-    // The real template, not a copy — a copy would stay green if the template
-    // gained a quoted placeholder, which is the exact failure this guards.
     const template = readFileSync(resolve(ROOT, 'doc-templates/rsct.json.template'), 'utf8')
     const r = run({
       promptBasename: '01-setup.md',
@@ -1494,24 +1332,10 @@ describe.skipIf(!BASH || !NODE)('block: .rsct.json CREATE render carries the cap
     expect(parsed.commit_message_max_lines).toBe(40)
     expect(typeof parsed.commit_message_max_lines).toBe('number')
     expect(raw).not.toContain('"commit_message_max_lines": "')
-    // The block's own placeholder sweep must have passed — no token survives.
     expect(raw).not.toContain('[COMMIT_MSG_MAX_LINES]')
   }, 60_000)
 })
 
-// ---------------------------------------------------------------------------
-// UTF-8 BOM tolerance across the prompt-side parse sites (issue #12).
-//
-// A BOM (Notepad, PowerShell 5.1 `Out-File -Encoding utf8`) survives
-// `readFileSync(_, 'utf8')` and makes `JSON.parse` throw. Before #12 that meant:
-// 4.V.c/4.V.d printed "malformed JSON" and EXITED 1 — the hooks were never
-// registered; 4.V.c2 aborted the install mid-run; and every uninstall scrub
-// silently skipped, so the uninstall claimed to remove entries it never touched.
-//
-// These run the REAL blocks. The guard is written as `charCodeAt(0) === 65279`
-// precisely because a `﻿` escape or a regex literal has to survive the
-// markdown-fence → bash-single-quote → MSYS chain, and that chain has eaten
-// backslashes in this repo before (CLAUDE.md, MED-16 / CAP-20).
 const BOM = '﻿'
 
 describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
@@ -1522,7 +1346,6 @@ describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
       seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
     })
     expect(readScriptRegistration(r.dir, 'sanitize-permissions.js')).toBe('registered')
-    // And the rewrite drops the BOM: tolerate on read, never re-emit.
     expect(readIn(r, '.claude/settings.json').charCodeAt(0)).not.toBe(0xfeff)
   }, 60_000)
 
@@ -1541,8 +1364,6 @@ describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
       preamble: stampPreamble('2.3.0'),
       seedFiles: { ...HOOK_SEED, '.claude/settings.json': BOM + '{}\n' },
     })
-    // Re-introduce a BOM on the produced file: the dev may re-save it at any
-    // point, and the scrub must not silently no-op on that.
     const scrubbed = run({
       promptBasename: '03-uninstall.md', anchor: SESSION_SCRUB_ANCHOR,
       seedFiles: { '.claude/settings.json': BOM + readIn(installed, '.claude/settings.json') },
@@ -1552,9 +1373,6 @@ describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
   }, 90_000)
 
   it('the Phase 1.9 detector reports a hook count, not SETTINGS_MALFORMED', () => {
-    // This block only REPORTS — it feeds the uninstall report. Before #12 a BOM
-    // made it claim the file was broken, so the report told the dev to fix JSON
-    // that was fine.
     const installed = run({
       promptBasename: '01-setup.md', anchor: SESSION_HOOK_ANCHOR,
       preamble: stampPreamble('2.3.0'),
@@ -1570,19 +1388,9 @@ describe.skipIf(!BASH || !NODE)('block: UTF-8 BOM tolerance (#12)', () => {
   }, 90_000)
 })
 
-// --- Block: project MCP registration + approval (01-setup 4.V.c2) — #73 ------
-//
-// A project .mcp.json is inert until the project has approved it: measured,
-// `claude mcp list` reports "Pending approval" and the server never spawns.
-// #73 makes 4.V.c2 write that approval into <project>/.claude/settings.local.json
-// — the host's OWN location, which it migrates the legacy global key into and
-// then deletes. Writing the global config instead would be undone at the next
-// host boot and would materialise this very file inside the dev's repo anyway.
 const MCPC2_ANCHOR = 'CHECKPOINT: Phase 4.V.c2 evaluating project-scope MCP registration'
 
 describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #73)', () => {
-  // The block gates on SANITIZER_SRC (set by Phase 4.V.a) AND the recorded
-  // scope. HOME is the temp dir, so the marker seeds as a plain relative file.
   const PRE = 'SANITIZER_SRC=/tmp/fake-sanitizer.js'
   const scope = (v: string) => ({ '.rsct/mcp-scope': `${v}\n` })
   const settingsLocal = (r: RunBlockResult) =>
@@ -1593,9 +1401,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
     }
 
   it('project scope — writes .mcp.json AND approves it', () => {
-    // The registration on its own is what shipped before #73, and it does not
-    // run. Both halves are asserted: dropping the approval write leaves the
-    // .mcp.json assertion green, which is exactly how this stayed unnoticed.
     const r = run({ promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE, seedFiles: scope('project') })
     expect(r.exit, r.out).toBe(0)
     const mcp = JSON.parse(readIn(r, '.mcp.json')) as { mcpServers: Record<string, { command: string; args: string[] }> }
@@ -1612,9 +1417,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
   }, 60_000)
 
   it('preserves a dev-owned settings.local.json instead of replacing it', () => {
-    // The dev owns this file — the host writes its own choices here too. A
-    // structured merge is required (the documented exception); clobbering it
-    // would throw away their other approvals and any local hook config.
     const seeded = '{\n  "enabledMcpjsonServers": ["other-server"],\n  "hooks": {"SessionStart": []}\n}\n'
     const r = run({
       promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
@@ -1627,11 +1429,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
   }, 60_000)
 
   it('never overrides an explicit refusal recorded in disabledMcpjsonServers', () => {
-    // The host checks the disabled list FIRST and it wins, so writing the
-    // approval anyway would leave rsct in BOTH lists and report success for
-    // something that can never run — while contradicting a human decision.
-    // Paired with a positive: the .mcp.json is still written in the same run,
-    // so this cannot pass by the block doing nothing at all.
     const seeded = '{\n  "disabledMcpjsonServers": ["rsct"]\n}\n'
     const r = run({
       promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
@@ -1646,7 +1443,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
   }, 60_000)
 
   it('user scope — writes neither the registration nor the approval', () => {
-    // The gate that keeps a solo-dev machine from acquiring per-project files.
     const r = run({ promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE, seedFiles: scope('user') })
     expect(r.exit, r.out).toBe(0)
     expect(hasIn(r, '.mcp.json')).toBe(false)
@@ -1655,24 +1451,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
   }, 60_000)
 
   it('refuses valid-JSON-but-not-an-object instead of reporting a phantom approval', () => {
-    // `null`, `[]`, `"x"` and `42` all survive JSON.parse. Before the Rv:
-    // `null` threw a raw TypeError (aborting the phase with a stack trace
-    // instead of the friendly message), and the other three silently dropped
-    // the assignment in sloppy mode, wrote the value back unchanged, and
-    // printed "approved rsct for this project" for an approval that never
-    // landed — the report-success-for-nothing class this whole issue is about.
-    //
-    // `exec 2>&1` IS THE TEST. Without it every assertion below is blind: the
-    // mutation harness ran "delete the typeof/Array.isArray guard" and it
-    // SURVIVED. The reason is that the post-write read-back a few lines later
-    // catches all three non-null values on its own and exits 1, so the shell
-    // takes the same `else` arm and prints the same "NOT approved" line as the
-    // guard does — and the write it lets through re-serialises each primitive
-    // to bytes identical to the seed (`[]` -> `[]`, `"x"` -> `"x"`, `42` ->
-    // `42`), so the file-state assertion cannot see it either. stdout, exit
-    // code and file bytes are ALL identical with and without the guard. The
-    // only thing that differs is WHICH refusal was printed, and refusals go to
-    // stderr, which runBlock discards on a zero exit.
     const CAPTURE = `${PRE}\nexec 2>&1`
     for (const bad of ['null', '[]', '"x"', '42']) {
       const r = run({
@@ -1681,23 +1459,14 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
       })
       expect(r.out, `${bad} must not claim success`).not.toMatch(/approved rsct for this project/)
       expect(r.out, `${bad} must not print the all-set notes`).toMatch(/rsct was NOT approved for this project/)
-      // THE falsifiable assertion: the guard's own message, named. Without the
-      // guard `null` produces a raw TypeError and the other three produce the
-      // read-back's "wrote ... but rsct is not in" — neither matches.
       expect(r.out, `${bad}: the guard must be what refuses`).toMatch(/is valid JSON but not an object/)
-      // `null` specifically must not abort with a stack trace.
       expect(r.out, `${bad} must not surface a raw stack`).not.toMatch(/TypeError|at Object\.<anonymous>/)
-      // Positive control in the same run: registration still happened, so this
-      // cannot pass by the whole phase being skipped.
       expect(hasIn(r, '.mcp.json'), `${bad}: registration still happens`).toBe(true)
-      // The dev's file is left exactly as it was — we refuse, we do not repair.
       expect(readIn(r, '.claude/settings.local.json').trim()).toBe(bad)
     }
   }, 90_000)
 
   it('tolerates a BOM-prefixed settings.local.json', () => {
-    // #12 class: a BOM makes JSON.parse throw, and this block exits 1 on a parse
-    // failure — which would abort /rsct-setup mid-run.
     const r = run({
       promptBasename: '01-setup.md', anchor: MCPC2_ANCHOR, preamble: PRE,
       seedFiles: { ...scope('project'), '.claude/settings.local.json': '\uFEFF{"hooks":{}}\n' },
@@ -1707,13 +1476,6 @@ describe.skipIf(!BASH || !NODE)('block: project MCP approval (01-setup 4.V.c2, #
   }, 60_000)
 })
 
-// --- Block: project MCP approval scrub (03-uninstall 4.V.a3) — #73 -----------
-//
-// The mirror of 01-setup 4.V.c2. Without it, uninstall removes the registration
-// AND the .gitignore line that was hiding the approval, and leaves the approval
-// itself: an un-ignored file pre-granting a server that no longer exists, which
-// silently re-grants it on the next install. The residue is created by #73's own
-// write, so scrubbing it belongs in #73.
 const APPROVAL_ANCHOR = 'CHECKPOINT: Phase 4.V.a3'
 
 describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3, #73)', () => {
@@ -1721,8 +1483,6 @@ describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3,
   const readLocal = (r: RunBlockResult) => JSON.parse(readIn(r, local)) as Record<string, unknown>
 
   it('removes only the rsct value and preserves every other key', () => {
-    // The dev and the host both own this file. Mutation: replace the by-value
-    // filter with a whole-file delete, or with `delete cfg.enabledMcpjsonServers`.
     const seed = JSON.stringify({
       enabledMcpjsonServers: ['other-server', 'rsct'],
       disabledMcpjsonServers: ['nope'],
@@ -1737,7 +1497,6 @@ describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3,
   }, 60_000)
 
   it('deletes the file only when the approval was all it held', () => {
-    // The "RSCT created it" test: nothing left means we were its only author.
     const seed = JSON.stringify({ enabledMcpjsonServers: ['rsct'] }, null, 2) + '\n'
     const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed } })
     expect(hasIn(r, local)).toBe(false)
@@ -1745,7 +1504,6 @@ describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3,
   }, 60_000)
 
   it('keeps the file when another key survives the scrub', () => {
-    // Paired with the case above: the delete must be conditional, not the norm.
     const seed = JSON.stringify({ enabledMcpjsonServers: ['rsct'], permissions: {} }, null, 2) + '\n'
     const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: seed } })
     expect(hasIn(r, local)).toBe(true)
@@ -1763,8 +1521,6 @@ describe.skipIf(!BASH || !NODE)('block: MCP approval scrub (03-uninstall 4.V.a3,
   }, 60_000)
 
   it('skips a file that is valid JSON but not an object, without throwing', () => {
-    // `null` would otherwise TypeError on the first property access and abort
-    // the phase with a raw stack trace — the same shape the install side hit.
     for (const bad of ['null', '[]', '"x"']) {
       const r = run({ promptBasename: '03-uninstall.md', anchor: APPROVAL_ANCHOR, seedFiles: { [local]: `${bad}\n` } })
       expect(r.exit, `${bad}: ${r.out}`).toBe(0)

@@ -21,21 +21,6 @@ import {
   type FabricationSignal,
 } from './dev-approval.js'
 
-/**
- * Shared helpers backing the R/S/C/T phase tool pairs. V phase
- * (rsct_phase_verification_{start,complete}) does NOT use these — its
- * checklist + reverse-dep walk + per-finding audit shape diverges from
- * the symmetric R/S/C/T pattern, so it owns its plumbing.
- *
- * Why a shared lib instead of generic phase tool?
- *   - Per-tool MCP discoverability (Claude sees rsct_phase_spec_start,
- *     not rsct_phase_transition({to_phase:"spec"})).
- *   - Per-phase audit event names (`spec.start` not `phase.start`).
- *   - INV-2.2 scope_mismatch detects per-tool action_scope prefix.
- *   - Future phase-specific logic (e.g., research sub-iterations for
- *     complex tier) has a clean extension point in the tool layer.
- */
-
 export const RSCT_PHASES = [
   'research',
   'spec',
@@ -47,17 +32,6 @@ export const RSCT_PHASES = [
 
 export type RsctPhase = (typeof RSCT_PHASES)[number]
 
-/**
- * Canonical RSCT phase order. Used by `nextPhase` to suggest the next
- * `_start` call after a `_complete`. Verification is OPTIONAL between
- * spec and code: when `spec_complete` lands, the next recommended phase
- * is verification; when `verification_complete` lands, it's code; when
- * spec is skipped straight to code, that is the dev's call. REVIEW (code
- * review of the diff) sits between code and test: when `code_complete`
- * lands the next recommended phase is review; it is opt-in (asked once at
- * spec_complete via include_review) and the test-start gate honors that
- * decision. The recommended cycle is R→S→V→C→REVIEW→T.
- */
 const PHASE_ORDER: readonly RsctPhase[] = [
   'research',
   'spec',
@@ -106,46 +80,9 @@ export interface StartPhaseResult {
 export interface StartPhaseInternal {
   auditWriter?: typeof appendAuditEntry
   now?: Date
-  /**
-   * Extra state merged into the transition's SINGLE write (#40).
-   *
-   * A caller that needs to persist something alongside the phase label — REVIEW's
-   * declared findings, say — must not do it in a second `writePhaseState`: the
-   * advisory lock serialises writes but not read-modify-write cycles, so a
-   * background `rsct_status` in another window can land between the two and drop
-   * whichever it did not read. Hand-rolling the transition instead would be worse:
-   * it would be a third copy of this function's guard, stale-label handling and
-   * hint branches, and copying `verification_start`'s guard specifically would
-   * regress #15 (see `isStaleVerificationLabel`).
-   *
-   * Applied AFTER the phase fields, so it sees them and can override deliberately.
-   * A mutator rather than an object because callers also need to REMOVE keys, which
-   * a spread cannot express under `exactOptionalPropertyTypes`.
-   */
   patch?: (state: PhaseState) => void
 }
 
-/**
- * Stale-label exception (issue #15). A `verification` label whose block already
- * carries `completed_at` describes finished work: builds predating the fix could
- * strand it via `clear_phase: false`, and every documented way out (abandon,
- * wiping the state) also destroyed the V record that `rsct_phase_code_start`
- * requires — a closed loop whose only exit was editing the enforcement file by
- * hand.
- *
- * The condition is EXACTLY `phase === 'verification' && completed_at != null`
- * and must not be widened. Not `verification != null` alone (a V that started and
- * never completed is what `rejected_incomplete` exists to catch), not other phase
- * labels (no completion evidence behind them), and not a time-based heuristic
- * (staleness by clock is not staleness by completion). Anything looser turns this
- * repair into a general escape hatch from `phase_already_active` — the behavior
- * the mechanical layer exists to block.
- *
- * Exported so `rsct_phase_verification_start`, which owns its own plumbing and
- * cannot route through `startPhaseGeneric`, asks THIS function rather than
- * retyping the condition (issue #27). A retyped copy is exactly how a guard this
- * narrow gets widened by accident.
- */
 export function isStaleVerificationLabel(state: PhaseState): boolean {
   return state.phase === 'verification' && state.verification?.completed_at != null
 }
@@ -207,12 +144,6 @@ export function startPhaseGeneric(
 
   const writeResult = writePhaseState(input.projectRoot, newState)
 
-  // Overwriting a completed label is a state transition worth its own forensic
-  // record, separate from the `<phase>.start` event below. Emitted AFTER the
-  // write so it reports what actually happened: a `locked` or failed write must
-  // not leave the log asserting a transition that never landed. Carries the
-  // PREVIOUS spec context too, so a reader can tell "cleared my own V" from
-  // "stepped over another spec's V".
   if (staleVerificationLabel && existingPhase !== input.phase) {
     appendAudit(
       input.projectRoot,
@@ -292,9 +223,7 @@ export type CompletePhaseRejectKind =
   | GateRejectKind
   | 'spec_ref_mismatch'
   | 'phase_mismatch'
-  /** #19: a REVIEW finding was marked action="block". */
   | 'block_actions_present'
-  /** #40: the findings gate — see `lib/findings.ts`. */
   | FindingsGateRejectKind
 
 export interface CompletePhaseResult {
@@ -319,17 +248,6 @@ export interface CompletePhaseInternal {
   now?: Date
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
-  /**
-   * #75. An extra line appended to the approval dialog's message, for a phase
-   * that has something the generic transition cannot know — today, REVIEW's
-   * evidence mix.
-   *
-   * Placed on the INTERNAL struct rather than on the public `CompletePhaseInput`,
-   * following `StartPhaseInternal.patch`: the shared public type stays untouched,
-   * and so does `DialogOptions`, which is `{title, message}` and would otherwise
-   * need a third field — a cross-OS change to `os-dialog.ts` in release week.
-   * The other four callers of `gatePhaseComplete` are unaffected.
-   */
   dialogDetail?: string
   forceDialog?: boolean
   forceDialogReason?: string
@@ -507,11 +425,6 @@ ${internal.dialogDetail}` : ''
   delete newState.phase
   delete newState.scope_globs
   delete newState.started_at
-  // plan-lifecycle-v2 (Bloco 3.2): closing the TERMINAL phase of the cycle arms
-  // the re-bootstrap flag, so the next task in the same session cannot reach an
-  // Edit until rsct_load_context re-reads context. Robust terminal test
-  // (nextPhase === null) rather than hardcoding 'test', so a trivial/small cycle
-  // that ends earlier still arms it.
   if (nextPhase(input.phase) === null) {
     newState.context_stale = { since: now.toISOString(), reason: 'plan_closed' }
   }

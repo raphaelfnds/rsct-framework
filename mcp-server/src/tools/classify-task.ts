@@ -55,19 +55,7 @@ export const classifyTaskTool: Tool = {
   },
 }
 
-/**
- * Keyword lexicons used by the classify_task heuristic.
- *
- * Multilingual by design (CAP-6 / v0.6.2): each list mixes English and
- * pt-BR (Brazilian Portuguese) terms. Substring match is case-
- * insensitive and language-agnostic — adding more languages later means
- * appending more entries to the existing arrays, not refactoring the
- * matcher. Translation-on-the-fly was deliberately rejected (violates
- * the framework's zero-external-deps premise and adds non-determinism).
- */
-
 const ARCHITECTURE_KEYWORDS = [
-  // English — base
   'architecture',
   'redesign',
   'rearchitect',
@@ -84,7 +72,6 @@ const ARCHITECTURE_KEYWORDS = [
   'rls',
   'multi-tenant',
   'multi-region',
-  // English — expanded (CAP-6 EN mirror)
   'decouple',
   'decoupling',
   'clean architecture',
@@ -102,7 +89,6 @@ const ARCHITECTURE_KEYWORDS = [
   'breaking change',
   'api contract',
   'ports and adapters',
-  // pt-BR formal
   'arquitetura',
   'redesenhar',
   'reformular',
@@ -116,7 +102,6 @@ const ARCHITECTURE_KEYWORDS = [
   'criptografia',
   'multi-tenant',
   'multi-região',
-  // Architecture pt-BR specific (Cat C)
   'camadas',
   'ddd',
   'domain-driven',
@@ -132,7 +117,6 @@ const ARCHITECTURE_KEYWORDS = [
 ]
 
 const MULTI_FILE_KEYWORDS = [
-  // English — base
   'rename across',
   'replace all',
   'update all',
@@ -142,7 +126,6 @@ const MULTI_FILE_KEYWORDS = [
   'all callers',
   'across the codebase',
   'across packages',
-  // English — expanded (CAP-6 EN mirror)
   'repository-wide',
   'project-wide',
   'system-wide',
@@ -151,7 +134,6 @@ const MULTI_FILE_KEYWORDS = [
   'in all packages',
   'in every module',
   'in every package',
-  // pt-BR
   'renomear em todos',
   'renomear em todo',
   'em todos os arquivos',
@@ -165,7 +147,6 @@ const MULTI_FILE_KEYWORDS = [
 ]
 
 const TRIVIAL_KEYWORDS = [
-  // English — base
   'fix typo',
   'fix a typo',
   'rename a comment',
@@ -174,14 +155,12 @@ const TRIVIAL_KEYWORDS = [
   'docs',
   'readme',
   'documentation',
-  // English — expanded (CAP-6 EN mirror)
   'one-liner',
   'comment fix',
   'formatting fix',
   'whitespace',
   'spelling',
   'spell check',
-  // pt-BR
   'corrigir typo',
   'corrigir erro de digitação',
   'atualizar comentário',
@@ -190,22 +169,10 @@ const TRIVIAL_KEYWORDS = [
   'renomear comentário',
 ]
 
-/**
- * CAP-29: technical-concern lexicon. Each category captures one
- * independent "thing the task touches" (DTO + service + listener +
- * template + test = 5 distinct concerns). When a task description
- * mentions 3 or more concerns, the heuristic upgrades to complex
- * even without architecture keywords — multi-concern tasks need V
- * phase verification regardless of vocabulary used.
- *
- * Lexicon scoped narrowly per category to avoid bleed (e.g., "test"
- * is a TEST concern, not a SERVICE concern). Substring match,
- * case-insensitive, multilingual.
- */
 const CONCERN_LEXICONS: Record<string, readonly string[]> = {
   dto: [
     'dto',
-    ' record ', // word boundary via spaces — avoids "recorded"
+    ' record ',
     'schema',
     'entity',
     'value object',
@@ -272,32 +239,15 @@ const CONCERN_LEXICONS: Record<string, readonly string[]> = {
   ],
 }
 
-/**
- * CAP-29: step-count detector. Multi-step plans (4+ numbered steps)
- * indicate orchestration that warrants the full R→S→V→C→REVIEW→T cycle.
- *
- * Matches sequences like "1. foo\n2. bar\n3. baz\n4. qux" (numbered
- * list with dots) OR "passo 1", "step 1" form with at least 4
- * occurrences. Returns the count.
- */
 function countSteps(text: string): number {
   const lower = text.toLowerCase()
-  // Match "passo N" / "step N" — count distinct integers seen.
   const stepMatches = lower.match(/\b(?:passo|step)\s+\d+\b/g) ?? []
-  // Match numbered list lines like "1. foo", "2. bar" — token must be
-  // at start of line or after whitespace to avoid false positives like
-  // "node 1.2.3" (semver).
   const listMatches = text.match(/(?:^|\n|\s)(\d+)\.\s+\S/g) ?? []
   return Math.max(stepMatches.length, listMatches.length)
 }
 
-/**
- * CAP-29: distinct concern categories that hit. Returns the set of
- * category keys (e.g., {'dto', 'service', 'listener'}). Cardinality
- * drives the tier upgrade (≥3 → complex, ===2 → standard).
- */
 function detectConcerns(text: string): Set<string> {
-  const lower = ` ${text.toLowerCase()} ` // padding so " term " spaces match at edges
+  const lower = ` ${text.toLowerCase()} `
   const hit = new Set<string>()
   for (const [category, terms] of Object.entries(CONCERN_LEXICONS)) {
     for (const term of terms) {
@@ -311,7 +261,6 @@ function detectConcerns(text: string): Set<string> {
 }
 
 const MUTATION_VERBS = [
-  // English — base
   'add',
   'implement',
   'fix',
@@ -322,7 +271,6 @@ const MUTATION_VERBS = [
   'remove',
   'delete',
   'rename',
-  // English — expanded (CAP-6 EN mirror)
   'refactor',
   'adjust',
   'replace',
@@ -359,7 +307,6 @@ const MUTATION_VERBS = [
   'validate',
   'verify',
   'treat',
-  // pt-BR formal
   'adicionar',
   'acrescentar',
   'implementar',
@@ -378,7 +325,6 @@ const MUTATION_VERBS = [
   'ajustar',
   'substituir',
   'refatorar',
-  // Brazilian dev jargon (verbiado do inglês — Cat A)
   'pushar',
   'comitar',
   'deployar',
@@ -389,7 +335,6 @@ const MUTATION_VERBS = [
   'mockar',
   'stubbar',
   'lintar',
-  // Common spec verbs (curated — Cat B; "permitir"/"garantir" skipped as too generic)
   'validar',
   'verificar',
   'tratar',
@@ -421,7 +366,6 @@ function classify(description: string): {
   const multiHits = hits(description, MULTI_FILE_KEYWORDS)
   const trivialHits = hits(description, TRIVIAL_KEYWORDS)
   const mutationHits = hits(description, MUTATION_VERBS)
-  // CAP-29: new signals
   const concerns = detectConcerns(description)
   const stepCount = countSteps(description)
 
@@ -465,7 +409,6 @@ function classify(description: string): {
       reasoning: `Trivial shape (${trivialHits.join(', ')}) and short description (${wordCount} words). No spec or code phases; any code change still owes the mandatory REVIEW before it can be committed.`,
     }
   }
-  // CAP-29: orchestration signals — multi-step plan or multi-concern.
   if (stepCount >= 4) {
     return {
       tier: 'complex',
@@ -504,11 +447,6 @@ function classify(description: string): {
 const RECOMMENDED_PHASES: Record<Tier, RsctPhase[]> = {
   trivial: ['review'],
   small: ['spec', 'code', 'test', 'review'],
-  // NOTE: 'verification' is deliberately omitted from the standard array
-  // (a pre-existing choice — V is still ENFORCED for standard at
-  // rsct_phase_code_start regardless of this hint). DX-4 adds 'review'
-  // (the code review of the diff) for standard + complex; the recommended
-  // cycle is R→S→V→C→REVIEW→T.
   standard: ['research', 'spec', 'code', 'test', 'review'],
   complex: ['research', 'spec', 'verification', 'code', 'test', 'review'],
 }
@@ -521,24 +459,11 @@ export async function classifyTaskHandler(
   const { tier, signals, reasoning } = classify(input.task_description)
   const recommended = RECOMMENDED_PHASES[tier]
 
-  // CAP-30: persist the verdict with tier_max ratchet — phase_code_start
-  // reads back the highest tier ever classified for this project state
-  // and rejects downgrades (input.spec_tier < tier_max) without explicit
-  // override_classify_downgrade. Best-effort write; failures swallowed
-  // (classify is read-only at the API contract and never fails on
-  // metadata write). Skip when rsct is not installed — no .rsct/ to
-  // write into.
   if (resolution.rsct_installed) {
     stampClassifyVerdict(resolution.root, {
       tier,
       signalsSummary: signals.join(' | '),
     })
-    // plan-lifecycle-v2 (Bloco 1.2): emit a durable classify verdict into the
-    // append-only audit log. deriveAuditCeiling reconstructs the tier ratchet
-    // from these events, so the free-commit ceiling survives a phase-state
-    // wipe (the AUDIT-side anchor). PRESENCE of ≥1 such event is REQUIRED for
-    // free eligibility, so this is the positive-evidence signal, not just a
-    // diagnostic. Best-effort (classify never fails on a metadata write).
     appendAuditEntry(
       resolution.root,
       { event: 'classify.verdict', tool: 'rsct_classify_task', tier },
@@ -569,10 +494,6 @@ export async function classifyTaskHandler(
     hints.push(
       'Complex tier — run the full cycle (research → spec → verification → code → test → review). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). After the tests, the REVIEW is mandatory: rsct_request_commit refuses code that no completed REVIEW covers.',
     )
-    // PH-3: worktree-orchestration nudge. Advisory only, complex-tier only. The
-    // threshold "how many phases" belongs to the §B prose question, NOT here —
-    // classify runs BEFORE the plan exists, so the wording stays conditional and
-    // never claims a phase count. Never auto-creates a worktree.
     hints.push(
       'Complex tier — if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated per worktree (§C). Decide this against the WRITTEN plan — this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial.',
     )

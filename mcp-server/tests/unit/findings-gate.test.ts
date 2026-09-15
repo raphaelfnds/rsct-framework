@@ -25,13 +25,6 @@ import { phaseVerificationStartHandler } from '../../src/tools/phase-verificatio
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { initSweepRepo } from '../sweep-repo.js'
 
-// #40. The gate that makes V and REVIEW bind: ids must be real, every finding must
-// get an action, and an answer set from a previous run is rejected as a set.
-//
-// Every negative assertion below is seeded so the guard under test is the ONLY thing
-// producing the result — the #38 review found three assertions that passed against a
-// deliberately broken build because their fixture could not have failed either way.
-
 let tmpRoot: string
 const FIXED_NOW = new Date('2026-06-07T18:00:00.000Z')
 const VALID_TS = '2026-06-07T17:59:45.000Z'
@@ -64,17 +57,6 @@ function writeRsctConfig(): void {
 const F1 = { id: 'v-gap-1', category: 'gap', title: 'Claim conflicts with AD-2' }
 const F2 = { id: 'v-breakage-2', category: 'breakage', title: 'Edits affect 3 importers' }
 
-/**
- * #75. `readFindingsBaseline` now stamps an evidence class onto every entry it
- * keeps. These fixtures are LEGACY-shaped — declared before the class existed —
- * so they must come back degraded to `hypothesis`, never to fact, and never
- * dropped. Kept as an exact shape rather than loosened to `toMatchObject`: the
- * point of the #40 payload is that it hands back what is stored, so an assertion
- * that stops looking at the whole object stops guarding it.
- */
-// `how_to_falsify` is matched on a stable fragment, NOT expect.any(String): the
-// latter accepts '', so a mutation blanking the generated falsifier would pass
-// while the dev is handed a finding that says nothing about how to test it.
 const DEGRADED = {
   kind: 'hypothesis',
   how_to_falsify: expect.stringContaining('no evidence class was supplied'),
@@ -85,7 +67,6 @@ function withEvidence<T extends object>(f: T): T & { evidence: typeof DEGRADED }
   return { ...f, evidence: DEGRADED }
 }
 
-/** An active V phase whose baseline is REAL — the fixture the old suite never had. */
 function seedVerification(findings: unknown[], runId?: string): void {
   const block: Record<string, unknown> = {
     spec_ref: 'feat-foo',
@@ -187,9 +168,6 @@ describe('lib/findings — checkFindingsGate', () => {
     expect(checkFindingsGate({ ...args, suppliedRunId: stored }).ok).toBe(true)
   })
 
-  // Omitting the run id is NOT itself a rejection: the id set is what the run id
-  // hashes, so a stale answer set is already caught as unknown-or-unanswered. Making
-  // absence fatal would only swap a useful message for a bookkeeping one.
   it('an absent run id falls through to the id checks', () => {
     const args = { baseline: [F1, F2], storedRunId: computeRunId([F1, F2]), suppliedRunId: null }
     expect(checkFindingsGate({ ...args, actions: [{ finding_id: 'v-gap-1' }] }).reject_kind).toBe(
@@ -207,7 +185,6 @@ describe('lib/findings — checkFindingsGate', () => {
   })
   it('run identity outranks id errors — a moved set is not a per-id problem', () => {
     const base = { baseline: [F1], storedRunId: 'current', suppliedRunId: 'stale' }
-    // Both flavours of per-id error must yield to it, not just `unknown`.
     expect(checkFindingsGate({ ...base, actions: [{ finding_id: 'ghost' }] }).reject_kind).toBe(
       'stale_finding_run',
     )
@@ -220,8 +197,6 @@ describe('lib/findings — checkFindingsGate', () => {
     expect(checkFindingsGate({ ...base, actions: [] }).reject_kind).toBe('stale_finding_run')
   })
 
-  // Answering another spec's findings used to COMPLETE, and then prune that spec's
-  // set — losing the work it was tracking. A re-plan leaves exactly this state.
   it('refuses a baseline belonging to a different spec_ref', () => {
     const r = checkFindingsGate({
       ...base,
@@ -232,7 +207,6 @@ describe('lib/findings — checkFindingsGate', () => {
     })
     expect(r.reject_kind).toBe('findings_spec_mismatch')
     expect(r.reason).toContain('spec-a')
-    // Matching refs are unaffected.
     expect(
       checkFindingsGate({
         ...base,
@@ -244,8 +218,6 @@ describe('lib/findings — checkFindingsGate', () => {
     ).toBe(true)
   })
 
-  // One action would otherwise close both, and the audit log would record a single
-  // decision for two distinct problems.
   it('refuses a baseline that reuses an id', () => {
     const r = checkFindingsGate({
       ...base,
@@ -266,7 +238,6 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
     expect(auditEvents()).toContain('verification.complete.rejected')
     expect(auditEvents()).not.toContain('verification.action')
     expect(readState().verification.completed_at).toBeUndefined()
-    // Mutation control: the SAME call with the real id completes.
     const ok = await completeV([{ finding_id: 'v-gap-1', action: 'accept' }], computeRunId([F1]))
     expect(ok.status).toBe('completed')
   })
@@ -323,8 +294,6 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
     expect(out.open_findings).toHaveLength(2)
   })
 
-  // The migration story: an unusable baseline must never make a phase uncompletable,
-  // and must never throw out of a handler that has no try/catch around its state read.
   it.each([
     ['key absent', undefined],
     ['empty array', []],
@@ -337,9 +306,6 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
     expect(out.status).toBe('completed')
   })
 
-  // M16 survived before this: nothing called the real _start, so every test seeded
-  // the run id by hand and then asserted on its own seed. Deleting the producer left
-  // the suite green and the whole run-identity feature silently inert.
   it('_start actually produces the run id it tells the agent to echo', async () => {
     writeFile('.rsct/phase-state.json', JSON.stringify({ spec_slug: 'feat-foo' }))
     const started = await phaseVerificationStartHandler({
@@ -350,7 +316,6 @@ describe('rsct_phase_verification_complete — the gate binds (#40)', () => {
     })
     expect(started.findings_run_id).toBe(computeRunId(started.findings))
     expect(readState().verification.findings_run_id).toBe(started.findings_run_id)
-    // And the value it advertises in the hint is the same one.
     expect(started.hints.join(' ')).toContain(started.findings_run_id!)
   })
 
@@ -387,9 +352,6 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     expect(s.phase).toBe('review')
   })
 
-  // The trap the V phase caught: stampReviewDecision defaults decision to 'no', and
-  // evaluateReviewGate reads 'no' as bypassed_declined — which needs no completed_at.
-  // Starting the review must never be able to disarm the review gate.
   it('starting a review never stamps a review block or a sweep ledger', async () => {
     writeFile('.rsct/phase-state.json', JSON.stringify({ spec_slug: 'feat-foo' }))
     await startReview([R1])
@@ -407,9 +369,9 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     )
     await startReview([R1, R2])
     const second = await startReview([R1])
-    expect(readState().review_findings.findings).toEqual([R1]) // replaced, not merged
-    expect(readState().review.completed_at).toBeUndefined() // reopened
-    expect(readState().review.decision).toBe('yes') // decision survives
+    expect(readState().review_findings.findings).toEqual([R1])
+    expect(readState().review.completed_at).toBeUndefined()
+    expect(readState().review.decision).toBe('yes')
     expect(second.hints.some((h) => /stale/.test(h))).toBe(true)
   })
 
@@ -424,8 +386,6 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     await startReview([R1, R2])
     await startReview()
     expect(readState().review_findings).toBeUndefined()
-    // Without this the audit log cannot tell "found nothing" from "erased two" —
-    // and erasing them is the one move that makes the completion gate fail open.
     const replaced = auditEntries().find((e) => e.event === 'review.findings_replaced')
     expect(replaced).toBeDefined()
     expect(replaced!.discarded_ids).toEqual(['r-bug-1', 'r-sec-2'])
@@ -450,8 +410,6 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     expect(readState().review_findings).toBeUndefined()
   })
 
-  // A receipt for a baseline that was never stored has the agent answer against
-  // nothing, and `_complete` then fails open and closes the review with no coverage.
   it('does not advertise findings when the write did not happen', async () => {
     writeFile('.rsct/phase-state.json', JSON.stringify({ phase: 'code', spec_slug: 'feat-foo' }))
     const out = await startReview([R1])
@@ -464,8 +422,8 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     writeFile('.rsct/phase-state.json', JSON.stringify({ phase: 'code', spec_slug: 'feat-foo' }))
     const out = await startReview([R1])
     expect(out.status).toBe('phase_already_active')
-    expect(readState().phase).toBe('code') // unchanged
-    expect(readState().review_findings).toBeUndefined() // and no findings leaked in
+    expect(readState().phase).toBe('code')
+    expect(readState().review_findings).toBeUndefined()
   })
 
   it('still clears a stale completed-V label (#15 intact)', async () => {
@@ -541,7 +499,7 @@ describe('rsct_phase_review_complete — coverage and prune (#40)', () => {
     )
     expect(out.status).toBe('completed')
     const s = readState()
-    expect(s.review_findings).toBeUndefined() // pruned
+    expect(s.review_findings).toBeUndefined()
     expect(s.review.completed_at).toBe(FIXED_NOW.toISOString())
     expect(auditEvents().filter((e) => e === 'review.action')).toHaveLength(2)
   })

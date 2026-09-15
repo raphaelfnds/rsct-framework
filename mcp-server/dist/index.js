@@ -41898,9 +41898,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
           event: "settings.drift_detected",
           tool: "rsct_request_commit",
           added_count: drift.added_entries.length,
-          // Redacted excerpt: the first entry, truncated. The dev reads the full
-          // list in the hint; the log is a forensic trail, not a mirror of a file
-          // that may carry machine paths.
           excerpt: drift.added_entries[0]?.slice(0, 80) ?? null
         },
         config2?.audit
@@ -46188,7 +46185,6 @@ var classifyTaskTool = {
   }
 };
 var ARCHITECTURE_KEYWORDS = [
-  // English — base
   "architecture",
   "redesign",
   "rearchitect",
@@ -46205,7 +46201,6 @@ var ARCHITECTURE_KEYWORDS = [
   "rls",
   "multi-tenant",
   "multi-region",
-  // English — expanded (CAP-6 EN mirror)
   "decouple",
   "decoupling",
   "clean architecture",
@@ -46223,7 +46218,6 @@ var ARCHITECTURE_KEYWORDS = [
   "breaking change",
   "api contract",
   "ports and adapters",
-  // pt-BR formal
   "arquitetura",
   "redesenhar",
   "reformular",
@@ -46237,7 +46231,6 @@ var ARCHITECTURE_KEYWORDS = [
   "criptografia",
   "multi-tenant",
   "multi-regi\xE3o",
-  // Architecture pt-BR specific (Cat C)
   "camadas",
   "ddd",
   "domain-driven",
@@ -46252,7 +46245,6 @@ var ARCHITECTURE_KEYWORDS = [
   "alta coes\xE3o"
 ];
 var MULTI_FILE_KEYWORDS = [
-  // English — base
   "rename across",
   "replace all",
   "update all",
@@ -46262,7 +46254,6 @@ var MULTI_FILE_KEYWORDS = [
   "all callers",
   "across the codebase",
   "across packages",
-  // English — expanded (CAP-6 EN mirror)
   "repository-wide",
   "project-wide",
   "system-wide",
@@ -46271,7 +46262,6 @@ var MULTI_FILE_KEYWORDS = [
   "in all packages",
   "in every module",
   "in every package",
-  // pt-BR
   "renomear em todos",
   "renomear em todo",
   "em todos os arquivos",
@@ -46284,7 +46274,6 @@ var MULTI_FILE_KEYWORDS = [
   "em todos os pacotes"
 ];
 var TRIVIAL_KEYWORDS = [
-  // English — base
   "fix typo",
   "fix a typo",
   "rename a comment",
@@ -46293,14 +46282,12 @@ var TRIVIAL_KEYWORDS = [
   "docs",
   "readme",
   "documentation",
-  // English — expanded (CAP-6 EN mirror)
   "one-liner",
   "comment fix",
   "formatting fix",
   "whitespace",
   "spelling",
   "spell check",
-  // pt-BR
   "corrigir typo",
   "corrigir erro de digita\xE7\xE3o",
   "atualizar coment\xE1rio",
@@ -46312,7 +46299,6 @@ var CONCERN_LEXICONS = {
   dto: [
     "dto",
     " record ",
-    // word boundary via spaces — avoids "recorded"
     "schema",
     "entity",
     "value object",
@@ -46398,7 +46384,6 @@ function detectConcerns(text2) {
   return hit;
 }
 var MUTATION_VERBS = [
-  // English — base
   "add",
   "implement",
   "fix",
@@ -46409,7 +46394,6 @@ var MUTATION_VERBS = [
   "remove",
   "delete",
   "rename",
-  // English — expanded (CAP-6 EN mirror)
   "refactor",
   "adjust",
   "replace",
@@ -46446,7 +46430,6 @@ var MUTATION_VERBS = [
   "validate",
   "verify",
   "treat",
-  // pt-BR formal
   "adicionar",
   "acrescentar",
   "implementar",
@@ -46465,7 +46448,6 @@ var MUTATION_VERBS = [
   "ajustar",
   "substituir",
   "refatorar",
-  // Brazilian dev jargon (verbiado do inglês — Cat A)
   "pushar",
   "comitar",
   "deployar",
@@ -46476,7 +46458,6 @@ var MUTATION_VERBS = [
   "mockar",
   "stubbar",
   "lintar",
-  // Common spec verbs (curated — Cat B; "permitir"/"garantir" skipped as too generic)
   "validar",
   "verificar",
   "tratar",
@@ -46573,11 +46554,6 @@ function classify(description) {
 var RECOMMENDED_PHASES = {
   trivial: ["review"],
   small: ["spec", "code", "test", "review"],
-  // NOTE: 'verification' is deliberately omitted from the standard array
-  // (a pre-existing choice — V is still ENFORCED for standard at
-  // rsct_phase_code_start regardless of this hint). DX-4 adds 'review'
-  // (the code review of the diff) for standard + complex; the recommended
-  // cycle is R→S→V→C→REVIEW→T.
   standard: ["research", "spec", "code", "test", "review"],
   complex: ["research", "spec", "verification", "code", "test", "review"]
 };
@@ -46698,14 +46674,7 @@ async function phaseStatusHandler(rawInput) {
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count: Array.isArray(findings) ? findings.length : 0,
-      // #40: the ids themselves, because completing the phase now requires naming
-      // every one of them. A count alone left a resumed session with no way to learn
-      // what to answer except deliberately failing a call or re-running _start —
-      // which rewrites the baseline it is being measured against.
       open_findings: readFindingsBaseline(findings) ?? [],
-      // Fed the baseline itself, NOT the `?? []` fallback: `null` means the
-      // baseline was unreadable, and collapsing it to an empty array here would
-      // report an unmeasurable block as a clean one.
       evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null
@@ -47689,10 +47658,6 @@ var declaredFindingSchema = external_exports.object({
   severity: external_exports.string().optional(),
   path: external_exports.string().optional(),
   line: external_exports.number().optional(),
-  // #75. REVIEW findings are 100% agent-declared — this tool generates none —
-  // so unlike the V phase, this is where the class comes from. Optional at the
-  // door: see `evidenceSchema` for why requiring it would buy ritual rather
-  // than evidence. Claiming `measured` without a command is still rejected here.
   evidence: evidenceSchema.optional()
 }).strict();
 var phaseReviewStartInputSchema = external_exports.object({

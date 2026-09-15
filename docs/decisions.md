@@ -368,6 +368,210 @@ code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function
 
 ---
 
+## Module notes (migrated from source comments, #62)
+
+Constraints and measurements that lived beside the code until the 2.11.0 REVIEW swept
+those files. Keyed by module and symbol; restatements of what the code says were dropped.
+
+### `lib/git.ts`
+
+- **`isSafeRevisionToken`** is an injection guard, not a validity check. Rules: no leading
+  `-`, no control characters (a NUL makes `execFileSync` throw; a newline would split the
+  JSONL audit record that echoes the rejected revision). Measured: an option-shaped token
+  in the range reader is an unapproved arbitrary-path write —
+  `git diff --name-only -z --diff-filter=d "--output=SIDEEFFECT...HEAD"` exits 0 and
+  creates that file — and it runs before `gateRequest`, so no dialog would show. A 30-token
+  battery found only the option shape doing anything but resolve-or-fail (`feat:main`,
+  `main..feat`, `+feat`, `a b`, `feat.lock`, `feat/` all fail cleanly with 128/129).
+  An earlier draft that also rejected `~ ^ : ? * [ .. @{` and bare `@` was refuted:
+  `HEAD~1`, `HEAD^`, `HEAD@{0}` and `@` resolve, and since merge/rebase fail closed a false
+  reject is a hard stop with no override. Rejected alternatives, both measured:
+  `--end-of-options` needs git ≥ 2.24 (no minimum is declared, so older git would fail every
+  read); `--` reclassifies the token as a pathspec and returns rc 0 with empty output — an
+  attack turned into a silent pass.
+- **`unsafeOperand`** is the second, process-side barrier, independent of the `--` sentinel
+  each mutating helper also passes; `--` behaves differently per subcommand and no minimum
+  git version is declared. Measured on git 2.45.1: `git push --exec=<program> -- <branch>`
+  runs the program, so in `gitPush` the `--` goes before the remote (with it first,
+  `git push -- --exec=X main` is refused as a strange hostname); `git rebase "--exec=<p>" main`
+  executes the program while `git rebase -- "--exec=..."` is refused; `merge -m x -- --no-verify`
+  is refused while `merge --no-ff -m x -- feat` merges.
+- **`RangePathsResult`** is three-way on purpose: `unsafe_revision` (an input-validation
+  event) and `unavailable` (git could not answer) must stay distinguishable in the audit log.
+- **`getRangePaths`** uses `--diff-filter=d`, which drops deletions and also the old side of
+  a rename git did not detect (`diff.renames=false`, or the silent `diff.renameLimit`
+  fallback whose warning is discarded). An explicit `-M` was tried and removed: it produced
+  byte-identical output. There is no MCP-substitutable override (the A2/INV-6 lesson: a public
+  diff override is an enforcement bypass); tools carry a test-only reader seam.
+- **`splitNulPaths`** rewrites `\` to `/`. Git emits `/` for `-z` on every OS, so it only fires
+  on a Linux/macOS filename containing a backslash, where it is lossy; kept identical across
+  the staged and range readers because divergence would be worse.
+- **`getStagedStats` / `parseNumstatZ`**: numstat renders `-\t-\t<path>` for binary files.
+  Parsed as integers that is `NaN`, which poisons cumulative counters
+  (`JSON.stringify(NaN) === "null"`) and makes `lines > cap` always false. A `-` counts 0
+  lines but the file still counts; every numeric is `Number.isFinite`-guarded.
+- **`GIT_READ_TIMEOUT_MS` (30 s)** bounds the local reads because `execFileSync` blocks the
+  event loop and a test timeout cannot interrupt a synchronous body. Not applied to
+  `defaultGitExecutor`, which carries pushes to slow remotes.
+- **`getHeadSha` vs `getHeadShaFull`**: short sha is the reporting format shared with
+  `readGitState`'s `sha_before` on reject paths (one field must not carry two widths); full
+  sha is the identifier for anything stored or compared (an abbreviation's width tracks object
+  count and `core.abbrev`). `getHeadShaFull` is one spawn (~64 ms warm on Windows) against
+  `readGitState`'s four.
+- **`readWorktreeInfo`** detects a linked worktree by the `/worktrees/<name>` tail of
+  `--git-dir`. Comparing absolute `--git-dir` with relative `--git-common-dir` as strings
+  false-positived a subdirectory of the main worktree (git resolves symlinks and 8.3 names,
+  `resolve()` does not).
+- **`gitIsTracked`** treats any ambiguous git error as tracked, so a git failure can never
+  green-light deleting a plan artifact. **`gitBranchMerged`** is blind to squash and rebase
+  merges; the `gh pr list` signal covers those.
+
+### `lib/free-commit.ts`
+
+- The audit log is the anti-rollback anchor for the free lane; phase-state is the primary
+  counter. Residual: a truncate-and-rewrite forge of the gitignored log (Fork 1/A — no
+  privilege boundary with a same-user agent). #92 measured that pointing `project_root` at a
+  crafted subdirectory committed in the parent repo while debiting the subdirectory's budget;
+  the log now resolves at the repository the commit lands in.
+- `free_commit.committed` is counted cumulatively over the whole log, never "since the last
+  `classify.verdict`" — classify is ungated, so a counting boundary there would be a counter
+  reset primitive.
+- `reserveFreeBudget` is debit-first: persisted before `gitCommit` ("can't record the spend"
+  means "can't spend"), refunded on commit failure. A cap-tripping commit lands and locks;
+  the next one is refused.
+- `evaluateFreeEligibility` only ever withholds; `tier_max` and the count are
+  `max(state, audit)`, and absence of classify evidence is ineligible. Security install drift
+  withholds the lane (#25) — that buys reach, not enforcement: it moves the warning from
+  `hints[]` into the per-action dialog. When the state ratchet already says non-free the audit
+  scan is skipped, safely, because the audit max is a superset a wipe cannot lower.
+
+### `lib/phase-machine.ts`, `lib/phase-scope.ts`
+
+- **`StartPhaseInternal.patch`** merges extra state into the transition's single write: a
+  second `writePhaseState` would race a background `rsct_status` (the lock serialises writes,
+  not read-modify-write cycles). A mutator, because callers must also remove keys, which a
+  spread cannot express under `exactOptionalPropertyTypes`.
+- **`isStaleVerificationLabel`** is exactly `phase === 'verification' && completed_at != null`
+  (#15) and must not be widened; exported so `rsct_phase_verification_start` asks it instead
+  of retyping it (#27). Overwriting a completed label emits its own audit record after the
+  write, carrying the previous spec context.
+- **`CompletePhaseInternal.dialogDetail` / `forceDialog`** live on the internal struct so
+  `CompletePhaseInput` and `DialogOptions` stay unchanged (a third dialog field would be a
+  cross-OS change to `os-dialog.ts`).
+- Closing the terminal phase (`nextPhase === null`, now `review`) arms `context_stale`.
+- **`PHASE_STATE_PRESERVED_ON_ABANDON`** is an allowlist (#53): a new `PhaseState` key is
+  dropped by an abandon unless listed. `context_stale` is listed because wiping it let an
+  agent the edit guard had blocked unblock itself by abandoning an unrelated phase.
+  `review_sweep` and `review_drift` are listed because they describe bytes, not the work.
+- **Phase-state lock**: exclusive create (`wx`); a lock older than 30 s is stale and
+  overwritten; a busy lock returns `locked` with its age; released in `finally`.
+- **`matchesAnyGlob`** relativises by prefix strip on normalised forms, not `path.relative`
+  (platform-bound, silently no-ops on mixed styles). Case-sensitive except the drive letter;
+  not symlink-resolved.
+- **`readThenStampBootstrap`** evaluates the marker before stamping (a post-stamp read is
+  always "fresh") and skips the stamp on an unparseable file, whose write would otherwise
+  replace every other key with `bootstrap_at` alone. **`truncateForHint`** takes `unknown`
+  because `bootstrap_at` comes from unvalidated JSON (`{"length": 999}` would throw).
+- `rsct_status` stamps `bootstrap_at` but only `rsct_load_context` clears `context_stale`.
+- `headStaleness` marks, never rejects; `null` means "cannot tell".
+- `readPlanDisposition` enforces the slug match on read, so a `delete` recorded for plan A is
+  never applied to plan B.
+- `PhaseVerificationBlock.head_sha` is nested in the block, not top-level, so it goes with the
+  work on abandon.
+
+### `lib/pre-merge-ack.ts`
+
+- The four booleans are self-attestations; `plan_complete` is not cross-checked against the
+  plan file's status (that produced a systematic false positive on every non-final merge of a
+  multi-phase plan). Teeth: presence, reject-on-false, the `progressHasOpenItems` contradiction
+  and the `files_swept` coverage check, which verifies the carried paths were claimed, not that
+  a sweep happened.
+- Every field is optional in the Zod schema so a partial ack is a clean `rejected`, never a
+  throw; the schema is shared verbatim by the integration tools (lesson V-P1·PH-1).
+- `PRE_MERGE_ACK_ITEMS` excludes `files_swept` because it is emitted as the
+  `pre_merge_ack_self_attested` audit label, which must keep meaning "the booleans attested".
+- `MAX_FILES_SWEPT` caps the first unbounded agent-supplied array echoed into the audit log;
+  enforced in the evaluator, not as Zod `.max()`, to stay a clean rejection.
+- Path comparison normalises NFC (macOS lists NFD, git stores NFC), separators, `./` and a
+  trailing `/`; case is not folded (folding would pass on Windows/macOS and fail on Linux).
+- The coverage check runs independently of the booleans and is skipped on an unreadable or
+  empty range; merge and rebase fail closed on an unreadable range (measured: unrelated
+  histories, rebase onto an orphan ref), push fails open.
+
+### `tools/request-commit.ts`
+
+- Checks run before authorization when they can reject (message length #20, the REVIEW gate),
+  so a doomed commit never costs a dialog, a token action or free budget.
+- `internal.*Override` seams (staged diff, paths, stats, git state, audit writer, approval
+  recorder) are test-only; the MCP dispatch passes no `internal`, closing the fabricated-diff
+  hole (A2).
+- #17: `.claude/settings.json` drift is reported, never staged or discarded; the audit keeps a
+  redacted excerpt only.
+- A lane withheld for security drift must not surface as `plan_token_invalid` (#25) — that
+  would send the dev to mint a token instead of repairing enforcement.
+- Token path: the action is debited before the commit and refunded on failure; if the refund
+  write fails the action stays spent (tightens, never loosens). The sliding window re-arms on
+  success only. Free lane: same debit-first discipline; the durable `free_commit.committed`
+  event is the backstop a phase-state wipe cannot erase.
+- INV-7 contract gate diverges only on a confirmed multi-repo topology, and a confirmed
+  multi-repo commit where it could not enforce says so at commit time (RV3).
+- CAP-33 bootstrap and CAP-53 plan-tracking notices are advisory, never rejections.
+
+### `tools/phase-review-start.ts`, `tools/phase-status.ts`
+
+- Declared finding ids must be distinct at the door: coverage counts distinct ids, so a repeat
+  would let one action close several findings.
+- Restarting with no findings clears the stale set and audits `review.findings_replaced` —
+  without it the log cannot tell "found nothing" from "erased five", the one move that makes the
+  gate fail open.
+- A run id or evidence mix is advertised only for a baseline that was actually persisted; `null`
+  (not `[]`) where nothing landed, so the mix reads unmeasurable rather than a clean zero.
+- `rsct_phase_status` lists open finding ids (a resumed session needs them to answer) and feeds
+  the baseline itself, not a `?? []` fallback, for the same reason.
+
+### `tools/classify-task.ts`
+
+- Lexicons mix English and pt-BR; translation at runtime was rejected (external dependency,
+  non-determinism). CAP-29 upgrades to complex at 3+ distinct concern categories, and at 4+
+  numbered steps; step matching requires a line start or whitespace so `node 1.2.3` does not
+  count. A real 2026-06-09 task (DTO + service + listener + template + test) returned standard
+  before CAP-29 and skipped V.
+- The verdict is persisted with a `tier_max` ratchet and emitted as `classify.verdict` to the
+  audit log, the positive evidence the free lane requires; both writes are best-effort.
+- The PH-3 worktree nudge stays conditional because classify runs before the plan exists.
+
+### Tests and build
+
+- `tsup.config.ts`: runtime deps are bundled (`noExternal`) so `dist/index.js` runs with no
+  `node_modules` (the 2026-06-22 "no mcp__rsct__* tools" incident); pino's dynamic
+  `require('node:os')` needs the `createRequire` banner, with the shebang kept on line 1.
+  `dist-standalone.test.ts` copies the bundle outside the repo so Node cannot resolve the
+  repo's `node_modules`; `spawnSync`, because the stdio server exits 0 on EOF and
+  `execFileSync` would drop stderr.
+- `block-smoke.test.ts`: blocks are extracted from the real prompts by anchor. Marker-range
+  assertions exist because `toContain` passes on the alias comment that contains `plan_*.md`.
+  The `.gitignore` clauses use a whole-file guard and a block-scoped splice — a block-scoped
+  guard duplicated a line a dev already had, an unscoped splice landed in the dev's section
+  where uninstall cannot remove it. In the MCP-approval block, `exec 2>&1` is the test: without
+  it, deleting the type guard survived mutation because stdout, exit code and file bytes are
+  identical and only the stderr refusal differs. Version-stamp and hook-registration tests run
+  the real block against the real reader (`STAMP_RE`, `readScriptRegistration`) so the bash
+  writer and the TS reader cannot drift with a green suite; the hook idempotency key is the
+  marker, which only a second run catches.
+- `findings-gate.test.ts`: every negative assertion is seeded so the guard under test is the
+  only thing producing the result (the #38 review found three that passed against a broken
+  build). The run-id producer is exercised through the real `_start` (M16 survived when tests
+  seeded the id by hand). `how_to_falsify` is matched on a fragment, not `expect.any(String)`,
+  which accepts `''`.
+- `review-evidence.test.ts`: the dialog-detail spread-order test must inject a competing
+  `dialogDetail`; injecting only `promptFn` passed under both orders (measured, 8/8 green under
+  the mutation). Evidence stays optional in the declared-finding schema; making it required would
+  break recovery of findings stored before #75.
+- `phase-machine.test.ts`: the #15 exception is tested mostly through negatives — a stale
+  `code` label carries no completion evidence and has no claim on it.
+
+---
+
 ## How to contribute new decisions
 
 - Firm premise: append under "Firm premises", sequential numbering.

@@ -130,22 +130,13 @@ export type RequestCommitRejectKind =
   | 'review_drift'
   | 'review_unreadable'
 
-/**
- * How the commit was authorized: a per-action dev_approval, a plan token, or
- * the dialog-free free-commit lane (plan-lifecycle-v2, trivial/small tiers).
- */
 export type CommitAuthVia = 'dev_approval' | 'plan_token' | 'free_commit'
 
-/** Commit authorization channel — the gate channels plus the token / free-commit paths. */
 export type CommitChannel = GateChannel | 'plan_token' | 'free_commit'
 
-/** T2/INV-7: the contract-surface gate result (multi-repo only). */
 export interface ContractCheckResult {
-  /** The CONFIRMED topology mode the gate saw (null when unconfirmed). */
   mode: 'mono' | 'monorepo' | 'multi-repo' | null
-  /** Contract ids whose produced surface the staged diff touched. */
   touched: string[]
-  /** Affected consumer apps (sorted union across touched contracts). */
   consumers: string[]
   override_used: boolean
 }
@@ -154,7 +145,6 @@ export interface RequestCommitOutput {
   status: RequestCommitStatus
   branch: string | null
   channel: CommitChannel | null
-  /** T3: which authorization path was taken (null on reject before auth resolves). */
   authorized_via: CommitAuthVia | null
   reject_kind: RequestCommitRejectKind | null
   reason: string | null
@@ -170,16 +160,13 @@ export interface RequestCommitOutput {
     findings: SecretFinding[]
     override_used: boolean
   }
-  /** T2/INV-7: contract-surface gate result (omitted on rejects before INV-7 runs). */
   contract_check?: ContractCheckResult | null
-  /** T3: plan-token budget after this commit (null when not a token commit). */
   plan_token?: {
     plan_slug: string
     actions_used: number
     max_actions: number
     expires_at: string
   } | null
-  /** plan-lifecycle-v2: free-commit budget after this commit (null when not a free commit). */
   free_commit?: {
     plan_slug: string
     commits_used: number
@@ -188,28 +175,10 @@ export interface RequestCommitOutput {
     locked: boolean
     locked_reason?: 'commit_cap' | 'volume_cap' | 'tier_divergence'
   } | null
-  /** CAP-33: §0 bootstrap visibility — null when not evaluated (reject paths). */
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
-  /**
-   * Set when an audit-log append failed. `null` means the append succeeded
-   * OR was disabled by config (`audit.enabled: false`). On `committed`
-   * outcomes, a non-null value is a §C-bypass red flag — the mutation
-   * landed but its audit trail is missing.
-   */
   audit_error: string | null
-  /**
-   * On `committed`: post-mutation bookkeeping persisted. For the dev_approval
-   * path this is `recordConsumedApproval` writing the anti-reuse entry; for the
-   * plan-token path it is the token's `actions_used` increment being persisted.
-   * `false` if that write failed. On rejected / mutation_failed: `null`.
-   */
   anti_replay_persisted: boolean | null
-  /**
-   * Set when the post-mutation bookkeeping write failed. Non-null means either
-   * the same dev_approval may be replayable, or the token counter is stale
-   * (an action was not debited). Repair before the next §C-gated call.
-   */
   anti_replay_error: string | null
   hints: string[]
 }
@@ -218,43 +187,11 @@ export interface RequestCommitInternal {
   gitExecutor?: GitExecutor
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
-  /**
-   * Test-only seam: bypass `readGitState` so tests can run with a fixed
-   * branch name without git-init'ing a temp repo. Not exposed to MCP callers.
-   */
   gitStateOverride?: GitState
-  /**
-   * Test-only seam: substitute the staged diff (`git diff --cached`) so the
-   * INV-6 secrets scan can be exercised without a real git repo. NOT an MCP
-   * input — the dispatch calls the handler with no `internal`, so a real caller
-   * can never use it to bypass the real scan (closes the pre-existing INV-6
-   * fabricated-diff hole; A2).
-   */
   stagedDiffOverride?: string
-  /**
-   * Test-only seam: substitute the staged file list (`git diff --cached
-   * --name-only`) so the INV-7 contract-surface gate can be exercised without a
-   * real git repo. NOT an MCP input (same posture as stagedDiffOverride).
-   */
   stagedPathsOverride?: string[]
-  /**
-   * Test-only seam: substitute the staged line stats (`git diff --cached
-   * --numstat -z`) so the free-commit budget/ceiling can be exercised without
-   * a real git repo. NOT an MCP input (same posture as stagedDiffOverride /
-   * stagedPathsOverride — a caller-declared volume would be a bypass).
-   */
   stagedStatsOverride?: StagedStats
-  /**
-   * Test-only seam: replace `appendAuditEntry`. Production uses the
-   * default lib helper; tests inject simulated I/O failures to verify
-   * the post-mutation surface (`audit_error` + warning hint).
-   */
   auditWriter?: typeof appendAuditEntry
-  /**
-   * Test-only seam: replace `recordConsumedApproval`. Production uses
-   * the default lib helper; tests inject simulated I/O failures to verify
-   * the post-mutation surface (`anti_replay_persisted` + warning hint).
-   */
   approvalRecorder?: typeof recordConsumedApproval
 }
 
@@ -320,20 +257,10 @@ export async function requestCommitHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
-  // Advisory channel. Checks that must be *reported* rather than *gated* push
-  // here, and every return path — success, the eight rejects and mutation_failed
-  // — drains it via `withAdvisories`. Populated before the commit runs, so an
-  // advisory derived from the staged diff still has an index to read, and so a
-  // rejected commit does not swallow the warning.
   const advisories: string[] = []
   advisories.push(...anchorHints(projectRoot, config?.audit))
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
 
-  // Install drift, security tier only: an enforcement script under
-  // `.rsct/scripts/` is absent, or is present with no hook entry pointing at it,
-  // so what it enforces is not running here. Evaluated before authorization, so
-  // the advisory reaches the dev on rejected attempts too, and prepended because
-  // it outranks the routine hint tail. Never blocks.
   const installAdvisory = evaluateInstallAdvisory({
     projectRoot,
     rsctInstalled: resolution.rsct_installed,
@@ -344,14 +271,6 @@ export async function requestCommitHandler(
   })
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
 
-  // #17: `.claude/settings.json` is VERSIONED and the harness appends approved
-  // permissions to it on its own. Nobody stages those lines — the agent did not
-  // write them and correctly says so, and the dev did not either — so the file
-  // sits permanently dirty and the §E pre-commit review of it decays into
-  // noise-skimming. Report it here, at the one moment someone is deciding what
-  // enters the repo. REPORT ONLY: never blocks, never stages, never edits, never
-  // discards. Auto-committing entries nobody reviewed would be strictly worse
-  // than the status quo this fixes.
   if (resolution.rsct_installed) {
     const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
     const drift = evaluateSettingsDrift({
@@ -369,9 +288,6 @@ export async function requestCommitHandler(
           event: 'settings.drift_detected',
           tool: 'rsct_request_commit',
           added_count: drift.added_entries.length,
-          // Redacted excerpt: the first entry, truncated. The dev reads the full
-          // list in the hint; the log is a forensic trail, not a mirror of a file
-          // that may carry machine paths.
           excerpt: drift.added_entries[0]?.slice(0, 80) ?? null,
         },
         config?.audit,
@@ -379,12 +295,6 @@ export async function requestCommitHandler(
     }
   }
 
-  // Message shape (#20). Runs BEFORE authorization by necessity, not by taste:
-  // `gateRequest` below pops an OS dialog, and further down the token path debits
-  // an action while the free lane reserves budget. Checking any later would ask
-  // the dev to approve — or spend budget on — a commit already destined to be
-  // rejected. Nothing has been read or mutated at this point, so the envelope
-  // mirrors the other pre-authorization rejects.
   const messageCheck = checkCommitMessage(input.message, config)
   if (!messageCheck.ok) {
     const audit = appendAudit(
@@ -466,7 +376,6 @@ export async function requestCommitHandler(
   const sweepBefore = await runSweepCheck()
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, 'before_authorization')
 
-  // --- Authorization: per-action dev_approval OR an active plan token (T3) ---
   let channel: CommitChannel
   let authorizedVia: CommitAuthVia
   let approval: DevApproval | null = null
@@ -529,10 +438,6 @@ export async function requestCommitHandler(
     authorizedVia = 'dev_approval'
     fabricationSignals = gate.fabrication_signals
   } else {
-    // No dev_approval supplied. Read phase-state ONCE for both the free-commit
-    // lane and the token fallback. Try the dialog-free free-commit lane first
-    // (plan-lifecycle-v2, Bloco 1.1) — eligible ONLY for a healthy MCP + an
-    // active plan classified trivial/small + within the audit-anchored budget.
     const existing = readPhaseState(projectRoot)
     const activePlan = findActivePlan(projectRoot)
     const elig = evaluateFreeEligibility({
@@ -549,7 +454,6 @@ export async function requestCommitHandler(
       authorizedVia = 'free_commit'
       freeCtx = { planSlug: elig.planSlug, baseState: existing.state ?? {} }
     } else {
-      // Not eligible for the free lane — fall through to the plan-token path.
       const token = readToken(existing.state)
       const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null
       const verdict = validateToken(token, {
@@ -561,17 +465,9 @@ export async function requestCommitHandler(
 
       if (!verdict.valid) {
         let reason = planTokenRejectReason(verdict.reason)
-        // Cluster C corr#4: when the free lane was refused because its budget
-        // is LOCKED/exhausted (not merely absent), surface that instead of a
-        // bare "no token" — the dev needs the re-classify / mint-token hint.
         if (verdict.reason === 'absent' && elig.lockedHint) {
           reason = `free-commit budget is locked for this plan (${elig.reason}) — re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`
         }
-        // #25. Without this, a lane withheld for security drift falls through to
-        // the token path and reports `plan_token_invalid` — which would be a lie:
-        // nothing is wrong with the token, and it would send the dev to mint one
-        // instead of repairing enforcement. The advisory itself is already in
-        // hints[] via withAdvisories; this makes the REASON honest too.
         if (verdict.reason === 'absent' && elig.installDriftSecurity) {
           reason =
             'the dialog-free commit lane is suspended while RSCT enforcement is not running — ' +
@@ -617,8 +513,6 @@ export async function requestCommitHandler(
     }
   }
 
-  // Overrides ONLY come from a per-action dev_approval. The token path leaves
-  // both undefined (FV3) → a protected branch / any secret finding rejects.
   const overrideBranch = approval?.override_protected_branch
   const overrideSecrets = approval?.override_secrets_check
 
@@ -679,10 +573,6 @@ export async function requestCommitHandler(
     )
   }
 
-  // INV-6: scan the staged diff for secrets. `internal.stagedDiffOverride` is a
-  // TEST-ONLY seam (not an MCP input — the dispatch passes no `internal`), so a
-  // real caller can never substitute a fabricated diff; production ALWAYS scans
-  // the real `git diff --cached` on both the dev_approval and plan-token paths.
   const diff = internal.stagedDiffOverride ?? getStagedDiff(projectRoot) ?? ''
   const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
   const findings = scanDiffForSecrets(diff, extras)
@@ -743,14 +633,6 @@ export async function requestCommitHandler(
     )
   }
 
-  // INV-7 (T2): contract-surface gate. Diverges ONLY on a CONFIRMED multi-repo
-  // topology (the dev confirmed it at /rsct-setup — an unconfirmed/inferred mode
-  // never gates). In multi-repo mode, a commit touching a contract surface THIS
-  // app PRODUCES is blocked so the cross-repo blast radius is acknowledged, unless
-  // a per-action dev_approval carries override_contract_surface. mono/monorepo, no
-  // universe/manifest, or no produced surface touched → no-op (degrade-to-today).
-  // The token path carries no overrides → a surface-touching commit under a token
-  // is a hard block. Scans the REAL staged set (the override is a test-only seam).
   const overrideContract = approval?.override_contract_surface
   const topoMode = confirmedTopologyMode(config ?? null)
   let contractResult: ContractCheckResult = {
@@ -759,8 +641,6 @@ export async function requestCommitHandler(
     consumers: [],
     override_used: false,
   }
-  // RV3: surface a multi-repo commit where the gate could NOT enforce (no universe
-  // linked / no readable contracts.json) so the inactive gate isn't silent at commit.
   let contractGateInactive = false
   if (topoMode === 'multi-repo') {
     const appName = config?.app?.name ?? null
@@ -826,7 +706,6 @@ export async function requestCommitHandler(
           hints: withAdvisories([reason]),
         }
       }
-      // Override invoked — audit the waiver (parallel to the secrets override).
       appendAudit(
         projectRoot,
         {
@@ -844,13 +723,6 @@ export async function requestCommitHandler(
     }
   }
 
-  // Token path (T3 / review FV): RESERVE the action by debiting the counter
-  // BEFORE the commit. If the debit can't persist, REFUSE to commit — the bound
-  // must be mechanically enforceable, so "can't record the spend" ⇒ "can't
-  // spend". (A debit-AFTER-commit ordering would let a persistent phase-state
-  // write failure authorize unbounded commits within the TTL window.) On a
-  // later commit failure we best-effort refund so a failed commit doesn't waste
-  // a slot.
   const sweepAtCommit = await runSweepCheck()
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
 
@@ -907,12 +779,6 @@ export async function requestCommitHandler(
       }
     }
   } else if (freeCtx) {
-    // Free lane: RESERVE the budget (debit-first, same discipline as the token
-    // path) BEFORE the commit. getStagedStats reads the REAL staged set (the
-    // override is a test-only seam). A cap-tripping commit is NOT rejected here
-    // — it lands and only LOCKS the budget; the NEXT free commit is refused by
-    // evaluateFreeEligibility. If we can't measure the diff or can't persist the
-    // reserve, REFUSE to commit (fail-closed → falls back to a per-action §C).
     const rejectFreeReserve = (reason: string): RequestCommitOutput => {
       const audit = appendAudit(
         projectRoot,
@@ -948,8 +814,6 @@ export async function requestCommitHandler(
       }
     }
 
-    // Fail-CLOSED on an unmeasurable diff: falling back to zero stats would let
-    // the cumulative volume cap silently under-count on a git failure.
     const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot)
     if (stats === null) {
       return rejectFreeReserve(
@@ -984,10 +848,6 @@ export async function requestCommitHandler(
   const commit = gitCommit(projectRoot, input.message, gitExecutor)
   if (!commit.ok) {
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
-    // Token path: the action was reserved (debited) before the commit. The
-    // commit didn't land, so best-effort REFUND it — a failed commit shouldn't
-    // waste a slot. If the refund write also fails, the action stays spent
-    // (fail-safe: tightens the bound, never loosens it).
     let refundNote = ''
     if (tokenCtx) {
       const refund = writePhaseState(projectRoot, {
@@ -998,9 +858,6 @@ export async function requestCommitHandler(
         ? ' The reserved token action was refunded.'
         : ' ⚠ the reserved token action could NOT be refunded (phase-state write failed) — one action was forfeited (fail-safe).'
     } else if (freeCtx) {
-      // Restore the pre-reserve budget (or clear it if there was none) so a
-      // failed commit doesn't burn a free-commit slot. If the refund write also
-      // fails, the spend stays (fail-safe: tightens the bound, never loosens).
       const prevBudget = freeCtx.baseState.free_commit_budget
       const restored: PhaseState = { ...freeCtx.baseState }
       if (prevBudget) restored.free_commit_budget = prevBudget
@@ -1052,10 +909,6 @@ export async function requestCommitHandler(
     }
   }
 
-  // Commit succeeded — persist post-mutation bookkeeping (anti-reuse for the
-  // approval path, or the token counter increment for the token path) and write
-  // the outcome audit entry. Both can fail; failures surface as warning hints
-  // + non-null `anti_replay_error` / `audit_error`.
   let antiReplayPersisted: boolean
   let antiReplayError: string | null = null
   let tokenSummary: RequestCommitOutput['plan_token'] = null
@@ -1115,8 +968,6 @@ export async function requestCommitHandler(
       )
     }
   } else if (tokenCtx) {
-    // Token path: the action was already debited (reserved) BEFORE the commit
-    // (debit-first — see the reserve block above), so nothing to persist here.
     antiReplayPersisted = true
     tokenSummary = {
       plan_slug: reservedToken!.plan_slug,
@@ -1124,10 +975,6 @@ export async function requestCommitHandler(
       max_actions: reservedToken!.max_actions,
       expires_at: reservedToken!.expires_at,
     }
-    // plan-lifecycle-v2 (Bloco 1.4): re-arm the sliding window — SUCCESS ONLY,
-    // never in the pre-commit reserve, so a failed/refunded commit never leaves
-    // an extended window. Best-effort: a failed re-arm keeps the un-slid expiry
-    // (tightens, never loosens).
     const rearmed = rearmToken(reservedToken!, now)
     if (rearmed !== reservedToken!) {
       const w = writePhaseState(projectRoot, {
@@ -1143,10 +990,6 @@ export async function requestCommitHandler(
       }
     }
   } else {
-    // Free lane: the budget was already debited (reserved) BEFORE the commit, so
-    // nothing more to persist. Emit the DURABLE free-commit ledger events —
-    // deriveAuditCeiling reconstructs the per-plan count/lock from these, which
-    // is what makes a phase-state wipe fail-CLOSED.
     antiReplayPersisted = true
     freeSummary = {
       plan_slug: reservedFreeBudget!.plan_slug,
@@ -1169,10 +1012,6 @@ export async function requestCommitHandler(
       },
       config?.audit,
     )
-    // The state budget is the primary counter (persisted in the reserve above);
-    // this ledger event is the durable anti-rollback backstop. If it didn't
-    // persist, warn: a later phase-state wipe could then under-count by one
-    // (until then the state budget still bounds the lane).
     if (!ledger.ok && ledger.reason !== 'disabled') {
       bookkeepingHints.push(
         `⚠ the durable free_commit.committed ledger event did not persist (${ledger.error ?? 'write failed'}) — if phase-state is later wiped, the free-commit count could under-count by one.`,
@@ -1215,9 +1054,6 @@ export async function requestCommitHandler(
   const hints: string[] = [
     `Committed ${commit.sha_after ?? '<unknown sha>'} on '${branchLabel}'.`,
   ]
-  // RV3: a confirmed multi-repo commit where the gate could not enforce (no
-  // universe linked / no readable contracts.json) — say so at commit time, not
-  // only in the read tools (the FV1 philosophy: the inactive gate is never silent).
   if (contractGateInactive) {
     hints.push(
       '⚠ topology is confirmed multi-repo but no readable contracts.json was found (no universe linked or no manifest) — the contract gate did not run. Link the universe / add contracts.json to enable it.',
@@ -1246,10 +1082,6 @@ export async function requestCommitHandler(
     )
   }
 
-  // CAP-33: bootstrap visibility on mutating commit. Soft signal —
-  // warns + audits when §0 was skipped or is stale; never rejects.
-  // Mirror of CAP-31 path in phase_code_start; here we surface late
-  // (post-commit) because §C gate already validated the mutation.
   const bootstrap = evaluateBootstrapMarker({ projectRoot, now })
   if (bootstrap.status !== 'fresh') {
     if (bootstrap.hint) hints.push(bootstrap.hint)
@@ -1268,9 +1100,6 @@ export async function requestCommitHandler(
     )
   }
 
-  // CAP-53: plan-tracking reminder (advisory — never blocks). If a branch-local
-  // plan/spec exists, nudge the agent to keep its progress log current so the
-  // audit trail does not stale across a long session.
   const activePlan = findActivePlan(projectRoot)
   if (activePlan) {
     hints.push(
