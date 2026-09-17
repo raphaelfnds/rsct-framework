@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-09-17
+
 REVIEW stops being something the agent chooses to run. It becomes the last phase of the
 cycle, mandatory at every tier, and it removes every comment from the code a change
 touches — with the commit gate refusing anything it did not cover.

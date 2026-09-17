@@ -130,8 +130,9 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**40 tools · 5 resources · tsc strict · ESM ~1.28 MB
-(server) + ~19 KB (sanitize-permissions hook) + ~152 KB (edit-scope guard) ·
+**40 tools · 5 resources · tsc strict · ESM ~1.76 MB
+(server) + ~19 KB (sanitize-permissions hook) + ~150 KB (edit-scope guard) +
+~5.3 MB (tree-sitter grammars, `grammars/`) ·
 cross-platform (Windows / macOS / Linux)**
 
 ---
