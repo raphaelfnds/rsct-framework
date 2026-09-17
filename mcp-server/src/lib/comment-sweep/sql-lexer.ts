@@ -79,15 +79,15 @@ function lex(src: string, offset: number, dialect: SqlDialect, out: SqlCommentSp
       statement = ''
       return
     }
-    const langMatch = /\bLANGUAGE\s+'?([A-Za-z0-9_]+)'?/i.exec(statement)
-    const lexable = langMatch
-      ? PROCEDURAL_SQL.has(langMatch[1]!.toLowerCase())
-      : /^\s*DO\b/i.test(statement)
+    const langMatch = /\bLANGUAGE\s+([A-Za-z0-9_]+)/i.exec(statement)
+    const declared = langMatch ? langMatch[1]!.toLowerCase() : null
+    const lexable = declared ? PROCEDURAL_SQL.has(declared) : /^\s*DO\b/i.test(statement)
+    const foreign = declared !== null && !PROCEDURAL_SQL.has(declared)
     for (const body of bodies) {
       const inner = src.slice(body.innerStart, body.innerEnd)
       if (lexable) {
         lex(inner, offset + body.innerStart, dialect, out)
-      } else if (/--|\/\*|#|\/\//.test(inner)) {
+      } else if (foreign && /--|\/\*|#|\/\//.test(inner)) {
         throw new LexError()
       }
     }
@@ -137,7 +137,8 @@ function lex(src: string, offset: number, dialect: SqlDialect, out: SqlCommentSp
       const escaped =
         mysql || ((prev === 'E' || prev === 'e') && !isIdentChar(src[i - 2]))
       const end = skipQuoted(src, i, "'", escaped)
-      statement += src.slice(i, end)
+      const inner = src.slice(i + 1, end - 1)
+      statement += /^[A-Za-z0-9_]+$/.test(inner) ? inner : ' '
       i = end
       continue
     }

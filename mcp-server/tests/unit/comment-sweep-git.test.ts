@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,6 +15,19 @@ import {
 import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
 
 const dirs: string[] = []
+
+function canSymlink(): boolean {
+  const probe = mkdtempSync(join(tmpdir(), 'rsct-symlink-probe-'))
+  try {
+    writeFileSync(join(probe, 'target'), 'x')
+    symlinkSync('target', join(probe, 'link'))
+    return true
+  } catch {
+    return false
+  } finally {
+    rmSync(probe, { recursive: true, force: true })
+  }
+}
 
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'rsct-sweep-git-'))
@@ -40,12 +53,12 @@ describe('comment-sweep git reads', () => {
     const r = openSweepRepo(root)!
     expect(r.headCommit).toBeNull()
     expect(readTouchedPaths(r)).toEqual([
-      { path: '.gitignore', status: 'added' },
-      { path: 'a.ts', status: 'added' },
+      { path: '.gitignore', status: 'added', symlink: false },
+      { path: 'a.ts', status: 'added', symlink: false },
     ])
     expect(readHeadContent(r, 'a.ts')).toBeNull()
     git(root, 'add', 'a.ts')
-    expect(readStagedEntries(r)).toEqual([{ path: 'a.ts', status: 'added', headBlob: null }])
+    expect(readStagedEntries(r)).toEqual([{ path: 'a.ts', status: 'added', headBlob: null, symlink: false }])
   })
 
   it('returns null outside a git repo', () => {
@@ -66,9 +79,9 @@ describe('comment-sweep git reads', () => {
     const r = openSweepRepo(join(root, 'svc'))!
     expect(r.prefix).toBe('svc/')
     expect(readTouchedPaths(r)).toEqual([
-      { path: 'other/o.ts', status: 'modified' },
-      { path: 'svc/a.ts', status: 'deleted' },
-      { path: 'svc/b.ts', status: 'added' },
+      { path: 'other/o.ts', status: 'modified', symlink: false },
+      { path: 'svc/a.ts', status: 'deleted', symlink: false },
+      { path: 'svc/b.ts', status: 'added', symlink: false },
     ])
     expect(readStagedEntries(r)!.map((e) => [e.path, e.status])).toEqual([
       ['other/o.ts', 'modified'],
@@ -90,6 +103,24 @@ describe('comment-sweep git reads', () => {
     expect(readStagedBlobId(r, 'app/[id]/page.tsx')).toBe(ids.get('app/[id]/page.tsx'))
   })
 
+  it('hashes the working bytes when the file is stat-identical to its index entry', () => {
+    const root = repo()
+    git(root, 'config', 'core.trustctime', 'false')
+    const file = join(root, 'a.ts')
+    const old = new Date(Date.now() - 10_000)
+    write(root, 'a.ts', 'export const a = 1\n')
+    utimesSync(file, old, old)
+    git(root, 'add', 'a.ts')
+    const r = openSweepRepo(root)!
+    const staged = readStagedBlobId(r, 'a.ts')
+    write(root, 'a.ts', 'export const a = 2\n')
+    utimesSync(file, old, old)
+    utimesSync(join(root, '.git', 'index'), old, old)
+    const id = readWorkingBlobIds(r, ['a.ts'])!.get('a.ts')
+    expect(id).toBe(git(root, 'hash-object', '--', 'a.ts').trim())
+    expect(id).not.toBe(staged)
+  })
+
   it('matches git add for a file whose committed blob keeps CRLF under text=auto', () => {
     const root = repo()
     git(root, 'config', 'core.autocrlf', 'false')
@@ -103,22 +134,30 @@ describe('comment-sweep git reads', () => {
     expect(predicted).toBe(readStagedBlobId(r, 'a.ts'))
   })
 
-  it('skips submodule gitlinks and symlinks in staged and committed paths', () => {
+  it('skips submodule gitlinks in staged and committed paths', () => {
     const root = repo()
     write(root, 'a.ts', 'x\n')
     commitAll(root, 'i')
     const head = git(root, 'rev-parse', 'HEAD').trim()
     git(root, 'update-index', '--add', '--cacheinfo', `160000,${head},libs/lib`)
-    try {
-      symlinkSync('a.ts', join(root, 'link.ts'))
-      git(root, 'add', 'link.ts')
-    } catch {
-      rmSync(join(root, 'link.ts'), { force: true })
-    }
     const r = openSweepRepo(root)!
     expect(readStagedEntries(r)).toEqual([])
     git(root, 'commit', '-qm', 'gitlink')
     expect(readCommitPaths(r, head, 'HEAD')).toEqual([])
+    const blob = git(root, 'hash-object', '-w', '--', 'a.ts').trim()
+    git(root, 'update-index', '--add', '--cacheinfo', `120000,${blob},link.ts`)
+    git(root, 'commit', '-qm', 'symlink')
+    expect(readCommitPaths(r, head, 'HEAD')).toEqual([{ path: 'link.ts', symlink: true }])
+  })
+
+  it.skipIf(!canSymlink())('marks a staged symlink so the sweep can tell it from content', () => {
+    const root = repo()
+    write(root, 'a.ts', 'x\n')
+    commitAll(root, 'i')
+    symlinkSync('a.ts', join(root, 'link.ts'))
+    git(root, 'add', 'link.ts')
+    const r = openSweepRepo(root)!
+    expect(readStagedEntries(r)).toEqual([{ path: 'link.ts', status: 'added', headBlob: null, symlink: true }])
   })
 
   it('detects a filter attribute and a staged deletion', () => {

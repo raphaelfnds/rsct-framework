@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isAllowlistedBody, isLicenceLine, isLicenceText, LICENCE_MAX_LINES, type AllowlistFamily } from './allowlist.js'
+import { isAllowlistedBody, isLicenceText, LICENCE_MAX_LINES, type AllowlistFamily } from './allowlist.js'
 import { scanHtml } from './html-engine.js'
 import { classifyPath, type SweepLanguage } from './language.js'
 import { lexSqlComments, type SqlDialect } from './sql-lexer.js'
@@ -110,7 +110,7 @@ async function collectHtml(
   for (const c of scan.comments) {
     const text = source.slice(c.start, c.end)
     if (text.startsWith('<![CDATA[')) return { ok: false, reason: 'parse_error', language: 'html' }
-    if (/^<\?xml[\s?]/i.test(text)) continue
+    if (/^<\?[A-Za-z]/.test(text)) continue
     spans.push({ start: base + c.start, end: base + c.end, family: 'html' })
   }
   for (const inline of scan.inline) {
@@ -199,14 +199,7 @@ function licenceGroup(source: string, spans: Span[], starts: number[]): Set<numb
   const lines = lineAt(starts, last.end) - lineAt(starts, first.start) + 1
   const groupText = source.slice(first.start, last.end)
   if (lines > LICENCE_MAX_LINES || !isLicenceText(groupText)) return allowed
-  if (members.length === 1 && (firstText.startsWith('/*') || firstText.startsWith('<!--'))) {
-    allowed.add(k)
-    return allowed
-  }
-  for (const m of members) {
-    const span = spans[m]!
-    if (isLicenceLine(commentBody(source.slice(span.start, span.end)))) allowed.add(m)
-  }
+  for (const m of members) allowed.add(m)
   return allowed
 }
 

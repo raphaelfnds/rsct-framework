@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posix } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, rmSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, realpathSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 import { homedir, tmpdir } from 'os';
@@ -28186,7 +28186,8 @@ init_esm_shims();
 
 // src/lib/comment-sweep/git-reads.ts
 init_esm_shims();
-var NON_CONTENT_MODES = /* @__PURE__ */ new Set(["160000", "120000"]);
+var GITLINK_MODE = "160000";
+var SYMLINK_MODE = "120000";
 var ADD_BATCH = 50;
 function text(buf) {
   return buf === null ? null : buf.toString("utf8");
@@ -28226,9 +28227,14 @@ function readRaw(repo, args2) {
   }
   return out2;
 }
+function effectiveMode(entry) {
+  return entry.status === "deleted" ? entry.oldMode : entry.newMode;
+}
 function hasContent(entry) {
-  const mode = entry.status === "deleted" ? entry.oldMode : entry.newMode;
-  return !NON_CONTENT_MODES.has(mode);
+  return effectiveMode(entry) !== GITLINK_MODE;
+}
+function isSymlink(entry) {
+  return effectiveMode(entry) === SYMLINK_MODE;
 }
 function readTouchedPaths(repo) {
   const base = repo.headCommit ?? emptyTree(repo);
@@ -28237,14 +28243,22 @@ function readTouchedPaths(repo) {
   const others = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z"]));
   if (diff === null || others === null) return null;
   const byPath = /* @__PURE__ */ new Map();
-  for (const entry of diff) if (hasContent(entry)) byPath.set(entry.path, entry.status);
-  for (const path2 of others) byPath.set(path2, "added");
-  return [...byPath.entries()].map(([path2, status]) => ({ path: path2, status })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  for (const entry of diff) {
+    if (!hasContent(entry)) continue;
+    byPath.set(entry.path, { path: entry.path, status: entry.status, symlink: isSymlink(entry) });
+  }
+  for (const path2 of others) byPath.set(path2, { path: path2, status: "added", symlink: false });
+  return [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 }
 function readStagedEntries(repo) {
   const entries = readRaw(repo, ["--cached", ...repo.headCommit ? [] : [emptyTree(repo) ?? ""]]);
   if (entries === null) return null;
-  return entries.filter(hasContent).map((e) => ({ path: e.path, status: e.status, headBlob: /^0+$/.test(e.oldBlob) ? null : e.oldBlob }));
+  return entries.filter(hasContent).map((e) => ({
+    path: e.path,
+    status: e.oldMode === SYMLINK_MODE && e.newMode !== SYMLINK_MODE && e.status !== "deleted" ? "modified" : e.status,
+    headBlob: /^0+$/.test(e.oldBlob) ? null : e.oldBlob,
+    symlink: isSymlink(e)
+  }));
 }
 function readWorkingBlobIds(repo, paths) {
   const ids = /* @__PURE__ */ new Map();
@@ -28254,23 +28268,48 @@ function readWorkingBlobIds(repo, paths) {
   const realIndex = isAbsolute(indexOut) ? indexOut : join(repo.toplevel, indexOut);
   const dir = mkdtempSync(join(tmpdir(), "rsct-sweep-index-"));
   const tempIndex = join(dir, "index");
+  const noHooks = join(dir, "no-hooks");
   try {
-    if (existsSync(realIndex)) copyFileSync(realIndex, tempIndex);
+    mkdirSync(noHooks, { recursive: true });
+    if (existsSync(realIndex)) {
+      copyFileSync(realIndex, tempIndex);
+      const stats = statSync(realIndex);
+      utimesSync(tempIndex, stats.atime, stats.mtime);
+    }
     const env = { GIT_INDEX_FILE: tempIndex };
+    const config2 = [
+      "-c",
+      `core.hooksPath=${noHooks}`,
+      "-c",
+      "core.splitIndex=false",
+      "-c",
+      "core.safecrlf=false",
+      "-c",
+      "core.fsmonitor=false"
+    ];
+    const addPaths = (batch) => safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "add", "-f", "--", ...batch], "", env) !== null;
+    const failed = [];
     for (let i2 = 0; i2 < paths.length; i2 += ADD_BATCH) {
       const batch = paths.slice(i2, i2 + ADD_BATCH);
-      const added = safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "add", "-f", "--", ...batch], "", env);
-      if (added === null) return null;
+      if (addPaths(batch)) continue;
+      for (const path2 of batch) if (!addPaths([path2])) failed.push(path2);
     }
-    const listing = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z"], "", env));
+    const listing = nulList(
+      safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "ls-files", "-s", "-z", "--", ...paths], "", env)
+    );
     if (listing === null) return null;
-    const wanted = new Set(paths);
     for (const record2 of listing) {
       const tab = record2.indexOf("	");
       if (tab < 0) continue;
       const [mode, blob, stage] = record2.slice(0, tab).split(" ");
       const path2 = record2.slice(tab + 1);
-      if (stage === "0" && blob && mode && !NON_CONTENT_MODES.has(mode) && wanted.has(path2)) ids.set(path2, blob);
+      if (stage === "0" && blob && mode && mode !== GITLINK_MODE) ids.set(path2, blob);
+    }
+    for (const path2 of paths) {
+      if (ids.has(path2)) continue;
+      if (failed.includes(path2)) continue;
+      const fallback = line(safeGitBuffer(repo.toplevel, ["hash-object", `--path=${path2}`, "--", path2]));
+      if (fallback) ids.set(path2, fallback);
     }
     return ids;
   } finally {
@@ -28311,7 +28350,10 @@ function readCommitPaths(repo, before, after) {
   if (!base) return null;
   const entries = readRaw(repo, [base, after]);
   if (entries === null) return null;
-  return entries.filter((e) => e.status !== "deleted" && hasContent(e)).map((e) => e.path);
+  return entries.filter((e) => e.status !== "deleted" && hasContent(e)).map((e) => ({ path: e.path, symlink: isSymlink(e) }));
+}
+function looksLikeLinkTarget(bytes) {
+  return bytes.length > 0 && bytes.length <= 4096 && !bytes.includes(10) && !bytes.includes(0);
 }
 function hasGitFilter(repo, path2) {
   const out2 = nulList(safeGitBuffer(repo.toplevel, ["check-attr", "-z", "filter", "--", path2]));
@@ -28325,11 +28367,12 @@ init_esm_shims();
 
 // src/lib/comment-sweep/allowlist.ts
 init_esm_shims();
-var MAX_DIRECTIVE_BODY = 400;
+var MAX_DIRECTIVE_BODY = 1e3;
+var PROSE_RUN = /[A-Za-z]{2,}[ ][A-Za-z]{2,}[ ][A-Za-z]{2,}[ ][A-Za-z]{2,}/;
 var RULE_LIST = String.raw`[@\w/.-]+(?:\s*,\s*[@\w/.-]+)*`;
 var WEBPACK_VALUE = String.raw`(?:"[\w./\[\]-]{1,100}"|'[\w./\[\]-]{1,100}'|true|false|\d+)`;
-var PY_TYPE = String.raw`[\w.]+(?:\[[\w., \[\]|]*\])?`;
-var PHP_TYPE = String.raw`[\w\\\[\]<>|()?:{}.-]+(?:, [\w\\\[\]<>|()?:{}.-]+)*`;
+var PY_TYPE_CHARS = String.raw`[\w.\[\], |'"()*-]`;
+var PHP_TAG = String.raw`[a-z][\w-]*`;
 var MYSQL_HINTS = [
   "BKA",
   "NO_BKA",
@@ -28391,7 +28434,7 @@ var SCRIPT = [
 ];
 var PYTHON = [
   /^-\*- coding: [\w.-]+ -\*-$/,
-  new RegExp(String.raw`^type: (?:ignore(?:\[[\w-]+(?:, ?[\w-]+)*\])?|${PY_TYPE}(?: ?\| ?${PY_TYPE})*)$`),
+  new RegExp(String.raw`^type: (?:ignore(?:\[[\w-]+(?:, ?[\w-]+)*\])?|${PY_TYPE_CHARS}{1,200})$`),
   /^noqa(?:: ?[A-Z]+\d+(?:, ?[A-Z]+\d+)*)?$/,
   /^pylint: (?:disable|enable)=[\w-]+(?:, ?[\w-]+)*$/,
   /^pyright: (?:ignore(?:\[[\w, ]+\])?|basic|strict|standard|\w+=\w+(?:, ?\w+=\w+)*)$/,
@@ -28401,11 +28444,7 @@ var PYTHON = [
   /^isort: (?:skip|skip_file|off|on)$/
 ];
 var PHP = [
-  /^@(?:phpstan|psalm)-ignore(?:-next-line|-line)?(?: [\w.-]+(?:, ?[\w.-]+)*)?$/,
-  new RegExp(
-    String.raw`^@(?:phpstan|psalm)-(?:var|param|return|type|import-type|template|extends|implements|use|property|property-read|property-write|method|assert|assert-if-true|assert-if-false|pure|impure|require-extends|require-implements|sealed) ${PHP_TYPE}(?: \$\w+)?$`
-  ),
-  /^@(?:phpstan|psalm)-(?:pure|impure|immutable|internal|mutation-free)$/,
+  new RegExp(String.raw`^@(?:phpstan|psalm)-${PHP_TAG}(?:[ (][^\n]{0,200})?$`),
   /^phpcs:(?:disable|enable|ignore|ignoreFile)(?:\s+[\w.,]+)?$/
 ];
 var JAVA = [
@@ -28436,16 +28475,13 @@ var FAMILIES = {
 };
 function isAllowlistedBody(family, body2) {
   if (body2.length > MAX_DIRECTIVE_BODY) return false;
+  if (PROSE_RUN.test(body2)) return false;
   return FAMILIES[family].some((pattern) => pattern.test(body2));
 }
-var LICENCE_MARKER = /SPDX-License-Identifier|Copyright (?:\(c\)|©|\d{4})/i;
-var LICENCE_LINE = /^(?:SPDX-License-Identifier: [\w.+() -]{1,80}|Copyright (?:\(c\) |© )?\d{4}(?:[-–]\d{4})?[^\n]{0,100}|All rights reserved\.?)$/i;
+var LICENCE_MARKER = /SPDX-(?:License-Identifier|FileCopyrightText)|Copyright\b|©|Licensed under|All rights reserved/i;
 var LICENCE_MAX_LINES = 30;
 function isLicenceText(text2) {
   return LICENCE_MARKER.test(text2);
-}
-function isLicenceLine(body2) {
-  return LICENCE_LINE.test(body2);
 }
 
 // src/lib/comment-sweep/html-engine.ts
@@ -36334,6 +36370,11 @@ function walk(node, out2) {
     return;
   }
   if ((node.tagName === "script" || node.tagName === "style") && node.sourceCodeLocation) {
+    for (const child of node.childNodes ?? []) {
+      if (child.nodeName === "#comment" && child.sourceCodeLocation) {
+        out2.comments.push({ start: child.sourceCodeLocation.startOffset, end: child.sourceCodeLocation.endOffset });
+      }
+    }
     for (const text2 of node.childNodes?.filter((c) => c.nodeName === "#text") ?? []) {
       if (!text2.sourceCodeLocation) continue;
       out2.inline.push({
@@ -36569,13 +36610,15 @@ function lex(src, offset, dialect, out2) {
       statement = "";
       return;
     }
-    const langMatch = /\bLANGUAGE\s+'?([A-Za-z0-9_]+)'?/i.exec(statement);
-    const lexable = langMatch ? PROCEDURAL_SQL.has(langMatch[1].toLowerCase()) : /^\s*DO\b/i.test(statement);
+    const langMatch = /\bLANGUAGE\s+([A-Za-z0-9_]+)/i.exec(statement);
+    const declared = langMatch ? langMatch[1].toLowerCase() : null;
+    const lexable = declared ? PROCEDURAL_SQL.has(declared) : /^\s*DO\b/i.test(statement);
+    const foreign = declared !== null && !PROCEDURAL_SQL.has(declared);
     for (const body2 of bodies) {
       const inner = src.slice(body2.innerStart, body2.innerEnd);
       if (lexable) {
         lex(inner, offset + body2.innerStart, dialect, out2);
-      } else if (/--|\/\*|#|\/\//.test(inner)) {
+      } else if (foreign && /--|\/\*|#|\/\//.test(inner)) {
         throw new LexError();
       }
     }
@@ -36619,7 +36662,8 @@ function lex(src, offset, dialect, out2) {
       const prev = src[i2 - 1];
       const escaped = mysql || (prev === "E" || prev === "e") && !isIdentChar(src[i2 - 2]);
       const end = skipQuoted(src, i2, "'", escaped);
-      statement += src.slice(i2, end);
+      const inner = src.slice(i2 + 1, end - 1);
+      statement += /^[A-Za-z0-9_]+$/.test(inner) ? inner : " ";
       i2 = end;
       continue;
     }
@@ -40755,7 +40799,7 @@ async function collectHtml(source, base, asFragment, grammarsDir) {
   for (const c of scan.comments) {
     const text2 = source.slice(c.start, c.end);
     if (text2.startsWith("<![CDATA[")) return { ok: false, reason: "parse_error", language: "html" };
-    if (/^<\?xml[\s?]/i.test(text2)) continue;
+    if (/^<\?[A-Za-z]/.test(text2)) continue;
     spans.push({ start: base + c.start, end: base + c.end, family: "html" });
   }
   for (const inline of scan.inline) {
@@ -40836,14 +40880,7 @@ function licenceGroup(source, spans, starts) {
   const lines = lineAt(starts, last.end) - lineAt(starts, first.start) + 1;
   const groupText = source.slice(first.start, last.end);
   if (lines > LICENCE_MAX_LINES || !isLicenceText(groupText)) return allowed;
-  if (members.length === 1 && (firstText.startsWith("/*") || firstText.startsWith("<!--"))) {
-    allowed.add(k);
-    return allowed;
-  }
-  for (const m of members) {
-    const span = spans[m];
-    if (isLicenceLine(commentBody(source.slice(span.start, span.end)))) allowed.add(m);
-  }
+  for (const m of members) allowed.add(m);
   return allowed;
 }
 async function scanFile(path2, bytes, options = {}) {
@@ -40893,6 +40930,9 @@ async function scanWithFilter(repo, path2, bytes, options) {
   if (filtered === null || filtered) return { kind: "unverified", language: result.language, reason: "git_filter" };
   return result;
 }
+async function scanBlobBytes(path2, bytes, options) {
+  return scanFile(path2, bytes, { sqlDialect: options.sqlDialect });
+}
 function readWorkingBytes(repo, path2) {
   const full = join(repo.toplevel, path2);
   try {
@@ -40920,17 +40960,20 @@ async function computeWorkingSweep(projectRoot, options) {
   if (!repo) return { ok: false, reason: "not_git_repo", detail: "project_root is not inside a git work tree" };
   const touched = readTouchedPaths(repo);
   if (!touched) return { ok: false, reason: "git_read_failed", detail: "could not list the touched paths" };
-  const byPath = new Map(touched.map((t) => [t.path, t.status]));
+  const byPath = new Map(touched.map((t) => [t.path, t]));
+  const known = readKnownPaths(repo);
   for (const extra of options.extraPaths ?? []) {
-    if (!byPath.has(extra) && lstatExists(repo, extra)) byPath.set(extra, "modified");
+    if (!byPath.has(extra) && known?.has(extra)) {
+      byPath.set(extra, { path: extra, status: "modified", symlink: false });
+    }
   }
-  const present = [...byPath.entries()].filter(([, s]) => s !== "deleted").map(([p]) => p);
+  const present = [...byPath.values()].filter((t) => t.status !== "deleted").map((t) => t.path);
   const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null));
   if (!blobs) return { ok: false, reason: "git_read_failed", detail: "could not hash the touched files" };
   const files = [];
-  for (const [path2, status] of [...byPath.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+  for (const { path: path2, status, symlink } of [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
     const head = readHeadContent(repo, path2);
-    const headScan = head ? await scanWithFilter(repo, path2, head, options) : null;
+    const headScan = head ? await scanBlobBytes(path2, head, options) : null;
     const headComments = headScan?.kind === "scanned" ? headScan.comments : [];
     if (status === "deleted") {
       if (headScan === null || headScan.kind === "not_code") continue;
@@ -40950,6 +40993,7 @@ async function computeWorkingSweep(projectRoot, options) {
     }
     const bytes = readWorkingBytes(repo, path2);
     if (bytes === null) continue;
+    if (symlink && looksLikeLinkTarget(Buffer.from(bytes))) continue;
     const blob = blobs.get(path2);
     if (!blob) return { ok: false, reason: "git_read_failed", detail: `could not hash ${path2}` };
     const scan = await scanWithFilter(repo, path2, bytes, options);
@@ -41089,6 +41133,21 @@ function isLedgerEntry(value) {
   const e = value;
   return typeof e.blob === "string" && (e.verdict === "clean" || e.verdict === "unverified_authorized") && Array.isArray(e.migrations) && typeof e.channel === "string" && typeof e.spec_ref === "string" && typeof e.at === "string";
 }
+async function migrationsHold(repo, entry, cache) {
+  for (const m of entry.migrations) {
+    if (typeof m.body !== "string") return false;
+    let content = cache.get(m.destination);
+    if (content === void 0) {
+      const repoPath = `${repo.prefix}${m.destination}`;
+      const stagedDest = readStagedBlobId(repo, repoPath);
+      const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath);
+      content = destBytes ? collapseWhitespace(destBytes.toString("utf8")) : "";
+      cache.set(m.destination, content);
+    }
+    if (!content.includes(m.body)) return false;
+  }
+  return true;
+}
 function ledgerEntries(ledger, path2) {
   if (!ledger || typeof ledger !== "object") return [];
   const list = ledger[path2];
@@ -41116,14 +41175,6 @@ function sweepEntry(blob, verdict, migrations, channel, specRef, at) {
 async function checkStagedSweep(args2) {
   const repo = openSweepRepo(args2.projectRoot);
   if (!repo) return { ok: true, skipped: "not_git_repo", checked: [] };
-  if (args2.drift && args2.drift.paths.length > 0) {
-    return {
-      ok: false,
-      reject_kind: "review_drift",
-      reason: `a previous commit landed code that no review covers (${args2.drift.paths.join(", ")}) \u2014 run rsct_phase_review_start / _complete; it re-checks those paths even when they are unchanged`,
-      paths: args2.drift.paths
-    };
-  }
   const staged = readStagedEntries(repo);
   if (staged === null) {
     return { ok: false, reject_kind: "review_unreadable", reason: "could not read the staged paths from git", paths: [] };
@@ -41133,16 +41184,21 @@ async function checkStagedSweep(args2) {
   const withComments = [];
   const reverted = [];
   const destinationCache = /* @__PURE__ */ new Map();
-  for (const { path: path2, status, headBlob } of staged) {
+  for (const { path: path2, status, headBlob, symlink } of staged) {
     if (status === "deleted") {
       if (!headBlob) continue;
       const headBytes = readBlob(repo, headBlob);
       if (!headBytes) {
         return { ok: false, reject_kind: "review_unreadable", reason: `could not read the HEAD content of ${path2}`, paths: [path2] };
       }
-      const headScan = await scanWithFilter(repo, path2, headBytes, args2.options);
+      const headScan = await scanBlobBytes(path2, headBytes, args2.options);
       if (headScan.kind !== "scanned" || headScan.comments.length === 0) continue;
-      if (!ledgerEntries(args2.ledger, path2).some((e) => e.blob === deletionBlob(headBlob))) missing.push(path2);
+      const deletionEntry = ledgerEntries(args2.ledger, path2).find((e) => e.blob === deletionBlob(headBlob));
+      if (!deletionEntry) {
+        missing.push(path2);
+        continue;
+      }
+      if (!await migrationsHold(repo, deletionEntry, destinationCache)) reverted.push(path2);
       continue;
     }
     const blob = readStagedBlobId(repo, path2);
@@ -41150,6 +41206,7 @@ async function checkStagedSweep(args2) {
     if (!blob || !bytes) {
       return { ok: false, reject_kind: "review_unreadable", reason: `could not read the staged content of ${path2}`, paths: [path2] };
     }
+    if (symlink && looksLikeLinkTarget(bytes)) continue;
     const scan = await scanWithFilter(repo, path2, bytes, args2.options);
     if (scan.kind === "not_code") continue;
     const entry = ledgerEntries(args2.ledger, path2).find((e) => e.blob === blob);
@@ -41162,25 +41219,32 @@ async function checkStagedSweep(args2) {
       missing.push(path2);
       continue;
     }
-    for (const m of entry.migrations) {
-      if (typeof m.body !== "string") {
-        reverted.push(path2);
-        break;
-      }
-      let content = destinationCache.get(m.destination);
-      if (content === void 0) {
-        const repoPath = `${repo.prefix}${m.destination}`;
-        const stagedDest = readStagedBlobId(repo, repoPath);
-        const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath);
-        content = destBytes ? collapseWhitespace(destBytes.toString("utf8")) : "";
-        destinationCache.set(m.destination, content);
-      }
-      if (!content.includes(m.body)) {
-        reverted.push(path2);
-        break;
-      }
+    if (!await migrationsHold(repo, entry, destinationCache)) {
+      reverted.push(path2);
+      continue;
     }
     checked.push({ path: path2, blob });
+  }
+  const driftPaths = args2.drift?.paths ?? [];
+  if (driftPaths.length > 0) {
+    const stagedPaths = new Map(staged.map((e) => [e.path, e]));
+    const carried = new Set(checked.map((c) => c.path));
+    const openDrift = driftCovered(args2.projectRoot, args2.ledger, driftPaths).open.filter((path2) => {
+      const entry = stagedPaths.get(path2);
+      if (!entry) return true;
+      if (entry.status === "deleted") {
+        return !(entry.headBlob && ledgerEntries(args2.ledger, path2).some((e) => e.blob === deletionBlob(entry.headBlob)));
+      }
+      return !carried.has(path2);
+    });
+    if (openDrift.length > 0) {
+      return {
+        ok: false,
+        reject_kind: "review_drift",
+        reason: `a previous commit landed code that no review covers (${openDrift.join(", ")}) \u2014 run rsct_phase_review_start / _complete over those paths, or stage the reviewed fix for them in this commit`,
+        paths: openDrift
+      };
+    }
   }
   if (withComments.length > 0) {
     return {
@@ -41217,7 +41281,7 @@ async function verifyCommittedSweep(args2) {
   if (paths === null) return { drift: [...expected.keys()], rewrites: [], full_sha: fullSha };
   const drift = [];
   const rewrites = [];
-  for (const path2 of paths) {
+  for (const { path: path2, symlink } of paths) {
     const blob = readCommitBlobId(repo, args2.after, path2);
     if (!blob) {
       drift.push(path2);
@@ -41229,9 +41293,10 @@ async function verifyCommittedSweep(args2) {
       drift.push(path2);
       continue;
     }
+    if (symlink && looksLikeLinkTarget(bytes)) continue;
     const scan = await scanWithFilter(repo, path2, bytes, args2.options);
     if (scan.kind === "not_code") continue;
-    if (scan.kind === "scanned" && scan.comments.length === 0) {
+    if (scan.kind === "scanned" && scan.comments.length === 0 && expected.has(path2)) {
       rewrites.push({ path: path2, blob });
       continue;
     }
@@ -41242,6 +41307,25 @@ async function verifyCommittedSweep(args2) {
 function knownPaths(projectRoot) {
   const repo = openSweepRepo(projectRoot);
   return repo ? readKnownPaths(repo) : null;
+}
+function driftCovered(projectRoot, ledger, paths) {
+  const repo = openSweepRepo(projectRoot);
+  if (!repo) return { covered: [], open: [...paths] };
+  const covered = [];
+  const open = [];
+  for (const path2 of paths) {
+    const headBlob = repo.headCommit ? readCommitBlobId(repo, repo.headCommit, path2) : null;
+    if (headBlob === null) {
+      covered.push(path2);
+      continue;
+    }
+    if (ledgerEntries(ledger, path2).some((e) => e.blob === headBlob)) {
+      covered.push(path2);
+      continue;
+    }
+    open.push(path2);
+  }
+  return { covered, open };
 }
 
 // src/lib/dev-approval.ts
@@ -42627,10 +42711,20 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
         { event: "review.commit_hook_rewrite", tool: "rsct_request_commit", path: r.path, blob: r.blob, sha_after: commit.sha_after },
         config2?.audit
       );
-      return { path: r.path, entry: sweepEntry(r.blob, "clean", [], "hook_rewrite", original?.spec_ref ?? "hook_rewrite", at) };
+      return { path: r.path, entry: sweepEntry(r.blob, "clean", original?.migrations ?? [], "hook_rewrite", original?.spec_ref ?? "hook_rewrite", at) };
     });
+    if (committed.rewrites.length > 0) {
+      bookkeepingHints.push(
+        `\u2139 a pre-commit hook rewrote ${committed.rewrites.map((r) => r.path).join(", ")} \u2014 the committed bytes carry no comment and were re-stamped.`
+      );
+    }
     const next = { ...state };
     if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, null);
+    if (state.review_drift) {
+      const { open } = driftCovered(projectRoot, next.review_sweep ?? state.review_sweep, state.review_drift.paths);
+      if (open.length === 0) delete next.review_drift;
+      else next.review_drift = { ...state.review_drift, paths: open };
+    }
     if (committed.drift.length > 0) {
       sweepDrift = committed.drift;
       next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at };
@@ -42643,7 +42737,7 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
         `\u26A0 the commit landed code no REVIEW covers (${committed.drift.join(", ")}) \u2014 most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`
       );
     }
-    if (stamps.length > 0 || committed.drift.length > 0) {
+    if (stamps.length > 0 || committed.drift.length > 0 || state.review_drift) {
       const w = writePhaseState(projectRoot, next);
       if (!w.ok) {
         bookkeepingHints.push(`\u26A0 could not record the post-commit sweep result in phase-state (${w.reason}).`);
@@ -48231,7 +48325,12 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   }
   summary.migrated = dispositionCheck.migrated;
   summary.discarded = dispositionCheck.discarded;
+  const removedFiles = sweep.files.filter((f) => f.removed.length > 0);
   const unverified = sweep.files.filter((f) => f.kind === "unverified");
+  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0;
+  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null;
+  summary.report_path = report?.path ?? null;
+  const reportLine = report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : "Full list: report could not be written.";
   if (unverified.length > 0) {
     const validation = validateDevApproval(input.dev_approval, {
       projectRoot,
@@ -48253,7 +48352,11 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       title: `RSCT \u2014 ${unverified.length} file(s) the comment sweep cannot verify`,
       message: `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:
 
-` + unverified.map((f) => `\u2022 ${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`).join("\n") + `
+` + listLines(
+        unverified.map((f) => `${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`),
+        40
+      ) + `
+${reportLine}
 
 Yes = allow these versions. No = reject this REVIEW.`
     });
@@ -48279,10 +48382,6 @@ Yes = allow these versions. No = reject this REVIEW.`
       });
     }
   }
-  const removedFiles = sweep.files.filter((f) => f.removed.length > 0);
-  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0;
-  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null;
-  summary.report_path = report?.path ?? null;
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]));
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })));
   const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`];
@@ -48304,7 +48403,7 @@ Yes = allow these versions. No = reject this REVIEW.`
         )
       );
     }
-    detailParts.push(report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : "Full list: report could not be written.");
+    detailParts.push(reportLine);
   }
   const result = await gatePhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -48337,7 +48436,10 @@ Yes = allow these versions. No = reject this REVIEW.`
   for (const f of sweep.files) {
     if (f.blob === null || f.kind === "comments_present") continue;
     if (f.kind === "deleted") {
-      stamps.push({ path: f.path, entry: sweepEntry(f.blob, "clean", [], channel, input.spec_ref, at) });
+      stamps.push({
+        path: f.path,
+        entry: sweepEntry(f.blob, "clean", dispositionCheck.migrations.get(f.path) ?? [], channel, input.spec_ref, at)
+      });
       continue;
     }
     if (currentIds.get(f.path) !== f.blob) {
@@ -48374,9 +48476,9 @@ Yes = allow these versions. No = reject this REVIEW.`
     const fresh = readPhaseState(projectRoot).state ?? {};
     const next = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) };
     if (fresh.review_drift) {
-      const stampedPaths = new Set(stamps.map((s2) => s2.path));
-      const covered = (p) => stampedPaths.has(p) || !sweep.files.some((f) => f.path === p) && !existsSync(join(sweep.repo.toplevel, p));
-      if (fresh.review_drift.paths.every(covered)) delete next.review_drift;
+      const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths);
+      if (open.length === 0) delete next.review_drift;
+      else next.review_drift = { ...fresh.review_drift, paths: open };
     }
     const w = writePhaseState(projectRoot, next);
     if (w.ok) summary.stamped = stamps.map((s2) => s2.path);

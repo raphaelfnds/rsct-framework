@@ -9,6 +9,7 @@ import {
   readCommitBlobId,
   readCommitPaths,
   readHeadContent,
+  looksLikeLinkTarget,
   readKnownPaths,
   readStagedBlobId,
   readStagedEntries,
@@ -94,6 +95,10 @@ async function scanWithFilter(
   return result
 }
 
+async function scanBlobBytes(path: string, bytes: Uint8Array, options: SweepOptions): Promise<ScanResult> {
+  return scanFile(path, bytes, { sqlDialect: options.sqlDialect })
+}
+
 function readWorkingBytes(repo: SweepRepo, path: string): Uint8Array | null {
   const full = join(repo.toplevel, path)
   try {
@@ -124,19 +129,22 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
   if (!repo) return { ok: false, reason: 'not_git_repo', detail: 'project_root is not inside a git work tree' }
   const touched = readTouchedPaths(repo)
   if (!touched) return { ok: false, reason: 'git_read_failed', detail: 'could not list the touched paths' }
-  const byPath = new Map(touched.map((t) => [t.path, t.status]))
+  const byPath = new Map(touched.map((t) => [t.path, t]))
+  const known = readKnownPaths(repo)
   for (const extra of options.extraPaths ?? []) {
-    if (!byPath.has(extra) && lstatExists(repo, extra)) byPath.set(extra, 'modified')
+    if (!byPath.has(extra) && known?.has(extra)) {
+      byPath.set(extra, { path: extra, status: 'modified', symlink: false })
+    }
   }
 
-  const present = [...byPath.entries()].filter(([, s]) => s !== 'deleted').map(([p]) => p)
+  const present = [...byPath.values()].filter((t) => t.status !== 'deleted').map((t) => t.path)
   const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null))
   if (!blobs) return { ok: false, reason: 'git_read_failed', detail: 'could not hash the touched files' }
 
   const files: SweepFile[] = []
-  for (const [path, status] of [...byPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const { path, status, symlink } of [...byPath.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
     const head = readHeadContent(repo, path)
-    const headScan = head ? await scanWithFilter(repo, path, head, options) : null
+    const headScan = head ? await scanBlobBytes(path, head, options) : null
     const headComments = headScan?.kind === 'scanned' ? headScan.comments : []
 
     if (status === 'deleted') {
@@ -158,6 +166,7 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
 
     const bytes = readWorkingBytes(repo, path)
     if (bytes === null) continue
+    if (symlink && looksLikeLinkTarget(Buffer.from(bytes))) continue
     const blob = blobs.get(path)
     if (!blob) return { ok: false, reason: 'git_read_failed', detail: `could not hash ${path}` }
     const scan = await scanWithFilter(repo, path, bytes, options)
@@ -316,6 +325,26 @@ function isLedgerEntry(value: unknown): value is SweepLedgerEntry {
   )
 }
 
+async function migrationsHold(
+  repo: SweepRepo,
+  entry: SweepLedgerEntry,
+  cache: Map<string, string>,
+): Promise<boolean> {
+  for (const m of entry.migrations) {
+    if (typeof m.body !== 'string') return false
+    let content = cache.get(m.destination)
+    if (content === undefined) {
+      const repoPath = `${repo.prefix}${m.destination}`
+      const stagedDest = readStagedBlobId(repo, repoPath)
+      const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath)
+      content = destBytes ? collapseWhitespace(destBytes.toString('utf8')) : ''
+      cache.set(m.destination, content)
+    }
+    if (!content.includes(m.body)) return false
+  }
+  return true
+}
+
 export function ledgerEntries(ledger: unknown, path: string): SweepLedgerEntry[] {
   if (!ledger || typeof ledger !== 'object') return []
   const list = (ledger as Record<string, unknown>)[path]
@@ -372,14 +401,6 @@ export async function checkStagedSweep(args: {
 }): Promise<StagedSweepCheck> {
   const repo = openSweepRepo(args.projectRoot)
   if (!repo) return { ok: true, skipped: 'not_git_repo', checked: [] }
-  if (args.drift && args.drift.paths.length > 0) {
-    return {
-      ok: false,
-      reject_kind: 'review_drift',
-      reason: `a previous commit landed code that no review covers (${args.drift.paths.join(', ')}) — run rsct_phase_review_start / _complete; it re-checks those paths even when they are unchanged`,
-      paths: args.drift.paths,
-    }
-  }
   const staged = readStagedEntries(repo)
   if (staged === null) {
     return { ok: false, reject_kind: 'review_unreadable', reason: 'could not read the staged paths from git', paths: [] }
@@ -391,16 +412,21 @@ export async function checkStagedSweep(args: {
   const reverted: string[] = []
   const destinationCache = new Map<string, string>()
 
-  for (const { path, status, headBlob } of staged) {
+  for (const { path, status, headBlob, symlink } of staged) {
     if (status === 'deleted') {
       if (!headBlob) continue
       const headBytes = readBlob(repo, headBlob)
       if (!headBytes) {
         return { ok: false, reject_kind: 'review_unreadable', reason: `could not read the HEAD content of ${path}`, paths: [path] }
       }
-      const headScan = await scanWithFilter(repo, path, headBytes, args.options)
+      const headScan = await scanBlobBytes(path, headBytes, args.options)
       if (headScan.kind !== 'scanned' || headScan.comments.length === 0) continue
-      if (!ledgerEntries(args.ledger, path).some((e) => e.blob === deletionBlob(headBlob))) missing.push(path)
+      const deletionEntry = ledgerEntries(args.ledger, path).find((e) => e.blob === deletionBlob(headBlob))
+      if (!deletionEntry) {
+        missing.push(path)
+        continue
+      }
+      if (!(await migrationsHold(repo, deletionEntry, destinationCache))) reverted.push(path)
       continue
     }
     const blob = readStagedBlobId(repo, path)
@@ -408,6 +434,7 @@ export async function checkStagedSweep(args: {
     if (!blob || !bytes) {
       return { ok: false, reject_kind: 'review_unreadable', reason: `could not read the staged content of ${path}`, paths: [path] }
     }
+    if (symlink && looksLikeLinkTarget(bytes)) continue
     const scan = await scanWithFilter(repo, path, bytes, args.options)
     if (scan.kind === 'not_code') continue
     const entry = ledgerEntries(args.ledger, path).find((e) => e.blob === blob)
@@ -421,25 +448,33 @@ export async function checkStagedSweep(args: {
       missing.push(path)
       continue
     }
-    for (const m of entry.migrations) {
-      if (typeof m.body !== 'string') {
-        reverted.push(path)
-        break
-      }
-      let content = destinationCache.get(m.destination)
-      if (content === undefined) {
-        const repoPath = `${repo.prefix}${m.destination}`
-        const stagedDest = readStagedBlobId(repo, repoPath)
-        const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath)
-        content = destBytes ? collapseWhitespace(destBytes.toString('utf8')) : ''
-        destinationCache.set(m.destination, content)
-      }
-      if (!content.includes(m.body)) {
-        reverted.push(path)
-        break
-      }
+    if (!(await migrationsHold(repo, entry, destinationCache))) {
+      reverted.push(path)
+      continue
     }
     checked.push({ path, blob })
+  }
+
+  const driftPaths = args.drift?.paths ?? []
+  if (driftPaths.length > 0) {
+    const stagedPaths = new Map(staged.map((e) => [e.path, e]))
+    const carried = new Set(checked.map((c) => c.path))
+    const openDrift = driftCovered(args.projectRoot, args.ledger, driftPaths).open.filter((path) => {
+      const entry = stagedPaths.get(path)
+      if (!entry) return true
+      if (entry.status === 'deleted') {
+        return !(entry.headBlob && ledgerEntries(args.ledger, path).some((e) => e.blob === deletionBlob(entry.headBlob!)))
+      }
+      return !carried.has(path)
+    })
+    if (openDrift.length > 0) {
+      return {
+        ok: false,
+        reject_kind: 'review_drift',
+        reason: `a previous commit landed code that no review covers (${openDrift.join(', ')}) — run rsct_phase_review_start / _complete over those paths, or stage the reviewed fix for them in this commit`,
+        paths: openDrift,
+      }
+    }
   }
 
   if (withComments.length > 0) {
@@ -486,7 +521,7 @@ export async function verifyCommittedSweep(args: {
   if (paths === null) return { drift: [...expected.keys()], rewrites: [], full_sha: fullSha }
   const drift: string[] = []
   const rewrites: Array<{ path: string; blob: string }> = []
-  for (const path of paths) {
+  for (const { path, symlink } of paths) {
     const blob = readCommitBlobId(repo, args.after, path)
     if (!blob) {
       drift.push(path)
@@ -498,9 +533,10 @@ export async function verifyCommittedSweep(args: {
       drift.push(path)
       continue
     }
+    if (symlink && looksLikeLinkTarget(bytes)) continue
     const scan = await scanWithFilter(repo, path, bytes, args.options)
     if (scan.kind === 'not_code') continue
-    if (scan.kind === 'scanned' && scan.comments.length === 0) {
+    if (scan.kind === 'scanned' && scan.comments.length === 0 && expected.has(path)) {
       rewrites.push({ path, blob })
       continue
     }
@@ -512,4 +548,28 @@ export async function verifyCommittedSweep(args: {
 export function knownPaths(projectRoot: string): ReadonlySet<string> | null {
   const repo = openSweepRepo(projectRoot)
   return repo ? readKnownPaths(repo) : null
+}
+
+export function driftCovered(
+  projectRoot: string,
+  ledger: unknown,
+  paths: readonly string[],
+): { covered: string[]; open: string[] } {
+  const repo = openSweepRepo(projectRoot)
+  if (!repo) return { covered: [], open: [...paths] }
+  const covered: string[] = []
+  const open: string[] = []
+  for (const path of paths) {
+    const headBlob = repo.headCommit ? readCommitBlobId(repo, repo.headCommit, path) : null
+    if (headBlob === null) {
+      covered.push(path)
+      continue
+    }
+    if (ledgerEntries(ledger, path).some((e) => e.blob === headBlob)) {
+      covered.push(path)
+      continue
+    }
+    open.push(path)
+  }
+  return { covered, open }
 }

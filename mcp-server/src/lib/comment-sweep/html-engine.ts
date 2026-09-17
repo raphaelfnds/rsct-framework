@@ -58,6 +58,11 @@ function walk(node: Node, out: HtmlScan): void {
     return
   }
   if ((node.tagName === 'script' || node.tagName === 'style') && node.sourceCodeLocation) {
+    for (const child of node.childNodes ?? []) {
+      if (child.nodeName === '#comment' && child.sourceCodeLocation) {
+        out.comments.push({ start: child.sourceCodeLocation.startOffset, end: child.sourceCodeLocation.endOffset })
+      }
+    }
     for (const text of node.childNodes?.filter((c) => c.nodeName === '#text') ?? []) {
       if (!text.sourceCodeLocation) continue
       out.inline.push({

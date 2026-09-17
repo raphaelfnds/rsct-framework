@@ -1,11 +1,12 @@
 export type AllowlistFamily = 'script' | 'python' | 'php' | 'java' | 'css' | 'sql_mysql' | 'sql_postgresql' | 'html'
 
-const MAX_DIRECTIVE_BODY = 400
+const MAX_DIRECTIVE_BODY = 1000
+const PROSE_RUN = /[A-Za-z]{2,}[ ][A-Za-z]{2,}[ ][A-Za-z]{2,}[ ][A-Za-z]{2,}/
 
 const RULE_LIST = String.raw`[@\w/.-]+(?:\s*,\s*[@\w/.-]+)*`
 const WEBPACK_VALUE = String.raw`(?:"[\w./\[\]-]{1,100}"|'[\w./\[\]-]{1,100}'|true|false|\d+)`
-const PY_TYPE = String.raw`[\w.]+(?:\[[\w., \[\]|]*\])?`
-const PHP_TYPE = String.raw`[\w\\\[\]<>|()?:{}.-]+(?:, [\w\\\[\]<>|()?:{}.-]+)*`
+const PY_TYPE_CHARS = String.raw`[\w.\[\], |'"()*-]`
+const PHP_TAG = String.raw`[a-z][\w-]*`
 
 const MYSQL_HINTS = [
   'BKA', 'NO_BKA', 'BNL', 'NO_BNL', 'HASH_JOIN', 'NO_HASH_JOIN', 'INDEX', 'NO_INDEX', 'INDEX_MERGE',
@@ -39,7 +40,7 @@ const SCRIPT: readonly RegExp[] = [
 
 const PYTHON: readonly RegExp[] = [
   /^-\*- coding: [\w.-]+ -\*-$/,
-  new RegExp(String.raw`^type: (?:ignore(?:\[[\w-]+(?:, ?[\w-]+)*\])?|${PY_TYPE}(?: ?\| ?${PY_TYPE})*)$`),
+  new RegExp(String.raw`^type: (?:ignore(?:\[[\w-]+(?:, ?[\w-]+)*\])?|${PY_TYPE_CHARS}{1,200})$`),
   /^noqa(?:: ?[A-Z]+\d+(?:, ?[A-Z]+\d+)*)?$/,
   /^pylint: (?:disable|enable)=[\w-]+(?:, ?[\w-]+)*$/,
   /^pyright: (?:ignore(?:\[[\w, ]+\])?|basic|strict|standard|\w+=\w+(?:, ?\w+=\w+)*)$/,
@@ -50,11 +51,7 @@ const PYTHON: readonly RegExp[] = [
 ]
 
 const PHP: readonly RegExp[] = [
-  /^@(?:phpstan|psalm)-ignore(?:-next-line|-line)?(?: [\w.-]+(?:, ?[\w.-]+)*)?$/,
-  new RegExp(
-    String.raw`^@(?:phpstan|psalm)-(?:var|param|return|type|import-type|template|extends|implements|use|property|property-read|property-write|method|assert|assert-if-true|assert-if-false|pure|impure|require-extends|require-implements|sealed) ${PHP_TYPE}(?: \$\w+)?$`,
-  ),
-  /^@(?:phpstan|psalm)-(?:pure|impure|immutable|internal|mutation-free)$/,
+  new RegExp(String.raw`^@(?:phpstan|psalm)-${PHP_TAG}(?:[ (][^\n]{0,200})?$`),
   /^phpcs:(?:disable|enable|ignore|ignoreFile)(?:\s+[\w.,]+)?$/,
 ]
 
@@ -91,17 +88,14 @@ const FAMILIES: Readonly<Record<AllowlistFamily, readonly RegExp[]>> = {
 
 export function isAllowlistedBody(family: AllowlistFamily, body: string): boolean {
   if (body.length > MAX_DIRECTIVE_BODY) return false
+  if (PROSE_RUN.test(body)) return false
   return FAMILIES[family].some((pattern) => pattern.test(body))
 }
 
-const LICENCE_MARKER = /SPDX-License-Identifier|Copyright (?:\(c\)|©|\d{4})/i
-const LICENCE_LINE = /^(?:SPDX-License-Identifier: [\w.+() -]{1,80}|Copyright (?:\(c\) |© )?\d{4}(?:[-–]\d{4})?[^\n]{0,100}|All rights reserved\.?)$/i
+const LICENCE_MARKER = /SPDX-(?:License-Identifier|FileCopyrightText)|Copyright\b|©|Licensed under|All rights reserved/i
 export const LICENCE_MAX_LINES = 30
 
 export function isLicenceText(text: string): boolean {
   return LICENCE_MARKER.test(text)
 }
 
-export function isLicenceLine(body: string): boolean {
-  return LICENCE_LINE.test(body)
-}

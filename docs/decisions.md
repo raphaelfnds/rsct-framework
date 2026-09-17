@@ -231,7 +231,7 @@ comment, on every authorization path, before any dialog and again right before `
 - A pre-commit hook can change the index after the check. The committed blobs are compared
   after `git commit`: a clean reformat is re-stamped (`review.commit_hook_rewrite`),
   anything else returns `committed_with_drift` and blocks further commits (`review_drift`)
-  until a REVIEW covers those paths.
+  until those paths are covered again (see the drift rule below).
 - Outside a git repository the commit check is skipped (the commit itself needs a
   repository); `rsct_phase_review_complete` rejects with `not_git_repo`.
 - A behaviour fix made during the REVIEW changes stamped blobs: the commit gate forces a new
@@ -252,19 +252,42 @@ comment, on every authorization path, before any dialog and again right before `
   review is open.
 - The commit gate reads the whole repository index, not the `project_root` subdirectory —
   `git commit` commits the whole index (measured: a subdirectory `project_root` let a staged
-  comment outside it through). Submodule gitlinks and symlinks are not content; a staged
-  deletion of a file whose HEAD version has comments needs a deletion stamp from a REVIEW.
+  comment outside it through). Submodule gitlinks carry no content. A symlink entry (mode
+  120000) is skipped only when its blob reads like a link target — on Windows with
+  `core.symlinks=false` such an entry is a real file, measured committable with a comment
+  before this rule. The same rule runs on the committed paths: without it a symlink the
+  commit carries was scanned as code and became `review_drift` that no REVIEW could ever
+  clear, because the REVIEW skips symlinks and never stamps one (measured by the test). A staged deletion of a file whose HEAD version has comments needs a
+  deletion stamp from a REVIEW, and its HEAD version is scanned without the working-tree
+  filter attribute (an untracked `.gitattributes` line otherwise hid it).
 - Working-tree blob ids come from `git add` into a temporary copy of the index: measured,
   `git hash-object --path` disagrees with the id `git add` stores for a file whose blob
-  already holds CRLF under `text=auto`, which made such files uncommittable forever.
-- Paths left as `review_drift` are re-checked by the next REVIEW even when unchanged, and a
-  comment-free file a hook adds or rewrites is re-stamped; the post-commit re-stamp never
-  prunes ledger entries, and the plan-token re-arm re-reads phase-state before writing
+  already holds CRLF under `text=auto`, which made such files uncommittable forever. The
+  copy keeps the real index's mtime (`utimesSync`), because git's racy-file protection keys
+  on the index's own mtime: a copy stamped "now" makes a stale stat entry look trustworthy.
+  MEASURED 2026-09-17, 20 runs each, bare `cp` + `git add -f` into the copy: the stale blob
+  id came back 3/20 on Git Bash (NTFS) with a fresh mtime and 0/20 with `cp -p`; 0/20 both
+  ways on WSL (ext4). Through `readWorkingBlobIds` itself the fresh mtime did not reproduce
+  it (0/20 on Windows), so this line is insurance against a mechanism that exists, not a
+  repaired failure — do not remove it because a test still passes without it.
+  The temp-index git runs with
+  `core.hooksPath` pointed at an empty directory, `core.splitIndex=false`,
+  `core.safecrlf=false` and `core.fsmonitor=false` — measured: the repository's
+  `post-index-change` hook fired, `sharedindex.*` files accumulated, and one unaddable file
+  (safecrlf, skip-worktree) failed the whole REVIEW. A path `git add` still refuses is
+  named in the rejection; anything else falls back to `hash-object --path`.
+- Drift is settled against git, never against the working tree: a `review_drift` path is
+  covered when the ledger holds its HEAD blob or when HEAD no longer has the path (measured:
+  deleting the file in the working tree alone used to clear it). The commit that carries the
+  reviewed fix for a drifted path is allowed through and clears the drift; a hook rewrite of
+  a file the commit already checked is re-stamped and named in the hints, while a file a hook
+  ADDS behind the review stays drift. The post-commit re-stamp never prunes ledger entries,
+  and the plan-token re-arm re-reads phase-state before writing
   (measured: writing from the pre-commit snapshot erased a recorded drift).
-- The unverified-files dialog lists every file (no truncation) and appears only after the
-  approval itself validated; the approval dialog lists allowlisted comments added or
-  changed, and allowlist matching gives up on bodies over 400 characters (a mypy pattern
-  measured quadratic on agent-written input).
+- The unverified-files dialog appears only after the approval itself validated, names at most
+  40 files and always points at the written report (measured: a PowerShell dialog carrying
+  ~400 paths fails with `ENAMETOOLONG` and the REVIEW cannot be completed at all). The
+  approval dialog lists allowlisted comments added or changed.
 
 ### ADR-012 — Comment engines per language (#62, 2.11.0)
 **Status**: active
@@ -284,7 +307,12 @@ miss in every language, so the zeros are not a comparator that never ran.
 - parse5 7 for HTML; inline `<script>`/`<style>` text goes through the JS/CSS grammars;
   PHP inline HTML goes through parse5; `<?xml … ?>` and CDATA are not comments.
 - A dialect-parameterised SQL lexer written here (see AD-005), dialect declared in
-  `.rsct.json` `sql_dialect` and never inferred.
+  `.rsct.json` `sql_dialect` and never inferred. A dollar-quoted body is lexed as SQL when
+  the statement declares `LANGUAGE sql` or `plpgsql` (a quoted `LANGUAGE 'plpgsql'` counts,
+  and string literals are blanked before that match so a default value cannot spoof it); a
+  body under another declared language that contains `--`, `/*`, `#` or `//` is a
+  `parse_error`, because those are comments in PL/Python and PL/Perl; a dollar string with
+  no `LANGUAGE` clause is a literal and is left alone.
 - Any tree-sitter parse error, a NUL byte, a UTF-16 BOM or invalid UTF-8 → `unverified`:
   a UTF-16 file read as UTF-8 parses with errors and zero comments in every grammar, which
   would otherwise read as clean. Measured cost: TS 9/284 and 2/196 files, CSS 16/232,
@@ -296,15 +324,24 @@ miss in every language, so the zeros are not a comparator that never ran.
 - Unknown extensions go to the developer; `not_code` is a closed list. MEASURED: Node
   executes `require('./payload.txt')` as JavaScript.
 - The allowlist is full-body patterns, never prefixes: `// @ts-expect-error <paragraph>`
-  would otherwise carry any prose. Python docstrings and JS/PHP bare string statements are
-  runtime values (`__doc__`, directives), not comments, and are not swept — a residual.
-- Git reads run from the top level with `:(top,literal)` pathspecs. MEASURED:
-  `git ls-files -s -- 'app/[id]/page.tsx'` returns three entries (glob);
+  would otherwise carry any prose, and a body that reads as prose (four ordinary words in a
+  row) is never allowlisted, whatever its shape. A body over 1000 characters is not matched
+  at all — measured, the earlier Python `type:` pattern backtracked exponentially (2.2 s at
+  150 characters, doubling per union member) and the sweep runs synchronously inside the MCP
+  server. Licence headers are kept as a whole group (block or consecutive line comments, at
+  most 30 lines, containing a licence marker), because per-line filtering deleted real Apache,
+  MIT and SPDX headers. Python docstrings and JS/PHP bare string statements are runtime
+  values (`__doc__`, directives), not comments, and are not swept — a residual.
+- Git reads run from the repository top level and cover the whole repository: the diffs
+  carry no pathspec at all, and the reads that do take paths (the temporary index) pass
+  `--literal-pathspecs`.
+  MEASURED: `git ls-files -s -- 'app/[id]/page.tsx'` returns three entries (glob);
   `git rev-parse :0:<path>` returns one. With `project_root` below the top level,
   `hash-object --path` resolves the file relative to cwd and `ls-files -s` returns empty
-  with rc 0. Blob ids from `hash-object --path`, `:0:<p>` and `HEAD:<p>` were identical
-  across autocrlf true/false/input and `eol` attributes. A path with a `filter` attribute is
-  `unverified` (LFS pointers, clean filters).
+  with rc 0. Working-tree ids come from a temporary index (see ADR-011) rather than
+  `hash-object --path`, which disagrees with `git add` on a CRLF blob under `text=auto`.
+  A path with a `filter` attribute is `unverified` (LFS pointers, clean filters), except when
+  scanning a HEAD blob for a deletion.
 **Consequences**: About 5.5 MB of WASM ships in the package. The standalone-dist test runs
 the packaged `dist/index.js` beside `grammars/` and sweeps one file per engine, which is what
 makes CI exercise Linux and macOS.

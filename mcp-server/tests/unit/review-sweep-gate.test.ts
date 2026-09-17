@@ -365,14 +365,71 @@ describe('rsct_request_commit — REVIEW gate', () => {
     expect((await commit()).status).toBe('committed')
   })
 
-  it('a clean file added by a hook is stamped, not flagged as drift', async () => {
+  it('a file a hook adds behind the review is drift, even when it is clean', async () => {
     write('src/a.ts', 'export const a = 1\n')
     expect((await completeReview()).status).toBe('completed')
     git(root, 'add', 'src/a.ts')
     installHook('printf "export const gen = 1\\n" > src/gen.ts\ngit add src/gen.ts\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    expect((await completeReview()).status).toBe('completed')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeUndefined()
+    write('NOTES.md', 'docs\n')
+    git(root, 'add', 'NOTES.md')
     expect((await commit()).status).toBe('committed')
-    const ledger = readJson('.rsct/phase-state.json').review_sweep as Record<string, unknown>
-    expect(Object.keys(ledger)).toContain('src/gen.ts')
+  })
+
+  it('a hook that only reformats a reviewed file re-stamps it and says so', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a  =  1\\n" > src/a.ts\ngit add src/a.ts\n')
+    const out = await commit()
+    expect(out.status).toBe('committed')
+    expect(out.hints.some((h) => h.includes('rewrote src/a.ts'))).toBe(true)
+  })
+
+  it('drift can be cleared by committing the reviewed fix for the drifted path', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a = 1 // hook\\n" > src/a.ts\ngit add src/a.ts\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    write('src/a.ts', 'export const a = 2\n')
+    const pending = await completeReview()
+    expect(pending.reject_kind).toBe('dispositions_missing')
+    const id = pending.pending_dispositions![0]!.comment_id
+    const fixed = await completeReview({ comment_dispositions: [{ comment_id: id, action: 'discarded' }] }, prompts('yes'))
+    expect(fixed.status).toBe('completed')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeDefined()
+    git(root, 'add', 'src/a.ts')
+    expect((await commit()).status).toBe('committed')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeUndefined()
+  })
+
+  it('deleting the drifted file from the working tree alone does not clear the drift', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "package main // hook\\n" > tool.go\ngit add tool.go\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    rmSync(join(root, 'tool.go'))
+    expect((await completeReview({}, prompts('yes', 'yes'))).status).toBe('completed')
+    expect(readJson('.rsct/phase-state.json').review_drift).toBeDefined()
+  })
+
+  it('staging an unreviewed change to a drifted path does not clear the drift', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a = 1 // hook\\n" > src/a.ts\ngit add src/a.ts\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    write('src/a.ts', 'export const a = 3\n')
+    git(root, 'add', 'src/a.ts')
+    expect((await commit()).reject_kind).toBe('review_drift')
   })
 
   it('a project subdirectory as project_root does not narrow the commit gate', async () => {
@@ -385,6 +442,20 @@ describe('rsct_request_commit — REVIEW gate', () => {
     )
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('comments_present')
+  })
+
+  it('a symlink-mode entry holding code is checked; a real link target is not', async () => {
+    write('src/a.ts', '// a fact that lived here long enough to matter\nexport const a = 1\n')
+    const codeBlob = git(root, 'hash-object', '-w', '--', 'src/a.ts').trim()
+    unlinkSync(join(root, 'src/a.ts'))
+    git(root, 'update-index', '--add', '--cacheinfo', `120000,${codeBlob},src/link.ts`)
+    expect((await commit()).reject_kind).toBe('comments_present')
+    write('target.ts', 'src/a.ts')
+    const linkBlob = git(root, 'hash-object', '-w', '--', 'target.ts').trim()
+    unlinkSync(join(root, 'target.ts'))
+    git(root, 'update-index', '--force-remove', 'src/link.ts')
+    git(root, 'update-index', '--add', '--cacheinfo', `120000,${linkBlob},src/link.ts`)
+    expect((await commit()).status).toBe('committed')
   })
 
   it('a staged submodule bump is not code and does not block the commit', async () => {
@@ -415,6 +486,27 @@ describe('rsct_request_commit — REVIEW gate', () => {
     expect((await commit()).status).toBe('committed')
   })
 
+  it('a fact migrated out of a deleted file must still be in its destination at commit', async () => {
+    const fact = 'the retry budget is 3 because the upstream API throttles at 4'
+    write('src/gone.ts', `// ${fact}\nexport const g = 1\n`)
+    commitAll(root, 'with fact')
+    git(root, 'rm', '-q', 'src/gone.ts')
+    write('docs/decisions.md', `# Decisions\n\n${fact}\n`)
+    const id = (await completeReview()).pending_dispositions![0]!.comment_id
+    const done = await completeReview({ comment_dispositions: [{ comment_id: id, action: 'migrated', destination: 'docs/decisions.md' }] })
+    expect(done.status).toBe('completed')
+    rmSync(join(root, 'docs'), { recursive: true, force: true })
+    expect((await commit()).reject_kind).toBe('migration_reverted')
+  })
+
+  it('refuses a staged deletion whose HEAD version is hidden behind a filter attribute', async () => {
+    write('src/gone.ts', '// a fact that lived here long enough to matter\nexport const g = 1\n')
+    commitAll(root, 'with comment')
+    write('.gitattributes', 'src/gone.ts filter=anything\n')
+    git(root, 'rm', '-q', 'src/gone.ts')
+    expect((await commit()).reject_kind).toBe('review_missing')
+  })
+
   it('a hook re-stamp keeps ledger entries for reviewed files that are not tracked yet', async () => {
     write('src/a.ts', 'export const a = 1\n')
     write('src/b.ts', 'export const b = 1\n')
@@ -439,7 +531,17 @@ describe('rsct_request_commit — REVIEW gate', () => {
     expect(p.seen).toHaveLength(0)
   })
 
-  it('lists every unverified file in the dialog and every kept allowlisted comment in the approval', async () => {
+  it('lists the unverified files in the dialog, with the report when there are too many to show', async () => {
+    for (let i = 0; i < 45; i++) write(`gen/f${String(i).padStart(2, '0')}.go`, 'package main\n')
+    const many = prompts('yes', 'yes')
+    const out = await completeReview({}, many)
+    expect(out.status).toBe('completed')
+    expect(many.seen[0]!.message).toContain('and 5 more')
+    expect(many.seen[0]!.message).toContain(out.comment_sweep!.report_path!)
+    expect(readFileSync(join(root, out.comment_sweep!.report_path!), 'utf8')).toContain('gen/f44.go')
+  })
+
+  it('lists every unverified file in a small set and every kept allowlisted comment in the approval', async () => {
     for (let i = 0; i < 18; i++) write(`gen/f${String(i).padStart(2, '0')}.go`, 'package main\n')
     write('src/x.ts', '// eslint-disable-next-line no-console\nconsole.log(1)\n')
     const p = prompts('yes', 'yes')

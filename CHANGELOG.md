@@ -43,7 +43,8 @@ touches — with the commit gate refusing anything it did not cover.
   token and free-lane paths alike (`review_missing`, `comments_present`,
   `migration_reverted`, `review_unreadable`). A pre-commit hook that slips unreviewed code
   into the commit returns `committed_with_drift` and blocks further commits
-  (`review_drift`) until a REVIEW covers it; a hook that only reformats is re-stamped.
+  (`review_drift`) until a REVIEW covers those paths, or the commit that carries their
+  reviewed fix lands; a hook that only reformats a reviewed file is re-stamped and said so.
 - Engines: tree-sitter WASM grammars vendored under `mcp-server/grammars/` (JS/TS/TSX,
   Java, Python, PHP, CSS) with a sha256 manifest, parse5 for HTML, and a SQL lexer for
   PostgreSQL and MySQL. Functional comments (shebang, licence header, tool directives) are

@@ -23,6 +23,7 @@ import {
 } from '../lib/free-commit.js'
 import {
   checkStagedSweep,
+  driftCovered,
   ledgerEntries,
   stampLedger,
   sweepEntry,
@@ -934,10 +935,20 @@ export async function requestCommitHandler(
         { event: 'review.commit_hook_rewrite', tool: 'rsct_request_commit', path: r.path, blob: r.blob, sha_after: commit.sha_after },
         config?.audit,
       )
-      return { path: r.path, entry: sweepEntry(r.blob, 'clean', [], 'hook_rewrite', original?.spec_ref ?? 'hook_rewrite', at) }
+      return { path: r.path, entry: sweepEntry(r.blob, 'clean', original?.migrations ?? [], 'hook_rewrite', original?.spec_ref ?? 'hook_rewrite', at) }
     })
+    if (committed.rewrites.length > 0) {
+      bookkeepingHints.push(
+        `ℹ a pre-commit hook rewrote ${committed.rewrites.map((r) => r.path).join(', ')} — the committed bytes carry no comment and were re-stamped.`,
+      )
+    }
     const next: PhaseState = { ...state }
     if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, null)
+    if (state.review_drift) {
+      const { open } = driftCovered(projectRoot, next.review_sweep ?? state.review_sweep, state.review_drift.paths)
+      if (open.length === 0) delete next.review_drift
+      else next.review_drift = { ...state.review_drift, paths: open }
+    }
     if (committed.drift.length > 0) {
       sweepDrift = committed.drift
       next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at }
@@ -950,7 +961,7 @@ export async function requestCommitHandler(
         `⚠ the commit landed code no REVIEW covers (${committed.drift.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
       )
     }
-    if (stamps.length > 0 || committed.drift.length > 0) {
+    if (stamps.length > 0 || committed.drift.length > 0 || state.review_drift) {
       const w = writePhaseState(projectRoot, next)
       if (!w.ok) {
         bookkeepingHints.push(`⚠ could not record the post-commit sweep result in phase-state (${w.reason}).`)

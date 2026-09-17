@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -38,6 +38,7 @@ import {
   MIGRATION_DESTINATIONS,
   checkDispositions,
   computeWorkingSweep,
+  driftCovered,
   knownPaths,
   normalizeRepoPath,
   stampLedger,
@@ -451,7 +452,15 @@ export async function phaseReviewCompleteHandler(
   summary.migrated = dispositionCheck.migrated
   summary.discarded = dispositionCheck.discarded
 
+  const removedFiles = sweep.files.filter((f) => f.removed.length > 0)
   const unverified = sweep.files.filter((f) => f.kind === 'unverified')
+  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
+  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null
+  summary.report_path = report?.path ?? null
+  const reportLine = report
+    ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})`
+    : 'Full list: report could not be written.'
+
   if (unverified.length > 0) {
     const validation = validateDevApproval(input.dev_approval, {
       projectRoot,
@@ -473,7 +482,11 @@ export async function phaseReviewCompleteHandler(
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
         `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:\n\n` +
-        unverified.map((f) => `• ${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`).join('\n') +
+        listLines(
+          unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
+          40,
+        ) +
+        `\n${reportLine}` +
         `\n\nYes = allow these versions. No = reject this REVIEW.`,
     })
     if (dialog.response !== 'yes') {
@@ -501,10 +514,6 @@ export async function phaseReviewCompleteHandler(
     }
   }
 
-  const removedFiles = sweep.files.filter((f) => f.removed.length > 0)
-  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
-  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null
-  summary.report_path = report?.path ?? null
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })))
   const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`]
@@ -526,7 +535,7 @@ export async function phaseReviewCompleteHandler(
         ),
       )
     }
-    detailParts.push(report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : 'Full list: report could not be written.')
+    detailParts.push(reportLine)
   }
 
   const result = await gatePhaseComplete(
@@ -562,7 +571,10 @@ export async function phaseReviewCompleteHandler(
   for (const f of sweep.files) {
     if (f.blob === null || f.kind === 'comments_present') continue
     if (f.kind === 'deleted') {
-      stamps.push({ path: f.path, entry: sweepEntry(f.blob, 'clean', [], channel, input.spec_ref, at) })
+      stamps.push({
+        path: f.path,
+        entry: sweepEntry(f.blob, 'clean', dispositionCheck.migrations.get(f.path) ?? [], channel, input.spec_ref, at),
+      })
       continue
     }
     if (currentIds.get(f.path) !== f.blob) {
@@ -601,10 +613,9 @@ export async function phaseReviewCompleteHandler(
     const fresh = readPhaseState(projectRoot).state ?? {}
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
     if (fresh.review_drift) {
-      const stampedPaths = new Set(stamps.map((s) => s.path))
-      const covered = (p: string): boolean =>
-        stampedPaths.has(p) || !sweep.files.some((f) => f.path === p) && !existsSync(join(sweep.repo.toplevel, p))
-      if (fresh.review_drift.paths.every(covered)) delete next.review_drift
+      const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths)
+      if (open.length === 0) delete next.review_drift
+      else next.review_drift = { ...fresh.review_drift, paths: open }
     }
     const w = writePhaseState(projectRoot, next)
     if (w.ok) summary.stamped = stamps.map((s) => s.path)

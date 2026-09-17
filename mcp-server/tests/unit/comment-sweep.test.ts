@@ -110,6 +110,10 @@ describe('comment-sweep HTML', () => {
     expect(await bodies('a.html', src)).toEqual(['yes'])
   })
 
+  it('finds a comment inside an svg style element', async () => {
+    expect(await bodies('a.html', '<svg><style>a{fill:red}<!-- svg-note --></style></svg>\n')).toEqual(['svg-note'])
+  })
+
   it('scans inline script and style with the JS and CSS grammars', async () => {
     const src = '<script>// js\nlet a = "<!-- no -->"</script>\n<style>/* c */</style>\n<!-- h -->\n'
     const result = await scan('a.html', src)
@@ -135,6 +139,8 @@ describe('comment-sweep HTML', () => {
 
   it('counts a processing-instruction-shaped note as a comment, and sends CDATA to the developer', async () => {
     expect(await bodies('a.html', '<div><? retry budget is 3 ?></div>\n')).toHaveLength(1)
+    expect(await bodies('a.html', '<div><?php echo 1; ?></div>\n')).toEqual([])
+    expect(await bodies('a.xhtml', '<?xml-stylesheet href="x.css"?>\n<div>x</div>\n')).toEqual([])
     expect(await scan('a.html', '<div><![CDATA[ x ]]></div>\n')).toMatchObject({ kind: 'unverified', reason: 'parse_error' })
   })
 })
@@ -166,11 +172,17 @@ describe('comment-sweep SQL lexer', () => {
     expect(text(plpgsql, 'postgresql')).toEqual(['-- inside'])
     const python = 'CREATE FUNCTION f() RETURNS int AS $$\nx = 1 -- 1\n$$ LANGUAGE plpython3u;\n'
     expect(lexSqlComments(python, 'postgresql')).toEqual({ ok: false })
+    const quotedLang = "CREATE FUNCTION f() RETURNS int AS $$\nBEGIN -- inside\nEND $$ LANGUAGE 'plpgsql';\n"
+    expect(text(quotedLang, 'postgresql')).toEqual(['-- inside'])
+    const spoof = "CREATE FUNCTION f(a text DEFAULT 'LANGUAGE sql') RETURNS int AS $$\n# note\n$$ LANGUAGE plpython3u;\n"
+    expect(lexSqlComments(spoof, 'postgresql')).toEqual({ ok: false })
     const pythonHash = 'CREATE FUNCTION f() RETURNS int AS $$\nx = 1  # retry budget\nreturn x\n$$ LANGUAGE plpython3u;\n'
     expect(lexSqlComments(pythonHash, 'postgresql')).toEqual({ ok: false })
     const v8 = 'CREATE FUNCTION f() RETURNS int AS $$\nreturn 1 // note\n$$ LANGUAGE plv8;\n'
     expect(lexSqlComments(v8, 'postgresql')).toEqual({ ok: false })
     expect(text("SELECT $q$ plain $q$;", 'postgresql')).toEqual([])
+    expect(text("INSERT INTO t VALUES ($$https://example.com/a$$);", 'postgresql')).toEqual([])
+    expect(text('SELECT $$#ffffff$$;', 'postgresql')).toEqual([])
   })
 
   it('unterminated constructs are parse errors', () => {
@@ -221,21 +233,32 @@ describe('comment-sweep allowlist', () => {
     expect(await bodies('a.php', '<?php\n/** @phpstan-var array<int, string> $a */\n$a = [];\n')).toEqual([])
     expect(await bodies('a.js', 'import(/* webpackChunkName: "retry budget is 3 because" */ "./x")\n')).toHaveLength(1)
     expect(await bodies('a.sql', 'SELECT /*+ NOTE(retry budget is 3) */ 1;', { sqlDialect: 'mysql' })).toHaveLength(1)
-    const manyRules = Array.from({ length: 60 }, (_, i) => `rule-${i}`).join(', ')
+    const manyRules = Array.from({ length: 140 }, (_, i) => `rule-${i}`).join(', ')
     expect(await bodies('a.ts', `// eslint-disable-next-line ${manyRules}\nconsole.log(1)\n`)).toHaveLength(1)
     expect(await bodies('a.ts', '// eslint-disable-next-line no-console, no-alert\nconsole.log(1)\n')).toEqual([])
   })
 
-  it('keeps only the licence lines of a line-comment header', async () => {
-    const src = '// Copyright 2026 Example\n// the retry budget is 3 because upstream throttles\n// SPDX-License-Identifier: MIT\nconst a = 1\n'
-    expect(await bodies('a.ts', src)).toEqual(['the retry budget is 3 because upstream throttles'])
+  it('keeps a real licence header, in either comment style', async () => {
+    const apache = ['# Copyright (c) Meta Platforms, Inc. and affiliates.', '#', '# Licensed under the Apache License, Version 2.0 (the "License");', '# you may not use this file except in compliance with the License.', 'x = 1'].join('\n')
+    expect(await bodies('a.py', apache)).toEqual([])
+    const mit = '// Copyright (c) Microsoft Corporation.\n// Licensed under the MIT License.\nconst a = 1\n'
+    expect(await bodies('a.ts', mit)).toEqual([])
+    const spdx = '// SPDX-FileCopyrightText: 2026 Example\n// SPDX-License-Identifier: MIT\nconst a = 1\n'
+    expect(await bodies('a.ts', spdx)).toEqual([])
   })
 
-  it('checks a long directive-shaped body in bounded time', async () => {
+  it('keeps the PHP and Python directives the analysers actually write', async () => {
+    const php = ['<?php', '/** @psalm-suppress MixedAssignment */', '/** @phpstan-var array{id: int, name: string} $row */', '/** @phpstan-param callable(int): bool $cb */', '// @phpstan-ignore argument.type (legacy API)', '$a = 1;'].join('\n')
+    expect(await bodies('a.php', php)).toEqual([])
+    expect(await bodies('a.py', "x = 1  # type: Literal['r', 'w']\n")).toEqual([])
+    expect(await bodies('a.py', 'x = 1  # type: ignore[attr-defined]\n')).toEqual([])
+  })
+
+  it('checks a directive-shaped body in bounded time', async () => {
     const started = Date.now()
-    const src = `x = 1  # mypy: a=b${',c'.repeat(8000)}!\n`
+    const src = `x = 1  # type: ${'a[]|'.repeat(30)}!\n`
     expect(await bodies('a.py', src)).toHaveLength(1)
-    expect(Date.now() - started).toBeLessThan(2000)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })
 
