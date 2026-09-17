@@ -132,6 +132,11 @@ describe('comment-sweep HTML', () => {
       reason: 'unsupported_language',
     })
   })
+
+  it('counts a processing-instruction-shaped note as a comment, and sends CDATA to the developer', async () => {
+    expect(await bodies('a.html', '<div><? retry budget is 3 ?></div>\n')).toHaveLength(1)
+    expect(await scan('a.html', '<div><![CDATA[ x ]]></div>\n')).toMatchObject({ kind: 'unverified', reason: 'parse_error' })
+  })
 })
 
 describe('comment-sweep SQL lexer', () => {
@@ -161,6 +166,10 @@ describe('comment-sweep SQL lexer', () => {
     expect(text(plpgsql, 'postgresql')).toEqual(['-- inside'])
     const python = 'CREATE FUNCTION f() RETURNS int AS $$\nx = 1 -- 1\n$$ LANGUAGE plpython3u;\n'
     expect(lexSqlComments(python, 'postgresql')).toEqual({ ok: false })
+    const pythonHash = 'CREATE FUNCTION f() RETURNS int AS $$\nx = 1  # retry budget\nreturn x\n$$ LANGUAGE plpython3u;\n'
+    expect(lexSqlComments(pythonHash, 'postgresql')).toEqual({ ok: false })
+    const v8 = 'CREATE FUNCTION f() RETURNS int AS $$\nreturn 1 // note\n$$ LANGUAGE plv8;\n'
+    expect(lexSqlComments(v8, 'postgresql')).toEqual({ ok: false })
     expect(text("SELECT $q$ plain $q$;", 'postgresql')).toEqual([])
   })
 
@@ -203,6 +212,30 @@ describe('comment-sweep allowlist', () => {
     expect(await bodies('A.java', 'class A { int x; // NOSONAR\n}\n')).toEqual([])
     expect(await bodies('a.css', '/* stylelint-disable color-no-hex */\na { color: #fff; }\n')).toEqual([])
     expect(await bodies('a.sql', 'SELECT /*+ BKA(t) */ 1;', { sqlDialect: 'mysql' })).toEqual([])
+  })
+
+  it('does not let prose ride on a directive-shaped comment', async () => {
+    expect(await bodies('a.py', 'x = 1  # type: we retry three times because the upstream API throttles\n')).toHaveLength(1)
+    expect(await bodies('a.py', 'x: List[int] = []  # type: List[int]\n')).toEqual([])
+    expect(await bodies('a.php', '<?php\n// @phpstan-note the retry budget is 3 because upstream throttles\n$a = 1;\n')).toHaveLength(1)
+    expect(await bodies('a.php', '<?php\n/** @phpstan-var array<int, string> $a */\n$a = [];\n')).toEqual([])
+    expect(await bodies('a.js', 'import(/* webpackChunkName: "retry budget is 3 because" */ "./x")\n')).toHaveLength(1)
+    expect(await bodies('a.sql', 'SELECT /*+ NOTE(retry budget is 3) */ 1;', { sqlDialect: 'mysql' })).toHaveLength(1)
+    const manyRules = Array.from({ length: 60 }, (_, i) => `rule-${i}`).join(', ')
+    expect(await bodies('a.ts', `// eslint-disable-next-line ${manyRules}\nconsole.log(1)\n`)).toHaveLength(1)
+    expect(await bodies('a.ts', '// eslint-disable-next-line no-console, no-alert\nconsole.log(1)\n')).toEqual([])
+  })
+
+  it('keeps only the licence lines of a line-comment header', async () => {
+    const src = '// Copyright 2026 Example\n// the retry budget is 3 because upstream throttles\n// SPDX-License-Identifier: MIT\nconst a = 1\n'
+    expect(await bodies('a.ts', src)).toEqual(['the retry budget is 3 because upstream throttles'])
+  })
+
+  it('checks a long directive-shaped body in bounded time', async () => {
+    const started = Date.now()
+    const src = `x = 1  # mypy: a=b${',c'.repeat(8000)}!\n`
+    expect(await bodies('a.py', src)).toHaveLength(1)
+    expect(Date.now() - started).toBeLessThan(2000)
   })
 })
 
@@ -249,6 +282,34 @@ describe('comment-sweep engine loading', () => {
     })
     expect(await scanFile('a.ts', enc('// x\n'), { grammarsDir: null })).toMatchObject({
       reason: 'engine_unavailable',
+    })
+  })
+
+  it('does not remember a failed grammar load: a later scan with good grammars works', async () => {
+    const source = locateGrammarsDir()!
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-grammars-'))
+    dirs.push(dir)
+    for (const f of readdirSync(source)) copyFileSync(join(source, f), join(dir, f))
+    writeFileSync(join(dir, 'tree-sitter-java.wasm'), Buffer.from('not wasm'))
+    expect(await scanFile('A.java', enc('class A { int x; // j\n}\n'), { grammarsDir: dir })).toMatchObject({
+      reason: 'engine_unavailable',
+    })
+    expect(await scanFile('A.java', enc('class A { int x; // j\n}\n'), { grammarsDir: source })).toMatchObject({
+      kind: 'scanned',
+    })
+  })
+
+  it('does not remember a grammar that failed to instantiate', async () => {
+    const source = locateGrammarsDir()!
+    const dir = mkdtempSync(join(tmpdir(), 'rsct-grammars-'))
+    dirs.push(dir)
+    for (const f of readdirSync(source)) copyFileSync(join(source, f), join(dir, f))
+    copyFileSync(join(source, 'tree-sitter.wasm'), join(dir, 'tree-sitter-css.wasm'))
+    expect(await scanFile('a.css', enc('a { color: red; } /* c */\n'), { grammarsDir: dir })).toMatchObject({
+      reason: 'engine_unavailable',
+    })
+    expect(await scanFile('a.css', enc('a { color: red; } /* c */\n'), { grammarsDir: source })).toMatchObject({
+      kind: 'scanned',
     })
   })
 })

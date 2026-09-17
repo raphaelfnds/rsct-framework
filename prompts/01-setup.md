@@ -579,7 +579,6 @@ RSCT_JSON_PROTECTED_BRANCHES=$(extract_json_array "protected_branches")
 RSCT_JSON_COMMIT_MAX_LINES=$(tr -d '\r' < .rsct.json 2>/dev/null \
   | grep -o '"commit_message_max_lines"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
   | sed 's/^.*[^0-9]//')
-# #62 ask-once: the declared SQL dialect for the REVIEW comment sweep.
 RSCT_JSON_SQL_DIALECT=$(extract_json_string "sql_dialect")
 RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 RSCT_JSON_CANONICAL_SOURCE_ADDED=$(extract_json_string "canonical_source_added")
@@ -2359,10 +2358,6 @@ if [ "$HAS_NEW_BLOCK" = "yes" ]; then
       echo "  ⚠ CAP-25 backfill: .rsct/phase-state.lock insertion did not land — inspect $GITIGNORE manually" >&2
     fi
   fi
-  # #62 backfill: .rsct/reports/ holds the REVIEW comment-sweep reports. Same
-  # guard/splice split as the #73 clause below: whole-file exact-line guard,
-  # block-scoped splice right after .rsct/phase-state.lock (guaranteed present:
-  # the CAP-25 lock clause above just ran), LF out, sanity check inside the block.
   if ! tr -d '\r' < "$GITIGNORE" \
        | awk '$0==".rsct/reports/"{f=1} END{exit f?0:1}'; then
     tr -d '\r' < "$GITIGNORE" \

@@ -561,6 +561,15 @@ those files. Keyed by module and symbol; restatements of what the code says were
   audit log, the positive evidence the free lane requires; both writes are best-effort.
 - The PH-3 worktree nudge stays conditional because classify runs before the plan exists.
 
+### `prompts/01-setup.md`
+
+- The `.rsct/reports/` backfill (#62) follows the #73 clause: whole-file exact-line guard,
+  block-scoped splice right after `.rsct/phase-state.lock` (the CAP-25 clause just before it
+  guarantees that line exists), LF out, and a sanity check inside the markers.
+- `sql_dialect` is validated three times on purpose — Phase 3, the CREATE render (the shell
+  does not persist between phases, so the value is re-declared) and the UPDATE splice — and
+  an existing invalid value is repaired in place, because it rejects the whole config.
+
 ### Tests and build
 
 - `tsup.config.ts`: runtime deps are bundled (`noExternal`) so `dist/index.js` runs with no

@@ -352,11 +352,13 @@ describe('rsct_phase_review_start — declared baseline (#40)', () => {
     expect(s.phase).toBe('review')
   })
 
-  it('starting a review never stamps a review block or a sweep ledger', async () => {
-    writeFile('.rsct/phase-state.json', JSON.stringify({ spec_slug: 'feat-foo' }))
+  it('starting a review reopens a completed review instead of stamping one', async () => {
+    writeFile(
+      '.rsct/phase-state.json',
+      JSON.stringify({ spec_slug: 'feat-foo', review: { spec_ref: 'feat-foo', completed_at: VALID_TS } }),
+    )
     await startReview([R1])
-    expect(readState().review).toBeUndefined()
-    expect(readState().review_sweep).toBeUndefined()
+    expect(readState().review).toEqual({ spec_ref: 'feat-foo' })
   })
 
   it('re-running replaces the set, clears completed_at, and warns that answers are stale', async () => {

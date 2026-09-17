@@ -3,10 +3,10 @@ import { createRequire } from 'module';
 import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posix } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, realpathSync, lstatSync, copyFileSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, rmSync, realpathSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 const require$1 = createRequire(import.meta.url);
 var __create = Object.create;
@@ -9221,7 +9221,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join31 } = __require("path");
+    var { join: join32 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9264,7 +9264,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join31(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join32(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9667,7 +9667,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join31, isAbsolute: isAbsolute6, sep: sep2 } = __require("path");
+    var { join: join32, isAbsolute: isAbsolute7, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9730,7 +9730,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join31(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join32(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9748,7 +9748,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join31(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join32(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9766,11 +9766,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute6(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute7(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join31(__dirname$1, "..", "file.js");
+          return join32(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10760,7 +10760,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join31 = ",";
+            let join32 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10774,7 +10774,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join31 = `,
+                join32 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10782,13 +10782,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join31;
+                res += join32;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join31}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join32}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10809,7 +10809,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join31 = `,
+              join32 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10823,13 +10823,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join31;
+                separator = join32;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join31;
+              separator = join32;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10870,7 +10870,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join31 = ",";
+            let join32 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10883,7 +10883,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join31 = `,
+                join32 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10891,13 +10891,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join31;
+                res += join32;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join31}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join32}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10910,7 +10910,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join31 = `,
+              join32 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10919,7 +10919,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join31;
+                separator = join32;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10977,20 +10977,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join32 = `,
+              const join33 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join32;
+                res2 += join33;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join32}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join33}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11006,16 +11006,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join31 = `,
+            const join32 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join31, maximumBreadth);
+              res += stringifyTypedArray(value, join32, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join31;
+              separator = join32;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11026,13 +11026,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join31;
+                separator = join32;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join31;
+              separator = join32;
             }
             if (separator !== "") {
               res = `
@@ -23044,11 +23044,12 @@ function safeGitRaw(cwd2, args2) {
     return null;
   }
 }
-function safeGitBuffer(cwd2, args2, input) {
+function safeGitBuffer(cwd2, args2, input, env) {
   try {
     return execFileSync("git", args2, {
       cwd: cwd2,
       input: input ?? "",
+      ...env !== void 0 && { env: { ...process.env, ...env } },
       stdio: ["pipe", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
       timeout: GIT_READ_TIMEOUT_MS
@@ -27926,6 +27927,15 @@ init_esm_shims();
 // src/lib/free-commit.ts
 init_esm_shims();
 
+// src/lib/comment-sweep/decision-key.ts
+init_esm_shims();
+function decisionKey(path2, blob) {
+  return `${path2}\0${blob}`;
+}
+function deletionBlob(headBlob) {
+  return `deleted:${headBlob}`;
+}
+
 // src/lib/health.ts
 init_esm_shims();
 var LOCK_STALE_MS2 = 3e4;
@@ -28063,7 +28073,7 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
     } else if (event === "free_commit.locked" && entry.plan_slug === planSlug) {
       auditLocked = true;
     } else if (event === "review.unverified_decision" && entry.answer === "yes" && typeof entry.path === "string" && typeof entry.blob === "string") {
-      unverifiedDecisions.add(`${entry.path}\0${entry.blob}`);
+      unverifiedDecisions.add(decisionKey(entry.path, entry.blob));
     }
   }
   return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true, unverifiedDecisions };
@@ -28176,6 +28186,8 @@ init_esm_shims();
 
 // src/lib/comment-sweep/git-reads.ts
 init_esm_shims();
+var NON_CONTENT_MODES = /* @__PURE__ */ new Set(["160000", "120000"]);
+var ADD_BATCH = 50;
 function text(buf) {
   return buf === null ? null : buf.toString("utf8");
 }
@@ -28187,9 +28199,6 @@ function nulList(buf) {
   const out2 = text(buf);
   return out2 === null ? null : out2.split("\0").filter((p) => p.length > 0);
 }
-function scopeArgs(repo) {
-  return repo.prefix.length > 0 ? ["--", `:(top,literal)${repo.prefix}`] : [];
-}
 function openSweepRepo(projectRoot) {
   const toplevel = line(safeGitBuffer(projectRoot, ["rev-parse", "--show-toplevel"]));
   if (!toplevel) return null;
@@ -28197,36 +28206,76 @@ function openSweepRepo(projectRoot) {
   const headCommit = line(safeGitBuffer(toplevel, ["rev-parse", "-q", "--verify", "HEAD^{commit}"]));
   return { toplevel, prefix, headCommit: headCommit && headCommit.length > 0 ? headCommit : null };
 }
-function baseTree(repo) {
-  if (repo.headCommit) return repo.headCommit;
+function emptyTree(repo) {
   return line(safeGitBuffer(repo.toplevel, ["hash-object", "-t", "tree", "--stdin"], ""));
 }
+function readRaw(repo, args2) {
+  const tokens = nulList(safeGitBuffer(repo.toplevel, ["diff", "--raw", "--no-abbrev", "-z", "--no-renames", ...args2]));
+  if (tokens === null) return null;
+  const out2 = [];
+  for (let i2 = 0; i2 + 1 < tokens.length; i2 += 2) {
+    const header = tokens[i2].replace(/^:/, "").split(" ");
+    const code = header[4] ?? "";
+    out2.push({
+      path: tokens[i2 + 1],
+      status: code === "D" ? "deleted" : code === "A" ? "added" : "modified",
+      oldMode: header[0] ?? "",
+      newMode: header[1] ?? "",
+      oldBlob: header[2] ?? ""
+    });
+  }
+  return out2;
+}
+function hasContent(entry) {
+  const mode = entry.status === "deleted" ? entry.oldMode : entry.newMode;
+  return !NON_CONTENT_MODES.has(mode);
+}
 function readTouchedPaths(repo) {
-  const base = baseTree(repo);
+  const base = repo.headCommit ?? emptyTree(repo);
   if (!base) return null;
-  const diff = nulList(
-    safeGitBuffer(repo.toplevel, ["diff", "--name-status", "-z", "--no-renames", base, ...scopeArgs(repo)])
-  );
-  const others = nulList(
-    safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z", ...scopeArgs(repo)])
-  );
+  const diff = readRaw(repo, [base]);
+  const others = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z"]));
   if (diff === null || others === null) return null;
   const byPath = /* @__PURE__ */ new Map();
-  for (let i2 = 0; i2 + 1 < diff.length; i2 += 2) {
-    const code = diff[i2];
-    const path2 = diff[i2 + 1];
-    byPath.set(path2, code === "D" ? "deleted" : code === "A" ? "added" : "modified");
-  }
+  for (const entry of diff) if (hasContent(entry)) byPath.set(entry.path, entry.status);
   for (const path2 of others) byPath.set(path2, "added");
   return [...byPath.entries()].map(([path2, status]) => ({ path: path2, status })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 }
-function readStagedPaths(repo) {
-  return nulList(
-    safeGitBuffer(repo.toplevel, ["diff", "--cached", "--name-only", "-z", "--diff-filter=d", ...scopeArgs(repo)])
-  );
+function readStagedEntries(repo) {
+  const entries = readRaw(repo, ["--cached", ...repo.headCommit ? [] : [emptyTree(repo) ?? ""]]);
+  if (entries === null) return null;
+  return entries.filter(hasContent).map((e) => ({ path: e.path, status: e.status, headBlob: /^0+$/.test(e.oldBlob) ? null : e.oldBlob }));
 }
-function readWorkingBlobId(repo, path2) {
-  return line(safeGitBuffer(repo.toplevel, ["hash-object", `--path=${path2}`, "--", path2]));
+function readWorkingBlobIds(repo, paths) {
+  const ids = /* @__PURE__ */ new Map();
+  if (paths.length === 0) return ids;
+  const indexOut = line(safeGitBuffer(repo.toplevel, ["rev-parse", "--git-path", "index"]));
+  if (!indexOut) return null;
+  const realIndex = isAbsolute(indexOut) ? indexOut : join(repo.toplevel, indexOut);
+  const dir = mkdtempSync(join(tmpdir(), "rsct-sweep-index-"));
+  const tempIndex = join(dir, "index");
+  try {
+    if (existsSync(realIndex)) copyFileSync(realIndex, tempIndex);
+    const env = { GIT_INDEX_FILE: tempIndex };
+    for (let i2 = 0; i2 < paths.length; i2 += ADD_BATCH) {
+      const batch = paths.slice(i2, i2 + ADD_BATCH);
+      const added = safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "add", "-f", "--", ...batch], "", env);
+      if (added === null) return null;
+    }
+    const listing = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z"], "", env));
+    if (listing === null) return null;
+    const wanted = new Set(paths);
+    for (const record2 of listing) {
+      const tab = record2.indexOf("	");
+      if (tab < 0) continue;
+      const [mode, blob, stage] = record2.slice(0, tab).split(" ");
+      const path2 = record2.slice(tab + 1);
+      if (stage === "0" && blob && mode && !NON_CONTENT_MODES.has(mode) && wanted.has(path2)) ids.set(path2, blob);
+    }
+    return ids;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 function verifyObject(repo, spec) {
   const id = line(safeGitBuffer(repo.toplevel, ["rev-parse", "-q", "--verify", spec]));
@@ -28257,20 +28306,12 @@ function readKnownPaths(repo) {
   }
   return known;
 }
-function readCommitPaths(repo, commit) {
-  return nulList(
-    safeGitBuffer(repo.toplevel, [
-      "diff-tree",
-      "--no-commit-id",
-      "--name-only",
-      "-r",
-      "-z",
-      "--root",
-      "--diff-filter=d",
-      commit,
-      ...scopeArgs(repo)
-    ])
-  );
+function readCommitPaths(repo, before, after) {
+  const base = before ?? emptyTree(repo);
+  if (!base) return null;
+  const entries = readRaw(repo, [base, after]);
+  if (entries === null) return null;
+  return entries.filter((e) => e.status !== "deleted" && hasContent(e)).map((e) => e.path);
 }
 function hasGitFilter(repo, path2) {
   const out2 = nulList(safeGitBuffer(repo.toplevel, ["check-attr", "-z", "filter", "--", path2]));
@@ -28284,7 +28325,51 @@ init_esm_shims();
 
 // src/lib/comment-sweep/allowlist.ts
 init_esm_shims();
+var MAX_DIRECTIVE_BODY = 400;
 var RULE_LIST = String.raw`[@\w/.-]+(?:\s*,\s*[@\w/.-]+)*`;
+var WEBPACK_VALUE = String.raw`(?:"[\w./\[\]-]{1,100}"|'[\w./\[\]-]{1,100}'|true|false|\d+)`;
+var PY_TYPE = String.raw`[\w.]+(?:\[[\w., \[\]|]*\])?`;
+var PHP_TYPE = String.raw`[\w\\\[\]<>|()?:{}.-]+(?:, [\w\\\[\]<>|()?:{}.-]+)*`;
+var MYSQL_HINTS = [
+  "BKA",
+  "NO_BKA",
+  "BNL",
+  "NO_BNL",
+  "HASH_JOIN",
+  "NO_HASH_JOIN",
+  "INDEX",
+  "NO_INDEX",
+  "INDEX_MERGE",
+  "NO_INDEX_MERGE",
+  "JOIN_ORDER",
+  "JOIN_PREFIX",
+  "JOIN_SUFFIX",
+  "JOIN_FIXED_ORDER",
+  "MAX_EXECUTION_TIME",
+  "MRR",
+  "NO_MRR",
+  "NO_ICP",
+  "NO_RANGE_OPTIMIZATION",
+  "QB_NAME",
+  "RESOURCE_GROUP",
+  "SEMIJOIN",
+  "NO_SEMIJOIN",
+  "SET_VAR",
+  "SKIP_SCAN",
+  "NO_SKIP_SCAN",
+  "SUBQUERY",
+  "MERGE",
+  "NO_MERGE",
+  "DERIVED_CONDITION_PUSHDOWN",
+  "NO_DERIVED_CONDITION_PUSHDOWN",
+  "GROUP_INDEX",
+  "NO_GROUP_INDEX",
+  "JOIN_INDEX",
+  "NO_JOIN_INDEX",
+  "ORDER_INDEX",
+  "NO_ORDER_INDEX"
+].join("|");
+var MYSQL_HINT = String.raw`(?:${MYSQL_HINTS})\([\w@.,= \`'-]{0,120}\)`;
 var SCRIPT = [
   /^@ts-expect-error$/,
   /^@ts-ignore$/,
@@ -28300,23 +28385,27 @@ var SCRIPT = [
   /^@jsx [\w.]+$/,
   /^@jsxImportSource [@\w/.-]+$/,
   /^[@#]__PURE__$/,
-  /^webpack[A-Za-z]+:\s*(?:"[^"]{0,100}"|'[^']{0,100}'|true|false|\d+)(?:\s*,\s*webpack[A-Za-z]+:\s*(?:"[^"]{0,100}"|'[^']{0,100}'|true|false|\d+))*$/,
+  new RegExp(String.raw`^webpack[A-Za-z]+:\s*${WEBPACK_VALUE}(?:\s*,\s*webpack[A-Za-z]+:\s*${WEBPACK_VALUE})*$`),
   /^@vite-ignore$/,
   /^# sourceMappingURL=\S+$/
 ];
 var PYTHON = [
   /^-\*- coding: [\w.-]+ -\*-$/,
-  /^type: [\w[\], .|()*'"-]{1,120}$/,
+  new RegExp(String.raw`^type: (?:ignore(?:\[[\w-]+(?:, ?[\w-]+)*\])?|${PY_TYPE}(?: ?\| ?${PY_TYPE})*)$`),
   /^noqa(?:: ?[A-Z]+\d+(?:, ?[A-Z]+\d+)*)?$/,
   /^pylint: (?:disable|enable)=[\w-]+(?:, ?[\w-]+)*$/,
   /^pyright: (?:ignore(?:\[[\w, ]+\])?|basic|strict|standard|\w+=\w+(?:, ?\w+=\w+)*)$/,
-  /^mypy: [\w-]+(?:=(?:"[^"]{0,100}"|[\w,-]+))?(?:, ?[\w-]+(?:=(?:"[^"]{0,100}"|[\w,-]+))?)*$/,
+  /^mypy: [\w-]+(?:=(?:"[\w ,.-]{0,100}"|[\w-]+))?(?:, ?[\w-]+(?:=(?:"[\w ,.-]{0,100}"|[\w-]+))?)*$/,
   /^fmt: (?:off|on|skip)$/,
   /^pragma: no cover$/,
   /^isort: (?:skip|skip_file|off|on)$/
 ];
 var PHP = [
-  /^@(?:phpstan|psalm)-[\w-]+(?: [^\n]{1,120})?$/,
+  /^@(?:phpstan|psalm)-ignore(?:-next-line|-line)?(?: [\w.-]+(?:, ?[\w.-]+)*)?$/,
+  new RegExp(
+    String.raw`^@(?:phpstan|psalm)-(?:var|param|return|type|import-type|template|extends|implements|use|property|property-read|property-write|method|assert|assert-if-true|assert-if-false|pure|impure|require-extends|require-implements|sealed) ${PHP_TYPE}(?: \$\w+)?$`
+  ),
+  /^@(?:phpstan|psalm)-(?:pure|impure|immutable|internal|mutation-free)$/,
   /^phpcs:(?:disable|enable|ignore|ignoreFile)(?:\s+[\w.,]+)?$/
 ];
 var JAVA = [
@@ -28329,7 +28418,7 @@ var CSS = [
   new RegExp(String.raw`^stylelint-enable(?:\s+${RULE_LIST})?$`)
 ];
 var SQL_MYSQL = [
-  /^\+\s*[A-Za-z_]+\s*\([^()]*\)(?:\s+[A-Za-z_]+\s*\([^()]*\))*$/
+  new RegExp(String.raw`^\+\s*${MYSQL_HINT}(?:\s+${MYSQL_HINT})*$`)
 ];
 var HTML = [
   /^\[if [^\]]{1,60}\]>(?:[\s\S]*<!\[endif\])?(?:<!)?$/,
@@ -28346,12 +28435,17 @@ var FAMILIES = {
   html: HTML
 };
 function isAllowlistedBody(family, body2) {
+  if (body2.length > MAX_DIRECTIVE_BODY) return false;
   return FAMILIES[family].some((pattern) => pattern.test(body2));
 }
 var LICENCE_MARKER = /SPDX-License-Identifier|Copyright (?:\(c\)|©|\d{4})/i;
+var LICENCE_LINE = /^(?:SPDX-License-Identifier: [\w.+() -]{1,80}|Copyright (?:\(c\) |© )?\d{4}(?:[-–]\d{4})?[^\n]{0,100}|All rights reserved\.?)$/i;
 var LICENCE_MAX_LINES = 30;
 function isLicenceText(text2) {
   return LICENCE_MARKER.test(text2);
+}
+function isLicenceLine(body2) {
+  return LICENCE_LINE.test(body2);
 }
 
 // src/lib/comment-sweep/html-engine.ts
@@ -36240,8 +36334,8 @@ function walk(node, out2) {
     return;
   }
   if ((node.tagName === "script" || node.tagName === "style") && node.sourceCodeLocation) {
-    const text2 = node.childNodes?.find((c) => c.nodeName === "#text");
-    if (text2?.sourceCodeLocation) {
+    for (const text2 of node.childNodes?.filter((c) => c.nodeName === "#text") ?? []) {
+      if (!text2.sourceCodeLocation) continue;
       out2.inline.push({
         kind: node.tagName === "style" ? "style" : scriptKind(node),
         start: text2.sourceCodeLocation.startOffset,
@@ -36481,7 +36575,7 @@ function lex(src, offset, dialect, out2) {
       const inner = src.slice(body2.innerStart, body2.innerEnd);
       if (lexable) {
         lex(inner, offset + body2.innerStart, dialect, out2);
-      } else if (inner.includes("--") || inner.includes("/*")) {
+      } else if (/--|\/\*|#|\/\//.test(inner)) {
         throw new LexError();
       }
     }
@@ -40542,14 +40636,21 @@ function initRuntime2(grammarsDir) {
 `),
     printErr: (text2) => process.stderr.write(`${text2}
 `)
-  }).then(() => true).catch(() => false);
+  }).then(() => true).catch(() => {
+    runtime = null;
+    return false;
+  });
   return runtime;
 }
 function loadLanguage(grammarsDir, language) {
   const cached2 = languages.get(language);
   if (cached2) return cached2;
   const bytes = readWasm(join(grammarsDir, GRAMMAR_FILES[language]));
-  const loading = bytes ? Language.load(bytes).catch(() => null) : Promise.resolve(null);
+  if (!bytes) return Promise.resolve(null);
+  const loading = Language.load(bytes).catch(() => {
+    languages.delete(language);
+    return null;
+  });
   languages.set(language, loading);
   return loading;
 }
@@ -40629,7 +40730,10 @@ function commentBody(text2) {
   } else if (body2.startsWith("#")) {
     body2 = body2.replace(/^#+/, "");
   }
-  return body2.replace(/\r/g, "").replace(/\s+/g, " ").trim();
+  return collapseWhitespace(body2);
+}
+function collapseWhitespace(text2) {
+  return text2.replace(/\r/g, "").replace(/\s+/g, " ").trim();
 }
 function treeFamily(language) {
   switch (language) {
@@ -40650,7 +40754,8 @@ async function collectHtml(source, base, asFragment, grammarsDir) {
   const spans = [];
   for (const c of scan.comments) {
     const text2 = source.slice(c.start, c.end);
-    if (text2.startsWith("<?") || text2.startsWith("<![CDATA[")) continue;
+    if (text2.startsWith("<![CDATA[")) return { ok: false, reason: "parse_error", language: "html" };
+    if (/^<\?xml[\s?]/i.test(text2)) continue;
     spans.push({ start: base + c.start, end: base + c.end, family: "html" });
   }
   for (const inline of scan.inline) {
@@ -40730,7 +40835,15 @@ function licenceGroup(source, spans, starts) {
   const last = spans[members[members.length - 1]];
   const lines = lineAt(starts, last.end) - lineAt(starts, first.start) + 1;
   const groupText = source.slice(first.start, last.end);
-  if (lines <= LICENCE_MAX_LINES && isLicenceText(groupText)) for (const m of members) allowed.add(m);
+  if (lines > LICENCE_MAX_LINES || !isLicenceText(groupText)) return allowed;
+  if (members.length === 1 && (firstText.startsWith("/*") || firstText.startsWith("<!--"))) {
+    allowed.add(k);
+    return allowed;
+  }
+  for (const m of members) {
+    const span = spans[m];
+    if (isLicenceLine(commentBody(source.slice(span.start, span.end)))) allowed.add(m);
+  }
   return allowed;
 }
 async function scanFile(path2, bytes, options = {}) {
@@ -40774,21 +40887,32 @@ var MIGRATION_DESTINATIONS = [
 var MIGRATION_MIN_BODY = 20;
 var LEDGER_ENTRIES_PER_PATH = 20;
 async function scanWithFilter(repo, path2, bytes, options) {
-  const result = await scanFile(path2, bytes, { sqlDialect: options.sqlDialect, grammarsDir: options.grammarsDir });
+  const result = await scanFile(path2, bytes, { sqlDialect: options.sqlDialect });
   if (result.kind === "not_code") return result;
   const filtered = hasGitFilter(repo, path2);
-  if (filtered === null || filtered) {
-    return { kind: "unverified", language: result.language, reason: "git_filter" };
-  }
+  if (filtered === null || filtered) return { kind: "unverified", language: result.language, reason: "git_filter" };
   return result;
 }
 function readWorkingBytes(repo, path2) {
   const full = join(repo.toplevel, path2);
   try {
-    if (!statSync(full).isFile()) return null;
+    if (!lstatSync(full).isFile()) return null;
     return new Uint8Array(readFileSync(full));
   } catch {
     return null;
+  }
+}
+function normalizeRepoPath(repo, path2) {
+  const forward = path2.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (repo.prefix.length === 0 || forward.startsWith(repo.prefix)) return forward;
+  return lstatExists(repo, forward) ? forward : `${repo.prefix}${forward}`;
+}
+function lstatExists(repo, path2) {
+  try {
+    lstatSync(join(repo.toplevel, path2));
+    return true;
+  } catch {
+    return false;
   }
 }
 async function computeWorkingSweep(projectRoot, options) {
@@ -40796,17 +40920,25 @@ async function computeWorkingSweep(projectRoot, options) {
   if (!repo) return { ok: false, reason: "not_git_repo", detail: "project_root is not inside a git work tree" };
   const touched = readTouchedPaths(repo);
   if (!touched) return { ok: false, reason: "git_read_failed", detail: "could not list the touched paths" };
+  const byPath = new Map(touched.map((t) => [t.path, t.status]));
+  for (const extra of options.extraPaths ?? []) {
+    if (!byPath.has(extra) && lstatExists(repo, extra)) byPath.set(extra, "modified");
+  }
+  const present = [...byPath.entries()].filter(([, s]) => s !== "deleted").map(([p]) => p);
+  const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null));
+  if (!blobs) return { ok: false, reason: "git_read_failed", detail: "could not hash the touched files" };
   const files = [];
-  for (const { path: path2, status } of touched) {
+  for (const [path2, status] of [...byPath.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     const head = readHeadContent(repo, path2);
     const headScan = head ? await scanWithFilter(repo, path2, head, options) : null;
     const headComments = headScan?.kind === "scanned" ? headScan.comments : [];
     if (status === "deleted") {
       if (headScan === null || headScan.kind === "not_code") continue;
+      const headBlob = repo.headCommit ? readCommitBlobId(repo, repo.headCommit, path2) : null;
       files.push({
         path: path2,
         status,
-        blob: null,
+        blob: headBlob ? deletionBlob(headBlob) : null,
         kind: "deleted",
         language: headScan.language,
         reason: null,
@@ -40818,7 +40950,7 @@ async function computeWorkingSweep(projectRoot, options) {
     }
     const bytes = readWorkingBytes(repo, path2);
     if (bytes === null) continue;
-    const blob = readWorkingBlobId(repo, path2);
+    const blob = blobs.get(path2);
     if (!blob) return { ok: false, reason: "git_read_failed", detail: `could not hash ${path2}` };
     const scan = await scanWithFilter(repo, path2, bytes, options);
     if (scan.kind === "not_code") continue;
@@ -40850,8 +40982,8 @@ async function computeWorkingSweep(projectRoot, options) {
   }
   return { ok: true, repo, files };
 }
-function collapse(text2) {
-  return text2.replace(/\r/g, "").replace(/\s+/g, " ").trim();
+function workingBlobIds(repo, paths) {
+  return readWorkingBlobIds(repo, paths);
 }
 function addedText(headText, currentText) {
   const remaining = /* @__PURE__ */ new Map();
@@ -40864,7 +40996,7 @@ function addedText(headText, currentText) {
     if (n > 0) remaining.set(line2, n - 1);
     else added.push(line2);
   }
-  return collapse(added.join("\n"));
+  return collapseWhitespace(added.join("\n"));
 }
 function destinationTexts(repo, destination) {
   const repoPath = `${repo.prefix}${destination}`;
@@ -40979,20 +41111,7 @@ function stampLedger(ledger, stamps, known) {
   return next;
 }
 function sweepEntry(blob, verdict, migrations, channel, specRef, at) {
-  return {
-    blob,
-    verdict,
-    migrations: migrations.map((m) => ({ destination: m.destination, body_sha: bodySha(m.body), body: m.body })),
-    channel,
-    spec_ref: specRef,
-    at
-  };
-}
-function bodySha(body2) {
-  return createHash("sha256").update(body2).digest("hex");
-}
-function decisionKey(path2, blob) {
-  return `${path2}\0${blob}`;
+  return { blob, verdict, migrations: migrations.map((m) => ({ ...m })), channel, spec_ref: specRef, at };
 }
 async function checkStagedSweep(args2) {
   const repo = openSweepRepo(args2.projectRoot);
@@ -41001,11 +41120,11 @@ async function checkStagedSweep(args2) {
     return {
       ok: false,
       reject_kind: "review_drift",
-      reason: `a previous commit landed code that no review covers (${args2.drift.paths.join(", ")}) \u2014 run rsct_phase_review_start / _complete over those paths before committing again`,
+      reason: `a previous commit landed code that no review covers (${args2.drift.paths.join(", ")}) \u2014 run rsct_phase_review_start / _complete; it re-checks those paths even when they are unchanged`,
       paths: args2.drift.paths
     };
   }
-  const staged = readStagedPaths(repo);
+  const staged = readStagedEntries(repo);
   if (staged === null) {
     return { ok: false, reject_kind: "review_unreadable", reason: "could not read the staged paths from git", paths: [] };
   }
@@ -41014,7 +41133,18 @@ async function checkStagedSweep(args2) {
   const withComments = [];
   const reverted = [];
   const destinationCache = /* @__PURE__ */ new Map();
-  for (const path2 of staged) {
+  for (const { path: path2, status, headBlob } of staged) {
+    if (status === "deleted") {
+      if (!headBlob) continue;
+      const headBytes = readBlob(repo, headBlob);
+      if (!headBytes) {
+        return { ok: false, reject_kind: "review_unreadable", reason: `could not read the HEAD content of ${path2}`, paths: [path2] };
+      }
+      const headScan = await scanWithFilter(repo, path2, headBytes, args2.options);
+      if (headScan.kind !== "scanned" || headScan.comments.length === 0) continue;
+      if (!ledgerEntries(args2.ledger, path2).some((e) => e.blob === deletionBlob(headBlob))) missing.push(path2);
+      continue;
+    }
     const blob = readStagedBlobId(repo, path2);
     const bytes = blob ? readBlob(repo, blob) : null;
     if (!blob || !bytes) {
@@ -41037,15 +41167,15 @@ async function checkStagedSweep(args2) {
         reverted.push(path2);
         break;
       }
-      let text2 = destinationCache.get(m.destination);
-      if (text2 === void 0) {
+      let content = destinationCache.get(m.destination);
+      if (content === void 0) {
         const repoPath = `${repo.prefix}${m.destination}`;
         const stagedDest = readStagedBlobId(repo, repoPath);
         const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath);
-        text2 = destBytes ? collapse(destBytes.toString("utf8")) : "";
-        destinationCache.set(m.destination, text2);
+        content = destBytes ? collapseWhitespace(destBytes.toString("utf8")) : "";
+        destinationCache.set(m.destination, content);
       }
-      if (!text2.includes(m.body)) {
+      if (!content.includes(m.body)) {
         reverted.push(path2);
         break;
       }
@@ -41080,33 +41210,34 @@ async function checkStagedSweep(args2) {
 }
 async function verifyCommittedSweep(args2) {
   const repo = openSweepRepo(args2.projectRoot);
-  if (!repo) return { drift: false, rewrites: [] };
+  if (!repo) return { drift: [], rewrites: [], full_sha: null };
+  const fullSha = repo.headCommit;
   const expected = new Map(args2.checked.map((c) => [c.path, c.blob]));
-  const paths = readCommitPaths(repo, args2.commit);
-  if (paths === null) return { drift: true, paths: [...expected.keys()], rewrites: [] };
-  const drifted = [];
+  const paths = readCommitPaths(repo, args2.before, args2.after);
+  if (paths === null) return { drift: [...expected.keys()], rewrites: [], full_sha: fullSha };
+  const drift = [];
   const rewrites = [];
   for (const path2 of paths) {
-    const blob = readCommitBlobId(repo, args2.commit, path2);
+    const blob = readCommitBlobId(repo, args2.after, path2);
     if (!blob) {
-      drifted.push(path2);
+      drift.push(path2);
       continue;
     }
     if (expected.get(path2) === blob) continue;
     const bytes = readBlob(repo, blob);
     if (!bytes) {
-      drifted.push(path2);
+      drift.push(path2);
       continue;
     }
     const scan = await scanWithFilter(repo, path2, bytes, args2.options);
     if (scan.kind === "not_code") continue;
-    if (scan.kind === "scanned" && scan.comments.length === 0 && expected.has(path2)) {
+    if (scan.kind === "scanned" && scan.comments.length === 0) {
       rewrites.push({ path: path2, blob });
       continue;
     }
-    drifted.push(path2);
+    drift.push(path2);
   }
-  return drifted.length > 0 ? { drift: true, paths: drifted, rewrites } : { drift: false, rewrites };
+  return { drift, rewrites, full_sha: fullSha };
 }
 function knownPaths(projectRoot) {
   const repo = openSweepRepo(projectRoot);
@@ -42481,7 +42612,8 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
     const committed = await verifyCommittedSweep({
       projectRoot,
       options: { sqlDialect: config2?.sql_dialect },
-      commit: commit.sha_after,
+      before: commit.sha_before,
+      after: commit.sha_after,
       checked: sweepAtCommit.checked
     });
     const state = readPhaseState(projectRoot).state ?? {};
@@ -42498,20 +42630,20 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       return { path: r.path, entry: sweepEntry(r.blob, "clean", [], "hook_rewrite", original?.spec_ref ?? "hook_rewrite", at) };
     });
     const next = { ...state };
-    if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, knownPaths(projectRoot));
-    if (committed.drift) {
-      sweepDrift = committed.paths;
-      next.review_drift = { sha: commit.sha_after, paths: committed.paths, at };
+    if (stamps.length > 0) next.review_sweep = stampLedger(state.review_sweep, stamps, null);
+    if (committed.drift.length > 0) {
+      sweepDrift = committed.drift;
+      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at };
       appendAudit(
         projectRoot,
-        { event: "review.commit_drift", tool: "rsct_request_commit", paths: committed.paths, sha_after: commit.sha_after },
+        { event: "review.commit_drift", tool: "rsct_request_commit", paths: committed.drift, sha_after: committed.full_sha ?? commit.sha_after },
         config2?.audit
       );
       bookkeepingHints.push(
-        `\u26A0 the commit landed code no REVIEW covers (${committed.paths.join(", ")}) \u2014 most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`
+        `\u26A0 the commit landed code no REVIEW covers (${committed.drift.join(", ")}) \u2014 most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`
       );
     }
-    if (stamps.length > 0 || committed.drift) {
+    if (stamps.length > 0 || committed.drift.length > 0) {
       const w = writePhaseState(projectRoot, next);
       if (!w.ok) {
         bookkeepingHints.push(`\u26A0 could not record the post-commit sweep result in phase-state (${w.reason}).`);
@@ -42538,7 +42670,7 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
     const rearmed = rearmToken(reservedToken, now);
     if (rearmed !== reservedToken) {
       const w = writePhaseState(projectRoot, {
-        ...tokenCtx.baseState,
+        ...readPhaseState(projectRoot).state ?? tokenCtx.baseState,
         plan_authorization: rearmed
       });
       if (w.ok) {
@@ -47848,7 +47980,7 @@ var phaseReviewCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. On success it stamps a sweep ledger (path + git blob id) that rsct_request_commit requires for every staged code file. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -47893,7 +48025,7 @@ var phaseReviewCompleteTool = {
       },
       exempt_files: {
         type: "array",
-        description: "Generated or vendored code files that keep their comments. Each goes to the developer-only unverified dialog, bound to its exact version.",
+        description: "Generated or vendored code files that keep their comments, as repository-relative or project-relative paths (either slash). Each goes to the developer-only unverified dialog, bound to its exact version.",
         items: {
           type: "object",
           required: ["path", "reason"],
@@ -48015,7 +48147,6 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
     return reject({ ...base, rejectKind: "sweep_input_invalid", reason, hints: [reason], comment_sweep: null });
   }
   const dispositions = sweepInput.data.comment_dispositions ?? [];
-  const exempt = new Map((sweepInput.data.exempt_files ?? []).map((e) => [e.path, e.reason]));
   const precheck = precheckPhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
     config2,
@@ -48059,7 +48190,16 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       extra: { blocked_count: actions_summary.block }
     });
   }
-  const sweep = await computeWorkingSweep(projectRoot, { sqlDialect: config2?.sql_dialect, exempt });
+  const sweepRepo = openSweepRepo(projectRoot);
+  const exempt = new Map(
+    (sweepInput.data.exempt_files ?? []).map((e) => [sweepRepo ? normalizeRepoPath(sweepRepo, e.path) : e.path, e.reason])
+  );
+  const driftBefore = readPhaseState(projectRoot).state?.review_drift;
+  const sweep = await computeWorkingSweep(projectRoot, {
+    sqlDialect: config2?.sql_dialect,
+    exempt,
+    extraPaths: driftBefore?.paths ?? []
+  });
   if (!sweep.ok) {
     const reason = sweep.reason === "not_git_repo" ? "the comment sweep needs a git repository \u2014 REVIEW compares the change against HEAD" : `the comment sweep could not read git: ${sweep.detail}`;
     return reject({ ...base, rejectKind: sweep.reason, reason, hints: [reason], comment_sweep: null });
@@ -48093,14 +48233,27 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   summary.discarded = dispositionCheck.discarded;
   const unverified = sweep.files.filter((f) => f.kind === "unverified");
   if (unverified.length > 0) {
+    const validation = validateDevApproval(input.dev_approval, {
+      projectRoot,
+      toolName: "rsct_phase_review_complete",
+      ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+      ...internal.now !== void 0 && { now: internal.now },
+      auditConfig: config2?.audit
+    });
+    if (validation.status === "rejected") {
+      return reject({
+        ...base,
+        rejectKind: inferRejectKind(validation.reason),
+        reason: validation.reason,
+        hints: [`Approval rejected before any dialog: ${validation.reason}`],
+        comment_sweep: summary
+      });
+    }
     const dialog = await promptFn({
       title: `RSCT \u2014 ${unverified.length} file(s) the comment sweep cannot verify`,
       message: `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:
 
-` + listLines(
-        unverified.map((f) => `${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`),
-        15
-      ) + `
+` + unverified.map((f) => `\u2022 ${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`).join("\n") + `
 
 Yes = allow these versions. No = reject this REVIEW.`
     });
@@ -48143,7 +48296,13 @@ Yes = allow these versions. No = reject this REVIEW.`
     );
     if (unverified.length > 0) detailParts.push(`Unverified files allowed: ${unverified.length}.`);
     if (summary.allowlist_changes.length > 0) {
-      detailParts.push(`Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`);
+      detailParts.push(
+        `Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`,
+        listLines(
+          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${c.body.slice(0, 120)}`),
+          10
+        )
+      );
     }
     detailParts.push(report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : "Full list: report could not be written.");
   }
@@ -48172,12 +48331,16 @@ Yes = allow these versions. No = reject this REVIEW.`
   }
   const at = now.toISOString();
   const channel = result.channel ?? "unknown";
-  const repo = openSweepRepo(projectRoot);
+  const present = sweep.files.filter((f) => f.kind !== "deleted" && f.blob !== null).map((f) => f.path);
+  const currentIds = workingBlobIds(sweep.repo, present) ?? /* @__PURE__ */ new Map();
   const stamps = [];
   for (const f of sweep.files) {
-    if (f.blob === null || f.kind !== "clean" && f.kind !== "unverified") continue;
-    const current = repo ? readWorkingBlobId(repo, f.path) : null;
-    if (current !== f.blob) {
+    if (f.blob === null || f.kind === "comments_present") continue;
+    if (f.kind === "deleted") {
+      stamps.push({ path: f.path, entry: sweepEntry(f.blob, "clean", [], channel, input.spec_ref, at) });
+      continue;
+    }
+    if (currentIds.get(f.path) !== f.blob) {
       summary.changed_during_dialog.push(f.path);
       continue;
     }
@@ -48212,7 +48375,8 @@ Yes = allow these versions. No = reject this REVIEW.`
     const next = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) };
     if (fresh.review_drift) {
       const stampedPaths = new Set(stamps.map((s2) => s2.path));
-      if (fresh.review_drift.paths.every((p) => stampedPaths.has(p))) delete next.review_drift;
+      const covered = (p) => stampedPaths.has(p) || !sweep.files.some((f) => f.path === p) && !existsSync(join(sweep.repo.toplevel, p));
+      if (fresh.review_drift.paths.every(covered)) delete next.review_drift;
     }
     const w = writePhaseState(projectRoot, next);
     if (w.ok) summary.stamped = stamps.map((s2) => s2.path);
@@ -48264,7 +48428,7 @@ Yes = allow these versions. No = reject this REVIEW.`
   output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);
   if (staleness.head_stale === true) {
     output.hints.push(
-      `\u26A0 HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} \u2192 ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found \u2014 but any finding anchored to a line number was read against the earlier tree.`
+      `\u26A0 HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} \u2192 ${staleness.head_sha_now?.slice(0, 12)}). That happens when non-code changes, or code an earlier REVIEW stamped, were committed while this review was open \u2014 any finding anchored to a line number was read against the earlier tree.`
     );
   }
   return output;

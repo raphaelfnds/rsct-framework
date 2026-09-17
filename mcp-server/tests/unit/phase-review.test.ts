@@ -226,6 +226,7 @@ describe('phase_abandon and the review blocks', () => {
       spec_slug: 'feat-x',
       review: { spec_ref: 'feat-x', completed_at: VALID_TS },
       review_sweep: ledger,
+      review_drift: { sha: 'f'.repeat(40), paths: ['src/b.ts'], at: VALID_TS },
     })
     await phaseAbandonHandler(
       {
@@ -241,6 +242,7 @@ describe('phase_abandon and the review blocks', () => {
     )
     expect(readState().review).toBeUndefined()
     expect(readState().review_sweep).toEqual(ledger)
+    expect(readState().review_drift).toEqual({ sha: 'f'.repeat(40), paths: ['src/b.ts'], at: VALID_TS })
   })
 })
 
