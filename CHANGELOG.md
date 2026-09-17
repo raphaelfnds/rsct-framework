@@ -10,6 +10,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > marker *format* does, not on every release. New changes are recorded under
 > **[Unreleased]** until the next tagged release.
 
+## [Unreleased]
+
+REVIEW stops being something the agent chooses to run. It becomes the last phase of the
+cycle, mandatory at every tier, and it removes every comment from the code a change
+touches — with the commit gate refusing anything it did not cover.
+
+### Breaking — REVIEW is mandatory and runs after the tests (#62)
+
+- The cycle is now **R→S→V→C→T→REVIEW**: code and tests are reviewed together, on a green
+  suite. `nextPhase('test')` is `review`, and closing the REVIEW arms `context_stale`.
+- Removed: `include_review` on `rsct_phase_spec_complete`; `override_review_skip`,
+  `spec_tier` and `dev_approval` on `rsct_phase_test_start`, which no longer gates
+  anything. Old callers get `status: 'rejected'`, `reject_kind: 'review_option_removed'`
+  — never a schema throw. The review decision block (`decision`, `decided_at`) is gone
+  from phase-state and from `rsct_phase_status`.
+- `rsct_classify_task` recommends `review` for every tier, `trivial` included.
+
+### Added — the comment sweep, enforced at the commit gate (#62)
+
+- `rsct_phase_review_start` returns `comment_sweep`: each touched code file, its remaining
+  comments and the comments the change removed.
+- `rsct_phase_review_complete` rejects a touched file that still has a comment, requires a
+  `comment_dispositions` entry per removed comment (renamed and deleted files included) and
+  checks every `migrated` entry against the lines added to the destination decisions file.
+  Files the sweep cannot verify, and generated or vendored files listed in `exempt_files`,
+  go to a developer-only OS dialog. When anything was removed or allowed, the §C dialog is
+  forced and names a report under `.rsct/reports/`. On success it stamps a ledger of git
+  blob ids, kept across `rsct_phase_abandon`.
+- `rsct_request_commit` refuses staged code the ledger does not cover or that still carries a
+  comment — before any dialog and again right before `git commit`, on the dev_approval, plan
+  token and free-lane paths alike (`review_missing`, `comments_present`,
+  `migration_reverted`, `review_unreadable`). A pre-commit hook that slips unreviewed code
+  into the commit returns `committed_with_drift` and blocks further commits
+  (`review_drift`) until a REVIEW covers those paths, or the commit that carries their
+  reviewed fix lands; a hook that only reformats a reviewed file is re-stamped and said so.
+- Engines: tree-sitter WASM grammars vendored under `mcp-server/grammars/` (JS/TS/TSX,
+  Java, Python, PHP, CSS) with a sha256 manifest, parse5 for HTML, and a SQL lexer for
+  PostgreSQL and MySQL. Functional comments (shebang, licence header, tool directives) are
+  kept by a closed allowlist of full-body patterns.
+- `.rsct.json` gains `sql_dialect` (`postgresql` | `mysql` | `none`). `/rsct-setup` asks it
+  once, writes it only when valid, and backfills it on UPDATE by text splice.
+- `.rsct/reports/` joins the RSCT `.gitignore` block (with a backfill); `/rsct-uninstall`
+  removes the `review-comments-*.md` reports.
+
+### Not closed — stated on purpose
+
+- No push or merge backstop in this release: a commit made outside `rsct_request_commit`
+  is not checked. The dead-code half of #62 waits for #76 and #77; `pre_merge_ack`
+  `hygiene_swept` keeps covering it by attestation.
+- Phase-state and the audit log are writable by a same-user agent; re-scanning the staged
+  blob defeats a forged `clean` entry, not a forged unverified decision.
+
 ## [2.10.0] - 2026-09-12
 
 The gates that decide whether a phase may be skipped stop accepting the agent's word for

@@ -65,8 +65,8 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
       'spec',
       'verification',
       'code',
-      'review',
       'test',
+      'review',
     ])
   })
 
@@ -74,12 +74,12 @@ describe('phase-machine — RSCT_PHASES + nextPhase', () => {
     expect(nextPhase('research')).toBe('spec')
     expect(nextPhase('spec')).toBe('verification')
     expect(nextPhase('verification')).toBe('code')
-    expect(nextPhase('code')).toBe('review')
-    expect(nextPhase('review')).toBe('test')
+    expect(nextPhase('code')).toBe('test')
+    expect(nextPhase('test')).toBe('review')
   })
 
   it('nextPhase returns null for the terminal phase', () => {
-    expect(nextPhase('test')).toBeNull()
+    expect(nextPhase('review')).toBeNull()
   })
 })
 
@@ -273,15 +273,15 @@ describe('phase-machine — gatePhaseComplete', () => {
     expect(state.spec_slug).toBe('feat-foo')
   })
 
-  it('terminal phase (test) returns null next_recommended_phase', async () => {
-    writeActivePhase('test', 'feat-foo')
+  it('terminal phase (review) returns null next_recommended_phase', async () => {
+    writeActivePhase('review', 'feat-foo')
     const r = (await gatePhaseComplete(
       {
         projectRoot: tmpRoot,
-        phase: 'test',
+        phase: 'review',
         specRef: 'feat-foo',
         devApproval: approval({
-          action_scope: 'test_complete:spec_ref=feat-foo',
+          action_scope: 'review_complete:spec_ref=feat-foo',
         }),
       },
       null,
@@ -292,13 +292,6 @@ describe('phase-machine — gatePhaseComplete', () => {
   })
 })
 
-/**
- * Issue #15 — the stale-label exception. The positive case is one line; the
- * value of this block is the NEGATIVES. A looser reading of "stale" would turn
- * the repair into a general escape hatch from `phase_already_active`, which is
- * the behavior the mechanical layer exists to block. Each rejected widening
- * named in the issue gets its own test.
- */
 describe('startPhaseGeneric — stale verification label (#15)', () => {
   function writeState(state: Record<string, unknown>): void {
     mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
@@ -331,13 +324,10 @@ describe('startPhaseGeneric — stale verification label (#15)', () => {
       readFileSync(join(tmpRoot, '.rsct', 'phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
     expect(state.phase).toBe('code')
-    // The V record survives — it is what the code_start gate reads.
     expect(state.verification).toBeDefined()
   })
 
   it('NEGATIVE — a verification block without completed_at still rejects', () => {
-    // `verification != null` alone must never satisfy the exception: this is the
-    // in-flight V that `rejected_incomplete` exists to catch.
     writeState({
       phase: 'verification',
       spec_slug: 'feat-foo',
@@ -364,8 +354,6 @@ describe('startPhaseGeneric — stale verification label (#15)', () => {
   })
 
   it('NEGATIVE — the exception does not extend to other phase labels', () => {
-    // A stale `code` label carries no completion evidence, so it is a different
-    // situation with no claim on this exception — even with a completed V block.
     writeState({
       phase: 'code',
       spec_slug: 'feat-foo',

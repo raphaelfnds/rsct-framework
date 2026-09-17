@@ -124,34 +124,8 @@ code (it also runs for `standard` — see the tier table):
   rejects the completion — the rejection lists what is still open,
   and `rsct_phase_status` lists it too if you lost the ids.
 
-For `standard` and `complex`, ALSO decide the REVIEW step at
-spec_complete — a code review of the diff between Code and Test (cycle:
-R→S→V→C→REVIEW→T):
-- Ask the dev ONCE, at plan/spec approval, whether to include a code
-  review before tests (strongly recommend it), then pass the answer:
-  `mcp__rsct__rsct_phase_spec_complete({ spec_ref, dev_approval,
-  include_review: true | false })`. The decision is recorded keyed by
-  `spec_ref` and asked only once.
-- `include_review: true` → after code_complete, run
-  `rsct_phase_review_start` → do the review (hunt correctness / security /
-  regression / cross-OS bugs in the diff — the qa + senior-dev personas
-  or a review skill help) → declare what you found via `findings[]` →
-  `rsct_phase_review_complete` with an action for **every** declared
-  finding, echoing the `findings_run_id`. Declaring a finding commits
-  you to resolving it: the phase will not close while any of them is
-  unanswered. Say how each finding is known — `evidence`: `measured`
-  (the command you ran, an excerpt of its output, and **what else would
-  produce that same output**), `reported` (the source, and whether you
-  checked it against a commit or a working tree), or `hypothesis` (how
-  someone would falsify it). Omitting it is allowed and is never a
-  rejection — the finding simply counts as *unrecorded*, and the dev
-  sees the mix ("12 findings, 11 of them hypotheses") before approving.
-  What IS rejected is an inconsistent claim: `measured` with no command.
-  Re-running `_start` REPLACES the declared set and is
-  recorded in the audit log.
-- `include_review: false` → the review is skipped and never run.
-- The test phase enforces this (see §5 below). NOTE: this REVIEW *phase*
-  is distinct from `rsct_persona_review` (a stateless advisory lens).
+There is no REVIEW decision to record at spec_complete: REVIEW is mandatory
+at every tier and runs last (cycle R→S→V→C→T→REVIEW, see §5b).
 
 ### 4. Code phase + scope-gated edits
 
@@ -183,25 +157,56 @@ Before any `Edit` / `Write` to executable behavior files
   context is stale — STOP and re-run `mcp__rsct__rsct_load_context` to
   re-read plan/decisions/knowledge before editing (plan-lifecycle-v2 item 5;
   a bare `rsct_status` does **not** clear it).
+- Never write a comment into code. A decision, a convention or a measured
+  fact belongs in `documentation/decisions.md`,
+  `documentation/knowledge/anti-decisions.md` or `CONVENTIONS.md`.
 - After all edits land → `mcp__rsct__rsct_phase_code_complete`
-  (§C gate). Next: the REVIEW phase when `include_review:true` was set at
-  spec_complete (see above), otherwise the test phase.
+  (§C gate). Next: the test phase.
 
 ### 5. Test phase
 
-After code phase closes (and the REVIEW phase, when included):
-- `mcp__rsct__rsct_phase_test_start({ spec_ref, spec_tier })` — **pass
-  `spec_tier`**. For `tier='standard'|'complex'` this enforces the REVIEW
-  decision recorded at spec_complete: `include_review:false` proceeds
-  (review skipped); `include_review:true` **rejects unless
-  `rsct_phase_review_complete` ran for the same `spec_ref`**; no recorded
-  decision rejects (record one first). `tier='trivial'|'small'` bypasses
-  the gate. To bypass intentionally (rare), pass `override_review_skip:
-  true` **together with a `dev_approval`** — the tool forces an OS dialog
-  and the override is audit-logged.
+After the code phase closes:
+- `mcp__rsct__rsct_phase_test_start({ spec_ref })` — no tier, no
+  override: the test phase gates nothing. `override_review_skip`,
+  `spec_tier` and `dev_approval` were removed in 2.11.0 and are rejected
+  (`review_option_removed`).
 - Run / add tests; check results.
-- `mcp__rsct__rsct_phase_test_complete` — the §C gate that closes
-  the task.
+- `mcp__rsct__rsct_phase_test_complete` (§C gate). Next: the REVIEW phase.
+
+### 5b. REVIEW phase — mandatory at every tier
+
+After the tests pass, review code and tests together:
+- `mcp__rsct__rsct_phase_review_start({ spec_ref, findings })` — its
+  `comment_sweep` lists every touched code file, the comments still in it
+  and the comments this change removed.
+- Do the review (hunt correctness / security / regression / cross-OS bugs —
+  the qa + senior-dev personas or a review skill help), declare what you
+  found via `findings[]`. Say how each finding is known — `evidence`:
+  `measured` (the command you ran, an excerpt of its output, and **what else
+  would produce that same output**), `reported` (the source, and whether you
+  checked it against a commit or a working tree), or `hypothesis` (how someone
+  would falsify it). Omitting it is allowed — the finding counts as
+  *unrecorded*; `measured` with no command is rejected. Re-running `_start`
+  REPLACES the declared set and is recorded in the audit log.
+- Remove **every** comment from the touched code files. Functional comments
+  stay (shebang, licence header, tool directives such as `@ts-expect-error`,
+  `eslint-disable-next-line`, `# noqa`). A comment that carried a measured
+  fact is written into a decisions file FIRST.
+- `mcp__rsct__rsct_phase_review_complete` with an action for **every**
+  declared finding (echo `findings_run_id`) and a `comment_dispositions`
+  entry for **every** removed comment: `discarded`, or `migrated` with
+  `destination` — the comment text must appear in the lines you added to
+  that file. `pending_dispositions` in a rejection lists what is missing.
+  A generated or vendored file that must keep its comments goes in
+  `exempt_files`. Files the sweep cannot verify (unsupported language,
+  undeclared `sql_dialect`, parse error) and exempt files go to an OS
+  dialog only the dev answers. When anything was removed or allowed, the
+  §C dialog is forced and names a report under `.rsct/reports/`.
+- `rsct_request_commit` then accepts only the exact bytes this REVIEW
+  stamped. Edit a file after the REVIEW and it needs a new one; a
+  behaviour fix made during the REVIEW sends the task back through §5.
+  NOTE: this REVIEW *phase* is distinct from `rsct_persona_review` (a
+  stateless advisory lens).
 
 ### 6. Branch protection check (§D)
 

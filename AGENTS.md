@@ -40,11 +40,12 @@ Every task opens with a stated tier — `trivial` | `small` | `standard` |
 `complex` — plus one line of reasoning. Judge by number of surfaces touched,
 regression risk, multi-file reach and whether architecture moves.
 
-Ceremony scales with the tier: `trivial`/`small` get a lean R and S, with V and
-REVIEW optional; `standard`/`complex` run the full cycle with no shortcuts. A
-constraint written into the active plan outranks this classification.
+Ceremony scales with the tier: `trivial`/`small` get a lean R and S, with V
+optional; `standard`/`complex` run the full cycle with no shortcuts. REVIEW is
+mandatory at every tier. A constraint written into the active plan outranks this
+classification.
 
-## The cycle — R → S → V → C → Rv → T
+## The cycle — R → S → V → C → T → Rv
 
 Run in order, per task.
 
@@ -58,12 +59,14 @@ Run in order, per task.
   nothing on a `complex` task is a V that did not run.
 - **C (Code).** Only after S and V are closed and the developer has said go.
   Mutation happens on a derived branch.
-- **Rv (REVIEW).** Audit the diff before the tests: scope respected, invariants
-  intact, no duplication, tests present and meaningful. The author does not
-  approve their own diff — be adversarial with it. Mandatory for
-  `standard`/`complex`.
-- **T (Test).** Every change ships tests. Build, suite, `verify:dist` and
-  cross-OS CI green before anything is called done.
+- **T (Test).** Every change ships tests. Build, suite and `verify:dist` green
+  before the REVIEW; cross-OS CI green before anything is called done.
+- **Rv (REVIEW).** Audit code and tests together, on a green suite: scope
+  respected, invariants intact, no duplication, tests present and meaningful.
+  Remove every comment from the touched files and migrate any measured fact to
+  `docs/decisions.md`. The author does not approve their own diff — be
+  adversarial with it. Mandatory at every tier. A behaviour fix made here sends
+  the task back through T, then REVIEW again.
 
 A test that cannot fail proves nothing. For each new test, name the mutation to
 the production code that would break it — if you cannot, the test is decoration.

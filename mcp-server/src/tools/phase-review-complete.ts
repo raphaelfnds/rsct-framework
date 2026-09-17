@@ -1,21 +1,27 @@
+import { createHash } from 'node:crypto'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
-import { resolveProjectRoot } from '../lib/project-root.js'
+import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import {
   gatePhaseComplete,
+  precheckPhaseComplete,
   type CompletePhaseInternal,
   type CompletePhaseResult,
 } from '../lib/phase-machine.js'
 import {
   headStaleness,
   readPhaseState,
-  stampReviewDecision,
+  stampReviewCompleted,
   writePhaseState,
   type PhaseState,
+  type SweepLedgerEntry,
 } from '../lib/phase-scope.js'
 import { getHeadShaFull } from '../lib/git.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { promptYesNo } from '../lib/os-dialog.js'
 import {
   FINDING_ACTIONS,
   checkFindingsGate,
@@ -28,25 +34,25 @@ import {
   type FindingsGateRejectKind,
   type StoredFinding,
 } from '../lib/findings.js'
+import {
+  MIGRATION_DESTINATIONS,
+  checkDispositions,
+  computeWorkingSweep,
+  driftCovered,
+  knownPaths,
+  normalizeRepoPath,
+  stampLedger,
+  sweepEntry,
+  workingBlobIds,
+  type Disposition,
+  type ExemptReason,
+  type PendingDisposition,
+  type SweepFile,
+} from '../lib/comment-sweep/review.js'
+import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
+import { validateDevApproval } from '../lib/dev-approval.js'
+import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 
-/**
- * #19. REVIEW was defined by its POSITION in the cycle — between Code and Test —
- * but never given anywhere to put what it found. `rsct_phase_review_complete`
- * took only `spec_ref` + `dev_approval`, so a review that found dead code, an
- * abandoned scaffold or a comment describing behaviour the code no longer has had
- * nowhere to record it. The phase rested entirely on the agent remembering the
- * tool description, which is exactly the behavioural slack the mechanical layer
- * exists to close.
- *
- * This gives it the V phase's shape: per-finding actions, `block` aborts, one
- * audit entry per finding.
- *
- * It does NOT give it a mechanical checklist. That half needs a diff reader this
- * codebase does not have — `getStagedDiff` passes `-U0`, so "comments adjacent to
- * changed lines" has no adjacent line to read — and a dead-code pass resting on
- * the JS/TS-only import walker would yield nothing forever in, say, a Java
- * project while charging its runtime at every REVIEW. Tracked separately.
- */
 const findingActionSchema = z
   .object({
     finding_id: z.string().min(1, 'finding_id required'),
@@ -54,6 +60,26 @@ const findingActionSchema = z
     note: z.string().optional(),
   })
   .strict()
+
+const dispositionSchema = z
+  .object({
+    comment_id: z.string().min(1),
+    action: z.enum(['migrated', 'discarded']),
+    destination: z.string().optional(),
+  })
+  .strict()
+
+const exemptFileSchema = z
+  .object({
+    path: z.string().min(1),
+    reason: z.enum(['generated', 'vendored']),
+  })
+  .strict()
+
+const sweepInputSchema = z.object({
+  comment_dispositions: z.array(dispositionSchema).optional(),
+  exempt_files: z.array(exemptFileSchema).optional(),
+})
 
 export const phaseReviewCompleteInputSchema = z
   .object({
@@ -72,32 +98,64 @@ export const phaseReviewCompleteInputSchema = z
       .describe(
         'The findings_run_id returned by rsct_phase_review_start. Echo it back so answers prepared before a re-run are rejected as a stale set.',
       ),
+    comment_dispositions: z.unknown().optional(),
+    exempt_files: z.unknown().optional(),
   })
   .strict()
 
 export type PhaseReviewCompleteInput = z.infer<typeof phaseReviewCompleteInputSchema>
 
-export type PhaseReviewCompleteRejectKind = FindingsGateRejectKind | 'block_actions_present'
+export type PhaseReviewSweepRejectKind =
+  | 'sweep_input_invalid'
+  | 'not_git_repo'
+  | 'git_read_failed'
+  | 'comments_remaining'
+  | 'dispositions_missing'
+  | 'disposition_unknown'
+  | 'disposition_duplicate'
+  | 'migration_missing'
+  | 'unverified_declined'
+  | 'unverified_undecided'
 
-export type PhaseReviewCompleteOutput = CompletePhaseResult & {
+export type PhaseReviewCompleteRejectKind =
+  | GateRejectKind
+  | FindingsGateRejectKind
+  | 'block_actions_present'
+  | PhaseReviewSweepRejectKind
+
+export interface CommentSweepSummary {
+  files: Array<{
+    path: string
+    kind: SweepFile['kind']
+    language: string | null
+    reason: string | null
+    blob: string | null
+    comments: Array<{ id: string; line: number; body: string }>
+  }>
+  removed_count: number
+  migrated: number
+  discarded: number
+  unverified: string[]
+  allowlist_changes: Array<{ path: string; line: number; body: string }>
+  stamped: string[]
+  changed_during_dialog: string[]
+  report_path: string | null
+}
+
+export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'> & {
+  reject_kind: CompletePhaseResult['reject_kind'] | PhaseReviewSweepRejectKind
   actions_summary: ActionsSummary
-  /** #75. How the declared findings are known, counted from the stored baseline. */
   evidence_mix: EvidenceMix
-  /**
-   * #75 Part C. `true` when HEAD moved since the findings were declared. Reported,
-   * NEVER a rejection: committing the fixes a review found is the normal reason
-   * for HEAD to move, and refusing to close the phase for it would punish the
-   * correct behaviour.
-   */
   head_stale: boolean | null
-  /** #40: on a findings-gate rejection, every finding still awaiting an action. */
   open_findings?: StoredFinding[]
+  pending_dispositions?: PendingDisposition[]
+  comment_sweep: CommentSweepSummary | null
 }
 
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure. Reads .rsct/phase-state.json (must hold phase="review" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. On success it also stamps completed_at into the review decision block so rsct_phase_test_start sees the review actually ran. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion, and the rejection returns open_findings so you can answer them without re-running _start (rsct_phase_status also lists them). Unknown ids, duplicates and a stale findings_run_id reject the same way. Dead code, leftover scaffolding from an abandoned approach inside this same task, and comments or tool/parameter descriptions that no longer match the code are the hygiene items worth recording, alongside correctness and security findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>". Next recommended phase: test.',
+    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -128,9 +186,146 @@ export const phaseReviewCompleteTool: Tool = {
           additionalProperties: false,
         },
       },
+      comment_dispositions: {
+        type: 'array',
+        description:
+          'One entry per comment this change removed (ids from rsct_phase_review_start comment_sweep or from pending_dispositions). migrated needs destination.',
+        items: {
+          type: 'object',
+          required: ['comment_id', 'action'],
+          properties: {
+            comment_id: { type: 'string' },
+            action: { type: 'string', enum: ['migrated', 'discarded'] },
+            destination: { type: 'string', enum: [...MIGRATION_DESTINATIONS] },
+          },
+          additionalProperties: false,
+        },
+      },
+      exempt_files: {
+        type: 'array',
+        description:
+          'Generated or vendored code files that keep their comments, as repository-relative or project-relative paths (either slash). Each goes to the developer-only unverified dialog, bound to its exact version.',
+        items: {
+          type: 'object',
+          required: ['path', 'reason'],
+          properties: {
+            path: { type: 'string' },
+            reason: { type: 'string', enum: ['generated', 'vendored'] },
+          },
+          additionalProperties: false,
+        },
+      },
     },
     additionalProperties: false,
   },
+}
+
+function summarize(files: SweepFile[]): CommentSweepSummary {
+  return {
+    files: files.map((f) => ({
+      path: f.path,
+      kind: f.kind,
+      language: f.language,
+      reason: f.reason,
+      blob: f.blob,
+      comments: f.comments.map((c) => ({ id: c.id, line: c.line, body: c.body })),
+    })),
+    removed_count: files.reduce((n, f) => n + f.removed.length, 0),
+    migrated: 0,
+    discarded: 0,
+    unverified: files.filter((f) => f.kind === 'unverified').map((f) => f.path),
+    allowlist_changes: files.flatMap((f) => f.allowlist_changes.map((c) => ({ path: f.path, line: c.line, body: c.body }))),
+    stamped: [],
+    changed_during_dialog: [],
+    report_path: null,
+  }
+}
+
+function listLines(items: string[], limit: number): string {
+  const head = items.slice(0, limit).map((i) => `• ${i}`)
+  if (items.length > limit) head.push(`… and ${items.length - limit} more`)
+  return head.join('\n')
+}
+
+function writeReport(
+  projectRoot: string,
+  specRef: string,
+  files: SweepFile[],
+  dispositions: readonly Disposition[],
+): { path: string; sha256: string } | null {
+  const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
+  const lines: string[] = [`# REVIEW comment sweep — ${specRef}`, '']
+  for (const f of files) {
+    lines.push(`## ${f.path} (${f.kind}${f.reason ? `: ${f.reason}` : ''})`)
+    for (const c of f.removed) {
+      const d = byId.get(c.id)
+      lines.push(`- HEAD line ${c.line} — ${d ? (d.action === 'migrated' ? `migrated to ${d.destination}` : 'discarded') : 'no disposition'}: ${c.body}`)
+    }
+    for (const c of f.allowlist_changes) lines.push(`- allowlisted, line ${c.line}: ${c.body}`)
+    lines.push('')
+  }
+  const content = `${lines.join('\n')}\n`
+  const sha256 = createHash('sha256').update(content).digest('hex')
+  const rel = join('.rsct', 'reports', `review-comments-${sha256.slice(0, 16)}.md`)
+  try {
+    mkdirSync(join(projectRoot, '.rsct', 'reports'), { recursive: true })
+    writeFileSync(join(projectRoot, rel), content, 'utf8')
+    return { path: rel.replace(/\\/g, '/'), sha256 }
+  } catch {
+    return null
+  }
+}
+
+interface RejectArgs {
+  projectRoot: string
+  config: RsctConfig | null
+  specRef: string
+  rejectKind: PhaseReviewCompleteRejectKind
+  reason: string
+  hints: string[]
+  actions_summary: ActionsSummary
+  evidence_mix: EvidenceMix
+  head_stale: boolean | null
+  comment_sweep: CommentSweepSummary | null
+  appendAudit: typeof appendAuditEntry
+  extra?: Record<string, unknown>
+  open_findings?: StoredFinding[]
+  pending_dispositions?: PendingDisposition[]
+}
+
+function reject(args: RejectArgs): PhaseReviewCompleteOutput {
+  const audit = args.appendAudit(
+    args.projectRoot,
+    {
+      event: 'review.complete.rejected',
+      tool: 'rsct_phase_review_complete',
+      spec_ref: args.specRef,
+      reject_kind: args.rejectKind,
+      ...args.extra,
+    },
+    args.config?.audit,
+  )
+  return {
+    status: 'rejected',
+    phase: 'review',
+    spec_ref: args.specRef,
+    channel: null,
+    reject_kind: args.rejectKind,
+    reason: args.reason,
+    fabrication_signals: [],
+    cleared: false,
+    next_recommended_phase: 'review',
+    ...auditFields(audit),
+    anti_replay_persisted: null,
+    anti_replay_error: null,
+    hints: args.hints,
+    actions_summary: args.actions_summary,
+    evidence_mix: args.evidence_mix,
+    head_stale: args.head_stale,
+    comment_sweep: args.comment_sweep,
+    ...(args.open_findings !== undefined && { open_findings: args.open_findings }),
+    ...(args.pending_dispositions !== undefined && { pending_dispositions: args.pending_dispositions }),
+  }
 }
 
 export async function phaseReviewCompleteHandler(
@@ -142,203 +337,341 @@ export async function phaseReviewCompleteHandler(
   const projectRoot = resolution.root
   const config = resolution.config
   const appendAudit = internal.auditWriter ?? appendAuditEntry
+  const promptFn = internal.promptFn ?? promptYesNo
+  const now = internal.now ?? new Date()
 
   const actions_summary = emptyActionsSummary()
   for (const fa of input.findings_actions) actions_summary[fa.action]++
 
-  // #40: the same gate the V phase runs, from the same module — the finding
-  // vocabulary was hand-written in four places before #10 and this is that hazard
-  // one level up. Placed before the `block` check so an unknown id carrying
-  // action:'block' is reported as the unknown id, not as an instruction to change
-  // the action on a finding that does not exist.
   const stored = readPhaseState(projectRoot).state?.review_findings
   const baseline = readFindingsBaseline(stored?.findings)
-  // #75. From the stored baseline, not from findings_actions — an action is a
-  // decision, never the evidence under it. `null` reads as unmeasurable.
   const evidence_mix = summarizeEvidence(baseline)
   const staleness = headStaleness(stored?.head_sha, getHeadShaFull(projectRoot))
+  const base = { projectRoot, config, specRef: input.spec_ref, actions_summary, evidence_mix, head_stale: staleness.head_stale, appendAudit }
+
+  const sweepInput = sweepInputSchema.safeParse({
+    comment_dispositions: input.comment_dispositions,
+    exempt_files: input.exempt_files,
+  })
+  if (!sweepInput.success) {
+    const reason = `comment_dispositions / exempt_files are malformed: ${sweepInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
+    return reject({ ...base, rejectKind: 'sweep_input_invalid', reason, hints: [reason], comment_sweep: null })
+  }
+  const dispositions: Disposition[] = sweepInput.data.comment_dispositions ?? []
+
+  const precheck = precheckPhaseComplete(
+    { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
+    config,
+    internal,
+  )
+  if (precheck) {
+    return { ...precheck, actions_summary, evidence_mix, head_stale: staleness.head_stale, comment_sweep: null }
+  }
+
   const findingsGate = checkFindingsGate({
     baseline,
     storedRunId: stored?.run_id ?? null,
     suppliedRunId: input.findings_run_id ?? null,
     actions: input.findings_actions,
-    // The phase/spec_slug checks live inside gatePhaseComplete, which also pops the
-    // §C dialog — and this gate has to run BEFORE that, so a rejected completion
-    // never spends an approval. Comparing the stored spec_ref here is what keeps the
-    // ordering safe: without it, spec-B could be completed by answering spec-A's
-    // findings, which would then prune spec-A's set as well.
     storedSpecRef: stored?.spec_ref ?? null,
     specRef: input.spec_ref,
   })
   if (!findingsGate.ok) {
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'review.complete.rejected',
-        tool: 'rsct_phase_review_complete',
-        spec_ref: input.spec_ref,
-        reject_kind: findingsGate.reject_kind!,
-        open_findings_count: findingsGate.open_findings?.length ?? 0,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      phase: 'review',
-      spec_ref: input.spec_ref,
-      channel: null,
-      reject_kind: findingsGate.reject_kind!,
+    return reject({
+      ...base,
+      rejectKind: findingsGate.reject_kind!,
       reason: findingsGate.reason!,
-      fabrication_signals: [],
-      cleared: false,
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      actions_summary,
-      evidence_mix,
-      head_stale: staleness.head_stale,
-      next_recommended_phase: 'review',
-      open_findings: findingsGate.open_findings ?? [],
       hints: [
         findingsGate.reason!,
         `findings_run_id for this review is '${stored?.run_id ?? '(none)'}'. Send one action per finding listed in open_findings, then retry.`,
       ],
-    }
+      comment_sweep: null,
+      extra: { open_findings_count: findingsGate.open_findings?.length ?? 0 },
+      open_findings: findingsGate.open_findings ?? [],
+    })
   }
 
-  // `block` aborts BEFORE the §C gate, mirroring the V phase: the dialog is a
-  // decision surface, and asking the dev to approve a completion that is already
-  // refused wastes an approval and trains them to click through.
   if (actions_summary.block > 0) {
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'review.complete.rejected',
-        tool: 'rsct_phase_review_complete',
-        spec_ref: input.spec_ref,
-        reject_kind: 'block_actions_present',
-        blocked_count: actions_summary.block,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      phase: 'review',
-      spec_ref: input.spec_ref,
-      channel: null,
-      reject_kind: 'block_actions_present',
-      reason: `${actions_summary.block} review finding(s) marked action="block". Resolve them, then re-run rsct_phase_review_complete.`,
-      fabrication_signals: [],
-      cleared: false,
-      next_recommended_phase: 'review',
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
+    const reason = `${actions_summary.block} review finding(s) marked action="block". Resolve them, then re-run rsct_phase_review_complete.`
+    return reject({
+      ...base,
+      rejectKind: 'block_actions_present',
+      reason,
       hints: [
         `REVIEW is not complete: ${actions_summary.block} finding(s) are blocking. Fix them or downgrade the action with the dev — a blocking finding is the one thing this phase will not wave through.`,
       ],
-      actions_summary,
-      evidence_mix,
-      head_stale: staleness.head_stale,
+      comment_sweep: null,
+      extra: { blocked_count: actions_summary.block },
+    })
+  }
+
+  const sweepRepo = openSweepRepo(projectRoot)
+  const exempt = new Map<string, ExemptReason>(
+    (sweepInput.data.exempt_files ?? []).map((e) => [sweepRepo ? normalizeRepoPath(sweepRepo, e.path) : e.path, e.reason]),
+  )
+  const driftBefore = readPhaseState(projectRoot).state?.review_drift
+  const sweep = await computeWorkingSweep(projectRoot, {
+    sqlDialect: config?.sql_dialect,
+    exempt,
+    extraPaths: driftBefore?.paths ?? [],
+  })
+  if (!sweep.ok) {
+    const reason =
+      sweep.reason === 'not_git_repo'
+        ? 'the comment sweep needs a git repository — REVIEW compares the change against HEAD'
+        : `the comment sweep could not read git: ${sweep.detail}`
+    return reject({ ...base, rejectKind: sweep.reason, reason, hints: [reason], comment_sweep: null })
+  }
+  const summary = summarize(sweep.files)
+
+  const withComments = sweep.files.filter((f) => f.kind === 'comments_present')
+  if (withComments.length > 0) {
+    const reason = `${withComments.length} touched code file(s) still carry comments: ${withComments.map((f) => f.path).join(', ')}`
+    return reject({
+      ...base,
+      rejectKind: 'comments_remaining',
+      reason,
+      hints: [reason, 'Remove every comment (a measured fact migrates to a decisions file first), then retry.'],
+      comment_sweep: summary,
+      extra: { paths: withComments.map((f) => f.path) },
+    })
+  }
+
+  const dispositionCheck = checkDispositions(sweep.repo, sweep.files, dispositions)
+  if (!dispositionCheck.ok) {
+    return reject({
+      ...base,
+      rejectKind: dispositionCheck.reject_kind,
+      reason: dispositionCheck.reason,
+      hints: [dispositionCheck.reason, 'pending_dispositions lists each removed comment with its HEAD line and text.'],
+      comment_sweep: summary,
+      extra: { pending_count: dispositionCheck.pending.length },
+      pending_dispositions: dispositionCheck.pending,
+    })
+  }
+  summary.migrated = dispositionCheck.migrated
+  summary.discarded = dispositionCheck.discarded
+
+  const removedFiles = sweep.files.filter((f) => f.removed.length > 0)
+  const unverified = sweep.files.filter((f) => f.kind === 'unverified')
+  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
+  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null
+  summary.report_path = report?.path ?? null
+  const reportLine = report
+    ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})`
+    : 'Full list: report could not be written.'
+
+  if (unverified.length > 0) {
+    const validation = validateDevApproval(input.dev_approval, {
+      projectRoot,
+      toolName: 'rsct_phase_review_complete',
+      ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
+      ...(internal.now !== undefined && { now: internal.now }),
+      auditConfig: config?.audit,
+    })
+    if (validation.status === 'rejected') {
+      return reject({
+        ...base,
+        rejectKind: inferRejectKind(validation.reason),
+        reason: validation.reason,
+        hints: [`Approval rejected before any dialog: ${validation.reason}`],
+        comment_sweep: summary,
+      })
     }
+    const dialog = await promptFn({
+      title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
+      message:
+        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:\n\n` +
+        listLines(
+          unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
+          40,
+        ) +
+        `\n${reportLine}` +
+        `\n\nYes = allow these versions. No = reject this REVIEW.`,
+    })
+    if (dialog.response !== 'yes') {
+      const declined = dialog.response === 'no'
+      if (declined) {
+        for (const f of unverified) {
+          appendAudit(
+            projectRoot,
+            { event: 'review.unverified_decision', tool: 'rsct_phase_review_complete', spec_ref: input.spec_ref, path: f.path, blob: f.blob, reason: f.reason, answer: 'no' },
+            config?.audit,
+          )
+        }
+      }
+      const reason = declined
+        ? 'the developer declined the unverified files — take them out of the change or make them scannable'
+        : `the unverified-files dialog could not be shown (${dialog.error ?? 'no channel'}) — only the developer can allow unverified files`
+      return reject({
+        ...base,
+        rejectKind: declined ? 'unverified_declined' : 'unverified_undecided',
+        reason,
+        hints: [reason],
+        comment_sweep: summary,
+        extra: { unverified: unverified.map((f) => f.path) },
+      })
+    }
+  }
+
+  const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
+  const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })))
+  const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`]
+  if (mustForce) {
+    detailParts.push(
+      `Comments removed: ${summary.removed_count} (migrated ${summary.migrated}, discarded ${summary.discarded}).`,
+      listLines(
+        removedLines.map(({ c, d }) => `${c.path}:${c.line} ${d?.action === 'migrated' ? '→ migrated' : '→ discarded'}: ${c.body.slice(0, 80)}`),
+        10,
+      ),
+    )
+    if (unverified.length > 0) detailParts.push(`Unverified files allowed: ${unverified.length}.`)
+    if (summary.allowlist_changes.length > 0) {
+      detailParts.push(
+        `Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`,
+        listLines(
+          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${c.body.slice(0, 120)}`),
+          10,
+        ),
+      )
+    }
+    detailParts.push(reportLine)
   }
 
   const result = await gatePhaseComplete(
+    { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
+    config,
     {
-      projectRoot,
-      phase: 'review',
-      specRef: input.spec_ref,
-      devApproval: input.dev_approval,
+      ...internal,
+      dialogDetail: detailParts.filter(Boolean).join('\n'),
+      ...(mustForce && {
+        forceDialog: true,
+        forceDialogReason: 'this REVIEW removed comments, allows unverified files or changes allowlisted comments',
+      }),
     },
-    resolution.config,
-    // `dialogDetail` AFTER the spread, deliberately: every test here injects
-    // `internal` for `promptFn`, and setting it first would let the injected
-    // object shadow the production value — the dialog assertion would then pass
-    // against a string this path never produced. That is the issue's own "a test
-    // built to confirm rather than to discriminate", one level down.
-    { ...internal, dialogDetail: `Evidence: ${describeEvidenceMix(evidence_mix)}` },
   )
 
-  // Stamp completed_at ONLY when the complete genuinely succeeded; a
-  // rejected/failed complete must not mark the review as done. Additive
-  // upsert (preserves the decision/decided_at recorded at spec_complete).
-  if (result.status === 'completed') {
-    const completedAt = (internal.now ?? new Date()).toISOString()
-    const stamp = stampReviewDecision(projectRoot, {
-      spec_ref: input.spec_ref,
-      completed_at: completedAt,
+  const output: PhaseReviewCompleteOutput = {
+    ...result,
+    actions_summary,
+    evidence_mix,
+    head_stale: staleness.head_stale,
+    comment_sweep: summary,
+  }
+  if (result.status !== 'completed') {
+    output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
+    return output
+  }
+
+  const at = now.toISOString()
+  const channel = result.channel ?? 'unknown'
+  const present = sweep.files.filter((f) => f.kind !== 'deleted' && f.blob !== null).map((f) => f.path)
+  const currentIds = workingBlobIds(sweep.repo, present) ?? new Map<string, string>()
+  const stamps: Array<{ path: string; entry: SweepLedgerEntry }> = []
+  for (const f of sweep.files) {
+    if (f.blob === null || f.kind === 'comments_present') continue
+    if (f.kind === 'deleted') {
+      stamps.push({
+        path: f.path,
+        entry: sweepEntry(f.blob, 'clean', dispositionCheck.migrations.get(f.path) ?? [], channel, input.spec_ref, at),
+      })
+      continue
+    }
+    if (currentIds.get(f.path) !== f.blob) {
+      summary.changed_during_dialog.push(f.path)
+      continue
+    }
+    const verdict = f.kind === 'clean' ? 'clean' : 'unverified_authorized'
+    stamps.push({
+      path: f.path,
+      entry: sweepEntry(f.blob, verdict, dispositionCheck.migrations.get(f.path) ?? [], channel, input.spec_ref, at),
     })
-    if (!stamp.ok) {
-      result.hints.push(
-        `⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}). rsct_phase_test_start will report the review as incomplete. This completion already cleared the phase label, so re-running rsct_phase_review_complete returns no_active_phase — re-open with rsct_phase_review_start (same findings) and complete again, or inspect .rsct/phase-state.json.`,
+  }
+
+  let auditOk = true
+  for (const s of stamps) {
+    if (s.entry.verdict === 'unverified_authorized') {
+      const file = unverified.find((f) => f.path === s.path)
+      const w = appendAudit(
+        projectRoot,
+        { event: 'review.unverified_decision', tool: 'rsct_phase_review_complete', spec_ref: input.spec_ref, path: s.path, blob: s.entry.blob, reason: file?.reason ?? null, answer: 'yes' },
+        config?.audit,
       )
+      if (!w.ok) auditOk = false
     }
+    const w = appendAudit(
+      projectRoot,
+      { event: 'review.sweep_stamped', tool: 'rsct_phase_review_complete', spec_ref: input.spec_ref, path: s.path, blob: s.entry.blob, verdict: s.entry.verdict, channel, migrations: s.entry.migrations.length },
+      config?.audit,
+    )
+    if (!w.ok) auditOk = false
+  }
 
-    // #40: prune the declared findings — a completed review has none pending, and
-    // `evaluateReviewGate` now reads that as an invariant rather than as a size
-    // optimisation. Done AFTER the audit entries below would be wrong: if the log
-    // write fails, the decisions would exist in neither place. Done here, a failed
-    // prune leaves the findings and the gate reports the review as incomplete,
-    // which is the safe direction.
-    // Guarded on the stamp: if completed_at did NOT land, pruning would delete the
-    // findings while leaving the review looking incomplete — the answers would exist
-    // only in the audit log, with nothing left to re-answer. Keeping them is the
-    // recoverable direction.
-    const s = readPhaseState(projectRoot)
-    if (stamp.ok && s.state?.review_findings !== undefined) {
-      const next: PhaseState = { ...s.state }
-      delete next.review_findings
-      const pruned = writePhaseState(projectRoot, next)
-      if (!pruned.ok) {
-        result.hints.push(
-          `⚠ review completed but the declared findings could not be pruned from phase state (${pruned.reason}) — rsct_phase_test_start will report the review as incomplete until they are. Re-open with rsct_phase_review_start (same findings) and complete again; re-running rsct_phase_review_complete alone returns no_active_phase, because this completion already cleared the phase label.`,
-        )
-      }
+  if (!auditOk) {
+    output.hints.push('⚠ REVIEW completed, but the audit log could not record the sweep, so no file was stamped — rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.')
+  } else {
+    const fresh = readPhaseState(projectRoot).state ?? {}
+    const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
+    if (fresh.review_drift) {
+      const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths)
+      if (open.length === 0) delete next.review_drift
+      else next.review_drift = { ...fresh.review_drift, paths: open }
     }
+    const w = writePhaseState(projectRoot, next)
+    if (w.ok) summary.stamped = stamps.map((s) => s.path)
+    else output.hints.push(`⚠ REVIEW completed, but the sweep ledger could not be written (${w.reason}) — rsct_request_commit will ask for a new REVIEW.`)
+  }
+  if (summary.changed_during_dialog.length > 0) {
+    output.hints.push(`⚠ ${summary.changed_during_dialog.length} file(s) changed while the dialog was open and were not stamped: ${summary.changed_during_dialog.join(', ')}.`)
+  }
 
-    // #75. The mix as its own forensic line. `gatePhaseComplete` owns the generic
-    // `review.complete` event and extending it would reach four other phases that
-    // have no findings at all, so this rides beside it instead.
+  const stamp = stampReviewCompleted(projectRoot, { spec_ref: input.spec_ref, completed_at: at })
+  if (!stamp.ok) {
+    output.hints.push(`⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}).`)
+  }
+  const s = readPhaseState(projectRoot)
+  if (stamp.ok && s.state?.review_findings !== undefined) {
+    const next: PhaseState = { ...s.state }
+    delete next.review_findings
+    const pruned = writePhaseState(projectRoot, next)
+    if (!pruned.ok) {
+      output.hints.push(`⚠ review completed but the declared findings could not be pruned from phase state (${pruned.reason}) — rsct_phase_status keeps listing them until they are.`)
+    }
+  }
+
+  appendAudit(
+    projectRoot,
+    {
+      event: 'review.evidence_mix',
+      tool: 'rsct_phase_review_complete',
+      spec_ref: input.spec_ref,
+      evidence_mix,
+      head_stale: staleness.head_stale,
+      head_sha_at_start: staleness.head_sha_at_start,
+      head_sha_now: staleness.head_sha_now,
+    },
+    config?.audit,
+  )
+  for (const fa of input.findings_actions) {
     appendAudit(
       projectRoot,
       {
-        event: 'review.evidence_mix',
+        event: 'review.action',
         tool: 'rsct_phase_review_complete',
         spec_ref: input.spec_ref,
-        evidence_mix,
-        head_stale: staleness.head_stale,
-        head_sha_at_start: staleness.head_sha_at_start,
-        head_sha_now: staleness.head_sha_now,
+        finding_id: fa.finding_id,
+        action: fa.action,
+        ...(fa.note ? { note: fa.note } : {}),
       },
       config?.audit,
     )
-
-    // One audit entry per finding, AFTER the gate: a rejected complete must not
-    // leave the log asserting decisions that were never approved. Deliberately NOT
-    // gated on a declared baseline — see the matching note in
-    // phase-verification-complete.ts.
-    for (const fa of input.findings_actions) {
-      appendAudit(
-        projectRoot,
-        {
-          event: 'review.action',
-          tool: 'rsct_phase_review_complete',
-          spec_ref: input.spec_ref,
-          finding_id: fa.finding_id,
-          action: fa.action,
-          ...(fa.note ? { note: fa.note } : {}),
-        },
-        config?.audit,
-      )
-    }
   }
 
-  // The leg that survives a headless run, where the dialog never renders.
-  result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
+  output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
   if (staleness.head_stale === true) {
-    result.hints.push(
-      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That is expected if you committed the fixes this review found — but any finding anchored to a line number was read against the earlier tree.`,
+    output.hints.push(
+      `⚠ HEAD moved since these findings were declared (${staleness.head_sha_at_start?.slice(0, 12)} → ${staleness.head_sha_now?.slice(0, 12)}). That happens when non-code changes, or code an earlier REVIEW stamped, were committed while this review was open — any finding anchored to a line number was read against the earlier tree.`,
     )
   }
-  return { ...result, actions_summary, evidence_mix, head_stale: staleness.head_stale }
+  return output
 }

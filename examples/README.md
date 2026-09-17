@@ -18,6 +18,6 @@ L3 personas + Tutor + issue capture) surfaces all live there. The
 server currently ships 40 tools and 5
 resources, including the four §C-gated mutating ops (commit / push /
 merge + rebase/squash), the SessionStart sanitizer hook, the PreToolUse
-edit-scope guard, the full R→S→V→C→REVIEW→T phase cycle, the
+edit-scope guard, the full R→S→V→C→T→REVIEW phase cycle, the
 6 personas, and bilingual (EN + pt-BR) keyword heuristics for
 `rsct_classify_task` and `rsct_auto_persona`.

@@ -9,6 +9,7 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "grammars",
     "README.md",
     "LICENSE"
   ],
@@ -38,10 +39,12 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^22.0.0",
+    "parse5": "7.3.0",
     "pino": "^9.5.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.11",
+    "web-tree-sitter": "0.25.10",
     "zod": "^3.23.0"
   },
   "overrides": {

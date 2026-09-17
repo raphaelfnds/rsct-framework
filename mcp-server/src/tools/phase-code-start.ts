@@ -69,7 +69,7 @@ export const phaseCodeStartInputSchema = z
       .unknown()
       .optional()
       .describe(
-        'Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V/REVIEW/plan tracking is a per-call decision, not a pre-authorised tool.',
+        'Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking is a per-call decision, not a pre-authorised tool.',
       ),
   })
   .strict()
@@ -166,7 +166,7 @@ export type PhaseCodeStartOutput =
 export const phaseCodeStartTool: Tool = {
   name: 'rsct_phase_code_start',
   description:
-    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, REVIEW or plan tracking is a per-call decision. **Evidence gate** — `spec_tier ∈ {trivial, small}` skips V, REVIEW and plan tracking, so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
+    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, the classification or plan tracking is a per-call decision. **Evidence gate** — `spec_tier ∈ {trivial, small}` skips V and plan tracking (never REVIEW, which is mandatory at every tier), so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],

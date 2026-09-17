@@ -33,28 +33,64 @@ Implements the **Recall MVP (M1)**, the **Enforcement MVP (M2)**, the
   (`rsct_detect_onboarding`, DX-1), plan-authorization batch tokens
   (`rsct_plan_authorize` / `rsct_plan_revoke`, T3), and the mechanical REVIEW
   phase (`rsct_phase_review_start` / `rsct_phase_review_complete`, DX-4 — the
-  cycle becomes R→S→V→C→REVIEW→T).
+  cycle becomes R→S→V→C→REVIEW→T; since 2.11.0 it is R→S→V→C→T→REVIEW).
 
 **Entry point for non-trivial tasks:** call `rsct_classify_task` with the
 task description. It returns a tier (trivial / small / standard / complex)
 and the recommended phase sequence. Tier is advisory — the phase tools
 accept any phase regardless of classify_task output. For trivial / docs-only
-fixes, skip the phase machine entirely.
+fixes, skip the spec and code phases — but any change that touches code still
+needs a completed REVIEW before `rsct_request_commit` accepts it.
 
-**REVIEW phase (DX-4)** — a code review of the diff sits between Code and Test
-(the recommended cycle is **R→S→V→C→REVIEW→T**), mirroring how the V audit sits
-between Spec and Code. It is opt-in and asked ONCE: pass `include_review` to
-`rsct_phase_spec_complete` (recorded keyed by `spec_ref`). For `spec_tier ∈
-{standard, complex}`, `rsct_phase_test_start` then enforces the decision —
-`decision=no` proceeds (review skipped), `decision=yes` requires a completed
-`rsct_phase_review_{start,complete}` for that `spec_ref`, and no decision rejects
-(asking you to record one); `override_review_skip=true` bypasses, and since
-2.10.0 it requires a `dev_approval` and **forces** the OS dialog —
-`trust_allowed_for` is ignored, so a headless project cannot skip a review.
-`trivial`/`small` bypass the gate, but only when an `rsct_classify_task` verdict
-is on record: a tier declared with no classification is refused
-(`classify_evidence_absent`). NOTE: the REVIEW *phase* is distinct from
-`rsct_persona_review` (a stateless advisory lens).
+**REVIEW phase (#62, 2.11.0)** — the last phase of the cycle
+**R→S→V→C→T→REVIEW**: code and tests are reviewed together, on a green suite.
+It is **mandatory at every tier** and anchored mechanically at the commit gate —
+`include_review` (spec_complete) and `override_review_skip` / `spec_tier` /
+`dev_approval` (test_start) were removed and are rejected with
+`reject_kind: 'review_option_removed'`.
+
+- `rsct_phase_review_start` returns `comment_sweep`: every touched code file
+  (git, against HEAD, untracked included), its remaining comments and the
+  comments the change removed.
+- `rsct_phase_review_complete` recomputes that sweep before any dialog. A code
+  file that still has a comment rejects (`comments_remaining`). Each removed
+  comment — renamed and deleted files included — needs a `comment_dispositions`
+  entry: `discarded`, or `migrated` with a `destination` among
+  `documentation/decisions.md`, `documentation/knowledge/anti-decisions.md`,
+  `docs/decisions.md`, where the comment text (at least 20 characters) must be
+  in the lines added to that file (`dispositions_missing` returns
+  `pending_dispositions`; also `migration_missing`, `disposition_unknown`,
+  `disposition_duplicate`). Functional comments are kept by a closed allowlist
+  of full-body patterns (shebang, licence header up to 30 lines,
+  `@ts-expect-error`, `eslint-disable…`, `# noqa`, `NOSONAR`, `stylelint-disable…`,
+  MySQL `/*+ hint */`, HTML conditional comments, …).
+- Files the sweep cannot verify (`unsupported_language`, `unknown_extension`,
+  `sql_dialect_missing`, `parse_error`, `binary_or_encoding`,
+  `engine_unavailable`, `git_filter`, `head_unverified` — the HEAD version could not be
+  scanned) and files listed in `exempt_files`
+  (generated / vendored) go to one forced OS dialog only the dev answers: Yes
+  makes those exact file versions committable without a mechanical check, No
+  rejects the REVIEW (`unverified_declined`), no channel rejects
+  (`unverified_undecided`).
+- When comments were removed, files are unverified or an allowlisted comment
+  changed, the §C dialog is forced (`trust_allowed_for` ignored) and names a
+  report under `.rsct/reports/`. On success the tool stamps a sweep ledger —
+  path + git blob id — in phase-state (kept across `rsct_phase_abandon`) and
+  audits `review.sweep_stamped` / `review.unverified_decision`.
+- `rsct_request_commit` checks every staged code file against that ledger before
+  any dialog and again right before `git commit`, on every authorization path.
+  A pre-commit hook that slips unreviewed code into the commit returns
+  `committed_with_drift` and blocks further commits (`review_drift`) until a
+  REVIEW covers those paths; a hook that only reformats is re-stamped.
+- Engines: tree-sitter (WASM, vendored under `grammars/` with a sha256 manifest)
+  for JS/TS/TSX, Java, Python, PHP and CSS; parse5 for HTML (inline
+  `<script>`/`<style>` go through the JS/CSS grammars); an in-house lexer for
+  SQL, parameterised by `.rsct.json` `sql_dialect` (`postgresql` | `mysql` | `none`).
+
+NOTE: the REVIEW *phase* is distinct from `rsct_persona_review` (a stateless
+advisory lens).
+
+Third-party code shipped for the sweep: `web-tree-sitter` 0.25.10 and the tree-sitter grammars (MIT, WASM under `grammars/`, listed with their versions and sha256 in `grammars/manifest.json`), `parse5` 7.3.0 (MIT) and its dependency `entities` 6.0.1 (BSD-2-Clause), bundled into `dist/index.js`.
 
 **Plan-tracking gate (PH-1)** — symmetrically, `rsct_phase_code_start` refuses
 the Code phase for `spec_tier ∈ {standard, complex}` unless the plan is tracked
@@ -364,8 +400,8 @@ supplies it.
 
 Findings also record `head_sha` (full, never an abbreviation) and `observed_at` at the
 phase start; `_complete` compares against HEAD and reports `head_stale`. It **marks,
-never rejects** — committing the fixes a review found is the normal reason for HEAD to
-move. Unknown is `null`, never `true`.
+never rejects** — HEAD moves while a review is open when non-code changes, or code an
+earlier REVIEW stamped, are committed (unstamped code cannot be committed at all). Unknown is `null`, never `true`.
 
 ### `rsct_load_context`
 
@@ -677,7 +713,7 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
-- Output: `status: 'committed' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
   1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, or present with no hook entry pointing at it; either way what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and on push/merge it also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit falls back to a per-action `dev_approval`.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
@@ -908,6 +944,7 @@ Bounds:
 | `audit` sub-object | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
 | `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
 | `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
+| `sql_dialect` | enum of `postgresql`, `mysql`, `none`; optional | an unknown dialect would make the REVIEW comment sweep read SQL with the wrong comment syntax; rejecting loudly beats sweeping wrongly |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

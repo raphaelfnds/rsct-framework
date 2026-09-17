@@ -8,11 +8,6 @@ export interface GitState {
   is_clean: boolean | null
 }
 
-/**
- * Read minimal git state for the project root. Returns `available: false`
- * if git is not installed or the directory is not a git repo. Never
- * throws — MCP tools must degrade gracefully outside git contexts.
- */
 export function readGitState(projectRoot: string): GitState {
   if (!isGitRepo(projectRoot)) {
     return { available: false, branch: null, head_sha: null, is_clean: null }
@@ -30,29 +25,11 @@ export function readGitState(projectRoot: string): GitState {
   }
 }
 
-/**
- * Return the staged diff (`git diff --cached`) as a unified-diff string.
- * Returns `null` when not in a git repo or when git fails. Returns the
- * empty string when there are no staged changes.
- *
- * Uses `--no-color` and `-U0` so consumers parse a stable, minimal diff
- * shape (no context lines around hunks).
- */
 export function getStagedDiff(projectRoot: string): string | null {
   if (!isGitRepo(projectRoot)) return null
   return safeGitRaw(projectRoot, ['diff', '--cached', '--no-color', '-U0'])
 }
 
-/**
- * Return the staged file paths (`git diff --cached --name-only -z`) as a
- * forward-slash-normalized string[]. `-z` is NUL-separated and unquoted, so
- * paths with spaces/unicode survive intact and `core.quotepath` can't mangle
- * them. `null` outside a git repo / on git failure; `[]` when nothing is staged.
- *
- * Used by the T2 contract-surface gate (INV-7). Deliberately the REAL staged
- * set — there is NO MCP-substitutable override (the A2/INV-6 lesson: a public
- * diff override is an enforcement bypass).
- */
 export function getStagedPaths(projectRoot: string): string[] | null {
   if (!isGitRepo(projectRoot)) return null
   const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
@@ -60,18 +37,6 @@ export function getStagedPaths(projectRoot: string): string[] | null {
   return splitNulPaths(raw)
 }
 
-/**
- * Split a `-z` (NUL-separated) git path list into forward-slash-normalized
- * entries. Shared by {@link getStagedPaths} and {@link getRangePaths} so the two
- * readers cannot drift apart in how they parse the same wire format.
- *
- * The `\` → `/` replace is inherited from the original `getStagedPaths` body and
- * kept for symmetry. Be aware of what it is: git emits `/` as the separator on
- * every OS (including Windows) for `-z` output, so as a SEPARATOR fix it never
- * fires. It only fires on a legal Linux/macOS filename containing a literal
- * backslash, where it is lossy. Divergence between the two readers would be the
- * worse defect, so it stays — documented rather than silently inherited.
- */
 function splitNulPaths(raw: string): string[] {
   return raw
     .split('\0')
@@ -79,109 +44,18 @@ function splitNulPaths(raw: string): string[] {
     .filter((p) => p.length > 0)
 }
 
-/**
- * Is `rev` safe to place in a git REVISION position?
- *
- * An injection guard, NOT a validity check — git still decides whether the ref
- * resolves. It exists because {@link getRangePaths} builds a single
- * `<base>...<head>` argv token out of caller-supplied strings, and a token
- * beginning with `-` is read by git as an OPTION rather than an operand.
- *
- * Why that matters more here than elsewhere: the `pre_merge_ack` gate runs
- * BEFORE `gateRequest` at all three call sites, deliberately, so a rejected ack
- * never spends a §C approval. An unguarded revision would therefore reach
- * `execFileSync` with no OS dialog shown and no `dev_approval` validated.
- * `execFileSync` passes argv directly (no shell), so this is not command
- * execution — it is an unapproved arbitrary-path WRITE, which is enough:
- *
- *     git diff --name-only -z --diff-filter=d "--output=SIDEEFFECT...HEAD"
- *       -> rc=0, and a file named `SIDEEFFECT...HEAD` is created
- *
- * **The rule set is deliberately tiny, and that is a measured result, not
- * minimalism.** A 30-token battery was run through the real argv above. Exactly
- * one shape did anything other than resolve-or-fail: the option-shaped one.
- * Every other candidate either resolved legitimately or exited 128/129 with no
- * side effect — including `feat:main`, `main..feat`, `+feat`, `a b`,
- * `feat.lock` and `feat/`. Rejecting those buys nothing the `unavailable`
- * path does not already give, and each extra rule costs real availability.
- *
- * An earlier draft of this predicate also rejected `~ ^ : ? * [ .. @{` and a
- * bare `@`. The battery refuted it: `HEAD~1`, `HEAD^`, `HEAD^1`,
- * `HEAD@{0}` and `@` all RESOLVE, and `git rebase HEAD~3` is a canonical
- * call. Because merge and rebase fail CLOSED on an unreadable range, a false
- * reject here is a hard stop on a legitimate integration — raised before any
- * dialog, with no override path. Over-restriction is the expensive error.
- *
- * Rejected alternatives, both measured:
- * - `--end-of-options` works (rc=128, nothing written) but landed in git 2.24,
- *   and this project declares no minimum git version; on older git it would fail
- *   EVERY read, which for merge/rebase means a blocked merge. Depth only.
- * - `--` is worse than nothing: it reclassifies the token as a pathspec and
- *   returns rc=0 with empty output, which this module's caller would read as an
- *   empty range — turning an attack into a silent pass.
- *
- * Exported for unit testing; NOT an MCP input.
- */
 export function isSafeRevisionToken(rev: string): boolean {
   if (typeof rev !== 'string' || rev.length === 0) return false
-  // THE rule — the only shape measured to have a side effect.
   if (rev.startsWith('-')) return false
-  // Control characters, NUL and newline included. Not a git-parsing concern (git
-  // forbids them in refnames anyway): a NUL makes Node's execFileSync throw, and
-  // a newline would split the JSONL audit record that echoes the rejected
-  // revision. Fails here rather than somewhere worse.
   if (/[\u0000-\u001f\u007f]/.test(rev)) return false
   return true
 }
 
-/**
- * Outcome of {@link getRangePaths}. Deliberately a three-way result rather than
- * `string[] | null` (the shape {@link getStagedPaths} uses), because the caller
- * must tell a REJECTED revision apart from an UNREADABLE range:
- *
- * - `unsafe_revision` means the caller handed us something option-shaped or
- *   otherwise not a refname. That is an input-validation event and it is
- *   audited as such.
- * - `unavailable` means git could not answer — not a repo, a ref that does not
- *   resolve, no merge base, an exec failure.
- *
- * Collapsing the two would make a crafted ref and an unfetched remote branch
- * indistinguishable in `.rsct/audit.log`, which is precisely the case a
- * forensic reader needs to separate.
- */
 export type RangePathsResult =
   | { status: 'ok'; paths: string[] }
   | { status: 'unsafe_revision'; revision: string }
   | { status: 'unavailable' }
 
-/**
- * Return the paths a branch-scoped integration CARRIES — the three-dot range
- * `git diff --name-only -z --diff-filter=d <base>...<head>` —
- * forward-slash-normalized. `status:'ok'` with an empty `paths` means the range
- * is genuinely empty (an already-merged source branch, or nothing to push);
- * that is NOT the same as being unable to read it.
- *
- * Used by the `pre_merge_ack` hygiene cross-check (#62) at `rsct_request_merge`,
- * `rsct_request_push` and `rsct_request_rebase`. Deliberately the REAL range —
- * there is NO MCP-substitutable override (the A2/INV-6 lesson: a public diff
- * override is an enforcement bypass). The tools carry a test-only READER seam on
- * their `Internal` interface instead, which is not reachable from a tool call.
- *
- * **`--diff-filter=d` is load-bearing and does more than it looks like.**
- * Measured against real git, not assumed:
- *
- * - It drops DELETIONS, which `--name-only` lists by default. A hygiene sweep of
- *   a file the integration removes is incoherent — there is nothing left to
- *   sweep and no honest way to attest it.
- * - It also, as a consequence, drops the OLD side of a rename that git did not
- *   detect as one. Under a user's `diff.renames=false` — or the silent
- *   `diff.renameLimit` fallback, whose warning goes to stderr and is discarded
- *   by `safeGitRaw` — the range would otherwise carry a path that does not exist
- *   at `head`, an unsatisfiable demand. An explicit `-M` was tried here first and
- *   REMOVED after measurement: git reports that old side as a deletion, so
- *   `--diff-filter=d` already excludes it and the two flags produce byte-identical
- *   output. Adding `-M` back would be dead weight, not defense.
- */
 export function getRangePaths(
   projectRoot: string,
   base: string,
@@ -203,31 +77,12 @@ export function getRangePaths(
 }
 
 export interface StagedStats {
-  /** Distinct files in the staged diff (renames count once, as the new path). */
   files: number
-  /** Sum of added lines across text files (binary files contribute 0). */
   insertions: number
-  /** Sum of deleted lines across text files (binary files contribute 0). */
   deletions: number
-  /** New-side, forward-slash-normalized paths (rename-safe). */
   paths: string[]
 }
 
-/**
- * Return per-file line stats for the staged diff via
- * `git diff --cached --numstat -z` (plan-lifecycle-v2, Bloco 1.2).
- *
- * `null` outside a git repo / on git failure; an all-zero `StagedStats`
- * when nothing is staged. `-z` is NUL-separated so paths with spaces /
- * unicode survive intact and renames emit old+new as separate fields.
- *
- * BINARY-SAFE: numstat renders `-\t-\t<path>` for binary blobs. Parsing the
- * dashes as integers would yield `NaN`, which then poisons any cumulative
- * counter (`NaN + n === NaN`, `JSON.stringify(NaN) === "null"`) and makes a
- * `lines > cap` check always false (cap fails open). Here a `-` contributes
- * **0 lines** but the file IS still counted, and every numeric is
- * `Number.isFinite`-guarded so the result can never carry `NaN`.
- */
 export function getStagedStats(projectRoot: string): StagedStats | null {
   if (!isGitRepo(projectRoot)) return null
   const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--numstat', '-z'])
@@ -235,12 +90,6 @@ export function getStagedStats(projectRoot: string): StagedStats | null {
   return parseNumstatZ(raw)
 }
 
-/**
- * Pure parser for `git diff --cached --numstat -z` output. Exported for unit
- * testing (the real reader is {@link getStagedStats}); NOT an MCP input — a
- * caller-substitutable stats value would be an enforcement bypass (the A2 /
- * INV-6 lesson), so the request-commit override for this is test-only.
- */
 export function parseNumstatZ(raw: string): StagedStats {
   const tokens = raw.split('\0')
   const paths: string[] = []
@@ -256,24 +105,20 @@ export function parseNumstatZ(raw: string): StagedStats {
     const firstTab = tok.indexOf('\t')
     const secondTab = firstTab >= 0 ? tok.indexOf('\t', firstTab + 1) : -1
     if (firstTab < 0 || secondTab < 0) {
-      // Malformed record — skip defensively (never throw).
       i += 1
       continue
     }
     const addedRaw = tok.slice(0, firstTab)
     const deletedRaw = tok.slice(firstTab + 1, secondTab)
     const rest = tok.slice(secondTab + 1)
-    // Binary files show '-' for added/deleted → contribute 0 lines.
     const added = addedRaw === '-' ? 0 : Number.parseInt(addedRaw, 10)
     const deleted = deletedRaw === '-' ? 0 : Number.parseInt(deletedRaw, 10)
     insertions += Number.isFinite(added) ? added : 0
     deletions += Number.isFinite(deleted) ? deleted : 0
     if (rest !== '') {
-      // Normal record: `rest` is the path (may contain tabs — sliced, not split).
       paths.push(rest.replace(/\\/g, '/'))
       i += 1
     } else {
-      // Rename/copy: the next two NUL-tokens are old-path then new-path.
       const newPath = tokens[i + 2]
       if (newPath !== undefined && newPath !== '') {
         paths.push(newPath.replace(/\\/g, '/'))
@@ -284,21 +129,11 @@ export function parseNumstatZ(raw: string): StagedStats {
   return { files: paths.length, insertions, deletions, paths }
 }
 
-/**
- * A file's content at `HEAD`, or null when it is untracked there / git fails.
- * Reads through git rather than the filesystem on purpose: the question is what
- * the LAST COMMIT holds, which is the only honest baseline for "what did someone
- * add since". Never throws.
- */
 export function getFileAtHead(projectRoot: string, relPath: string): string | null {
   if (!isGitRepo(projectRoot)) return null
   return safeGitRaw(projectRoot, ['show', `HEAD:${relPath}`])
 }
 
-/**
- * Return the unstaged diff (`git diff`) as a unified-diff string.
- * Same semantics as {@link getStagedDiff}.
- */
 export function getUnstagedDiff(projectRoot: string): string | null {
   if (!isGitRepo(projectRoot)) return null
   return safeGitRaw(projectRoot, ['diff', '--no-color', '-U0'])
@@ -309,14 +144,6 @@ function isGitRepo(projectRoot: string): boolean {
   return out === 'true'
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.3): is `relPath` TRACKED by git (`git ls-files
- * --error-unmatch`)? Used only to LABEL a plan artifact at cleanup time
- * (tracked → surfaced as `deferred_tracked`, never fs.rm'd). FAIL-SAFE: any
- * ambiguous git error is treated as TRACKED so a real git failure can never
- * green-light deleting something that might be under version control. Only a
- * clean exit-1 ("not tracked") returns false.
- */
 export function gitIsTracked(
   projectRoot: string,
   relPath: string,
@@ -325,17 +152,9 @@ export function gitIsTracked(
   const r = executor(projectRoot, ['ls-files', '--error-unmatch', '--', relPath])
   if (r.ok) return true
   if (r.exitCode === 1) return false
-  return true // fail-safe: unknown error → assume tracked
+  return true
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.4): is `branch`'s tip an ancestor of `target`
- * (i.e. reported by `git branch --merged <target>`)? Used for retroactive
- * reconciliation. NOTE: this is blind to SQUASH and REBASE merges (they create
- * new SHAs) and to already-deleted branches — the `gh pr list` signal covers
- * those; this local check is the cheap first pass. Returns false on any git
- * failure (never falsely claims merged).
- */
 export function gitBranchMerged(
   projectRoot: string,
   branch: string,
@@ -352,28 +171,11 @@ export function gitBranchMerged(
 
 export interface WorktreeInfo {
   in_git_repo: boolean
-  /**
-   * True when running inside a LINKED git worktree (not the main worktree).
-   * T3/FV2: a linked worktree's `git rev-parse --git-dir` ends in
-   * `…/.git/worktrees/<name>`; the main worktree — and any subdir of it —
-   * never does. We detect that tail (OS-path-form-robust) rather than
-   * string-comparing `--git-dir` against `--git-common-dir`.
-   */
   is_worktree: boolean
-  /** `git rev-parse --show-toplevel` (forward-slash normalized) or null. */
   toplevel: string | null
-  /** Linked-worktree name (basename of git-dir) or null on the main worktree. */
   name: string | null
 }
 
-/**
- * Read git worktree info for the project root. Pure read, never throws
- * (mirrors {@link readGitState}). Used by T3 to surface that the
- * plan-authorization token + phase-state + anti-reuse store are isolated to
- * THIS worktree (each `git worktree` checkout starts with its own gitignored
- * `.rsct/`). Git emits forward slashes even on Windows; we normalize
- * defensively before comparing/splitting.
- */
 export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
   if (safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree']) !== 'true') {
     return { in_git_repo: false, is_worktree: false, toplevel: null, name: null }
@@ -383,15 +185,6 @@ export function readWorktreeInfo(projectRoot: string): WorktreeInfo {
   const gitDirRaw = safeGit(projectRoot, ['rev-parse', '--git-dir'])
   const toplevel = norm(safeGit(projectRoot, ['rev-parse', '--show-toplevel']))
 
-  // A LINKED worktree's git-dir lives at `<common>/.git/worktrees/<name>`; the
-  // MAIN worktree — and any SUBDIR of it — never does (its git-dir is `.git` /
-  // `<root>/.git`). Detect the `/worktrees/<name>` tail directly. This is robust
-  // across OS path forms where comparing the absolute `--git-dir` against the
-  // relative `--git-common-dir` as strings is NOT: from a subdir git mixes an
-  // ABSOLUTE git-dir with a RELATIVE common-dir, and the absolute one is
-  // symlink/short-name-resolved (Windows 8.3 + drive casing; macOS /var→
-  // /private/var) while `resolve()` is not — so a same-`.git` pair compared as
-  // strings false-positived the main worktree's subdir as a linked worktree.
   let isWorktree = false
   let name: string | null = null
   if (gitDirRaw !== null) {
@@ -410,28 +203,8 @@ function safeGit(cwd: string, args: string[]): string | null {
   return raw !== null ? raw.trim() : null
 }
 
-/**
- * The trimmed read above, exported for `lib/repo-anchor.ts` (#92). Kept as a
- * re-export rather than widening `safeGit` itself so the timeout, the
- * failure-to-null contract and the single spawn site stay in one module.
- */
 export const safeGitRead = safeGit
 
-/**
- * Wall-clock bound for the READ helpers below.
- *
- * `execFileSync` blocks the event loop, so a wedged git child holds the whole
- * MCP server. A test-level timeout is no substitute: a synchronous body is never
- * interrupted, only failed retroactively, so the process stays alive either way.
- * On expiry Node kills the child and throws, the `catch` returns `null`, and the
- * caller takes its normal degraded path — a hang becomes a degrade.
- *
- * Deliberately NOT applied to {@link defaultGitExecutor}. That one carries the
- * MUTATING ops, and `git push` to a slow remote is legitimately long; a bound
- * there would abort real work rather than a stall. These callers are all LOCAL
- * reads (`rev-parse`, `status`, `diff`, `show`), where 30s is far past any
- * honest duration and only a genuine stall reaches it.
- */
 const GIT_READ_TIMEOUT_MS = 30_000
 
 function safeGitRaw(cwd: string, args: string[]): string | null {
@@ -448,12 +221,26 @@ function safeGitRaw(cwd: string, args: string[]): string | null {
   }
 }
 
-/**
- * Result envelope for the injectable git executor used by mutating ops.
- * Distinct from `safeGit` / `safeGitRaw` (string|null) because mutating
- * helpers (gitCommit, gitPush, gitMerge in F2.5.5b/c) need exit code,
- * stderr, and the ability to swap implementations in tests.
- */
+export function safeGitBuffer(
+  cwd: string,
+  args: string[],
+  input?: string,
+  env?: Record<string, string>,
+): Buffer | null {
+  try {
+    return execFileSync('git', args, {
+      cwd,
+      input: input ?? '',
+      ...(env !== undefined && { env: { ...process.env, ...env } }),
+      stdio: ['pipe', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS,
+    })
+  } catch {
+    return null
+  }
+}
+
 export interface GitExecResult {
   ok: boolean
   stdout: string
@@ -506,23 +293,6 @@ function bufferOrStringToString(v: string | Buffer | undefined): string {
   return v.toString('utf8')
 }
 
-/**
- * Read the current HEAD SHORT sha via the injectable executor.
- * Returns `null` outside a git repo or on any git error.
- *
- * REPORTING format, deliberately. Its eight callers below are the
- * `sha_before`/`sha_after` pairs of {@link gitCommit}, {@link gitPush},
- * {@link gitMerge} and {@link gitRebase}, which exist to tell a human what an
- * operation did — and `readGitState` (line 22) fills the SAME `sha_before` field
- * on `rsct_request_commit`'s rejection paths, also short. One field must not
- * carry two widths depending on which branch produced it.
- *
- * For an IDENTIFIER — anything stored, compared later, or carried between
- * machines — use {@link getHeadShaFull}. The two are separate on purpose: a short
- * sha is an abbreviation whose width tracks object count and `core.abbrev`, so it
- * is not stable across clones. Two contracts, not a duplication to be
- * consolidated.
- */
 export function getHeadSha(
   projectRoot: string,
   executor: GitExecutor = defaultGitExecutor,
@@ -532,24 +302,6 @@ export function getHeadSha(
   return r.stdout.trim() || null
 }
 
-/**
- * Read the current HEAD sha in FULL (40 chars) via the injectable executor.
- * Returns `null` outside a git repo or on any git error.
- *
- * IDENTIFIER format. #75's staleness stamp records which commit a finding was
- * made against, and its whole premise is that only a commit is immutable — an
- * abbreviation is not, so it cannot be the thing written down.
- *
- * Separate from {@link getHeadSha} rather than replacing it: that one has eight
- * callers whose output is read by humans alongside a short sha from
- * `readGitState`, and widening it would make one audit field 7 characters on a
- * rejection path and 40 on a success path in the same tool. Nothing compares
- * shas today, so that would break nobody now and mislead whoever reads the log
- * later.
- *
- * ONE git spawn (~64 ms warm on Windows, a floor not a ceiling) against
- * `readGitState`'s four, which is why the stamp calls this and not that.
- */
 export function getHeadShaFull(
   projectRoot: string,
   executor: GitExecutor = defaultGitExecutor,
@@ -559,24 +311,6 @@ export function getHeadShaFull(
   return r.stdout.trim() || null
 }
 
-/**
- * Guard every agent-controlled operand a mutating helper is about to place in
- * git's argv. Returns a reason string when one is unsafe, `null` when all are.
- *
- * This is the SECOND barrier, deliberately independent of the `--` sentinel each
- * helper also passes. Neither relies on the other: `--` is a git-side control
- * whose exact behaviour differs per subcommand (measured: at `git diff` it
- * reclassifies the token as a PATHSPEC and returns rc=0 with empty output — a
- * silent pass — which is why the range reader validates instead), while this is
- * a process-side control that holds regardless of git version. The project
- * declares no minimum git version, so a control that depends on one is not
- * something to lean the whole fix on.
- *
- * Reuses {@link isSafeRevisionToken}: its two rules — no leading `-`, no control
- * characters — are operand rules, not revision rules, and apply equally to a
- * remote name. Anything beyond them was measured to cost availability without
- * buying safety; see that function's docblock.
- */
 function unsafeOperand(operands: Record<string, string>): string | null {
   for (const [name, value] of Object.entries(operands)) {
     if (!isSafeRevisionToken(value)) {
@@ -594,12 +328,6 @@ export interface GitCommitResult {
   stderr?: string
 }
 
-/**
- * Run `git commit -m <message>` via the injectable executor and capture
- * HEAD before/after for the audit log. Never throws — failures (nothing
- * staged, pre-commit hook block, signing prompt timeout) surface via
- * `ok: false` so the caller can append the audit entry without aborting.
- */
 export function gitCommit(
   projectRoot: string,
   message: string,
@@ -624,11 +352,6 @@ export interface GitPushResult {
   stdout?: string
 }
 
-/**
- * Run `git push <remote> <branch>` via the injectable executor. Never
- * throws — remote rejection, missing remote, or network failure surface
- * via `ok: false` so the caller can audit the failure without aborting.
- */
 export function gitPush(
   projectRoot: string,
   remote: string,
@@ -637,12 +360,6 @@ export function gitPush(
 ): GitPushResult {
   const bad = unsafeOperand({ remote, branch })
   if (bad) return { ok: false, error: bad }
-  // `--` goes BEFORE the remote, not after it. `remote` is an agent-controlled
-  // slot too, and `git push --exec=<program> -- <branch>` RUNS THE PROGRAM
-  // (measured, git 2.45.1) — putting the sentinel after the remote guards the
-  // refspec while leaving the execution vector wide open. With it first,
-  // `git push -- --exec=X main` is refused ("strange hostname blocked") and
-  // `git push -- origin release/2.0` is unaffected. See {@link unsafeOperand}.
   const exec = executor(projectRoot, ['push', '--', remote, branch])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
@@ -668,17 +385,6 @@ export interface GitMergeResult {
   stdout?: string
 }
 
-/**
- * Run `git merge <sourceBranch> [--no-ff] [--allow-unrelated-histories]`
- * via the injectable executor. Always merges INTO the current HEAD —
- * the caller is responsible for `git checkout`ing the target first.
- *
- * `--no-commit` is NOT used: merge auto-commits unless there is a
- * conflict (in which case stderr will say so and ok=false).
- *
- * Never throws — conflicts, unrelated histories, missing source branch
- * all surface via `ok: false`.
- */
 export function gitMerge(
   projectRoot: string,
   sourceBranch: string,
@@ -690,10 +396,6 @@ export function gitMerge(
   const args = ['merge']
   if (options.no_ff) args.push('--no-ff')
   if (options.allow_unrelated_histories) args.push('--allow-unrelated-histories')
-  // Every flag above comes from a boolean, so nothing agent-controlled precedes
-  // the sentinel. `--` makes git read what follows as an operand: measured,
-  // `merge -m x -- --no-verify` is refused ("not something we can merge") while
-  // `merge --no-ff -m x -- feat` merges normally.
   args.push('--', sourceBranch)
 
   const sha_before = getHeadSha(projectRoot, executor)
@@ -709,12 +411,6 @@ export function gitMerge(
   return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() }
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.5): run `git rebase <upstream>` via the injectable
- * executor, capturing HEAD before/after. Never throws — conflicts / missing
- * upstream surface via `ok: false` (the caller aborts nothing; the working tree
- * is left as git leaves it, and stderr says so). Reuses {@link GitMergeResult}.
- */
 export function gitRebase(
   projectRoot: string,
   upstream: string,
@@ -723,9 +419,6 @@ export function gitRebase(
   const bad = unsafeOperand({ upstream })
   if (bad) return { ok: false, sha_before: null, sha_after: null, error: bad }
   const sha_before = getHeadSha(projectRoot, executor)
-  // The sharpest of the four: measured, `git rebase "--exec=<program>" main`
-  // EXECUTES the program. `git rebase -- "--exec=..."` is refused as an invalid
-  // upstream, and `git rebase -- main` is unaffected.
   const exec = executor(projectRoot, ['rebase', '--', upstream])
   if (!exec.ok) {
     const result: GitMergeResult = { ok: false, sha_before, sha_after: null }
@@ -738,12 +431,6 @@ export function gitRebase(
   return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() }
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.5): run `git merge --squash <sourceBranch>` — it
- * STAGES the combined change but does NOT commit (git's `--squash` semantics),
- * so `sha_after` normally equals `sha_before`; the caller commits separately
- * (through the §C gate). Never throws — conflicts surface via `ok: false`.
- */
 export function gitSquash(
   projectRoot: string,
   sourceBranch: string,

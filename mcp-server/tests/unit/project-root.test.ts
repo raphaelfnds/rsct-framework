@@ -130,6 +130,29 @@ describe('lib/project-root — readRsctConfig happy path', () => {
   })
 })
 
+describe('lib/project-root — sql_dialect (#62)', () => {
+  it('accepts each declared dialect', () => {
+    for (const dialect of ['postgresql', 'mysql', 'none']) {
+      writeConfig({ ...VALID_MIN, sql_dialect: dialect })
+      const r = resolveProjectRoot()
+      expect(r.rsct_installed).toBe(true)
+      expect(r.config?.sql_dialect).toBe(dialect)
+    }
+  })
+
+  it('rejects the whole config on an unknown dialect', () => {
+    const stderr = spyStderr()
+    try {
+      writeConfig({ ...VALID_MIN, sql_dialect: 'postgres' })
+      const r = resolveProjectRoot()
+      expect(r.rsct_installed).toBe(false)
+      expect(r.config).toBeNull()
+    } finally {
+      stderr.restore()
+    }
+  })
+})
+
 describe('lib/project-root — HIGH-4 bounds violations are rejected + audited', () => {
   it('rejects audit.enabled: false', () => {
     writeConfig({ ...VALID_MIN, audit: { enabled: false } })
