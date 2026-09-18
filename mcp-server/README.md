@@ -82,6 +82,16 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate â
   A pre-commit hook that slips unreviewed code into the commit returns
   `committed_with_drift` and blocks further commits (`review_drift`) until a
   REVIEW covers those paths; a hook that only reformats is re-stamped.
+- The two scripts `/rsct-setup` installs (`.rsct/scripts/sanitize-permissions.js`,
+  `.rsct/scripts/edit-scope-guard.js`) need no REVIEW when their bytes are exactly
+  the copy this `rsct-mcp` ships â€” shebang, the version stamp of this server, the
+  shipped body; CRLF tolerated, nothing else. Any other content, path or version
+  takes the path above (2.11.1).
+- A phase `_start` without `spec_slug`, while phase-state still holds a different
+  task name and no phase is active, returns `previous_task_pending` and writes
+  nothing: ask the developer, then call again with `spec_slug` set to the recorded
+  name (continue) or to `spec_ref` (new task). Restarting the same active phase
+  keeps its name (2.11.1).
 - Engines: tree-sitter (WASM, vendored under `grammars/` with a sha256 manifest)
   for JS/TS/TSX, Java, Python, PHP and CSS; parse5 for HTML (inline
   `<script>`/`<style>` go through the JS/CSS grammars); an in-house lexer for

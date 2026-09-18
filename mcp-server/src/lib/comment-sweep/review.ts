@@ -26,6 +26,7 @@ import {
   type SweepComment,
   type UnverifiedReason,
 } from './index.js'
+import { isShippedScriptCopy } from '../version-drift.js'
 
 export type ExemptReason = 'generated' | 'vendored'
 
@@ -49,6 +50,13 @@ export interface SweepOptions {
   sqlDialect?: ConfiguredSqlDialect | undefined
   exempt?: ReadonlyMap<string, ExemptReason> | undefined
   extraPaths?: readonly string[] | undefined
+  shippedScriptsDir?: string | null | undefined
+}
+
+function isShippedScript(repo: SweepRepo, path: string, bytes: Uint8Array, scan: ScanResult, options: SweepOptions): boolean {
+  if (scan.kind === 'unverified' && scan.reason === 'git_filter') return false
+  if (repo.prefix.length > 0 && !path.startsWith(repo.prefix)) return false
+  return isShippedScriptCopy(path.slice(repo.prefix.length), bytes, options.shippedScriptsDir)
 }
 
 export const MIGRATION_DESTINATIONS = [
@@ -171,6 +179,7 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
     if (!blob) return { ok: false, reason: 'git_read_failed', detail: `could not hash ${path}` }
     const scan = await scanWithFilter(repo, path, bytes, options)
     if (scan.kind === 'not_code') continue
+    if (isShippedScript(repo, path, bytes, scan, options)) continue
 
     const base = { path, status, blob, comments: [], allowlist_changes: [], removed: [] }
     const exempt = options.exempt?.get(path)
@@ -437,6 +446,10 @@ export async function checkStagedSweep(args: {
     if (symlink && looksLikeLinkTarget(bytes)) continue
     const scan = await scanWithFilter(repo, path, bytes, args.options)
     if (scan.kind === 'not_code') continue
+    if (isShippedScript(repo, path, bytes, scan, args.options)) {
+      checked.push({ path, blob })
+      continue
+    }
     const entry = ledgerEntries(args.ledger, path).find((e) => e.blob === blob)
     const authorized =
       entry?.verdict === 'unverified_authorized' && args.unverifiedDecisions.has(decisionKey(path, blob))

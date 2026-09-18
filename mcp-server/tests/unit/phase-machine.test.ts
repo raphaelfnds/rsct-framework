@@ -386,3 +386,83 @@ describe('startPhaseGeneric — stale verification label (#15)', () => {
     expect(auditEvents()).not.toContain('phase.stale_label_cleared')
   })
 })
+
+describe('phase-machine — a leftover task name is not silently inherited', () => {
+  function writeState(state: Record<string, unknown>): void {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(join(tmpRoot, '.rsct/phase-state.json'), JSON.stringify(state), 'utf8')
+  }
+  const rawState = (): string => readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8')
+
+  it('stops, leaves the state untouched and names both choices', () => {
+    writeState({ spec_slug: 'old-task', started_at: '2026-09-07T10:00:00.000Z' })
+    const before = rawState()
+    const r = startPhaseGeneric({ projectRoot: tmpRoot, phase: 'review', specRef: 'new-task' }, null)
+    expect(r.status).toBe('previous_task_pending')
+    expect(r.phase_state_written).toBe(false)
+    expect(rawState()).toBe(before)
+    const hint = r.hints.join(' ')
+    expect(hint).toContain("spec_slug='old-task'")
+    expect(hint).toContain("spec_slug='new-task'")
+    expect(hint).toContain('2026-09-07T10:00:00.000Z')
+    const audit = readFileSync(join(tmpRoot, '.rsct/audit.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(audit.some((l) => l.reject_kind === 'previous_task_pending' && l.existing_spec_slug === 'old-task')).toBe(true)
+  })
+
+  it('a new task named by the developer starts and then completes under its own name', async () => {
+    writeState({ spec_slug: 'old-task' })
+    const r = startPhaseGeneric(
+      { projectRoot: tmpRoot, phase: 'research', specRef: 'new-task', specSlug: 'new-task' },
+      null,
+    )
+    expect(r.status).toBe('started')
+    const c = (await gatePhaseComplete(
+      {
+        projectRoot: tmpRoot,
+        phase: 'research',
+        specRef: 'new-task',
+        devApproval: approval({ action_scope: 'research_complete:spec_ref=new-task' }),
+      },
+      null,
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )) as CompletePhaseResult
+    expect(c.status).toBe('completed')
+  })
+
+  it('continuing the recorded task keeps its name', () => {
+    writeState({ spec_slug: 'old-task' })
+    const r = startPhaseGeneric(
+      { projectRoot: tmpRoot, phase: 'test', specRef: 'new-task', specSlug: 'old-task' },
+      null,
+    )
+    expect(r.status).toBe('started')
+    expect(JSON.parse(rawState()).spec_slug).toBe('old-task')
+  })
+
+  it('restarting the SAME active phase keeps inheriting, as before', () => {
+    writeState({ phase: 'code', spec_slug: 'old-task' })
+    const r = startPhaseGeneric({ projectRoot: tmpRoot, phase: 'code', specRef: 'other' }, null)
+    expect(r.status).toBe('started')
+    expect(JSON.parse(rawState()).spec_slug).toBe('old-task')
+  })
+
+  it('the same name, or no recorded name, starts as before', () => {
+    writeState({ spec_slug: 'same' })
+    expect(startPhaseGeneric({ projectRoot: tmpRoot, phase: 'spec', specRef: 'same' }, null).status).toBe('started')
+    rmSync(join(tmpRoot, '.rsct'), { recursive: true, force: true })
+    expect(startPhaseGeneric({ projectRoot: tmpRoot, phase: 'spec', specRef: 'fresh' }, null).status).toBe('started')
+  })
+
+  it('a stale V label of another task asks instead of inheriting', () => {
+    writeState({
+      phase: 'verification',
+      spec_slug: 'old-task',
+      verification: { spec_ref: 'old-task', completed_at: '2026-09-07T11:00:00.000Z' },
+    })
+    const r = startPhaseGeneric({ projectRoot: tmpRoot, phase: 'code', specRef: 'new-task' }, null)
+    expect(r.status).toBe('previous_task_pending')
+  })
+})

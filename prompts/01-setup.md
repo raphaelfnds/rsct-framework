@@ -68,6 +68,16 @@ The contract is strict and the framework's correctness depends on it:
    dev has to assume the prompt was bypassed and audit the diff
    manually.
 
+6. **A block marked `▶ Run from a file` is too long to send inline.**
+   On Windows the Claude Code Bash tool cuts any command longer than
+   about 8,000 characters, and bash then reports
+   `unexpected EOF while looking for matching` a quote — nothing in
+   the block ran. For a marked block (or any block that fails with
+   that message): write the block **unchanged** to a file in your
+   scratchpad and run `bash <file>` from the project root. One block
+   per file (rule 2), CHECKPOINT line included (rule 5). This is still
+   literal execution (rule 1); only the transport changes.
+
 If a code block in this prompt looks like it has a bug, **stop and
 ask** — do not "fix it" by reimplementing. A real bug in a canonical
 block is a framework bug and needs to be fixed at the prompt source,
@@ -1337,6 +1347,8 @@ classifier carrying no historical data resolves 9 of 9 sections correctly, and t
 three it cannot verify are exactly the three that genuinely changed. Without it, six
 reports, half of them false.
 
+> ▶ Run from a file (execution mandate, rule 6).
+
 ```bash
 echo "  CHECKPOINT: Phase 4.3b executing canonical rule-section reconciliation"
 CLAUDE_MD="$(pwd)/CLAUDE.md"
@@ -1925,6 +1937,8 @@ form so re-runs converge instead of accumulating.
 (does NOT round-trip through `JSON.parse → JSON.stringify`, so the
 rest of `.rsct.json` keeps its formatting byte-for-byte):**
 
+> ▶ Run from a file (execution mandate, rule 6).
+
 ```bash
 echo "  CHECKPOINT: Phase 4.4 executing canonical text-based secrets_extra_patterns merge"
 node -e '
@@ -2159,6 +2173,8 @@ RSCT runtime-state files and, root-anchored, the framework source clone
 team-safety rule so the clone never travels with the project repo.
 Setup adds a marker-wrapped block to the project's `.gitignore` so
 `/rsct-uninstall` can excise it cleanly later:
+
+> ▶ Run from a file (execution mandate, rule 6).
 
 ```bash
 echo "  CHECKPOINT: Phase 4.4b executing canonical .gitignore RSCT block install"
@@ -2515,6 +2531,8 @@ sha256_compute() {
 ```
 
 **Canonical bash — enumerate, classify, mutate canonical docs ONLY:**
+
+> ▶ Run from a file (execution mandate, rule 6).
 
 ```bash
 echo "  CHECKPOINT: Phase 4.5 executing canonical documentation/* writer"
@@ -3859,6 +3877,8 @@ PATH — i.e. they ran the installer). For `user` / `skip` / absent, this step i
 a no-op — a user-scope registration already resolves in every project.
 
 Gate on `[ -n "$SANITIZER_SRC" ]` (rsct-mcp available, from 4.V.a) AND the flag.
+
+> ▶ Run from a file (execution mandate, rule 6).
 
 ```bash
 echo "  CHECKPOINT: Phase 4.V.c2 evaluating project-scope MCP registration"

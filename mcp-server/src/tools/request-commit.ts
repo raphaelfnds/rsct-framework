@@ -193,6 +193,7 @@ export interface RequestCommitInternal {
   stagedStatsOverride?: StagedStats
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
+  shippedScriptsDir?: string | null
 }
 
 export const requestCommitTool: Tool = {
@@ -334,7 +335,7 @@ export async function requestCommitHandler(
     const sweepState = readPhaseState(projectRoot).state
     return checkStagedSweep({
       projectRoot,
-      options: { sqlDialect: config?.sql_dialect },
+      options: { sqlDialect: config?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       ledger: sweepState?.review_sweep,
       drift: sweepState?.review_drift,
       unverifiedDecisions: deriveAuditCeiling(projectRoot, config ?? null, '').unverifiedDecisions,
@@ -919,7 +920,7 @@ export async function requestCommitHandler(
   if (commit.sha_after && sweepAtCommit.skipped === null) {
     const committed = await verifyCommittedSweep({
       projectRoot,
-      options: { sqlDialect: config?.sql_dialect },
+      options: { sqlDialect: config?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       before: commit.sha_before,
       after: commit.sha_after,
       checked: sweepAtCommit.checked,
