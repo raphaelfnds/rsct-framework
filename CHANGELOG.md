@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-09-18
+
 Three defects the first field test of 2.11.0 hit while running `/rsct-setup` in two
 projects.
 
