@@ -130,10 +130,15 @@ describe('shipped scripts — only the exact shipped copy is exempt', () => {
   })
 
   it('a project in a subdirectory does not exempt a copy under another directory', async () => {
-    write('app/.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
-    write(`lib/.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER))
-    git(root, 'add', '-f', `lib/.rsct/scripts/${SANITIZER}`)
-    expect((await commit(dist, join(root, 'app'))).status).toBe('rejected')
+    const project = 'app'
+    const sibling = 'lib'
+    expect(sibling.length).toBe(project.length)
+    write(`${project}/.rsct.json`, JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
+    write(`${sibling}/.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER))
+    git(root, 'add', '-f', `${sibling}/.rsct/scripts/${SANITIZER}`)
+    const out = await commit(dist, join(root, project))
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('comments_present')
   })
 
   const refused: Array<[string, () => void]> = [

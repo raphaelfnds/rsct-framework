@@ -76,7 +76,9 @@ The contract is strict and the framework's correctness depends on it:
    that message): write a file in your scratchpad whose top lines are
    the variable assignments you would re-declare before the block
    inline (`APP_NAME=…`, `SANITIZER_SRC=…` — whatever earlier phases
-   captured and the block reads), followed by the block **unchanged**,
+   captured and the block reads) and any helper function the block
+   calls but does not define (e.g. `sha256_compute`, defined in its own
+   block just before Phase 4.5), followed by the block **unchanged**,
    and run `bash <file>` from the project root. `bash <file>` starts a
    new shell: a variable set in an earlier command, or with
    `VAR=x; bash <file>`, does not reach it — a missing one turns into

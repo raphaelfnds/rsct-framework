@@ -383,8 +383,8 @@ task (`spec_slug=<old>`) or start a new one (`spec_slug=<spec_ref>`). Restarting
 active phase inherits as before. `rsct_phase_verification_start` gained the same optional
 `spec_slug`.
 **Residual, accepted by the developer**: no OS dialog — the agent could answer on its own.
-**Consequences**: every start without `spec_slug` whose `spec_ref` differs from the recorded
-name stops with that question — a multi-phase plan (ADR-003) that starts the phases after
+**Consequences**: every start without `spec_slug`, with no phase active, whose `spec_ref`
+differs from the recorded name stops with that question — a multi-phase plan (ADR-003) that starts the phases after
 Code under the plan name included, since `_complete` clears `phase`. The hint asks the agent
 to keep passing the chosen `spec_slug` on every later start of the task. Known and left as
 is: `rsct_phase_code_start` runs its override dialog before this check, as it already did
@@ -438,7 +438,7 @@ code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function
   `unexpected EOF while looking for matching` a quote and nothing runs. Counter-test: a
   quote-free 8.8k-character command fails the same way. The limit counts characters, not
   bytes. Five `01-setup.md` blocks were over it, so they carry `▶ Run from a file` and
-  `tests/bash/block-size.test.ts` refuses a new oversized block without that mark
+  `mcp-server/tests/bash/block-size.test.ts` refuses a new oversized block without that mark
   (threshold 7,000, `'` costing 5). Linux and macOS were not measured.
 - **A `git rev-parse` subprocess costs ~32 ms on Windows 11.** `readWorktreeInfo` spends
   three of them, and deriving the repository anchor adds a fourth on the worktree branch —

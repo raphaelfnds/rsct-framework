@@ -28,17 +28,16 @@ projects.
   phase, now returns `previous_task_pending`, writes nothing, and asks the agent to put the
   choice to the developer: continue that task (`spec_slug=<old>`) or start a new one
   (`spec_slug=<spec_ref>`). `rsct_phase_verification_start` accepts `spec_slug` too
-  (ADR-014). **Behaviour change:** every start without `spec_slug` whose `spec_ref`
-  differs from the recorded name now stops with that question — including a multi-phase
+  (ADR-014). **Behaviour change:** every start without `spec_slug`, with no phase active,
+  whose `spec_ref` differs from the recorded name now stops with that question — including a multi-phase
   plan that starts later phases under the plan name. The hint tells the agent to keep
   passing the chosen `spec_slug` on every later start of the task.
-- `01-setup.md` rule 6 says how to run a marked block from a file: the variable
-  assignments from earlier phases go at the top of the file, above the unchanged block,
-  because `bash <file>` starts a new shell.
 - **Phase 4.4b could not run inline on Windows.** The Claude Code Bash tool cuts commands
   above ~8,000 characters. `01-setup.md` gains rule 6 of the execution mandate and marks
-  its five oversized blocks `▶ Run from a file`; a new test refuses an unmarked oversized
-  block. No bash changed.
+  its five oversized blocks `▶ Run from a file`: the variables and helper functions from
+  earlier phases go at the top of the file, above the unchanged block, because
+  `bash <file>` starts a new shell. A new test refuses an unmarked oversized block. No
+  bash changed.
 
 ## [2.11.0] - 2026-09-17
 
