@@ -24,7 +24,7 @@ export const phaseResearchStartInputSchema = z
       .string()
       .optional()
       .describe(
-        'Optional spec_slug to write into phase-state.json. Defaults to spec_ref if absent.',
+        'Optional spec_slug to write into phase-state.json. When absent, the recorded task name is kept, or spec_ref when none is recorded; a different recorded name returns previous_task_pending.',
       ),
     scope_globs: z
       .array(z.string())

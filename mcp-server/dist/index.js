@@ -45422,7 +45422,7 @@ function leftoverTaskSlug(state, phase, specRef, specSlug) {
   return leftover;
 }
 function leftoverTaskHint(phase, leftover, specRef, startedAt) {
-  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ""} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task).`;
+  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ""} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`;
 }
 function startPhaseGeneric(input, config2, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
@@ -47107,7 +47107,7 @@ var phaseResearchStartInputSchema = external_exports.object({
     'Free-form spec identifier \u2014 typically the plan slug (e.g., "feat-foo") or a path to plan_<slug>.md. Correlates start/complete and used as audit key.'
   ),
   spec_slug: external_exports.string().optional().describe(
-    "Optional spec_slug to write into phase-state.json. Defaults to spec_ref if absent."
+    "Optional spec_slug to write into phase-state.json. When absent, the recorded task name is kept, or spec_ref when none is recorded; a different recorded name returns previous_task_pending."
   ),
   scope_globs: external_exports.array(external_exports.string()).optional().describe(
     "Optional scope globs for rsct_check_edit_scope. Research is exploratory \u2014 usually omitted at this phase."

@@ -383,8 +383,12 @@ task (`spec_slug=<old>`) or start a new one (`spec_slug=<spec_ref>`). Restarting
 active phase inherits as before. `rsct_phase_verification_start` gained the same optional
 `spec_slug`.
 **Residual, accepted by the developer**: no OS dialog — the agent could answer on its own.
-**Consequences**: a flow that relied on silent inheritance under a different name now stops
-once with that question.
+**Consequences**: every start without `spec_slug` whose `spec_ref` differs from the recorded
+name stops with that question — a multi-phase plan (ADR-003) that starts the phases after
+Code under the plan name included, since `_complete` clears `phase`. The hint asks the agent
+to keep passing the chosen `spec_slug` on every later start of the task. Known and left as
+is: `rsct_phase_code_start` runs its override dialog before this check, as it already did
+before `phase_already_active`, so a start that asks shows that dialog again on the retry.
 
 ---
 

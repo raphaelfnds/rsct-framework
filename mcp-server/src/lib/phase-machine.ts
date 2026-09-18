@@ -102,7 +102,7 @@ export function leftoverTaskSlug(
 }
 
 export function leftoverTaskHint(phase: RsctPhase, leftover: string, specRef: string, startedAt: string | null): string {
-  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ''} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task).`
+  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ''} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`
 }
 
 export function startPhaseGeneric(

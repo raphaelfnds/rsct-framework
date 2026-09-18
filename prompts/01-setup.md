@@ -73,10 +73,16 @@ The contract is strict and the framework's correctness depends on it:
    about 8,000 characters, and bash then reports
    `unexpected EOF while looking for matching` a quote — nothing in
    the block ran. For a marked block (or any block that fails with
-   that message): write the block **unchanged** to a file in your
-   scratchpad and run `bash <file>` from the project root. One block
-   per file (rule 2), CHECKPOINT line included (rule 5). This is still
-   literal execution (rule 1); only the transport changes.
+   that message): write a file in your scratchpad whose top lines are
+   the variable assignments you would re-declare before the block
+   inline (`APP_NAME=…`, `SANITIZER_SRC=…` — whatever earlier phases
+   captured and the block reads), followed by the block **unchanged**,
+   and run `bash <file>` from the project root. `bash <file>` starts a
+   new shell: a variable set in an earlier command, or with
+   `VAR=x; bash <file>`, does not reach it — a missing one turns into
+   an empty string with no error. One block per file (rule 2),
+   CHECKPOINT line included (rule 5). This is still literal execution
+   (rule 1); only the transport changes.
 
 If a code block in this prompt looks like it has a bug, **stop and
 ask** — do not "fix it" by reimplementing. A real bug in a canonical

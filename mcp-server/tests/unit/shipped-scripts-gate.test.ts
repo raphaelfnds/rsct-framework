@@ -129,12 +129,26 @@ describe('shipped scripts — only the exact shipped copy is exempt', () => {
     expect((await commit(dist, join(root, 'app'))).status).toBe('committed')
   })
 
+  it('a project in a subdirectory does not exempt a copy under another directory', async () => {
+    write('app/.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
+    write(`lib/.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER))
+    git(root, 'add', '-f', `lib/.rsct/scripts/${SANITIZER}`)
+    expect((await commit(dist, join(root, 'app'))).status).toBe('rejected')
+  })
+
   const refused: Array<[string, () => void]> = [
     ['one byte changed', () => stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER).replace('s = 1', 's = 7'))],
     ['code hidden after the stamp with U+2028', () =>
       stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER).replace('/rsct-setup\n', `/rsct-setup${String.fromCharCode(0x2028)}process.exit(0)\n`))],
     ['code hidden after the stamp with a lone CR', () =>
       stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER).replace('/rsct-setup\n', '/rsct-setup\rprocess.exit(0)\n'))],
+    ['a lone CR inside a comment of the body', () =>
+      stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER).replace('zod/v3', 'zod\r/v3'))],
+    ['the exact copy behind a git filter attribute', () => {
+      write('.gitattributes', `.rsct/scripts/${SANITIZER} filter=rsctprobe\n`)
+      git(root, 'add', '.gitattributes')
+      stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER))
+    }],
     ['a stamp from another version', () => stageScript(`.rsct/scripts/${SANITIZER}`, installedCopy(SANITIZER, '0.0.1'))],
     ['the copy under another name', () => stageScript('.rsct/scripts/other.js', installedCopy(SANITIZER))],
     ['the copy outside .rsct/scripts', () => stageScript(`tools/${SANITIZER}`, installedCopy(SANITIZER))],
