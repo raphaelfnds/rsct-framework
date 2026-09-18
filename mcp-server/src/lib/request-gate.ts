@@ -44,6 +44,7 @@ export interface GateOptions {
   approvalModes?: RsctApprovalModes
   auditConfig?: RsctAuditConfig | undefined
   forceDialog?: boolean
+  forceDialogReason?: string
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
 }
@@ -82,7 +83,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
     }
     const why = validation.must_force_dialog
       ? `the approval looked auto-generated (signals: ${validation.fabrication_signals.join(',')})`
-      : 'this call bypasses a phase the tier requires'
+      : (opts.forceDialogReason ?? 'this call bypasses a phase the tier requires')
     if (dialog.response === 'no') {
       return {
         status: 'rejected',
@@ -133,7 +134,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   }
 }
 
-function inferRejectKind(reason: string): GateRejectKind {
+export function inferRejectKind(reason: string): GateRejectKind {
   if (reason.includes('reused')) return 'reused'
   if (reason.includes('skew') || reason.includes('future')) return 'expired'
   return 'schema'

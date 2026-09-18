@@ -11,7 +11,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       task_description: 'fix typo in error message in handler',
     })) as ClassifyTaskOutput
     expect(r.tier).toBe('trivial')
-    expect(r.recommended_phases).toEqual([])
+    expect(r.recommended_phases).toEqual(['review'])
   })
 
   it('returns complex for architecture / security keywords', async () => {
@@ -24,8 +24,8 @@ describe('rsct_classify_task — heuristic per tier', () => {
       'spec',
       'verification',
       'code',
-      'review',
       'test',
+      'review',
     ])
   })
 
@@ -46,7 +46,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       task_description: 'add a new field to the OrderResponse DTO',
     })) as ClassifyTaskOutput
     expect(r.tier).toBe('small')
-    expect(r.recommended_phases).toEqual(['spec', 'code', 'test'])
+    expect(r.recommended_phases).toEqual(['spec', 'code', 'test', 'review'])
   })
 
   it('defaults to standard when no signal hits', async () => {
@@ -69,9 +69,7 @@ describe('rsct_classify_task — heuristic per tier', () => {
       task_description: 'rewrite the authentication subsystem end-to-end',
     })) as ClassifyTaskOutput
     expect(r.tier).toBe('complex')
-    // additive, not a replacement — the verification guidance must survive
     expect(r.hints.some((h) => h.includes('rsct_phase_code_start'))).toBe(true)
-    // and the worktree nudge is present
     expect(r.hints.some((h) => h.includes('git worktree'))).toBe(true)
     expect(r.hints.length).toBeGreaterThanOrEqual(2)
   })
@@ -177,14 +175,12 @@ describe('rsct_classify_task — EN expanded vocabulary (CAP-6 / v0.6.2)', () =>
     const r = (await classifyTaskHandler({
       task_description: 'refactor the email validator helper',
     })) as ClassifyTaskOutput
-    // Either small (mutation verb match) or default standard — both acceptable
     expect(['small', 'standard']).toContain(r.tier)
   })
 })
 
 describe('rsct_classify_task — CAP-29 multi-concern + step-count', () => {
   it('upgrades to complex when 3+ technical concerns detected', async () => {
-    // 5 concerns: dto + service + listener + template + test
     const r = (await classifyTaskHandler({
       task_description:
         'criar novo DTO ItemReprovadoExibicaoDTO, adicionar service para enviar email com template HTML, registrar listener de evento e cobrir com unit test',
@@ -195,7 +191,6 @@ describe('rsct_classify_task — CAP-29 multi-concern + step-count', () => {
   })
 
   it('upgrades to standard when exactly 2 technical concerns detected', async () => {
-    // 2 concerns: service + repository (persistence)
     const r = (await classifyTaskHandler({
       task_description:
         'add a method to the OrderService to query the OrderRepository for pending items',
@@ -217,7 +212,6 @@ describe('rsct_classify_task — CAP-29 multi-concern + step-count', () => {
   })
 
   it('keeps single-concern + short mutation as small (no regression)', async () => {
-    // 1 concern (dto) + mutation + 8 words → small per CAP-29 cascade step 7
     const r = (await classifyTaskHandler({
       task_description: 'add a new field to the OrderResponse DTO',
     })) as ClassifyTaskOutput
@@ -225,9 +219,6 @@ describe('rsct_classify_task — CAP-29 multi-concern + step-count', () => {
   })
 
   it('upgrades to complex on acme-api-like task (real dogfood case)', async () => {
-    // Real case that returned standard pre-CAP-29 and triggered the
-    // verification gate skip in 2026-06-09 session. Concerns: dto +
-    // service + listener + template + test = 5. Tier must be complex.
     const r = (await classifyTaskHandler({
       task_description:
         'event-driven email notification: extract AprovacaoFilterUtil from service, create RequisicaoParaAprovacaoEvent, write NotificacaoAprovacaoListener with @TransactionalEventListener(AFTER_COMMIT), add native query for aggregated data, build new email template, update EmailService and add unit test',

@@ -63,13 +63,18 @@ describe('rsct_phase_status', () => {
     expect(r.next_recommended_phase).toBe('spec')
   })
 
-  it('returns null next_recommended_phase when phase=test (terminal)', async () => {
+  it('recommends review after test, and null after review (terminal)', async () => {
     writePhaseState({ phase: 'test', spec_slug: 'feat-foo' })
     const r = (await phaseStatusHandler({
       project_root: tmpRoot,
     })) as PhaseStatusOutput
     expect(r.active_phase).toBe('test')
-    expect(r.next_recommended_phase).toBeNull()
+    expect(r.next_recommended_phase).toBe('review')
+    writePhaseState({ phase: 'review', spec_slug: 'feat-foo' })
+    const t = (await phaseStatusHandler({
+      project_root: tmpRoot,
+    })) as PhaseStatusOutput
+    expect(t.next_recommended_phase).toBeNull()
   })
 
   it('surfaces verification summary when phase=verification', async () => {

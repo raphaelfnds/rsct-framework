@@ -179,6 +179,7 @@ independently in Phase 2:
 | `.rsct/audit.log` | first §C-gated tool call or sanitizer hook | **keep by default** | Forensic / compliance record (rule overrides, sanitize events). Dev can opt-in to delete. |
 | `.rsct/approvals-seen.json` | first successful `rsct_request_*` mutation (INV-2 anti-reuse store) | **remove** | Internal state with no post-uninstall value. |
 | `.rsct/phase-state.json` | M3 phase machine on every `rsct_phase_*_start/_complete` call | **remove** | Internal phase-machine state with no post-uninstall value (analogous to approvals-seen). |
+| `.rsct/reports/review-comments-*.md` | `rsct_phase_review_complete` when a REVIEW removed comments or allowed unverified files (#62) | **remove** | Per-REVIEW report shown in the approval dialog; the decisions it lists live in the audit log and the decisions files. |
 
 Anything else in `.rsct/` (developer-added files, schema references):
 **always preserve** — never delete files the framework did not create.
@@ -305,6 +306,7 @@ For each Category B item, the dev will choose:
 | The `rsct` entry in `enabledMcpjsonServers` of `.claude/settings.local.json` (#73) | **remove** | yes (4.V.a3 — by value; the key is dropped when its array empties, and the file only when nothing else remains) | none — a stale approval silently re-grants on the next install |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
 | `.rsct/phase-state.json` | **remove** | yes (silent — no question raised) | none — M3 phase-machine state with no post-uninstall value |
+| `.rsct/reports/review-comments-*.md` (and `.rsct/reports/` when it ends up empty) | **remove** | yes (silent — no question raised) | none — REVIEW sweep reports with no post-uninstall value; any other file under `.rsct/reports/` is kept |
 | Any other file under `.rsct/` not listed above | **keep** | no | preserved unconditionally — never delete unknowns |
 
 > **`CONVENTIONS.md`** (project root, CAP-54) is **dev-owned** — it carries no
@@ -366,6 +368,7 @@ Current branch: [CURRENT_BRANCH]
   .rsct/audit.log                                       : [present (N lines) | absent]
   .rsct/approvals-seen.json                             : [present (M entries) | absent]
   .rsct/phase-state.json                                : [present | absent]
+  .rsct/reports/review-comments-*.md                    : [N files | absent]
 
 ──────────────────────────────────────────────────────
 ❓ Scope of uninstall:
@@ -387,7 +390,7 @@ Current branch: [CURRENT_BRANCH]
 ❓ M2 enforcement state (only asked if Category E is in scope):
   - SessionStart sanitizer hook entry: remove (recommended) | keep
   - .rsct/audit.log forensic record  : keep (recommended) | delete
-  (.rsct/scripts/, .rsct/approvals-seen.json, and .rsct/phase-state.json are removed silently — no value preserved.)
+  (.rsct/scripts/, .rsct/approvals-seen.json, .rsct/phase-state.json and the .rsct/reports/review-comments-*.md sweep reports are removed silently — no value preserved.)
 
 ❓ Final branch for uninstall commits:
   - chore/rsct-uninstall (recommended — new branch from [CURRENT_BRANCH])
@@ -981,6 +984,25 @@ prior phase-machine write crashed mid-flight and left a stale lock.
 ```bash
 [ -f .rsct/phase-state.json ] && rm -f .rsct/phase-state.json
 [ -f .rsct/phase-state.lock ] && rm -f .rsct/phase-state.lock
+```
+
+`.rsct/reports/review-comments-*.md` are the REVIEW comment-sweep reports (#62),
+always removed when Category E is in scope. Only files matching that exact name are
+deleted; `rmdir` then drops `.rsct/reports/` only if nothing else is left in it.
+
+```bash
+REPORTS_REMOVED=0
+if [ -d .rsct/reports ]; then
+  for report in .rsct/reports/review-comments-*.md; do
+    [ -f "$report" ] || continue
+    rm -f "$report" && REPORTS_REMOVED=$((REPORTS_REMOVED + 1))
+  done
+  rmdir .rsct/reports 2>/dev/null || true
+fi
+echo "  REVIEW sweep reports removed: $REPORTS_REMOVED"
+if ls .rsct/reports/review-comments-*.md >/dev/null 2>&1; then
+  echo "  ⚠ some REVIEW sweep reports were not removed — inspect .rsct/reports/" >&2
+fi
 ```
 
 ### 4.7 — Granular .rsct/ cleanup

@@ -29,13 +29,7 @@ export interface PhaseStatusVerificationSummary {
   spec_ref: string | null
   spec_tier: string | null
   findings_count: number
-  /** #40: the findings themselves — completing the phase requires answering each. */
   open_findings: StoredFinding[]
-  /**
-   * #75. How those findings are known. `measurable: false` distinguishes "no
-   * baseline could be read" from "the phase ran and raised nothing" — a row of
-   * zeros would render the two identically.
-   */
   evidence_mix: EvidenceMix
   findings_run_id: string | null
   started_at: string | null
@@ -43,13 +37,9 @@ export interface PhaseStatusVerificationSummary {
 
 export interface PhaseStatusReviewSummary {
   spec_ref: string | null
-  decision: 'yes' | 'no' | null
   completed: boolean
-  decided_at: string | null
   completed_at: string | null
-  /** #40: findings declared at review_start and not yet answered. */
   open_findings: StoredFinding[]
-  /** #75. How those declared findings are known. */
   evidence_mix: EvidenceMix
   findings_run_id: string | null
 }
@@ -71,11 +61,8 @@ export interface PhaseStatusOutput {
   started_at: string | null
   scope_globs: string[]
   verification: PhaseStatusVerificationSummary | null
-  /** DX-4: the REVIEW-before-Tests decision (null when none recorded). */
   review: PhaseStatusReviewSummary | null
-  /** T3: active plan-scoped batch token (null when none). */
   plan_authorization: PhaseStatusPlanAuthSummary | null
-  /** T3: git worktree context (linked worktree → isolated rsct state). */
   worktree: WorktreeInfo
   next_recommended_phase: RsctPhase | null
   rsct_phase_order: readonly RsctPhase[]
@@ -85,7 +72,7 @@ export interface PhaseStatusOutput {
 export const phaseStatusTool: Tool = {
   name: 'rsct_phase_status',
   description:
-    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the recorded review decision when present, and the next recommended phase per the canonical R→S→V→C→REVIEW→T order. Use to check where the task is mid-session before starting a new phase.',
+    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, and the next recommended phase per the canonical R→S→V→C→T→REVIEW order. Use to check where the task is mid-session before starting a new phase.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -145,14 +132,7 @@ export async function phaseStatusHandler(
       spec_ref: state.verification.spec_ref ?? null,
       spec_tier: state.verification.spec_tier ?? null,
       findings_count: Array.isArray(findings) ? findings.length : 0,
-      // #40: the ids themselves, because completing the phase now requires naming
-      // every one of them. A count alone left a resumed session with no way to learn
-      // what to answer except deliberately failing a call or re-running _start —
-      // which rewrites the baseline it is being measured against.
       open_findings: readFindingsBaseline(findings) ?? [],
-      // Fed the baseline itself, NOT the `?? []` fallback: `null` means the
-      // baseline was unreadable, and collapsing it to an empty array here would
-      // report an unmeasurable block as a clean one.
       evidence_mix: summarizeEvidence(readFindingsBaseline(findings)),
       findings_run_id: state.verification.findings_run_id ?? null,
       started_at: state.verification.started_at ?? null,
@@ -163,9 +143,7 @@ export async function phaseStatusHandler(
   if (state?.review || state?.review_findings) {
     review = {
       spec_ref: state.review?.spec_ref ?? state.review_findings?.spec_ref ?? null,
-      decision: state.review?.decision ?? null,
       completed: state.review?.completed_at != null,
-      decided_at: state.review?.decided_at ?? null,
       completed_at: state.review?.completed_at ?? null,
       open_findings: readFindingsBaseline(state.review_findings?.findings) ?? [],
       evidence_mix: summarizeEvidence(readFindingsBaseline(state.review_findings?.findings)),
@@ -198,7 +176,6 @@ export async function phaseStatusHandler(
     )
   }
 
-  // T3: surface an active plan-scoped batch token (execution mode = batch).
   const token = readToken(state)
   let planAuth: PhaseStatusPlanAuthSummary | null = null
   if (token) {

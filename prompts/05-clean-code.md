@@ -3,7 +3,7 @@
 You are operating inside a software project repository to run a **clean-code
 sweep**: a read-only pass that surfaces **duplication / centralization**,
 **scalability** risks, and **dependency hygiene** — then routes any change the
-developer accepts through the normal RSCT cycle (R→S→V→C→REVIEW→T).
+developer accepts through the normal RSCT cycle (R→S→V→C→T→REVIEW).
 
 This command **never edits code or dependencies on its own**. It produces
 findings, debates them with you, and — for the items you accept — hands off to

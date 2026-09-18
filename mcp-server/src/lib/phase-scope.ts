@@ -4,21 +4,10 @@ import { randomUUID } from 'node:crypto'
 
 import { ensureParentDir } from './io-utils.js'
 
-/**
- * Per-process session ID used as the writer identity in the file lock.
- * Generated once at module load; survives across all writePhaseState calls
- * from the same Node process so a stale lock can be attributed back to a
- * dead session in diagnostics.
- */
 const SESSION_ID = randomUUID()
 
 const LOCK_RELATIVE_PATH = '.rsct/phase-state.lock'
 
-/**
- * Maximum age before a lock is considered stale and may be overwritten.
- * 30s covers the worst-case slow tool invocation while bounding the
- * window during which a crashed writer blocks future writers.
- */
 const LOCK_STALE_MS = 30000
 
 interface LockContent {
@@ -70,7 +59,6 @@ function tryAcquireLock(lockPath: string, now: Date): AcquireResult {
       existing = parsed as LockContent
     }
   } catch {
-    // Corrupt lock — treat as stale and overwrite.
   }
 
   const lockedAtMs = existing?.locked_at
@@ -103,24 +91,9 @@ function releaseLock(lockPath: string): void {
   try {
     unlinkSync(lockPath)
   } catch {
-    // Lock already gone — fine. Either another writer cleaned up after
-    // detecting our stale lock, or the disk was unmounted between write
-    // and unlink. Either way, nothing to do here.
   }
 }
 
-/**
- * `.rsct/phase-state.json` — written by the M3 phase machine. The first
- * writer to land is the V phase (rsct_phase_verification_start). The
- * schema is intentionally forgiving so subsequent phase tools (R/S/C/T
- * pairs) can extend it without breaking earlier callers.
- *
- * `verification` is an optional sub-block populated while the V phase is
- * active and cleared by `rsct_phase_verification_complete`. The reader
- * treats inner arrays as opaque (`unknown[]`) so the V-phase tool layer
- * owns the precise shape via `verification-checklist` and
- * `reverse-dep-walk` types.
- */
 export interface PhaseVerificationBlock {
   spec_ref?: string
   spec_tier?: string
@@ -128,35 +101,13 @@ export interface PhaseVerificationBlock {
   declared_paths?: string[]
   discovered_importers?: unknown[]
   findings?: unknown[]
-  /**
-   * #40: fingerprint of the id SET in `findings`, echoed back at `_complete` so an
-   * answer set prepared before a re-run is rejected as a set instead of being
-   * re-applied item by item against renumbered ids.
-   */
   findings_run_id?: string
-  /**
-   * #75 Part C. HEAD when this phase started, and when that was read.
-   *
-   * Full sha, never an abbreviation — see `getHeadShaFull`. Nested inside this block
-   * on purpose rather than added as a top-level PhaseState key: unlisted
-   * top-level keys are dropped by `rsct_phase_abandon`
-   * (PHASE_STATE_PRESERVED_ON_ABANDON), and a stamp describing discarded work
-   * SHOULD go with the work rather than need an allowlist entry to survive it.
-   */
   head_sha?: string
   observed_at?: string
   started_at?: string
   completed_at?: string
 }
 
-/**
- * CAP-30: persisted classify_task verdict, used by phase-code-start
- * to enforce mechanical link between classifier tier and the gate.
- * `tier_max` is the highest tier ever recorded for this project's
- * state — a later classify_task call CANNOT lower it (defends against
- * downgrade attacks where the agent re-runs classify with a weaker
- * description to bypass the V gate).
- */
 export interface LastClassifyBlock {
   tier: string
   tier_max: string
@@ -164,17 +115,6 @@ export interface LastClassifyBlock {
   signals_summary?: string
 }
 
-/**
- * T3: plan-scoped batch authorization token. When present + valid,
- * `rsct_request_commit` authorizes a commit WITHOUT a fresh per-action
- * dev_approval — one approval (minted by `rsct_plan_authorize` under the full
- * §C gate) covers up to `max_actions` commits within the plan+branch+time
- * window. Covers COMMIT only (push/merge keep per-action §C). Cleared by
- * `rsct_plan_revoke` / `rsct_phase_abandon`, and auto-revoked on branch
- * switch, plan completion/deletion, expiry, or exhaustion. The token never
- * bypasses INV-5 (branch protection) or INV-6 (secrets): the token path
- * carries no dev_approval, hence no overrides. See lib/plan-authorization.ts.
- */
 export interface PlanAuthorizationBlock {
   plan_slug: string
   branch: string
@@ -184,106 +124,59 @@ export interface PlanAuthorizationBlock {
   max_actions: number
   actions_used: number
   approval_ref: { action_scope: string; timestamp: string }
-  /** Diagnostic only — the session that minted the token. Not used for validation. */
   session_id?: string
-  /**
-   * plan-lifecycle-v2 (Bloco 1.4): sliding-window TTL. `expires_at` is
-   * re-armed to `min(now + slide_minutes, absolute_expires_at)` on each
-   * SUCCESSFUL commit under the token (so an actively-worked plan never
-   * expires mid-flight), but `absolute_expires_at` is stamped ONCE at mint
-   * and is the hard ceiling the sliding window can never exceed.
-   * `slide_minutes` is stamped immutable at mint (deriving it from
-   * `expires_at − authorized_at` would grow the window every re-arm). Both
-   * optional so pre-v2 tokens keep pure fixed-`expires_at` semantics.
-   */
   absolute_expires_at?: string
   slide_minutes?: number
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 1.2): per-plan budget for the dialog-free
- * free-commit lane, keyed by `plan_slug`. This is the STATE-side anchor of
- * the two-anchor ceiling; the AUDIT-side anchor (`deriveAuditCeiling` over
- * the append-only audit log) is what makes a state-file wipe fail-CLOSED
- * rather than reset the ceiling to zero. Survives the generic phase-complete
- * (which deletes only phase/scope_globs/started_at); wiped by phase_abandon.
- */
 export interface FreeCommitBudget {
   plan_slug: string
-  /** Deduped UNION of new-side paths touched across this plan's free commits. */
   files_touched_paths: string[]
   commits_used: number
-  /** Monotonic sum of (insertions + deletions) across this plan's free commits. */
   lines_changed: number
   locked: boolean
   locked_reason?: 'commit_cap' | 'volume_cap' | 'tier_divergence'
 }
 
-/**
- * DX-4: the REVIEW decision sub-block. A code review of the diff sits
- * between Code and Test in the recommended cycle (R→S→V→C→REVIEW→T). The
- * framework asks ONCE, at spec_complete, whether to include it
- * (`include_review`); the yes/no is recorded here keyed by `spec_ref`
- * (ask-once = presence-keyed). `completed_at` is stamped by
- * `rsct_phase_review_complete`. `rsct_phase_test_start`'s review gate
- * reads this block: a `decision:'no'` lets tests proceed (the review is
- * never run); a `decision:'yes'` without `completed_at` blocks until the
- * review phase completes — mirroring how the code-start gate reads the
- * `verification` block. Survives `code.complete` (the generic complete
- * preserves sub-blocks); wiped by `phase_abandon`.
- */
 export interface PhaseReviewBlock {
   spec_ref: string
-  decision: 'yes' | 'no'
-  decided_at?: string
   completed_at?: string
 }
 
-/**
- * #40: the findings a REVIEW declared, and the run they belong to.
- *
- * Deliberately NOT a field on `PhaseReviewBlock`. That block's only writer is
- * `stampReviewDecision`, whose merge defaults `decision` to `'no'` when no matching
- * block exists — and `evaluateReviewGate` reads `decision === 'no'` as
- * `bypassed_declined`, which requires no `completed_at` at all. Routing
- * `review_start` through that writer would therefore let STARTING the review phase
- * disarm the gate the review phase exists to satisfy.
- *
- * Written by `review_start` in the same write as the phase transition, and pruned at
- * `review_complete` — a completed review has no pending findings, and the test gate
- * now reads that as an invariant rather than as a size optimisation.
- */
+export type SweepVerdict = 'clean' | 'unverified_authorized'
+
+export interface SweepLedgerEntry {
+  blob: string
+  verdict: SweepVerdict
+  migrations: Array<{ destination: string; body: string }>
+  channel: string
+  spec_ref: string
+  at: string
+}
+
+export type SweepLedger = Record<string, SweepLedgerEntry[]>
+
+export interface ReviewDriftBlock {
+  sha: string
+  paths: string[]
+  at: string
+}
+
 export interface PhaseFindingsBlock {
   spec_ref: string
   run_id: string
   findings: unknown[]
   declared_at: string
-  /** #75 Part C. HEAD when these findings were declared (full sha), and when. */
   head_sha?: string
   observed_at?: string
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.1): the keep|delete decision for a plan's
- * branch-local `plan_`/`progress_`/`spec_` artifacts at integration time,
- * keyed by `plan_slug`. Recorded ONCE (ask-once, mirroring PhaseReviewBlock)
- * so a merge followed by a push of the merged result does NOT re-prompt.
- * Survives the generic phase-complete; wiped by phase_abandon.
- */
 export interface PlanDispositionBlock {
   plan_slug: string
   decision: 'keep' | 'delete'
   decided_at: string
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 3.1): the "re-bootstrap needed" flag. A POSITIVE
- * marker set when a plan closes (or on a declared pivot) — NOT an overload of
- * the decaying `bootstrap_at` timestamp. While set, the edit-scope guard treats
- * managed edits as blocked (`stale_context`) until `rsct_load_context` actually
- * re-reads plan/decisions/knowledge and clears it (D4: only load_context
- * clears; a cheap rsct_status must not discharge the re-load obligation).
- */
 export interface ContextStaleBlock {
   since: string
   reason: 'plan_closed' | 'pivot'
@@ -295,64 +188,18 @@ export interface PhaseState {
   scope_globs?: string[]
   started_at?: string
   verification?: PhaseVerificationBlock
-  /** DX-4: the REVIEW-before-Tests decision (see PhaseReviewBlock). */
   review?: PhaseReviewBlock
-  /** #40: findings declared by the REVIEW phase, pending an action each (see PhaseFindingsBlock). */
   review_findings?: PhaseFindingsBlock
-  /** CAP-30: most-recent classify_task verdict (with tier_max ratchet). */
+  review_sweep?: SweepLedger
+  review_drift?: ReviewDriftBlock
   last_classify?: LastClassifyBlock
-  /** T3: active plan-scoped batch authorization token (see PlanAuthorizationBlock). */
   plan_authorization?: PlanAuthorizationBlock
-  /** plan-lifecycle-v2: per-plan free-commit budget/ceiling (see FreeCommitBudget). */
   free_commit_budget?: FreeCommitBudget
-  /** plan-lifecycle-v2: the keep|delete disposition for a plan's artifacts (see PlanDispositionBlock). */
   disposition?: PlanDispositionBlock
-  /** plan-lifecycle-v2: the re-bootstrap-needed flag (see ContextStaleBlock). */
   context_stale?: ContextStaleBlock
-  /**
-   * CAP-31: timestamp of the most-recent rsct_status / rsct_load_context
-   * call. Mutating tools (phase_code_start, request_*) surface a warning
-   * if absent or older than the bootstrap stale window, encouraging
-   * agents to run §0 bootstrap before deeper phase work.
-   */
   bootstrap_at?: string
 }
 
-/**
- * #53: the keys `rsct_phase_abandon` PRESERVES. The rule this list encodes:
- * abandon clears everything that describes the work being discarded — the phase,
- * its spec, and every plan- or spec-scoped token, budget or recorded decision —
- * and preserves only what describes the SESSION or the PROJECT, never the work.
- *
- * Consumed as an ALLOWLIST by {@link preserveAcrossAbandon}, never as a wipe-list.
- * A key added to {@link PhaseState} later is therefore dropped by an abandon
- * unless its author deliberately adds it here — fail-closed, and the reason this
- * is a list rather than a sequence of `delete` calls: written the other way
- * round, forgetting `plan_authorization` would leave a live §C batch token alive
- * across an abandon and the whole suite would stay green.
- *
- * `context_stale` is on the list because it is an OBLIGATION on the session, not
- * state of the work: while it is set the edit guard blocks every managed edit
- * (lib/edit-guard.ts), and the only legitimate clear is a real re-load through
- * `rsct_load_context` (D4 — see {@link stampBootstrapMarker}'s `clearStale`).
- * Wiping it here let an agent the guard had blocked unblock itself by discarding
- * an unrelated phase: a mechanical gate defeated by a call that never satisfied
- * it. Note abandon only ever PRESERVES the flag, never arms one —
- * `completePhaseGeneric` is its sole producer today and {@link stampContextStale}
- * has no production caller, so the `'pivot'` reason is currently unreachable.
- */
-/**
- * #75 Part C. Compare a stamped HEAD against the one now, for a phase closing.
- *
- * MARKS, never rejects — and that is the whole design, not a softening. HEAD
- * moving between declaring a REVIEW finding and completing the phase is the
- * NORMAL case: you commit the fixes you found. Rejecting it would make the phase
- * uncompletable for doing the right thing, and an agent would learn to route
- * around the stamp rather than read it.
- *
- * `null` means "cannot tell" — no stamp recorded (state predating this), or git
- * unavailable. Never `true`, because an unknown is not a staleness finding.
- */
 export function headStaleness(
   stampedSha: string | undefined,
   currentSha: string | null,
@@ -368,9 +215,10 @@ export function headStaleness(
 export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'bootstrap_at',
   'context_stale',
+  'review_sweep',
+  'review_drift',
 ]
 
-/** Copy one key when the source actually carries it (exactOptionalPropertyTypes). */
 function copyIfPresent<K extends keyof PhaseState>(
   from: PhaseState,
   to: PhaseState,
@@ -380,13 +228,6 @@ function copyIfPresent<K extends keyof PhaseState>(
   if (value !== undefined) to[key] = value
 }
 
-/**
- * Build the post-abandon phase-state: an allowlist copy of
- * {@link PHASE_STATE_PRESERVED_ON_ABANDON} and nothing else. Everything the
- * abandoned work owned is dropped, including the four blocks whose docstrings
- * already declare themselves "wiped by phase_abandon" (`plan_authorization`,
- * `free_commit_budget`, `review`, `disposition`).
- */
 export function preserveAcrossAbandon(
   state: PhaseState | null | undefined,
 ): PhaseState {
@@ -421,24 +262,6 @@ export type WritePhaseStateResult =
       held_by_session: string | null
     }
 
-/**
- * Atomically-ish write the phase-state file, guarded by an advisory file
- * lock (`.rsct/phase-state.lock`). Creates `.rsct/` if missing. Never
- * throws — failures return `{ ok: false }` so the caller can surface the
- * error in its tool output (alongside an audit entry). Pretty-prints with
- * 2-space indent + trailing newline so diffs and audit-log scrubs are
- * predictable.
- *
- * Lock semantics (CAP-3 hardening, v0.4.0):
- *  - Acquire via exclusive-create (`flag: 'wx'`); on EEXIST, peek at the
- *    existing lock and overwrite if its `locked_at` is older than
- *    `LOCK_STALE_MS` (30s) — covers crashed-writer cases without an OS
- *    cleanup loop.
- *  - On busy (non-stale) lock, return `reason: 'locked'` with the age so
- *    the caller can surface a wait-and-retry hint instead of overwriting
- *    a peer session's in-flight write.
- *  - Lock is released in `finally` so a failed write still unlocks.
- */
 export function writePhaseState(
   projectRoot: string,
   state: PhaseState,
@@ -482,12 +305,6 @@ export function writePhaseState(
   }
 }
 
-/**
- * Read `.rsct/phase-state.json`. Returns `{ exists: false, state: null }` if
- * the file is absent. If present but unparseable, returns `{ exists: true,
- * state: null, parse_error }` so callers can surface the diagnostic.
- * Never throws.
- */
 export function readPhaseState(projectRoot: string): PhaseStateReadResult {
   const path = phaseStatePath(projectRoot)
   if (!existsSync(path)) {
@@ -509,19 +326,6 @@ export function readPhaseState(projectRoot: string): PhaseStateReadResult {
   }
 }
 
-/**
- * Minimal glob-to-regex converter for scope-glob matching.
- *
- *  - `**` matches any number of path segments (including slashes)
- *  - `*`  matches any characters except `/`
- *  - `?`  matches exactly one character except `/`
- *  - everything else is matched literally
- *
- * Bracket expressions (`[abc]`) and brace alternation (`{a,b}`) are NOT
- * supported in v1 — most M3 scope lists are expected to be path-shaped
- * patterns that the three operators above cover. Future versions can
- * extend this without changing the {@link matchesAnyGlob} contract.
- */
 export function globToRegex(glob: string): RegExp {
   let out = '^'
   let i = 0
@@ -531,7 +335,7 @@ export function globToRegex(glob: string): RegExp {
       if (glob[i + 1] === '*') {
         out += '.*'
         i += 2
-        if (glob[i] === '/') i++ // consume the slash after `**/`
+        if (glob[i] === '/') i++
       } else {
         out += '[^/]*'
         i++
@@ -556,16 +360,10 @@ export interface ScopeMatch {
   matched_glob?: string
 }
 
-/** Backslashes → forward slashes. Single source shared with reverse-dep-walk. */
 export function toPosix(p: string): string {
   return p.split('\\').join('/')
 }
 
-/**
- * Normalize a path for prefix comparison: `\`→`/`, drop a single trailing
- * slash (keep a bare "/"), and case-fold a leading Windows drive letter
- * (`C:` ≡ `c:`) so a drive-case mismatch never causes a spurious miss.
- */
 function normForMatch(p: string): string {
   let s = toPosix(p)
   if (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1)
@@ -578,28 +376,13 @@ export function matchesAnyGlob(
   globs: readonly string[],
   projectRoot?: string,
 ): ScopeMatch {
-  // Candidate forms the globs are tested against. [0] is the absolute/raw
-  // form (backward-compatible with every existing caller + glob authored
-  // absolute or with a leading `**/`).
   const candidates: string[] = [toPosix(path)]
 
-  // Cross-OS relativization by PREFIX-STRIP on the normalized forms — NOT
-  // node:path.relative, which is platform-bound and silently no-ops on
-  // mixed path styles (e.g. a win32 server resolving a posix file_path).
-  // When `path` sits under `projectRoot`, also try the project-relative
-  // form so a scope glob authored relative (`pom.xml`, `src/**`) matches an
-  // absolute file_path. Genuinely cross-namespace inputs (win32 root vs
-  // posix file) don't share a prefix → fall through to the absolute form.
-  // Limits (advisory tool — a wrong verdict only mis-hints): matching is
-  // case-SENSITIVE except a leading drive letter (a glob `pom.xml` won't
-  // match `Pom.xml`); and `path` is NOT symlink-resolved, so an unresolved
-  // file_path under a realpath'd root (macOS /var vs /private/var) can
-  // under-match. Pass an already-resolved file_path when that matters.
   if (projectRoot !== undefined && projectRoot.length > 0) {
     const nf = normForMatch(path)
     const nr = normForMatch(projectRoot)
     if (nf === nr) {
-      candidates.push('') // file === root (degenerate; lets a `*` glob match)
+      candidates.push('')
     } else if (nf.startsWith(`${nr}/`)) {
       candidates.push(nf.slice(nr.length + 1))
     }
@@ -614,10 +397,6 @@ export function matchesAnyGlob(
   return { matched: false }
 }
 
-/**
- * Canonical tier ranking. trivial=0 < small=1 < standard=2 < complex=3.
- * Used by `tierRank` (CAP-30) to detect downgrades.
- */
 const TIER_RANK: Record<string, number> = {
   trivial: 0,
   small: 1,
@@ -625,32 +404,13 @@ const TIER_RANK: Record<string, number> = {
   complex: 3,
 }
 
-/**
- * Ordinal rank of a tier string. Unknown tiers fall back to 0 (most
- * permissive) so a malformed state never falsely rejects code_start.
- */
 export function tierRank(tier: string | undefined | null): number {
   if (!tier) return 0
   return TIER_RANK[tier] ?? 0
 }
 
-/**
- * CAP-31: stale window for `bootstrap_at`. Past this threshold, mutating
- * tools surface a warning that §0 bootstrap should be re-run. 4 hours
- * matches a typical agent session; tunable in future via .rsct.json.
- */
 export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
 
-/**
- * CAP-31: stamp `bootstrap_at` on the current phase-state, so downstream
- * mutating tools can detect when §0 was skipped or stale.
- *
- * Do NOT call this directly from a §0 tool — go through
- * {@link readThenStampBootstrap}, the only production caller, which evaluates
- * the marker first and refuses to stamp over an unparseable file. Stamping is
- * still best-effort (never the reason a status/load_context call fails), but
- * #53 stopped the result being DISCARDED: both tools now report it.
- */
 export function stampBootstrapMarker(
   projectRoot: string,
   opts: { now?: Date; clearStale?: boolean } = {},
@@ -662,20 +422,10 @@ export function stampBootstrapMarker(
     ...baseState,
     bootstrap_at: now.toISOString(),
   }
-  // plan-lifecycle-v2 (D4): clear the re-bootstrap flag ONLY when the caller
-  // actually re-loaded context. rsct_load_context passes clearStale:true;
-  // rsct_status stamps bootstrap_at but must NOT discharge the re-load
-  // obligation (a cheap diagnostic call is not a real re-load).
   if (opts.clearStale) delete newState.context_stale
   return writePhaseState(projectRoot, newState)
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 3.2): set the `context_stale` flag. Called when a
- * plan reaches its terminal phase or a declared pivot happens. Best-effort,
- * additive read-modify-write (preserves every other field). Cleared only via
- * {@link stampBootstrapMarker} with `clearStale:true` (i.e. rsct_load_context).
- */
 export function stampContextStale(
   projectRoot: string,
   reason: ContextStaleBlock['reason'],
@@ -689,24 +439,12 @@ export function stampContextStale(
   })
 }
 
-/** Read the context_stale flag (null when absent). */
 export function readContextStale(
   state: PhaseState | null | undefined,
 ): ContextStaleBlock | null {
   return state?.context_stale ?? null
 }
 
-/**
- * CAP-31 / CAP-33 bootstrap marker reader. Returns whether §0 was
- * performed and how recently. Soft signal — callers surface a hint
- * and audit entry but do NOT reject. Shared across `phase_code_start`
- * (CAP-31), `request_commit/_push/_merge/_rebase` (CAP-33) and — via
- * {@link readThenStampBootstrap} — `rsct_status` / `rsct_load_context` (#53).
- *
- * `bootstrap_at` is whatever the JSON held: the schema is deliberately
- * forgiving and nothing validates the type, so a caller interpolating it into
- * a hint must treat it as `unknown` ({@link truncateForHint}).
- */
 export type BootstrapStatus = 'fresh' | 'stale' | 'missing'
 
 export interface BootstrapMarker {
@@ -757,38 +495,12 @@ export function evaluateBootstrapMarker(args: {
   }
 }
 
-/**
- * #53: what a §0 bootstrap call learned about the marker BEFORE it touched it.
- *
- * `marker` is the pre-stamp verdict, `read` the pre-stamp read it was computed
- * over, and `write` the stamp — or `null` when the stamp was deliberately
- * skipped (see {@link readThenStampBootstrap}).
- */
 export interface BootstrapRefresh {
   marker: BootstrapMarker
   read: PhaseStateReadResult
   write: WritePhaseStateResult | null
 }
 
-/**
- * #53: evaluate the bootstrap marker, THEN stamp it. The ordering is the whole
- * point and it is centralised here for exactly one reason: `rsct_status` and
- * `rsct_load_context` both stamp before anything else runs, so a report built
- * from a post-stamp read is vacuously "fresh" on every single call — a report
- * that can never fire. Both tools call this instead of pairing the two library
- * functions themselves.
- *
- * On an UNPARSEABLE phase-state.json the stamp is SKIPPED (`write: null`) rather
- * than attempted. {@link stampBootstrapMarker} builds its write from
- * `existing.state ?? {}`, which makes an unreadable file indistinguishable from
- * an empty one: the write would land carrying `bootstrap_at` and nothing else,
- * destroying whatever `plan_authorization`, `free_commit_budget`, `last_classify`
- * or `context_stale` the file still held. A corrupt file is the moment the
- * framework most needs to preserve what it cannot read. Skipping is fail-closed:
- * downstream tools then report bootstrap as missing, which is the truth.
- *
- * Callers surface the outcome as hints; nothing here throws or gates.
- */
 export function readThenStampBootstrap(
   projectRoot: string,
   opts: { now?: Date; clearStale?: boolean } = {},
@@ -804,31 +516,11 @@ export function readThenStampBootstrap(
   return { marker, read, write: stampBootstrapMarker(projectRoot, opts) }
 }
 
-/**
- * #53: bound an untrusted value before it is interpolated into `hints[]`, the
- * agent's control channel. Takes `unknown` on purpose: `bootstrap_at` and
- * `parse_error` come straight out of a JSON file nothing validates, so a
- * `{"bootstrap_at": {"length": 999}}` would otherwise reach `.slice()` and throw
- * out of a tool documented "always succeeds", and an array would slip the length
- * check entirely and interpolate in full.
- */
 export function truncateForHint(value: unknown, max = 80): string {
   const s = typeof value === 'string' ? value : String(value)
   return s.length > max ? `${s.slice(0, max)}…` : s
 }
 
-/**
- * #53: the "the stamp did not land" hint, shared by both §0 tools because it is
- * the same fact about the same file — only the retry tool differs. The verdict
- * lines around it are per-call-site on purpose (the library's own marker hints
- * name both tools, which is self-referential from inside either); this one names
- * neither except through `toolName`.
- *
- * `markerFresh` exists because the consequence clause is FALSE without it: when
- * a still-fresh marker is already on disk, a failed write changes nothing that
- * `phase_code_start` or the `request_*` gates can see — they read the same
- * marker and report `fresh`. Only a missing or stale marker leaves them warning.
- */
 export function bootstrapWriteFailureHint(
   write: WritePhaseStateResult,
   toolName: string,
@@ -844,13 +536,6 @@ export function bootstrapWriteFailureHint(
   return `⚠ The §0 bootstrap marker could not be written to .rsct/phase-state.json: ${truncateForHint(write.error)}. ${consequence}`
 }
 
-/**
- * CAP-30: persist the classify_task verdict with a tier-ratchet on
- * `tier_max`. Subsequent classify_task calls cannot lower `tier_max`
- * — only `tier` reflects the latest call. `phase_code_start` compares
- * against `tier_max`, blocking downgrades unless the dev passes
- * `override_classify_downgrade: true`.
- */
 export function stampClassifyVerdict(
   projectRoot: string,
   args: {
@@ -883,51 +568,18 @@ export function stampClassifyVerdict(
   return writePhaseState(projectRoot, newState)
 }
 
-/**
- * DX-4: upsert the REVIEW decision sub-block. Called from TWO places:
- * `rsct_phase_spec_complete` sets `{spec_ref, decision, decided_at}`;
- * `rsct_phase_review_complete` sets `{spec_ref, completed_at}`. It is a
- * single additive read-modify-write (mirroring `stampClassifyVerdict`):
- * the prior block is merged so review_complete passing only `completed_at`
- * preserves `decision`/`decided_at`, and vice-versa.
- *
- * SPEC_REF CARRY-GUARD (the write-side complement of the gate's read-side
- * spec_ref match): when a prior `review` block exists for a DIFFERENT
- * `spec_ref`, this is a re-plan — start a FRESH block instead of inheriting
- * the stale one, so a re-planned spec never carries the old decision /
- * completed_at. Never throws — returns the WritePhaseStateResult like the
- * other stampers; the caller surfaces `!ok` as a hint.
- */
-export function stampReviewDecision(
+export function stampReviewCompleted(
   projectRoot: string,
-  patch: {
-    spec_ref: string
-    decision?: 'yes' | 'no'
-    decided_at?: string
-    completed_at?: string
-  },
+  patch: { spec_ref: string; completed_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
-  const prev = baseState.review
-  const carry = prev && prev.spec_ref === patch.spec_ref ? prev : undefined
-  const merged: PhaseReviewBlock = {
-    ...carry,
-    spec_ref: patch.spec_ref,
-    decision: patch.decision ?? carry?.decision ?? 'no',
-  }
-  if (patch.decided_at !== undefined) merged.decided_at = patch.decided_at
-  if (patch.completed_at !== undefined) merged.completed_at = patch.completed_at
-  return writePhaseState(projectRoot, { ...baseState, review: merged })
+  return writePhaseState(projectRoot, {
+    ...baseState,
+    review: { spec_ref: patch.spec_ref, completed_at: patch.completed_at },
+  })
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.1): record the keep|delete disposition for a
- * plan's artifacts, keyed by `plan_slug`. Recorded ONCE — the block is
- * replaced wholesale each call (a single decision, not accumulated), so a
- * prior decision for a DIFFERENT plan never carries over. Read it back with
- * {@link readPlanDisposition} (which enforces the slug match).
- */
 export function stampPlanDisposition(
   projectRoot: string,
   patch: { plan_slug: string; decision: 'keep' | 'delete'; decided_at: string },
@@ -942,11 +594,6 @@ export function stampPlanDisposition(
   return writePhaseState(projectRoot, { ...baseState, disposition: merged })
 }
 
-/**
- * Read a plan's disposition, enforcing the READ-side slug guard (Cluster A
- * F4): the block is returned ONLY when `disposition.plan_slug === slug`, so a
- * stale `delete` recorded for plan A can never be applied to plan B's files.
- */
 export function readPlanDisposition(
   state: PhaseState | null | undefined,
   slug: string,

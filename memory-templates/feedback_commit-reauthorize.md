@@ -33,7 +33,10 @@ dialog + audit log entry per call):
 
 - `mcp__rsct__rsct_request_commit` for commits (for `trivial`/`small` tasks the
   dialog-free free-commit lane applies — bounded, audit-log-anchored ceiling;
-  branch-protection + secret-scan still enforced. The lane is SUSPENDED while
+  branch-protection + secret-scan still enforced. Every path, the free lane
+  included, carries only code a completed REVIEW stamped: a staged code file
+  that no REVIEW covers, or that still has a comment, is rejected before any
+  dialog (`review_missing` / `comments_present`). The lane is SUSPENDED while
   RSCT enforcement is not running — an enforcement script absent or with no hook
   wired to it — and the next commit falls back to a per-action `dev_approval`)
 - `mcp__rsct__rsct_request_push` for pushes
@@ -45,8 +48,8 @@ Merge, rebase/squash, and a push to a protected branch also require a
 `pre_merge_ack` — four items (`plan_complete`, `adr_confirmed`,
 `issues_resolved`, `hygiene_swept`) plus `files_swept[]`, checked BEFORE the OS
 dialog so a bad ack costs nothing. `hygiene_swept` is the cleanup obligation:
-sweep the files the integration carries for dead code and for comments that no
-longer match the code, and list those paths. RSCT reads the carried paths from
+sweep the files the integration carries for dead code, and list those paths
+(comments are already enforced mechanically at commit time by the REVIEW sweep). RSCT reads the carried paths from
 git itself and rejects when one is missing, regardless of the booleans. It
 applies at every tier. See feedback_branch-protection.md for the full checklist.
 

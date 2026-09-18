@@ -116,7 +116,7 @@ describe('phase-code start + complete', () => {
     expect(state.scope_globs).toEqual(['src/lib/**/*.ts'])
   })
 
-  it('complete advances to review (next phase per RSCT)', async () => {
+  it('complete advances to test (next phase per RSCT)', async () => {
     setActivePhase('code', 'feat-code-smoke')
     const r = (await phaseCodeCompleteHandler(
       {
@@ -131,17 +131,15 @@ describe('phase-code start + complete', () => {
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as CompletePhaseResult
     expect(r.status).toBe('completed')
-    expect(r.next_recommended_phase).toBe('review')
+    expect(r.next_recommended_phase).toBe('test')
   })
 })
 
-describe('phase-test start + complete (terminal)', () => {
-  it('start writes phase=test (tier=trivial bypasses review gate)', async () => {
-    writeClassifyVerdict('trivial')
+describe('phase-test start + complete', () => {
+  it('start writes phase=test with no tier and no classification', async () => {
     const r = await phaseTestStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-test-smoke',
-      spec_tier: 'trivial',
     })
     if (r.status !== 'started') {
       throw new Error(
@@ -149,10 +147,9 @@ describe('phase-test start + complete (terminal)', () => {
       )
     }
     expect(r.phase).toBe('test')
-    expect(r.review_gate.status).toBe('bypassed_tier')
   })
 
-  it('complete returns null next_recommended_phase (cycle done)', async () => {
+  it('complete recommends the mandatory review', async () => {
     setActivePhase('test', 'feat-test-smoke')
     const r = (await phaseTestCompleteHandler(
       {
@@ -161,12 +158,12 @@ describe('phase-test start + complete (terminal)', () => {
         dev_approval: {
           timestamp: VALID_TS,
           action_scope: 'test_complete:spec_ref=feat-test-smoke',
-          reason: 'test phase complete; sign-off the RSCT cycle for this spec',
+          reason: 'test phase complete; hand over to the mandatory review',
         },
       },
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as CompletePhaseResult
     expect(r.status).toBe('completed')
-    expect(r.next_recommended_phase).toBeNull()
+    expect(r.next_recommended_phase).toBe('review')
   })
 })

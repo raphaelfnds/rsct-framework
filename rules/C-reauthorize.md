@@ -108,9 +108,9 @@ it is:
   `plan_complete` (below) and `hygiene_swept` via `files_swept[]`;
   `adr_confirmed` / `issues_resolved` are not.
 - **`hygiene_swept` + `files_swept[]` — the cleanup obligation, at every tier.**
-  Before you integrate, sweep the files this integration carries for **dead code**
-  and for **comments that no longer match the code**, then list those paths in
-  `files_swept`. RSCT reads the carried paths out of git itself and **rejects when
+  Before you integrate, sweep the files this integration carries for **dead code**,
+  then list those paths in `files_swept` (comments are already removed in the REVIEW
+  phase and enforced at every commit by `rsct_request_commit`). RSCT reads the carried paths out of git itself and **rejects when
   one is missing from your list, regardless of the four booleans** — that is the
   one part of the checklist you cannot assert your way past. Get the SAME list it
   reads with `git diff --name-only --diff-filter=d <base>...<head>` — the filter
@@ -122,9 +122,10 @@ it is:
   that a sweep happened or that it found anything. There is no `trivial`/`small`
   exemption: residue reaches the codebase at every task size and is paid for by
   every task after it.
-  Practise the sweep at the **refactor moment**, while the context is warm;
-  record what it found in `findings_actions[]` at REVIEW; it is **enforced** here,
-  at the integration boundary, because that is where residue becomes permanent.
+  Practise the sweep in the **REVIEW phase**, after the tests, while the context is
+  warm; record what it found in `findings_actions[]`; the dead-code half is
+  **enforced** here, at the integration boundary, because that is where residue
+  becomes permanent.
 - **`plan_complete` now has a mechanical cross-check (plan-lifecycle-v2):** a
   `plan_complete:true` that contradicts open `- [ ]` items in
   `progress_<slug>.md` (resolved by the plan whose `Branch` matches the branch

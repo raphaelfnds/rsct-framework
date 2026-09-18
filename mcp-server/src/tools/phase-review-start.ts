@@ -19,6 +19,7 @@ import {
 } from '../lib/findings.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { getHeadShaFull } from '../lib/git.js'
+import { computeWorkingSweep } from '../lib/comment-sweep/review.js'
 import {
   readPhaseState,
   type PhaseFindingsBlock,
@@ -35,10 +36,6 @@ const declaredFindingSchema = z
     severity: z.string().optional(),
     path: z.string().optional(),
     line: z.number().optional(),
-    // #75. REVIEW findings are 100% agent-declared — this tool generates none —
-    // so unlike the V phase, this is where the class comes from. Optional at the
-    // door: see `evidenceSchema` for why requiring it would buy ritual rather
-    // than evidence. Claiming `measured` without a command is still rejected here.
     evidence: evidenceSchema.optional(),
   })
   .strict()
@@ -52,10 +49,6 @@ export const phaseReviewStartInputSchema = z
     persona: z.string().optional(),
     findings: z
       .array(declaredFindingSchema)
-      // Distinct ids, enforced at the door. Coverage counts distinct ids, so a
-      // repeated one would let a single action close several findings and leave the
-      // audit log recording one decision for all of them. Caught here rather than at
-      // `_complete` so the bad set is never stored in the first place.
       .refine(
         (fs) => new Set(fs.map((f) => f.id)).size === fs.length,
         (fs) => ({
@@ -70,33 +63,29 @@ export const phaseReviewStartInputSchema = z
 
 export type PhaseReviewStartInput = z.infer<typeof phaseReviewStartInputSchema>
 
-/**
- * What the agent declared, echoed back verbatim. Typed from the schema rather than
- * as `StoredFinding[]`: the declaration is RICHER (detail, severity, path, line,
- * and now evidence), and narrowing the echo to the storage shape both understated
- * what the tool returns and collided with `exactOptionalPropertyTypes` once the
- * optional `evidence` arrived.
- */
 export type DeclaredFinding = z.infer<typeof declaredFindingSchema>
 
 export type PhaseReviewStartOutput = StartPhaseResult & {
-  /** Echoed back so the caller can answer them — see `findings_run_id`. */
   findings: DeclaredFinding[]
-  /**
-   * Identifies the SET of findings this run declared. `rsct_phase_review_complete`
-   * must echo it: re-running this tool replaces the findings, and without run
-   * identity an answer set prepared from the earlier run would be re-applied to
-   * whatever now happens to share an id.
-   */
   findings_run_id: string | null
-  /** #75. The class mix of what was just declared, so it is visible before actions are chosen. */
   evidence_mix: EvidenceMix
+  comment_sweep: {
+    files: Array<{
+      path: string
+      status: string
+      kind: string
+      language: string | null
+      reason: string | null
+      comments: Array<{ id: string; line: number; body: string }>
+      removed: Array<{ id: string; head_line: number; body: string }>
+    }>
+  } | null
 }
 
 export const phaseReviewStartTool: Tool = {
   name: 'rsct_phase_review_start',
   description:
-    'Start the REVIEW phase — an adversarial code review of the diff, between Code and Test (cycle: R→S→V→C→REVIEW→T). Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_code_complete when the review decision (recorded at rsct_phase_spec_complete via include_review) was YES. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and comments or tool/parameter descriptions that no longer match the code — e.g. via the qa + senior-dev personas or /code-review), then declare what you found via findings[] and call rsct_phase_review_complete. DECLARING A FINDING COMMITS YOU TO RESOLVING IT: every declared finding needs an action at _complete or the phase will not close. Re-running this tool REPLACES the declared set and reopens the review. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
+    'Start the REVIEW phase — an adversarial code review of the diff, code and tests together, as the last phase of the cycle (R→S→V→C→T→REVIEW). Mandatory at every tier: rsct_request_commit refuses code that no completed REVIEW covers. Writes phase="review" into .rsct/phase-state.json and emits review.start audit. Run it after rsct_phase_test_complete. Do the review here (hunt correctness/security/regression/cross-OS bugs in the diff, plus hygiene: dead code, scaffolding left from an approach abandoned inside this same task, and tool/parameter descriptions that no longer match the code — e.g. via the qa + senior-dev personas or /code-review). The output carries comment_sweep: every touched code file with its remaining comments and the comments the change removed (each needs a disposition at _complete); remove every comment, migrating measured facts to a decisions file first, then declare what you found via findings[] and call rsct_phase_review_complete. DECLARING A FINDING COMMITS YOU TO RESOLVING IT: every declared finding needs an action at _complete or the phase will not close. Re-running this tool REPLACES the declared set and reopens the review. NOTE: this is the review PHASE, distinct from rsct_persona_review (a stateless advisory lens). Refuses if a different phase is already active.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -105,7 +94,7 @@ export const phaseReviewStartTool: Tool = {
       spec_ref: {
         type: 'string',
         description:
-          'The spec this review covers. Must match the spec_ref the REVIEW decision was recorded under at rsct_phase_spec_complete, and the one you pass to rsct_phase_review_complete.',
+          'The spec this review covers. Must match the one you pass to rsct_phase_review_complete.',
       },
       spec_slug: { type: 'string', description: 'Plan slug, when it differs from spec_ref.' },
       scope_globs: {
@@ -160,9 +149,6 @@ export async function phaseReviewStartHandler(
 
   const runId = declared.length > 0 ? computeRunId(declared) : null
 
-  // Everything below rides the transition's SINGLE write via `patch`. A second
-  // writePhaseState would race the advisory lock against any background
-  // rsct_status, and whichever call read first would drop the other's fields.
   const previous = readPhaseState(resolution.root).state
   const hadFindings = previous?.review_findings !== undefined
   const declaredAt = (internal.now ?? new Date()).toISOString()
@@ -170,9 +156,6 @@ export async function phaseReviewStartHandler(
 
   const patch = (state: PhaseState): void => {
     if (runId === null) {
-      // Restarting with no declared findings clears the stale set rather than
-      // leaving a previous run's findings attached to a review that no longer
-      // claims them.
       delete state.review_findings
     } else {
       const block: PhaseFindingsBlock = {
@@ -182,17 +165,10 @@ export async function phaseReviewStartHandler(
         declared_at: declaredAt,
         observed_at: declaredAt,
       }
-      // #75 Part C. See phase-verification-start for why this is conditional.
       if (headSha !== null) block.head_sha = headSha
       state.review_findings = block
     }
 
-    // Opening the review REOPENS it, whether or not anything was declared: a
-    // completed_at left from a previous pass would otherwise make
-    // evaluateReviewGate report `passed` over a review that is currently open.
-    // Note this NEVER writes `decision` — stampReviewDecision defaults it to 'no',
-    // and the gate reads 'no' as bypassed_declined, so routing through that writer
-    // would let STARTING the review disarm the review gate.
     if (state.review?.completed_at !== undefined) {
       const reopened: PhaseReviewBlock = { ...state.review }
       delete reopened.completed_at
@@ -205,11 +181,6 @@ export async function phaseReviewStartHandler(
     patch,
   })
 
-  // Discarding a previously declared set needs its own forensic line. The generic
-  // `review.start` event records nothing about findings, so without this the audit
-  // log cannot tell "a review that found nothing" from "a review that erased five
-  // findings" — and erasing them is the one move that makes the gate fail open.
-  // A hint alone would only inform the actor doing the discarding.
   if (hadFindings && result.status === 'started') {
     const discarded = readFindingsBaseline(previous?.review_findings?.findings) ?? []
     const audit = (internal.auditWriter ?? appendAuditEntry)(
@@ -235,23 +206,37 @@ export async function phaseReviewStartHandler(
     )
   }
 
-  // Only advertise a baseline that actually landed. On `phase_already_active` or a
-  // failed/locked write nothing was stored, and returning a run id for it would have
-  // the agent prepare answers against a baseline that does not exist — which
-  // `_complete` then fails open on, closing the review with no coverage at all.
   const persisted = result.status === 'started' && result.phase_state_written
-  // #75. Counted from what was actually PERSISTED, not from the input: advertising
-  // a mix for a baseline that was never stored would describe a set the dev cannot
-  // act on. `null` (not `[]`) where nothing landed, so the mix reads `unmeasurable`
-  // rather than an innocent-looking row of zeros.
   const evidence_mix = summarizeEvidence(persisted ? declared : null)
   if (persisted && declared.length > 0) {
     result.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
+  }
+  const sweep = await computeWorkingSweep(resolution.root, { sqlDialect: resolution.config?.sql_dialect })
+  const comment_sweep = sweep.ok
+    ? {
+        files: sweep.files.map((f) => ({
+          path: f.path,
+          status: f.status,
+          kind: f.kind,
+          language: f.language,
+          reason: f.reason,
+          comments: f.comments.map((c) => ({ id: c.id, line: c.line, body: c.body })),
+          removed: f.removed.map((c) => ({ id: c.id, head_line: c.line, body: c.body })),
+        })),
+      }
+    : null
+  if (!sweep.ok) {
+    result.hints.push(`Comment sweep unavailable (${sweep.detail}) — rsct_phase_review_complete will reject until it can read git.`)
+  } else {
+    const remaining = comment_sweep!.files.filter((f) => f.kind === 'comments_present').length
+    const removed = comment_sweep!.files.reduce((n, f) => n + f.removed.length, 0)
+    result.hints.push(`Comment sweep: ${comment_sweep!.files.length} touched code file(s), ${remaining} still with comments, ${removed} comment(s) removed so far (each needs a disposition at _complete).`)
   }
   return {
     ...result,
     findings: persisted ? declared : [],
     findings_run_id: persisted ? runId : null,
     evidence_mix,
+    comment_sweep,
   }
 }
