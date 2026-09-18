@@ -521,6 +521,7 @@ describe('phase-verification-start — respects the active phase (#27)', () => {
     const out = (await phaseVerificationStartHandler({
       project_root: tmpRoot,
       spec_ref: 'feat-bar',
+      spec_slug: 'feat-bar',
       spec_tier: 'standard',
     })) as PhaseVerificationStartOutput
     expect(out.status).toBe('verified')
@@ -585,5 +586,76 @@ describe('phase-verification-start — respects the active phase (#27)', () => {
     expect(out.phase_state_written).toBe(false)
     expect(readState().phase).toBe('code')
     expect(auditEvents().some((e) => e.event === 'verification.start.rejected')).toBe(false)
+  })
+})
+
+describe('phase-verification-start — a leftover task name is not silently inherited', () => {
+  function writeState(state: Record<string, unknown>): void {
+    writeFile('.rsct/phase-state.json', JSON.stringify(state))
+  }
+  const rawState = (): string => readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8')
+  const completedV = {
+    phase: 'verification',
+    spec_slug: 'feat-foo',
+    verification: {
+      spec_ref: 'feat-foo',
+      spec_tier: 'standard',
+      started_at: '2026-01-01T00:00:00.000Z',
+      completed_at: '2026-01-01T01:00:00.000Z',
+    },
+  }
+
+  it('stops and asks when a completed V of another task is still recorded', async () => {
+    writeRsctConfig()
+    writeState(completedV)
+    const before = rawState()
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('previous_task_pending')
+    expect(out.phase_state_written).toBe(false)
+    expect(rawState()).toBe(before)
+    expect(out.hints.join(' ')).toContain("spec_slug='feat-foo'")
+    expect(out.hints.join(' ')).toContain("spec_slug='feat-bar'")
+  })
+
+  it('continues the recorded task when the developer says so', async () => {
+    writeRsctConfig()
+    writeState(completedV)
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_slug: 'feat-foo',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+    expect(JSON.parse(rawState()).spec_slug).toBe('feat-foo')
+  })
+
+  it('a new task named by the developer is recorded under its own name', async () => {
+    writeRsctConfig()
+    writeState(completedV)
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_slug: 'feat-bar',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+    expect(JSON.parse(rawState()).spec_slug).toBe('feat-bar')
+  })
+
+  it('an in-flight V restarted under another spec_ref keeps its name, as before', async () => {
+    writeRsctConfig()
+    writeState({ ...completedV, verification: { ...completedV.verification, completed_at: undefined } })
+    const out = (await phaseVerificationStartHandler({
+      project_root: tmpRoot,
+      spec_ref: 'feat-bar',
+      spec_tier: 'standard',
+    })) as PhaseVerificationStartOutput
+    expect(out.status).toBe('verified')
+    expect(JSON.parse(rawState()).spec_slug).toBe('feat-foo')
   })
 })

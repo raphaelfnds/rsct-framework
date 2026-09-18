@@ -24540,6 +24540,42 @@ function installedBody(text2) {
 function shippedBody(text2) {
   return trimTrailingNewlines(text2.split("\n").slice(1).join("\n"));
 }
+var shippedCopies = /* @__PURE__ */ new Map();
+function shippedCopy(name2, shippedDir) {
+  const source = join(shippedDir, name2);
+  if (!shippedCopies.has(source)) {
+    let copy = null;
+    try {
+      const shipped = readFileSync(source, "utf8").replace(/\r\n/g, "\n");
+      const body2 = trimTrailingNewlines(shipped.split("\n").slice(1).join("\n"));
+      copy = Buffer.from(`#!/usr/bin/env node
+// rsct-mcp v=${RSCT_MCP_VERSION} \u2014 installed by /rsct-setup
+${body2}
+`, "utf8");
+    } catch {
+      copy = null;
+    }
+    shippedCopies.set(source, copy);
+  }
+  return shippedCopies.get(source) ?? null;
+}
+function withoutCrlf(bytes) {
+  const out2 = [];
+  for (let i2 = 0; i2 < bytes.length; i2++) {
+    if (bytes[i2] === 13 && bytes[i2 + 1] === 10) continue;
+    out2.push(bytes[i2]);
+  }
+  return Buffer.from(out2);
+}
+function isShippedScriptCopy(projectPath, bytes, shippedDir = shippedScriptsDir()) {
+  if (shippedDir === null) return false;
+  const prefix = ".rsct/scripts/";
+  if (!projectPath.startsWith(prefix)) return false;
+  const name2 = projectPath.slice(prefix.length);
+  if (!ENFORCEMENT_SCRIPTS.has(name2)) return false;
+  const expected = shippedCopy(name2, shippedDir);
+  return expected !== null && withoutCrlf(bytes).equals(expected);
+}
 function stampOf(text2) {
   const line2 = text2.split("\n")[1] ?? "";
   const m = STAMP_RE.exec(line2);
@@ -40916,6 +40952,11 @@ async function scanFile(path2, bytes, options = {}) {
 }
 
 // src/lib/comment-sweep/review.ts
+function isShippedScript(repo, path2, bytes, scan, options) {
+  if (scan.kind === "unverified" && scan.reason === "git_filter") return false;
+  if (repo.prefix.length > 0 && !path2.startsWith(repo.prefix)) return false;
+  return isShippedScriptCopy(path2.slice(repo.prefix.length), bytes, options.shippedScriptsDir);
+}
 var MIGRATION_DESTINATIONS = [
   "documentation/decisions.md",
   "documentation/knowledge/anti-decisions.md",
@@ -40998,6 +41039,7 @@ async function computeWorkingSweep(projectRoot, options) {
     if (!blob) return { ok: false, reason: "git_read_failed", detail: `could not hash ${path2}` };
     const scan = await scanWithFilter(repo, path2, bytes, options);
     if (scan.kind === "not_code") continue;
+    if (isShippedScript(repo, path2, bytes, scan, options)) continue;
     const base = { path: path2, status, blob, comments: [], allowlist_changes: [], removed: [] };
     const exempt = options.exempt?.get(path2);
     if (exempt) {
@@ -41209,6 +41251,10 @@ async function checkStagedSweep(args2) {
     if (symlink && looksLikeLinkTarget(bytes)) continue;
     const scan = await scanWithFilter(repo, path2, bytes, args2.options);
     if (scan.kind === "not_code") continue;
+    if (isShippedScript(repo, path2, bytes, scan, args2.options)) {
+      checked.push({ path: path2, blob });
+      continue;
+    }
     const entry = ledgerEntries(args2.ledger, path2).find((e) => e.blob === blob);
     const authorized = entry?.verdict === "unverified_authorized" && args2.unverifiedDecisions.has(decisionKey(path2, blob));
     if (scan.kind === "scanned" && scan.comments.length > 0 && !authorized) {
@@ -42157,7 +42203,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
     const sweepState = readPhaseState(projectRoot).state;
     return checkStagedSweep({
       projectRoot,
-      options: { sqlDialect: config2?.sql_dialect },
+      options: { sqlDialect: config2?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       ledger: sweepState?.review_sweep,
       drift: sweepState?.review_drift,
       unverifiedDecisions: deriveAuditCeiling(projectRoot, config2 ?? null, "").unverifiedDecisions
@@ -42695,7 +42741,7 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
   if (commit.sha_after && sweepAtCommit.skipped === null) {
     const committed = await verifyCommittedSweep({
       projectRoot,
-      options: { sqlDialect: config2?.sql_dialect },
+      options: { sqlDialect: config2?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       before: commit.sha_before,
       after: commit.sha_after,
       checked: sweepAtCommit.checked
@@ -45368,6 +45414,16 @@ function nextPhase(current) {
 function isStaleVerificationLabel(state) {
   return state.phase === "verification" && state.verification?.completed_at != null;
 }
+function leftoverTaskSlug(state, phase, specRef, specSlug) {
+  if (specSlug !== void 0) return null;
+  const leftover = state.spec_slug;
+  if (!leftover || leftover === specRef) return null;
+  if (state.phase === phase && !isStaleVerificationLabel(state)) return null;
+  return leftover;
+}
+function leftoverTaskHint(phase, leftover, specRef, startedAt) {
+  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ""} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`;
+}
 function startPhaseGeneric(input, config2, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
@@ -45404,6 +45460,36 @@ function startPhaseGeneric(input, config2, internal = {}) {
       hints: [
         `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
       ]
+    };
+  }
+  const leftover = leftoverTaskSlug(baseState, input.phase, input.specRef, input.specSlug);
+  if (leftover !== null) {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "previous_task_pending",
+        existing_spec_slug: leftover
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "previous_task_pending",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: leftover,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: "",
+      phase_state_written: false,
+      existing_phase: existingPhase ?? null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [leftoverTaskHint(input.phase, leftover, input.specRef, baseState.started_at ?? null)]
     };
   }
   const newState = {
@@ -45704,6 +45790,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
   spec_ref: external_exports.string().min(1, "spec_ref required").describe(
     'Free-form spec identifier \u2014 typically the plan slug (e.g., "feat-aprovacao") or a path to plan_<slug>.md. Used to correlate start/complete and as audit key.'
   ),
+  spec_slug: external_exports.string().min(1).optional().describe("Task name to record in phase-state.json. Pass it when a start returns previous_task_pending: the recorded task name (continue it) or spec_ref (new task), as the developer decided."),
   declared_paths: external_exports.array(external_exports.string()).default([]).describe("Project-relative paths the spec declares as affected. Used as seeds for reverse-dep walk."),
   spec_claims: external_exports.array(external_exports.string().min(5)).optional().describe("Short claim sentences extracted from the spec, each scanned via lib/premise-check against decisions + anti-decisions."),
   spec_tier: external_exports.enum(TIER_VALUES).default("standard").describe("Tier per rsct_classify_task (pending its arrival). trivial+small skip the V phase; standard runs; complex runs and mandates _complete before code-start."),
@@ -45725,6 +45812,10 @@ var phaseVerificationStartTool = {
       spec_ref: {
         type: "string",
         description: "Free-form spec identifier (plan slug or plan_<slug>.md path)."
+      },
+      spec_slug: {
+        type: "string",
+        description: "Task name to record. Pass it after previous_task_pending, as the developer decided: the recorded task name (continue) or spec_ref (new task)."
       },
       declared_paths: {
         type: "array",
@@ -45869,6 +45960,41 @@ async function phaseVerificationStartHandler(rawInput) {
       ]
     };
   }
+  const leftover = leftoverTaskSlug(baseState, "verification", input.spec_ref, input.spec_slug);
+  if (leftover !== null) {
+    const leftoverAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: "verification.start.rejected",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        reject_kind: "previous_task_pending",
+        existing_spec_slug: leftover
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(leftoverAudit);
+    return {
+      status: "previous_task_pending",
+      findings_run_id: null,
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk2.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk2.stats,
+      walk_coverage: walk2.coverage,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [leftoverTaskHint("verification", leftover, input.spec_ref, baseState.started_at ?? baseState.verification?.started_at ?? null)]
+    };
+  }
   const staleRestart = isStaleVerificationLabel(baseState);
   const headSha = getHeadShaFull(projectRoot);
   const verificationBlock = {
@@ -45886,7 +46012,7 @@ async function phaseVerificationStartHandler(rawInput) {
   const newState = {
     ...baseState,
     phase: "verification",
-    spec_slug: baseState.spec_slug ?? input.spec_ref,
+    spec_slug: input.spec_slug ?? baseState.spec_slug ?? input.spec_ref,
     verification: verificationBlock
   };
   const writeResult = writePhaseState(projectRoot, newState);
@@ -46981,7 +47107,7 @@ var phaseResearchStartInputSchema = external_exports.object({
     'Free-form spec identifier \u2014 typically the plan slug (e.g., "feat-foo") or a path to plan_<slug>.md. Correlates start/complete and used as audit key.'
   ),
   spec_slug: external_exports.string().optional().describe(
-    "Optional spec_slug to write into phase-state.json. Defaults to spec_ref if absent."
+    "Optional spec_slug to write into phase-state.json. When absent, the recorded task name is kept, or spec_ref when none is recorded; a different recorded name returns previous_task_pending."
   ),
   scope_globs: external_exports.array(external_exports.string()).optional().describe(
     "Optional scope globs for rsct_check_edit_scope. Research is exploratory \u2014 usually omitted at this phase."

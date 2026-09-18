@@ -23,7 +23,7 @@ import {
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
-import { isStaleVerificationLabel } from '../lib/phase-machine.js'
+import { isStaleVerificationLabel, leftoverTaskHint, leftoverTaskSlug } from '../lib/phase-machine.js'
 import { getHeadShaFull } from '../lib/git.js'
 import { detectTopology } from '../lib/topology.js'
 import { readContracts } from '../lib/contracts.js'
@@ -43,6 +43,11 @@ export const phaseVerificationStartInputSchema = z
       .describe(
         'Free-form spec identifier — typically the plan slug (e.g., "feat-aprovacao") or a path to plan_<slug>.md. Used to correlate start/complete and as audit key.',
       ),
+    spec_slug: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Task name to record in phase-state.json. Pass it when a start returns previous_task_pending: the recorded task name (continue it) or spec_ref (new task), as the developer decided.'),
     declared_paths: z
       .array(z.string())
       .default([])
@@ -82,6 +87,7 @@ export type PhaseVerificationStartStatus =
   | 'skipped_tier'
   | 'state_write_failed'
   | 'phase_already_active'
+  | 'previous_task_pending'
 
 export interface PhaseVerificationStartOutput {
   status: PhaseVerificationStartStatus
@@ -131,6 +137,10 @@ export const phaseVerificationStartTool: Tool = {
       spec_ref: {
         type: 'string',
         description: 'Free-form spec identifier (plan slug or plan_<slug>.md path).',
+      },
+      spec_slug: {
+        type: 'string',
+        description: 'Task name to record. Pass it after previous_task_pending, as the developer decided: the recorded task name (continue) or spec_ref (new task).',
       },
       declared_paths: {
         type: 'array',
@@ -307,6 +317,42 @@ export async function phaseVerificationStartHandler(
     }
   }
 
+  const leftover = leftoverTaskSlug(baseState, 'verification', input.spec_ref, input.spec_slug)
+  if (leftover !== null) {
+    const leftoverAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: 'verification.start.rejected',
+        tool: 'rsct_phase_verification_start',
+        spec_ref: input.spec_ref,
+        reject_kind: 'previous_task_pending',
+        existing_spec_slug: leftover,
+      },
+      config?.audit,
+    )
+    const fields = auditFields(leftoverAudit)
+    return {
+      status: 'previous_task_pending',
+      findings_run_id: null,
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk.stats,
+      walk_coverage: walk.coverage,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [leftoverTaskHint('verification', leftover, input.spec_ref, baseState.started_at ?? baseState.verification?.started_at ?? null)],
+    }
+  }
+
   // A completed V being reopened. `startPhaseGeneric` stays silent on a same-label
   // restart, and that is right for it — restarting the phase you are already in
   // is routine. Here it is not: the block about to be rebuilt carries a
@@ -337,7 +383,7 @@ export async function phaseVerificationStartHandler(
   const newState: PhaseState = {
     ...baseState,
     phase: 'verification',
-    spec_slug: baseState.spec_slug ?? input.spec_ref,
+    spec_slug: input.spec_slug ?? baseState.spec_slug ?? input.spec_ref,
     verification: verificationBlock,
   }
   const writeResult = writePhaseState(projectRoot, newState)

@@ -8,6 +8,7 @@ import {
   type SettingsFile,
 } from './claude-settings.js'
 import { isNewer } from './update-check.js'
+import { RSCT_MCP_VERSION } from './version.js'
 
 /**
  * Install-drift notice, on two independent axes.
@@ -227,6 +228,47 @@ function installedBody(text: string): string {
 /** Body of a shipped copy: drop only the tsup shebang banner (line 1). */
 function shippedBody(text: string): string {
   return trimTrailingNewlines(text.split('\n').slice(1).join('\n'))
+}
+
+const shippedCopies = new Map<string, Buffer | null>()
+
+function shippedCopy(name: string, shippedDir: string): Buffer | null {
+  const source = join(shippedDir, name)
+  if (!shippedCopies.has(source)) {
+    let copy: Buffer | null = null
+    try {
+      const shipped = readFileSync(source, 'utf8').replace(/\r\n/g, '\n')
+      const body = trimTrailingNewlines(shipped.split('\n').slice(1).join('\n'))
+      copy = Buffer.from(`#!/usr/bin/env node\n// rsct-mcp v=${RSCT_MCP_VERSION} — installed by /rsct-setup\n${body}\n`, 'utf8')
+    } catch {
+      copy = null
+    }
+    shippedCopies.set(source, copy)
+  }
+  return shippedCopies.get(source) ?? null
+}
+
+function withoutCrlf(bytes: Uint8Array): Buffer {
+  const out: number[] = []
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 0x0d && bytes[i + 1] === 0x0a) continue
+    out.push(bytes[i]!)
+  }
+  return Buffer.from(out)
+}
+
+export function isShippedScriptCopy(
+  projectPath: string,
+  bytes: Uint8Array,
+  shippedDir: string | null = shippedScriptsDir(),
+): boolean {
+  if (shippedDir === null) return false
+  const prefix = '.rsct/scripts/'
+  if (!projectPath.startsWith(prefix)) return false
+  const name = projectPath.slice(prefix.length)
+  if (!ENFORCEMENT_SCRIPTS.has(name)) return false
+  const expected = shippedCopy(name, shippedDir)
+  return expected !== null && withoutCrlf(bytes).equals(expected)
 }
 
 function stampOf(text: string): string | null {
