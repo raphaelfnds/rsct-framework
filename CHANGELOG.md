@@ -12,6 +12,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-09-18
+
+Three defects the first field test of 2.11.0 hit while running `/rsct-setup` in two
+projects.
+
+### Fixed
+
+- **The setup commit was refused by the framework's own gate.** The two scripts setup copies
+  into `.rsct/scripts/` carry comments, so the commit needed a REVIEW with an `exempt_files`
+  dialog. A staged copy that is byte-identical to what this `rsct-mcp` ships (CRLF
+  tolerated, nothing else) now commits without a REVIEW; any other content, path or version
+  takes the REVIEW path as before (ADR-013).
+- **A phase start inherited the name of an old task and could complete only under that
+  old name.** A `_start`
+  without `spec_slug`, over a state that still holds a different task name and no active
+  phase, now returns `previous_task_pending`, writes nothing, and asks the agent to put the
+  choice to the developer: continue that task (`spec_slug=<old>`) or start a new one
+  (`spec_slug=<spec_ref>`). `rsct_phase_verification_start` accepts `spec_slug` too
+  (ADR-014). **Behaviour change:** every start without `spec_slug`, with no phase active,
+  whose `spec_ref` differs from the recorded name now stops with that question — including a multi-phase
+  plan that starts later phases under the plan name. The hint tells the agent to keep
+  passing the chosen `spec_slug` on every later start of the task.
+- **Phase 4.4b could not run inline on Windows.** The Claude Code Bash tool cuts commands
+  above ~8,000 characters. `01-setup.md` gains rule 6 of the execution mandate and marks
+  its five oversized blocks `▶ Run from a file`: the variables and helper functions from
+  earlier phases go at the top of the file, above the unchanged block, because
+  `bash <file>` starts a new shell. A new test refuses an unmarked oversized block. No
+  bash changed.
+
 ## [2.11.0] - 2026-09-17
 
 REVIEW stops being something the agent chooses to run. It becomes the last phase of the

@@ -346,6 +346,50 @@ miss in every language, so the zeros are not a comparator that never ran.
 the packaged `dist/index.js` beside `grammars/` and sweeps one file per engine, which is what
 makes CI exercise Linux and macOS.
 
+### ADR-013 — The scripts setup installs are recognised by exact bytes, not by path (2.11.1)
+**Status**: active
+**Tags**: review, commit-gate, setup
+**Context**: Field test of 2.11.0, two projects: the setup commit was refused. The two
+`.rsct/scripts/*.js` copies are bundles with comments (bundled libraries, bundler module
+markers, the line-2 version stamp), and the commit gate asks a REVIEW for every staged code
+file. They cannot be gitignored: the shared `.claude/settings.json` hooks call them.
+**Decision**: a staged or touched `.rsct/scripts/<name>.js` (name in `ENFORCEMENT_SCRIPTS`,
+relative to the project root) skips the REVIEW sweep and the staged check, and enters the
+checked list, only when its bytes, with CRLF pairs turned into LF and nothing else changed,
+equal `#!/usr/bin/env node\n// rsct-mcp v=<this server's version> — installed by
+/rsct-setup\n<shipped body>\n`, the shipped body read once per process from the server's own
+`dist/scripts/`. A git filter attribute, another version, another path, one changed byte,
+or an unresolvable shipped directory keep today's path (REVIEW, exempt_files dialog).
+MEASURED in V: comparing line 2 by pattern and splitting on `\n` let code hide after the
+stamp — Node ends a `//` comment at U+2028 and at a lone CR, and both payloads executed.
+Exact byte equality closes that class.
+**Rejected**: exempting the path (any code placed there would skip the gate); shipping
+comment-free bundles (a REVIEW would still be required on every setup); gitignoring the
+scripts (teammates' hooks break).
+**Consequences**: the post-commit check needs no change — the file is in `checked`, so an
+unchanged blob passes it. A pre-commit hook that rewrites the script becomes drift, as for any
+other file. Deleting the scripts (uninstall) still follows the deletion rule.
+
+### ADR-014 — A leftover task name stops the start and asks the developer (2.11.1)
+**Status**: active
+**Tags**: phases, spec_slug
+**Context**: `spec_slug` is carried across phases on purpose (multi-phase plans, ADR-003),
+so a `_start` without `spec_slug` inherited whatever name the state held — including a task
+finished days earlier. Its `_complete` under the new name then failed `spec_ref_mismatch`.
+**Decision**: a `_start` without `spec_slug`, while the state holds a different name and no
+phase is active (the stale V label counts as not active), returns `previous_task_pending`,
+writes nothing and asks the agent to put the choice to the developer: continue the recorded
+task (`spec_slug=<old>`) or start a new one (`spec_slug=<spec_ref>`). Restarting the same
+active phase inherits as before. `rsct_phase_verification_start` gained the same optional
+`spec_slug`.
+**Residual, accepted by the developer**: no OS dialog — the agent could answer on its own.
+**Consequences**: every start without `spec_slug`, with no phase active, whose `spec_ref`
+differs from the recorded name stops with that question — a multi-phase plan (ADR-003) that starts the phases after
+Code under the plan name included, since `_complete` clears `phase`. The hint asks the agent
+to keep passing the chosen `spec_slug` on every later start of the task. Known and left as
+is: `rsct_phase_code_start` runs its override dialog before this check, as it already did
+before `phase_already_active`, so a start that asks shows that dialog again on the retry.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -388,6 +432,14 @@ code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function
 
 ## Measured facts worth not re-deriving
 
+- **The Claude Code Bash tool on Windows cuts a command at about 8,186 characters** (2.11.1).
+  The tool sends `eval '<text>'` with every `'` written as `'"'"'` (four characters more), and
+  the argument reaching Git's `bash.exe` stops there; a cut inside the quote reports
+  `unexpected EOF while looking for matching` a quote and nothing runs. Counter-test: a
+  quote-free 8.8k-character command fails the same way. The limit counts characters, not
+  bytes. Five `01-setup.md` blocks were over it, so they carry `▶ Run from a file` and
+  `mcp-server/tests/bash/block-size.test.ts` refuses a new oversized block without that mark
+  (threshold 7,000, `'` costing 5). Linux and macOS were not measured.
 - **A `git rev-parse` subprocess costs ~32 ms on Windows 11.** `readWorktreeInfo` spends
   three of them, and deriving the repository anchor adds a fourth on the worktree branch —
   about 130 ms per resolution. `resolveAuditPath` runs on every audit write, so the anchor

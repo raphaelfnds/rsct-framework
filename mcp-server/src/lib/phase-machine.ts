@@ -59,6 +59,7 @@ export interface StartPhaseInput {
 export type StartPhaseStatus =
   | 'started'
   | 'phase_already_active'
+  | 'previous_task_pending'
   | 'state_write_failed'
 
 export interface StartPhaseResult {
@@ -85,6 +86,23 @@ export interface StartPhaseInternal {
 
 export function isStaleVerificationLabel(state: PhaseState): boolean {
   return state.phase === 'verification' && state.verification?.completed_at != null
+}
+
+export function leftoverTaskSlug(
+  state: PhaseState,
+  phase: RsctPhase,
+  specRef: string,
+  specSlug: string | undefined,
+): string | null {
+  if (specSlug !== undefined) return null
+  const leftover = state.spec_slug
+  if (!leftover || leftover === specRef) return null
+  if (state.phase === phase && !isStaleVerificationLabel(state)) return null
+  return leftover
+}
+
+export function leftoverTaskHint(phase: RsctPhase, leftover: string, specRef: string, startedAt: string | null): string {
+  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ''} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`
 }
 
 export function startPhaseGeneric(
@@ -130,6 +148,37 @@ export function startPhaseGeneric(
       hints: [
         `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`,
       ],
+    }
+  }
+
+  const leftover = leftoverTaskSlug(baseState, input.phase, input.specRef, input.specSlug)
+  if (leftover !== null) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: 'previous_task_pending',
+        existing_spec_slug: leftover,
+      },
+      config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'previous_task_pending',
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: leftover,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: '',
+      phase_state_written: false,
+      existing_phase: existingPhase ?? null,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [leftoverTaskHint(input.phase, leftover, input.specRef, baseState.started_at ?? null)],
     }
   }
 
