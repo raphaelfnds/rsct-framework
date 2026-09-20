@@ -1,0 +1,84 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { coverageHints, seedIsCoverable, walkReverseDeps } from '../../src/lib/reverse-dep-walk.js'
+
+let tmpRoot: string
+
+beforeEach(() => {
+  tmpRoot = mkdtempSync(join(tmpdir(), 'rsct-mts-'))
+})
+
+afterEach(() => {
+  if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+function writeFile(rel: string, content: string): void {
+  const full = join(tmpRoot, rel)
+  mkdirSync(join(full, '..'), { recursive: true })
+  writeFileSync(full, content, 'utf8')
+}
+
+describe('the walk covers .mts and .cts (#101 Part A)', () => {
+  it('finds an importer written as .mts', () => {
+    writeFile('src/seed.ts', 'export const x = 1\n')
+    writeFile('src/importer.mts', "import { x } from './seed.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.ts'] })
+    expect(out.discovered.map((d) => d.file)).toContain('src/importer.mts')
+  })
+
+  it('finds an importer written as .cts', () => {
+    writeFile('src/seed.ts', 'export const x = 1\n')
+    writeFile('src/importer.cts', "import { x } from './seed.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.ts'] })
+    expect(out.discovered.map((d) => d.file)).toContain('src/importer.cts')
+  })
+
+  it('calls a .mts seed coverable, so importers and coverage cannot disagree', () => {
+    expect(seedIsCoverable('src/thing.mts')).toBe(true)
+    expect(seedIsCoverable('src/thing.cts')).toBe(true)
+  })
+
+  it('resolves a NodeNext .mjs specifier to its .mts source', () => {
+    writeFile('src/seed.mts', 'export const x = 1\n')
+    writeFile('src/importer.ts', "import { x } from './seed.mjs'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.mts'] })
+    expect(out.discovered.map((d) => d.file)).toContain('src/importer.ts')
+    expect(out.stats.unresolved_js_specifiers).toBe(0)
+  })
+
+  it('resolves a NodeNext .cjs specifier to its .cts source', () => {
+    writeFile('src/seed.cts', 'export const x = 1\n')
+    writeFile('src/importer.ts', "import { x } from './seed.cjs'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.cts'] })
+    expect(out.discovered.map((d) => d.file)).toContain('src/importer.ts')
+    expect(out.stats.unresolved_js_specifiers).toBe(0)
+  })
+
+  it('resolves a .mjs specifier case-exactly per segment, as ADR-016 requires', () => {
+    writeFile('src/Sub/seed.mts', 'export const x = 1\n')
+    writeFile('src/importer.ts', "import { x } from './sub/seed.mjs'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/Sub/seed.mts'] })
+    expect(out.discovered.map((d) => d.file)).not.toContain('src/importer.ts')
+  })
+
+  it('names the new suffixes in the coverage hint for an uncoverable seed', () => {
+    writeFile('src/seed.ts', 'export const x = 1\n')
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/thing.py'] })
+    const hint = coverageHints(out).join(' ')
+    expect(hint).toContain('.mts')
+    expect(hint).toContain('.cts')
+  })
+
+  it('scans a .mts file for its own imports, not only as a target', () => {
+    writeFile('src/seed.ts', 'export const x = 1\n')
+    writeFile('src/mid.mts', "import { x } from './seed.js'\nexport const y = x\n")
+    writeFile('src/top.ts', "import { y } from './mid.mjs'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.ts'], maxDepth: 2 })
+    const files = out.discovered.map((d) => d.file)
+    expect(files).toContain('src/mid.mts')
+    expect(files).toContain('src/top.ts')
+  })
+})

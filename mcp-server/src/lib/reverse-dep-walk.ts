@@ -40,6 +40,8 @@ const DEFAULT_LANG_GLOBS: readonly string[] = [
   '**/*.jsx',
   '**/*.mjs',
   '**/*.cjs',
+  '**/*.mts',
+  '**/*.cts',
 ]
 
 const DEFAULT_EXCLUDE_GLOBS: readonly string[] = [
@@ -61,7 +63,7 @@ const DEFAULT_MAX_DEPTH = 2
  * production the wording and the verdict are computed from the same list. A
  * future caller that overrides `langGlobs` must revisit this string.
  */
-const DEFAULT_LANG_SUFFIXES = '.ts, .tsx, .js, .jsx, .mjs, .cjs'
+const DEFAULT_LANG_SUFFIXES = '.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts'
 
 const JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/
 
@@ -72,6 +74,8 @@ const RESOLVE_EXTENSIONS: readonly string[] = [
   '.jsx',
   '.mjs',
   '.cjs',
+  '.mts',
+  '.cts',
 ]
 
 const INDEX_RESOLUTIONS: readonly string[] = [
@@ -81,6 +85,8 @@ const INDEX_RESOLUTIONS: readonly string[] = [
   '/index.jsx',
   '/index.mjs',
   '/index.cjs',
+  '/index.mts',
+  '/index.cts',
 ]
 
 const IMPORT_PATTERNS: readonly RegExp[] = [
@@ -239,6 +245,8 @@ function extractImports(content: string): string[] {
 
 const NODENEXT_SOURCE_EXTENSIONS: ReadonlyMap<string, readonly string[]> = new Map([
   ['.js', ['.ts', '.tsx'] as readonly string[]],
+  ['.mjs', ['.mts'] as readonly string[]],
+  ['.cjs', ['.cts'] as readonly string[]],
 ])
 
 function hasExactEntry(path: string, entries: Map<string, Set<string>>): boolean {
@@ -285,7 +293,7 @@ function resolveNodeNextSource(
   return null
 }
 
-function resolveImport(
+export function resolveImport(
   projectRoot: string,
   importerAbs: string,
   spec: string,
