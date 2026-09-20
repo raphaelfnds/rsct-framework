@@ -51,6 +51,11 @@ import {
   type SweepFile,
 } from '../lib/comment-sweep/review.js'
 import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
+import {
+  checkDeadCode,
+  type DeadCodeRejectKind,
+  type PendingDeadSymbol,
+} from '../lib/dead-code/review-gate.js'
 import { validateDevApproval } from '../lib/dev-approval.js'
 import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 
@@ -77,9 +82,19 @@ const exemptFileSchema = z
   })
   .strict()
 
+const deadCodeKeepSchema = z
+  .object({
+    path: z.string().min(1),
+    name: z.string().min(1),
+    declaration_sha256: z.string().regex(/^[0-9a-f]{64}$/, 'declaration_sha256 must be a sha256 hex digest'),
+    note: z.string().min(1, 'a keep needs the reason the developer gave'),
+  })
+  .strict()
+
 const sweepInputSchema = z.object({
   comment_dispositions: z.array(dispositionSchema).optional(),
   exempt_files: z.array(exemptFileSchema).optional(),
+  dead_code_keeps: z.array(deadCodeKeepSchema).optional(),
 })
 
 export const phaseReviewCompleteInputSchema = z
@@ -101,6 +116,12 @@ export const phaseReviewCompleteInputSchema = z
       ),
     comment_dispositions: z.unknown().optional(),
     exempt_files: z.unknown().optional(),
+    dead_code_keeps: z
+      .unknown()
+      .optional()
+      .describe(
+        'One entry per dead symbol the DEVELOPER decided to keep: path, name, the declaration_sha256 from pending_dead_code, and the reason they gave. A keep is bound to those exact declaration bytes — editing the declaration asks again.',
+      ),
   })
   .strict()
 
@@ -117,6 +138,7 @@ export type PhaseReviewSweepRejectKind =
   | 'migration_missing'
   | 'unverified_declined'
   | 'unverified_undecided'
+  | DeadCodeRejectKind
 
 export type PhaseReviewCompleteRejectKind =
   | GateRejectKind
@@ -150,6 +172,7 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
   head_stale: boolean | null
   open_findings?: StoredFinding[]
   pending_dispositions?: PendingDisposition[]
+  pending_dead_code?: PendingDeadSymbol[]
   comment_sweep: CommentSweepSummary | null
 }
 
@@ -198,6 +221,22 @@ export const phaseReviewCompleteTool: Tool = {
             comment_id: { type: 'string' },
             action: { type: 'string', enum: ['migrated', 'discarded'] },
             destination: { type: 'string', enum: [...MIGRATION_DESTINATIONS] },
+          },
+          additionalProperties: false,
+        },
+      },
+      dead_code_keeps: {
+        type: 'array',
+        description:
+          'One entry per dead symbol the DEVELOPER decided to keep. Take path, name and declaration_sha256 verbatim from pending_dead_code, and put the reason they gave in note. The keep is bound to those declaration bytes: edit the declaration and it is asked again.',
+        items: {
+          type: 'object',
+          required: ['path', 'name', 'declaration_sha256', 'note'],
+          properties: {
+            path: { type: 'string' },
+            name: { type: 'string' },
+            declaration_sha256: { type: 'string' },
+            note: { type: 'string' },
           },
           additionalProperties: false,
         },
@@ -292,6 +331,7 @@ interface RejectArgs {
   extra?: Record<string, unknown>
   open_findings?: StoredFinding[]
   pending_dispositions?: PendingDisposition[]
+  pending_dead_code?: PendingDeadSymbol[]
 }
 
 function reject(args: RejectArgs): PhaseReviewCompleteOutput {
@@ -326,6 +366,7 @@ function reject(args: RejectArgs): PhaseReviewCompleteOutput {
     comment_sweep: args.comment_sweep,
     ...(args.open_findings !== undefined && { open_findings: args.open_findings }),
     ...(args.pending_dispositions !== undefined && { pending_dispositions: args.pending_dispositions }),
+    ...(args.pending_dead_code !== undefined && { pending_dead_code: args.pending_dead_code }),
   }
 }
 
@@ -353,9 +394,10 @@ export async function phaseReviewCompleteHandler(
   const sweepInput = sweepInputSchema.safeParse({
     comment_dispositions: input.comment_dispositions,
     exempt_files: input.exempt_files,
+    dead_code_keeps: input.dead_code_keeps,
   })
   if (!sweepInput.success) {
-    const reason = `comment_dispositions / exempt_files are malformed: ${sweepInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
+    const reason = `comment_dispositions / exempt_files / dead_code_keeps are malformed: ${sweepInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
     return reject({ ...base, rejectKind: 'sweep_input_invalid', reason, hints: [reason], comment_sweep: null })
   }
   const dispositions: Disposition[] = sweepInput.data.comment_dispositions ?? []
@@ -435,6 +477,24 @@ export async function phaseReviewCompleteHandler(
       hints: [reason, 'Remove every comment (a measured fact migrates to a decisions file first), then retry.'],
       comment_sweep: summary,
       extra: { paths: withComments.map((f) => f.path) },
+    })
+  }
+
+  const deadCheck = await checkDeadCode({
+    projectRoot,
+    touched: sweep.files.filter((f) => f.status !== 'deleted').map((f) => f.path),
+    publicApi: config?.public_api,
+    keeps: sweepInput.data.dead_code_keeps ?? [],
+  })
+  if (!deadCheck.ok) {
+    return reject({
+      ...base,
+      rejectKind: deadCheck.reject_kind,
+      reason: deadCheck.reason,
+      hints: [deadCheck.reason, ...deadCheck.hints],
+      comment_sweep: summary,
+      extra: { dead_symbols: deadCheck.pending.length },
+      pending_dead_code: deadCheck.pending,
     })
   }
 

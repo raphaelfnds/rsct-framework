@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  ENTRYPOINT_HINT_PREFIX,
   PUBLIC_API_HINT_PREFIX,
   UNREADABLE_HINT_PREFIX,
   findDeadSymbols,
@@ -24,6 +25,11 @@ function writeFile(rel: string, content: string): void {
   const full = join(tmpRoot, rel)
   mkdirSync(join(full, '..'), { recursive: true })
   writeFileSync(full, content, 'utf8')
+}
+
+function importerOf(...paths: string[]): string {
+  writeFile('entry.ts', paths.map((p) => `import './${p.replace(/\.tsx?$/, '.js')}'`).join('\n') + '\n')
+  return 'entry.ts'
 }
 
 async function deadNames(corpus: string[], targets: string[], publicApi?: string[]): Promise<string[]> {
@@ -50,7 +56,7 @@ describe('languageOf', () => {
 describe('findDeadSymbols — the basic predicate', () => {
   it('reports a symbol nothing references', async () => {
     writeFile('a.ts', 'export function orphan(): void {}\n')
-    expect(await deadNames(['a.ts'], ['a.ts'])).toEqual(['orphan'])
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['orphan'])
   })
 
   it('does NOT report a symbol used inside its own file, when the user is itself alive', async () => {
@@ -61,7 +67,7 @@ describe('findDeadSymbols — the basic predicate', () => {
 
   it('reports an export nothing imports, and the private helper that only it used', async () => {
     writeFile('a.ts', 'function helper(): number { return 1 }\nexport const total = helper()\n')
-    expect(await deadNames(['a.ts'], ['a.ts'])).toEqual(['helper', 'total'])
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['helper', 'total'])
   })
 
   it('does NOT report a symbol another file imports and uses', async () => {
@@ -91,13 +97,13 @@ describe('findDeadSymbols — the basic predicate', () => {
   it('does not let a same-named symbol in an unrelated file keep it alive', async () => {
     writeFile('a.ts', 'export function walk(): void {}\n')
     writeFile('b.ts', 'function walk(): void {}\nexport const run = () => walk()\n')
-    expect(await deadNames(['a.ts', 'b.ts'], ['a.ts'])).toEqual(['walk'])
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['walk'])
   })
 
   it('does not count a mention inside a comment or a string', async () => {
     writeFile('a.ts', 'export function ghost(): void {}\n')
     writeFile('b.ts', '// ghost is discussed here\nexport const label = "ghost"\n')
-    expect(await deadNames(['a.ts', 'b.ts'], ['a.ts'])).toEqual(['ghost'])
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['ghost'])
   })
 })
 
@@ -151,7 +157,7 @@ describe('findDeadSymbols — what it refuses to claim', () => {
     writeFile('broken.ts', "import { x } from './other.js'\nfunction oops( {\n")
     const result = await findDeadSymbols({
       projectRoot: tmpRoot,
-      corpus: ['a.ts', 'other.ts', 'broken.ts'],
+      corpus: ['a.ts', 'other.ts', 'broken.ts', importerOf('a.ts')],
       targets: ['a.ts'],
     })
     expect(result.dead.map((s) => s.name)).toEqual(['faraway'])
@@ -182,17 +188,18 @@ describe('findDeadSymbols — declared public surface', () => {
     writeFile('src/deep/nested/b.ts', 'export function alsoExposed(): void {}\n')
     writeFile('src/internal/c.ts', 'export function hidden(): void {}\n')
     const corpus = ['src/public/a.ts', 'src/deep/nested/b.ts', 'src/internal/c.ts']
-    expect(await deadNames(corpus, corpus, ['src/public/**', '**/nested/**'])).toEqual(['hidden'])
+    const entry = importerOf('src/public/a.ts', 'src/deep/nested/b.ts', 'src/internal/c.ts')
+    expect(await deadNames([...corpus, entry], corpus, ['src/public/**', '**/nested/**'])).toEqual(['hidden'])
   })
 
   it('reports everything exported when no public surface is declared', async () => {
     writeFile('api.ts', 'export function publicThing(): void {}\n')
-    expect(await deadNames(['api.ts'], ['api.ts'])).toEqual(['publicThing'])
+    expect(await deadNames(['api.ts', importerOf('api.ts')], ['api.ts'])).toEqual(['publicThing'])
   })
 
   it('does not treat an empty declaration as a match-everything', async () => {
     writeFile('api.ts', 'export function publicThing(): void {}\n')
-    expect(await deadNames(['api.ts'], ['api.ts'], [])).toEqual(['publicThing'])
+    expect(await deadNames(['api.ts', importerOf('api.ts')], ['api.ts'], [])).toEqual(['publicThing'])
   })
 })
 
@@ -206,7 +213,7 @@ describe('findDeadSymbols — types are out of scope unless asked for', () => {
     writeFile('a.ts', 'export type Unused = string\nexport interface AlsoUnused { x: string }\n')
     const result = await findDeadSymbols({
       projectRoot: tmpRoot,
-      corpus: ['a.ts'],
+      corpus: ['a.ts', importerOf('a.ts')],
       targets: ['a.ts'],
       includeTypes: true,
     })
@@ -215,14 +222,18 @@ describe('findDeadSymbols — types are out of scope unless asked for', () => {
 
   it('still reports an unreferenced value while types are excluded', async () => {
     writeFile('a.ts', 'export type Unused = string\nexport function alsoDead(): void {}\n')
-    expect(await deadNames(['a.ts'], ['a.ts'])).toEqual(['alsoDead'])
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['alsoDead'])
   })
 })
 
 describe('findDeadSymbols — it says what it could not see', () => {
   it('warns that no public surface is declared when an export is reported dead', async () => {
     writeFile('a.ts', 'export function exposed(): void {}\n')
-    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts'], targets: ['a.ts'] })
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', importerOf('a.ts')],
+      targets: ['a.ts'],
+    })
     expect(result.hints.some((h) => h.startsWith(PUBLIC_API_HINT_PREFIX))).toBe(true)
   })
 
@@ -230,7 +241,7 @@ describe('findDeadSymbols — it says what it could not see', () => {
     writeFile('a.ts', 'export function exposed(): void {}\n')
     const result = await findDeadSymbols({
       projectRoot: tmpRoot,
-      corpus: ['a.ts'],
+      corpus: ['a.ts', importerOf('a.ts')],
       targets: ['a.ts'],
       publicApi: ['other/**'],
     })
@@ -249,7 +260,7 @@ describe('findDeadSymbols — it says what it could not see', () => {
     writeFile('broken.ts', "import { maybe } from './a.js'\nfunction oops( {\n")
     const result = await findDeadSymbols({
       projectRoot: tmpRoot,
-      corpus: ['a.ts', 'broken.ts'],
+      corpus: ['a.ts', 'broken.ts', importerOf('a.ts')],
       targets: ['a.ts'],
     })
     const hint = result.hints.find((h) => h.startsWith(UNREADABLE_HINT_PREFIX))
@@ -259,8 +270,40 @@ describe('findDeadSymbols — it says what it could not see', () => {
 
   it('emits no withheld-verdict hint when everything was readable', async () => {
     writeFile('a.ts', 'export function exposed(): void {}\n')
-    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts'], targets: ['a.ts'] })
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', importerOf('a.ts')],
+      targets: ['a.ts'],
+    })
     expect(result.hints.some((h) => h.startsWith(UNREADABLE_HINT_PREFIX))).toBe(false)
+  })
+})
+
+describe('findDeadSymbols — a file nobody imports cannot be told from an entrypoint', () => {
+  it('leaves its exports unknown rather than calling them dead', async () => {
+    writeFile('entry.ts', 'export function looksOrphaned(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['entry.ts'], targets: ['entry.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['looksOrphaned'])
+  })
+
+  it('names the file and says why in a hint', async () => {
+    writeFile('entry.ts', 'export function looksOrphaned(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['entry.ts'], targets: ['entry.ts'] })
+    const hint = result.hints.find((h) => h.startsWith(ENTRYPOINT_HINT_PREFIX))
+    expect(hint).toBeDefined()
+    expect(hint).toContain('entry.ts')
+  })
+
+  it('STILL reports a non-exported symbol there — only exports are unattributable', async () => {
+    writeFile('entry.ts', 'function privateDead(): void {}\nexport function looksOrphaned(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['entry.ts'], targets: ['entry.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['privateDead'])
+  })
+
+  it('judges the exports once any file imports it, even for side effects', async () => {
+    writeFile('a.ts', 'export function nowJudged(): void {}\n')
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['nowJudged'])
   })
 })
 
@@ -270,10 +313,10 @@ describe('findDeadSymbols — scope', () => {
     writeFile('elsewhere.ts', 'export function notJudged(): void {}\n')
     const result = await findDeadSymbols({
       projectRoot: tmpRoot,
-      corpus: ['target.ts', 'elsewhere.ts'],
+      corpus: ['target.ts', 'elsewhere.ts', importerOf('target.ts', 'elsewhere.ts')],
       targets: ['target.ts'],
     })
     expect(result.dead.map((s) => s.name)).toEqual(['judged'])
-    expect(result.filesScanned).toBe(2)
+    expect(result.filesScanned).toBe(3)
   })
 })

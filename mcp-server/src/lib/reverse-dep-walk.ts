@@ -44,7 +44,7 @@ const DEFAULT_LANG_GLOBS: readonly string[] = [
   '**/*.cts',
 ]
 
-const DEFAULT_EXCLUDE_GLOBS: readonly string[] = [
+export const DEFAULT_EXCLUDE_GLOBS: readonly string[] = [
   '**/node_modules/**',
   '**/dist/**',
   '**/build/**',

@@ -53,6 +53,20 @@ describe('scanSymbols — declarations', () => {
     expect(source.slice(alpha?.start ?? 0, alpha?.end ?? 0)).toBe('const alpha = 1')
   })
 
+  it('includes the export keyword in the range, since dropping it changes the declaration', async () => {
+    const source = 'export function beta(): void {}\n'
+    const scan = await symbols(source)
+    const beta = scan.declarations.find((d) => d.name === 'beta')
+    expect(source.slice(beta?.start ?? 0, beta?.end ?? 0)).toBe('export function beta(): void {}')
+  })
+
+  it('includes the export keyword for a const declaration too', async () => {
+    const source = 'export const gamma = 1\n'
+    const scan = await symbols(source)
+    const gamma = scan.declarations.find((d) => d.name === 'gamma')
+    expect(source.slice(gamma?.start ?? 0, gamma?.end ?? 0)).toBe('export const gamma = 1')
+  })
+
   it('does NOT count a declaration name as a reference to itself', async () => {
     const scan = await symbols('function lonely() {}\n')
     expect(named(scan, 'lonely')).toBe(0)

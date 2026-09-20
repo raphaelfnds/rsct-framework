@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join, relative, resolve as resolvePath } from 'node:path'
 
 import { matchesAnyGlob, toPosix } from '../phase-scope.js'
-import { extractImports, resolveImport } from '../reverse-dep-walk.js'
+import { DEFAULT_EXCLUDE_GLOBS, extractImports, resolveImport } from '../reverse-dep-walk.js'
 import {
   DEFAULT_IMPORT,
   NAMESPACE_IMPORT,
@@ -27,6 +27,19 @@ export function languageOf(path: string): TreeLanguage | null {
   const dot = path.lastIndexOf('.')
   if (dot < 0) return null
   return LANGUAGE_BY_SUFFIX.get(path.slice(dot).toLowerCase()) ?? null
+}
+
+export function isAnalysable(path: string): boolean {
+  if (languageOf(path) === null) return false
+  return !matchesAnyGlob(path, DEFAULT_EXCLUDE_GLOBS).matched
+}
+
+export function corpusFrom(knownPaths: Iterable<string>): string[] {
+  const corpus: string[] = []
+  for (const path of knownPaths) {
+    if (isAnalysable(path)) corpus.push(path)
+  }
+  return corpus
 }
 
 export interface DeadCodeInput {
@@ -60,6 +73,7 @@ export interface DeadCodeResult {
 
 export const PUBLIC_API_HINT_PREFIX = 'Dead-code scan: no "public_api" is declared'
 export const UNREADABLE_HINT_PREFIX = 'Dead-code scan: withheld a verdict'
+export const ENTRYPOINT_HINT_PREFIX = 'Dead-code scan: no file imports'
 
 const KEY_SEPARATOR = '\u0000'
 
@@ -220,13 +234,31 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
   const isPublicPath = (path: string): boolean =>
     publicApi.length > 0 && matchesAnyGlob(path, publicApi).matched
 
+  const importedAnywhere = new Set<string>()
+  for (const facts of corpus.facts.values()) {
+    for (const target of facts.importsByTarget.keys()) importedAnywhere.add(target)
+  }
+
   const includeTypes = input.includeTypes === true
   const candidates: DeadSymbol[] = []
+  const unattributableExports: DeadSymbol[] = []
   for (const rel of input.targets) {
     const facts = corpus.facts.get(rel)
     if (!facts) continue
+    const isEntrypoint = !importedAnywhere.has(rel)
     for (const declaration of facts.symbols.declarations) {
       if (!includeTypes && declaration.kind === 'type') continue
+      if (isEntrypoint && declaration.exported) {
+        unattributableExports.push({
+          path: rel,
+          name: declaration.name,
+          kind: declaration.kind,
+          exported: true,
+          start: declaration.start,
+          end: declaration.end,
+        })
+        continue
+      }
       candidates.push({
         path: rel,
         name: declaration.name,
@@ -272,6 +304,7 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
     if (tainted) unknownSymbols.push(candidate)
     else deadSymbols.push(candidate)
   }
+  unknownSymbols.push(...unattributableExports)
 
   const hints: string[] = []
   if (publicApi.length === 0 && deadSymbols.some((symbol) => symbol.exported)) {
@@ -281,10 +314,19 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
         `paths there or those exports will read as dead.`,
     )
   }
-  if (unknownSymbols.length > 0) {
+  if (unknownSymbols.length > unattributableExports.length) {
     hints.push(
-      `${UNREADABLE_HINT_PREFIX} on ${unknownSymbols.length} symbol(s): a file the parser could not ` +
-        `read may hold the only reference. Unreadable files: ${[...corpus.unreadable].join(', ')}`,
+      `${UNREADABLE_HINT_PREFIX} on ${unknownSymbols.length - unattributableExports.length} symbol(s): ` +
+        `a file the parser could not read may hold the only reference. ` +
+        `Unreadable files: ${[...corpus.unreadable].join(', ')}`,
+    )
+  }
+  if (unattributableExports.length > 0) {
+    const paths = [...new Set(unattributableExports.map((symbol) => symbol.path))]
+    hints.push(
+      `${ENTRYPOINT_HINT_PREFIX} ${paths.join(', ')}, so its exports cannot be told apart from an ` +
+        `entrypoint's. ${unattributableExports.length} export(s) left as unknown rather than reported dead. ` +
+        `Declare the file in "public_api" if it is an entrypoint or a published surface.`,
     )
   }
 
