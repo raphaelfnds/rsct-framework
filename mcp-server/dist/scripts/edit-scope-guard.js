@@ -4451,16 +4451,25 @@ function readPhaseState(projectRoot) {
     };
   }
 }
+var globRegexCache = /* @__PURE__ */ new Map();
 function globToRegex(glob) {
+  const cached = globRegexCache.get(glob);
+  if (cached) return cached;
   let out = "^";
   let i = 0;
   while (i < glob.length) {
     const ch = glob[i];
     if (ch === "*") {
       if (glob[i + 1] === "*") {
-        out += ".*";
-        i += 2;
-        if (glob[i] === "/") i++;
+        const atSegmentStart = i === 0 || glob[i - 1] === "/";
+        const followedBySlash = glob[i + 2] === "/";
+        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
+          out += "(?:[^/]*/)*";
+          i += 3;
+        } else {
+          out += ".*";
+          i += followedBySlash ? 3 : 2;
+        }
       } else {
         out += "[^/]*";
         i++;
@@ -4477,7 +4486,9 @@ function globToRegex(glob) {
     }
   }
   out += "$";
-  return new RegExp(out);
+  const re = new RegExp(out);
+  globRegexCache.set(glob, re);
+  return re;
 }
 function toPosix(p) {
   return p.split("\\").join("/");

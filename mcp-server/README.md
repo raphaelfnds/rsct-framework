@@ -558,7 +558,8 @@ In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks**
 touches a produced surface (listing the affected consumers) unless
 `dev_approval.override_contract_surface: { reason }` is given. Surface globs support `*` `**`
 `?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
-sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
+sibling `dir.ext` file. A leading `**/` spans whole directories, so `**/api/**` covers `api/`,
+`src/api/` and `any/dir/api/`, never `webapi/` or `openapi/` (2.11.2). Fail-graceful: no universe / no `contracts.json` → empty graph + a
 hint (never an error).
 
 **Name-mismatch warnings.** Whenever the contract graph and the universe are both

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 
 import { matchesAnyGlob, toPosix } from './phase-scope.js'
 
@@ -63,13 +63,6 @@ const DEFAULT_MAX_DEPTH = 2
  */
 const DEFAULT_LANG_SUFFIXES = '.ts, .tsx, .js, .jsx, .mjs, .cjs'
 
-/**
- * Specifiers that address a file and end in a JS runtime extension. Under
- * NodeNext/ESM, TypeScript source imports `'./x.js'` for a file stored as
- * `x.ts`; v1 does not remap that, so such a specifier resolves to nothing and
- * the import graph comes out empty. Counted, not fixed — see the parked
- * resolver finding in the issue record.
- */
 const JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/
 
 const RESOLVE_EXTENSIONS: readonly string[] = [
@@ -244,7 +237,38 @@ function extractImports(content: string): string[] {
   return [...imports]
 }
 
-function resolveImport(importerAbs: string, spec: string): string | null {
+const NODENEXT_SOURCE_EXTENSIONS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['.js', ['.ts', '.tsx'] as readonly string[]],
+])
+
+function hasExactEntry(path: string, entries: Map<string, Set<string>>): boolean {
+  const dir = dirname(path)
+  let names = entries.get(dir)
+  if (!names) {
+    try {
+      names = new Set(readdirSync(dir))
+    } catch {
+      names = new Set<string>()
+    }
+    entries.set(dir, names)
+  }
+  return names.has(basename(path))
+}
+
+function resolveNodeNextSource(target: string, entries: Map<string, Set<string>>): string | null {
+  const dot = target.lastIndexOf('.')
+  if (dot < 0) return null
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(dot))
+  if (!sourceExtensions) return null
+  const stem = target.slice(0, dot)
+  for (const ext of sourceExtensions) {
+    const candidate = stem + ext
+    if (existsSync(candidate) && hasExactEntry(candidate, entries)) return candidate
+  }
+  return null
+}
+
+function resolveImport(importerAbs: string, spec: string, entries: Map<string, Set<string>>): string | null {
   if (!spec.startsWith('.') && !isAbsolute(spec)) return null
   const target = isAbsolute(spec) ? spec : resolvePath(dirname(importerAbs), spec)
 
@@ -268,7 +292,7 @@ function resolveImport(importerAbs: string, spec: string): string | null {
     if (existsSync(candidate)) return candidate
   }
 
-  return null
+  return resolveNodeNextSource(target, entries)
 }
 
 interface BfsItem {
@@ -349,6 +373,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
   }
 
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs)
+  const directoryEntries = new Map<string, Set<string>>()
   stats.files_scanned = candidates.length
 
   const reverseDeps = new Map<string, Set<string>>()
@@ -364,7 +389,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     const candidateRel = relPosix(projectRoot, candidateAbs)
     const imports = extractImports(content)
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(candidateAbs, spec)
+      const resolvedAbs = resolveImport(candidateAbs, spec, directoryEntries)
       if (!resolvedAbs) {
         // Only a RELATIVE specifier counts. A bare package specifier is
         // rejected on purpose and is not a defect; and an absolute one is

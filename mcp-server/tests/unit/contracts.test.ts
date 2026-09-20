@@ -159,3 +159,32 @@ describe('lib/contracts — unregisteredNames (DX-5 + PH-2, role-agnostic)', () 
     expect(unregisteredNames([], ['api'])).toEqual([])
   })
 })
+
+describe('lib/contracts — a leading ** surface covers whole segments only (#76)', () => {
+  function graphWith(surface: string[]) {
+    const u = mkdtempSync(join(tmpdir(), 'rsct-contracts-'))
+    writeFileSync(
+      join(u, 'contracts.json'),
+      JSON.stringify({ contracts: [{ id: 'api', producer: 'p', surface, consumers: ['q'] }] }),
+    )
+    return readContracts(u)
+  }
+
+  it('still blocks every declared path', () => {
+    const g = graphWith(['**/api/**'])
+    for (const path of ['api/x.ts', 'src/api/x.ts', 'any/dir/api/x.ts']) {
+      expect(contractsTouchingPaths(g, 'p', [path]).map((c) => c.id)).toEqual(['api'])
+    }
+  })
+
+  it('no longer blocks a path the surface never declared', () => {
+    const g = graphWith(['**/api/**'])
+    expect(contractsTouchingPaths(g, 'p', ['webapi/x.ts'])).toEqual([])
+    expect(contractsTouchingPaths(g, 'p', ['openapi/billing.yaml'])).toEqual([])
+  })
+
+  it('a ** inside a segment keeps spanning directories', () => {
+    const g = graphWith(['openapi/**.yaml'])
+    expect(contractsTouchingPaths(g, 'p', ['openapi/v2/billing.yaml']).map((c) => c.id)).toEqual(['api'])
+  })
+})

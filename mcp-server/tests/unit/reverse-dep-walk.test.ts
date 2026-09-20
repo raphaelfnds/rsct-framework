@@ -444,43 +444,33 @@ describe('walkReverseDeps — coverage verdict (#54)', () => {
   })
 })
 
-/**
- * #54 — the NodeNext blind spot, REPORTED not fixed.
- *
- * Under `"module": "NodeNext"` TypeScript source imports './x.js' for a file
- * stored as x.ts. `resolveImport` probes 'x.js', then 'x.js.ts', 'x.js.tsx' …
- * and gives up, so the import graph comes out empty. This repository is itself
- * NodeNext, so its own walk finds zero importers of any of its modules.
- *
- * Stage 1 does not change what resolves. It counts the failures and says so,
- * because "0 importers" with a blind resolver is exactly the silence this issue
- * exists to break.
- */
-describe('walkReverseDeps — NodeNext specifiers are counted and reported (#54)', () => {
-  it('counts unresolved .js specifiers and names the real cause', () => {
-    // Mutation: drop the counter increment, or the `coverageHints` branch that
-    // reads it.
+describe('walkReverseDeps — NodeNext specifiers resolve, and what still fails is counted (#54, #77)', () => {
+  it("resolves './b.js' to the b.ts that holds it", () => {
     writeFile('src/b.ts', 'export const b = 1\n')
     writeFile('src/a.ts', "import { b } from './b.js'\n")
     const out = walkReverseDeps({
       projectRoot: tmpRoot,
       seedPaths: ['src/b.ts'],
     })
+    expect(out.discovered.map((d) => d.file)).toEqual(['src/a.ts'])
+    expect(out.stats.unresolved_js_specifiers).toBe(0)
+  })
+
+  it('counts a .js specifier that resolves to nothing and names the real cause', () => {
+    writeFile('src/b.ts', 'export const b = 1\n')
+    writeFile('src/a.ts', "import { gone } from './gone.js'\n")
+    const out = walkReverseDeps({
+      projectRoot: tmpRoot,
+      seedPaths: ['src/b.ts'],
+    })
     expect(out.discovered).toEqual([])
     expect(out.stats.unresolved_js_specifiers).toBe(1)
-    // In `hints`, not in `coverageHints`: it is a fact about the walk, so every
-    // caller must see it — including a tier-skipped phase, which emits no
-    // advisory at all.
     expect(out.hints.join(' ')).toContain('NodeNext')
   })
 
   it('suppresses the zero-importer hint when the resolver is the cause', () => {
-    // That hint names two causes — seed-path form and tsconfig aliases — and on
-    // a NodeNext project BOTH are wrong.
-    //
-    // Mutation: drop the `unresolved_js_specifiers === 0` guard on that hint.
     writeFile('src/b.ts', 'export const b = 1\n')
-    writeFile('src/a.ts', "import { b } from './b.js'\n")
+    writeFile('src/a.ts', "import { gone } from './gone.js'\n")
     const out = walkReverseDeps({
       projectRoot: tmpRoot,
       seedPaths: ['src/b.ts'],
@@ -519,5 +509,37 @@ describe('walkReverseDeps — multiple seeds + dedup', () => {
     })
     const both = out.discovered.filter((d) => d.file === 'src/both.ts')
     expect(both).toHaveLength(1)
+  })
+})
+
+describe('walkReverseDeps — the exclusion list covers whole directories only (#76)', () => {
+  it('scans a directory whose name merely contains an excluded one', () => {
+    writeFile('src/seed.ts', 'export const s = 1\n')
+    writeFile('webbuild/importer.ts', "import { s } from '../src/seed.js'\n")
+    writeFile('build/importer.ts', "import { s } from '../src/seed.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.ts'] })
+    const files = out.discovered.map((d) => d.file)
+    expect(files).toContain('webbuild/importer.ts')
+    expect(files).not.toContain('build/importer.ts')
+  })
+})
+
+describe('walkReverseDeps — the NodeNext mapping is a last resort and is case-exact (#77)', () => {
+  it('prefers the .js file that actually exists over a same-named .ts', () => {
+    writeFile('src/b.js', 'export const b = 1\n')
+    writeFile('src/b.ts', 'export const b = 2\n')
+    writeFile('src/a.ts', "import { b } from './b.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/b.js'] })
+    expect(out.discovered.map((d) => d.file)).toEqual(['src/a.ts'])
+    const other = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/b.ts'] })
+    expect(other.discovered).toEqual([])
+  })
+
+  it('does not resolve a specifier whose case differs from the file on disk', () => {
+    writeFile('src/Widget.ts', 'export const w = 1\n')
+    writeFile('src/a.ts', "import { w } from './widget.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/Widget.ts'] })
+    expect(out.discovered).toEqual([])
+    expect(out.stats.unresolved_js_specifiers).toBe(1)
   })
 })

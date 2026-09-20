@@ -326,16 +326,26 @@ export function readPhaseState(projectRoot: string): PhaseStateReadResult {
   }
 }
 
+const globRegexCache = new Map<string, RegExp>()
+
 export function globToRegex(glob: string): RegExp {
+  const cached = globRegexCache.get(glob)
+  if (cached) return cached
   let out = '^'
   let i = 0
   while (i < glob.length) {
     const ch = glob[i]!
     if (ch === '*') {
       if (glob[i + 1] === '*') {
-        out += '.*'
-        i += 2
-        if (glob[i] === '/') i++
+        const atSegmentStart = i === 0 || glob[i - 1] === '/'
+        const followedBySlash = glob[i + 2] === '/'
+        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
+          out += '(?:[^/]*/)*'
+          i += 3
+        } else {
+          out += '.*'
+          i += followedBySlash ? 3 : 2
+        }
       } else {
         out += '[^/]*'
         i++
@@ -352,7 +362,9 @@ export function globToRegex(glob: string): RegExp {
     }
   }
   out += '$'
-  return new RegExp(out)
+  const re = new RegExp(out)
+  globRegexCache.set(glob, re)
+  return re
 }
 
 export interface ScopeMatch {

@@ -370,6 +370,52 @@ scripts (teammates' hooks break).
 unchanged blob passes it. A pre-commit hook that rewrites the script becomes drift, as for any
 other file. Deleting the scripts (uninstall) still follows the deletion rule.
 
+### ADR-015 — One glob semantics: a leading `**/` spans whole segments (#76, 2.11.2)
+**Status**: active
+**Tags**: globs, v-phase, edit-scope, contracts
+**Context**: `globToRegex` compiled a leading `**` to `.*` and then swallowed the following `/`,
+so `**/build/**` became `^.*build/.*$`. MEASURED as the walk calls it (`dir + "/probe"`):
+`webbuild`, `packages/app-build`, `redist`, `test-coverage` and `my_node_modules` were all
+excluded from the V walk. Five call sites share the matcher: the walk's language and exclude
+globs (`reverse-dep-walk.ts:201,222,225,226`), the edit-scope guard (`edit-guard.ts:66`),
+`check-edit-scope.ts:142` and the contract surface (`contracts.ts:124`).
+**Decision**: one semantics for all of them — a `**/` at the start of a segment is zero or more
+WHOLE segments (`(?:[^/]*/)*`); a trailing `**` (and a trailing `**/`) is everything below; a `**`
+glued inside a name keeps today's `.*`, because narrowing that would lose a DECLARED contract
+block (`openapi/**.yaml` vs `openapi/v2/b.yaml`). Compiled regexes are memoised per glob.
+**Direction of each gate**: walk — sees more, the V answer is more complete; edit-scope — matches
+fewer paths, so it refuses more; contract surface — blocks exactly what the surface declares.
+The developer weighed the contract case three times and chose to remove the excess: `api/`,
+`src/api/` and `any/dir/api/` still block under `**/api/**`; `webapi/` and `openapi/billing.yaml`,
+which no declaration asked for, no longer do. A block the declaration never asked for is noise,
+and noise is what makes a gate get ignored. The four places that teach the rule were corrected
+with it (template `_help`, `docs/multi-repo.md`, `prompts/01-setup.md` Q&A, `mcp-server/README.md`),
+and the template already promised these semantics.
+**Consequences**: the V walk scans directories it used to skip (MEASURED: no change on this repo —
+`node_modules`, `dist` and `.git` are still excluded, `files_scanned` unchanged). A project whose
+scope glob relied on the wide match now sees `out_of_scope` — the stricter direction.
+
+### ADR-016 — The walk resolves NodeNext specifiers, case-exactly, as a last resort (#77, 2.11.2)
+**Status**: active
+**Tags**: v-phase, blast-radius, cross-os
+**Context**: under `"module": "NodeNext"` TypeScript source imports `'./x.js'` for a file stored as
+`x.ts`. The walk probed `target + ext` only, so the specifier resolved to nothing. MEASURED on this
+repository (seed `src/lib/phase-scope.ts`, depth 2): 216 files scanned, **611 unresolved
+specifiers, 0 importers** — the blast radius was empty for the framework's own code, and for any
+NodeNext project. #54 stage 1 shipped the honest hint for exactly this, and
+`reverse-dep-walk.test.ts` pinned the gap as "REPORTED, not fixed"; that decision is superseded
+here, and the test now pins a specifier that truly resolves to nothing.
+**Decision**: after today's probes fail, map the specifier extension to its source extensions
+(`.js` → `.ts`, `.tsx`) and accept a candidate only when `readdirSync` of its directory holds that
+exact basename, memoised per walk. The case check is not optional: `existsSync('widget.ts')` is
+true for `Widget.ts` on Windows and macOS, so without it one project would get two different import
+graphs on two operating systems — the invariant this module's own header states. `.mjs`/`.cjs` are
+NOT mapped: `.mts`/`.cts` are not in `DEFAULT_LANG_GLOBS`, so the walk would list importers for a
+seed it also calls uncoverable. That gap is its own issue.
+**Consequences**: MEASURED after, same repo and seed: **81 importers, 1 unresolved**, 166 ms.
+`unresolved_js_specifiers` keeps counting what still fails and the hint keeps firing on a partial
+under-report, so the honest-coverage rule of #54 stands.
+
 ### ADR-014 — A leftover task name stops the start and asks the developer (2.11.1)
 **Status**: active
 **Tags**: phases, spec_slug

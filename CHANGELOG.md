@@ -12,6 +12,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The V phase could not see the repository it was auditing (#76, #77).** A leading `**/` in a
+  glob compiled to "any characters", so `**/build/**` excluded `webbuild/`, `app-build/`,
+  `redist/` and `test-coverage/` from the reverse-dependency walk; and a NodeNext specifier
+  (`'./x.js'` for a file stored as `x.ts`) resolved to nothing. MEASURED on this repository before:
+  611 unresolved specifiers and **0 importers**; after: **81 importers, 1 unresolved**.
+  `**/` now spans whole directories, a trailing `**` still covers everything below, and a `**`
+  glued inside a name still spans anything (ADR-015). The resolver maps `.js` → `.ts`/`.tsx` only
+  after today's probes and only when the basename matches exactly, so the graph cannot differ
+  between operating systems (ADR-016).
+- **Contract surfaces now block exactly what they declare.** Under `**/api/**`, `api/`, `src/api/`
+  and `any/dir/api/` still block a producer commit; `webapi/` and `openapi/billing.yaml`, which no
+  declaration asked for, no longer do. The four places that teach the glob rule were corrected with
+  it, and the shipped `contracts.json.template` already promised these semantics.
+
 ## [2.11.1] - 2026-09-18
 
 Three defects the first field test of 2.11.0 hit while running `/rsct-setup` in two

@@ -23718,16 +23718,25 @@ function readPhaseState(projectRoot) {
     };
   }
 }
+var globRegexCache = /* @__PURE__ */ new Map();
 function globToRegex(glob) {
+  const cached2 = globRegexCache.get(glob);
+  if (cached2) return cached2;
   let out2 = "^";
   let i2 = 0;
   while (i2 < glob.length) {
     const ch = glob[i2];
     if (ch === "*") {
       if (glob[i2 + 1] === "*") {
-        out2 += ".*";
-        i2 += 2;
-        if (glob[i2] === "/") i2++;
+        const atSegmentStart = i2 === 0 || glob[i2 - 1] === "/";
+        const followedBySlash = glob[i2 + 2] === "/";
+        if (atSegmentStart && followedBySlash && i2 + 3 < glob.length) {
+          out2 += "(?:[^/]*/)*";
+          i2 += 3;
+        } else {
+          out2 += ".*";
+          i2 += followedBySlash ? 3 : 2;
+        }
       } else {
         out2 += "[^/]*";
         i2++;
@@ -23744,7 +23753,9 @@ function globToRegex(glob) {
     }
   }
   out2 += "$";
-  return new RegExp(out2);
+  const re = new RegExp(out2);
+  globRegexCache.set(glob, re);
+  return re;
 }
 function toPosix(p) {
   return p.split("\\").join("/");
@@ -26248,12 +26259,12 @@ function parseEnvFileAt(projectRoot, relPath) {
   } catch {
     return null;
   }
-  const basename3 = relPath.split("/").pop() ?? relPath;
-  const isProperties = /\.properties$/i.test(basename3);
-  const isEnv = /^\.env/.test(basename3);
+  const basename4 = relPath.split("/").pop() ?? relPath;
+  const isProperties = /\.properties$/i.test(basename4);
+  const isEnv = /^\.env/.test(basename4);
   if (!isProperties && !isEnv) return null;
   const format = isProperties ? "properties" : "env";
-  const profile = isProperties ? getProfileFromBasename(basename3) : null;
+  const profile = isProperties ? getProfileFromBasename(basename4) : null;
   const entries = isProperties ? parseProperties(content) : parseDotEnv(content);
   return { path: relPath, format, profile, entries };
 }
@@ -44863,7 +44874,35 @@ function extractImports(content) {
   }
   return [...imports];
 }
-function resolveImport(importerAbs, spec) {
+var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
+  [".js", [".ts", ".tsx"]]
+]);
+function hasExactEntry(path2, entries) {
+  const dir = dirname(path2);
+  let names = entries.get(dir);
+  if (!names) {
+    try {
+      names = new Set(readdirSync(dir));
+    } catch {
+      names = /* @__PURE__ */ new Set();
+    }
+    entries.set(dir, names);
+  }
+  return names.has(basename(path2));
+}
+function resolveNodeNextSource(target, entries) {
+  const dot = target.lastIndexOf(".");
+  if (dot < 0) return null;
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(dot));
+  if (!sourceExtensions) return null;
+  const stem = target.slice(0, dot);
+  for (const ext of sourceExtensions) {
+    const candidate = stem + ext;
+    if (existsSync(candidate) && hasExactEntry(candidate, entries)) return candidate;
+  }
+  return null;
+}
+function resolveImport(importerAbs, spec, entries) {
   if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
   const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
   if (existsSync(target)) {
@@ -44883,7 +44922,7 @@ function resolveImport(importerAbs, spec) {
     const candidate = target + ext;
     if (existsSync(candidate)) return candidate;
   }
-  return null;
+  return resolveNodeNextSource(target, entries);
 }
 function walkReverseDeps(input) {
   const projectRoot = input.projectRoot;
@@ -44939,6 +44978,7 @@ function walkReverseDeps(input) {
     return notRun();
   }
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
+  const directoryEntries = /* @__PURE__ */ new Map();
   stats.files_scanned = candidates.length;
   const reverseDeps = /* @__PURE__ */ new Map();
   for (const candidateAbs of candidates) {
@@ -44953,7 +44993,7 @@ function walkReverseDeps(input) {
     const candidateRel = relPosix(projectRoot, candidateAbs);
     const imports = extractImports(content);
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(candidateAbs, spec);
+      const resolvedAbs = resolveImport(candidateAbs, spec, directoryEntries);
       if (!resolvedAbs) {
         if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
           stats.unresolved_js_specifiers++;
