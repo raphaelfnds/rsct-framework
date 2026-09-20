@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join, relative, resolve as resolvePath } from 'node:path'
 
-import { toPosix } from '../phase-scope.js'
+import { matchesAnyGlob, toPosix } from '../phase-scope.js'
 import { extractImports, resolveImport } from '../reverse-dep-walk.js'
 import {
   DEFAULT_IMPORT,
@@ -33,7 +33,7 @@ export interface DeadCodeInput {
   projectRoot: string
   corpus: readonly string[]
   targets: readonly string[]
-  publicPaths?: readonly string[]
+  publicApi?: readonly string[]
   includeTypes?: boolean
 }
 
@@ -55,7 +55,11 @@ export interface DeadCodeResult {
   unreadable: string[]
   filesScanned: number
   iterations: number
+  hints: string[]
 }
+
+export const PUBLIC_API_HINT_PREFIX = 'Dead-code scan: no "public_api" is declared'
+export const UNREADABLE_HINT_PREFIX = 'Dead-code scan: withheld a verdict'
 
 const KEY_SEPARATOR = '\u0000'
 
@@ -212,7 +216,9 @@ function citationsFor(
 export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeResult> {
   const corpus = await readCorpus(input)
   const reexportedBy = starSources(corpus)
-  const publicPaths = new Set(input.publicPaths ?? [])
+  const publicApi = input.publicApi ?? []
+  const isPublicPath = (path: string): boolean =>
+    publicApi.length > 0 && matchesAnyGlob(path, publicApi).matched
 
   const includeTypes = input.includeTypes === true
   const candidates: DeadSymbol[] = []
@@ -245,7 +251,7 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
     for (const candidate of candidates) {
       const key = keyOf(candidate.path, candidate.name)
       if (dead.has(key)) continue
-      if (candidate.exported && publicPaths.has(candidate.path)) continue
+      if (candidate.exported && isPublicPath(candidate.path)) continue
       const live = (citations.get(key) ?? []).some(
         (citation) => citation.owner === null || !dead.has(keyOf(citation.file, citation.owner)),
       )
@@ -267,11 +273,27 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
     else deadSymbols.push(candidate)
   }
 
+  const hints: string[] = []
+  if (publicApi.length === 0 && deadSymbols.some((symbol) => symbol.exported)) {
+    hints.push(
+      `${PUBLIC_API_HINT_PREFIX} in .rsct.json, so every export is judged by references inside this ` +
+        `repository alone. If consumers live outside it (a published library), declare the public ` +
+        `paths there or those exports will read as dead.`,
+    )
+  }
+  if (unknownSymbols.length > 0) {
+    hints.push(
+      `${UNREADABLE_HINT_PREFIX} on ${unknownSymbols.length} symbol(s): a file the parser could not ` +
+        `read may hold the only reference. Unreadable files: ${[...corpus.unreadable].join(', ')}`,
+    )
+  }
+
   return {
     dead: deadSymbols,
     unknown: unknownSymbols,
     unreadable: [...corpus.unreadable],
     filesScanned: corpus.facts.size,
     iterations,
+    hints,
   }
 }

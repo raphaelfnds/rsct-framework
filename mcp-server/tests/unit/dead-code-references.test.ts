@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { findDeadSymbols, languageOf } from '../../src/lib/dead-code/references.js'
+import {
+  PUBLIC_API_HINT_PREFIX,
+  UNREADABLE_HINT_PREFIX,
+  findDeadSymbols,
+  languageOf,
+} from '../../src/lib/dead-code/references.js'
 
 let tmpRoot: string
 
@@ -21,12 +26,12 @@ function writeFile(rel: string, content: string): void {
   writeFileSync(full, content, 'utf8')
 }
 
-async function deadNames(corpus: string[], targets: string[], publicPaths?: string[]): Promise<string[]> {
+async function deadNames(corpus: string[], targets: string[], publicApi?: string[]): Promise<string[]> {
   const result = await findDeadSymbols({
     projectRoot: tmpRoot,
     corpus,
     targets,
-    ...(publicPaths ? { publicPaths } : {}),
+    ...(publicApi ? { publicApi } : {}),
   })
   return result.dead.map((d) => d.name).sort()
 }
@@ -171,6 +176,24 @@ describe('findDeadSymbols — declared public surface', () => {
     writeFile('api.ts', 'function privateHelper(): void {}\nexport function publicThing(): void {}\n')
     expect(await deadNames(['api.ts'], ['api.ts'], ['api.ts'])).toEqual(['privateHelper'])
   })
+
+  it('accepts a glob, spanning whole segments as ADR-015 requires', async () => {
+    writeFile('src/public/a.ts', 'export function exposed(): void {}\n')
+    writeFile('src/deep/nested/b.ts', 'export function alsoExposed(): void {}\n')
+    writeFile('src/internal/c.ts', 'export function hidden(): void {}\n')
+    const corpus = ['src/public/a.ts', 'src/deep/nested/b.ts', 'src/internal/c.ts']
+    expect(await deadNames(corpus, corpus, ['src/public/**', '**/nested/**'])).toEqual(['hidden'])
+  })
+
+  it('reports everything exported when no public surface is declared', async () => {
+    writeFile('api.ts', 'export function publicThing(): void {}\n')
+    expect(await deadNames(['api.ts'], ['api.ts'])).toEqual(['publicThing'])
+  })
+
+  it('does not treat an empty declaration as a match-everything', async () => {
+    writeFile('api.ts', 'export function publicThing(): void {}\n')
+    expect(await deadNames(['api.ts'], ['api.ts'], [])).toEqual(['publicThing'])
+  })
 })
 
 describe('findDeadSymbols — types are out of scope unless asked for', () => {
@@ -193,6 +216,51 @@ describe('findDeadSymbols — types are out of scope unless asked for', () => {
   it('still reports an unreferenced value while types are excluded', async () => {
     writeFile('a.ts', 'export type Unused = string\nexport function alsoDead(): void {}\n')
     expect(await deadNames(['a.ts'], ['a.ts'])).toEqual(['alsoDead'])
+  })
+})
+
+describe('findDeadSymbols — it says what it could not see', () => {
+  it('warns that no public surface is declared when an export is reported dead', async () => {
+    writeFile('a.ts', 'export function exposed(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts'], targets: ['a.ts'] })
+    expect(result.hints.some((h) => h.startsWith(PUBLIC_API_HINT_PREFIX))).toBe(true)
+  })
+
+  it('stays quiet about the public surface once one is declared', async () => {
+    writeFile('a.ts', 'export function exposed(): void {}\n')
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts'],
+      targets: ['a.ts'],
+      publicApi: ['other/**'],
+    })
+    expect(result.hints.some((h) => h.startsWith(PUBLIC_API_HINT_PREFIX))).toBe(false)
+  })
+
+  it('stays quiet when only a non-exported symbol is reported', async () => {
+    writeFile('a.ts', 'function hidden(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts'], targets: ['a.ts'] })
+    expect(result.dead.map((d) => d.name)).toEqual(['hidden'])
+    expect(result.hints.some((h) => h.startsWith(PUBLIC_API_HINT_PREFIX))).toBe(false)
+  })
+
+  it('names the unreadable files when it withheld a verdict', async () => {
+    writeFile('a.ts', 'export function maybe(): void {}\n')
+    writeFile('broken.ts', "import { maybe } from './a.js'\nfunction oops( {\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'broken.ts'],
+      targets: ['a.ts'],
+    })
+    const hint = result.hints.find((h) => h.startsWith(UNREADABLE_HINT_PREFIX))
+    expect(hint).toBeDefined()
+    expect(hint).toContain('broken.ts')
+  })
+
+  it('emits no withheld-verdict hint when everything was readable', async () => {
+    writeFile('a.ts', 'export function exposed(): void {}\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts'], targets: ['a.ts'] })
+    expect(result.hints.some((h) => h.startsWith(UNREADABLE_HINT_PREFIX))).toBe(false)
   })
 })
 
