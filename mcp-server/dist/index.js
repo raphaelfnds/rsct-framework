@@ -23642,7 +23642,8 @@ var PHASE_STATE_PRESERVED_ON_ABANDON = [
   "bootstrap_at",
   "context_stale",
   "review_sweep",
-  "review_drift"
+  "review_drift",
+  "last_classify"
 ];
 function copyIfPresent(from, to, key) {
   const value = from[key];
@@ -23795,6 +23796,17 @@ function tierRank(tier) {
   if (!tier) return 0;
   return TIER_RANK[tier] ?? 0;
 }
+function refuseUnreadableState(projectRoot, read) {
+  if (read.parse_error === void 0) return null;
+  const path2 = phaseStatePath(projectRoot);
+  return {
+    ok: false,
+    path: path2,
+    reason: "unreadable_state",
+    parse_error: read.parse_error,
+    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`
+  };
+}
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
 function stampBootstrapMarker(projectRoot, opts = {}) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
@@ -23872,6 +23884,8 @@ function bootstrapWriteFailureHint(write, toolName, markerFresh) {
 }
 function stampClassifyVerdict(projectRoot, args2) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   const prevMaxRank = tierRank(baseState.last_classify?.tier_max);
   const currentRank = tierRank(args2.tier);
@@ -23893,6 +23907,8 @@ function stampClassifyVerdict(projectRoot, args2) {
 }
 function stampReviewCompleted(projectRoot, patch) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -23901,6 +23917,8 @@ function stampReviewCompleted(projectRoot, patch) {
 }
 function stampPlanDisposition(projectRoot, patch) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   const merged = {
     plan_slug: patch.plan_slug,

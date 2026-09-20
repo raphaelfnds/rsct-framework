@@ -416,6 +416,26 @@ seed it also calls uncoverable. That gap is its own issue.
 `unresolved_js_specifiers` keeps counting what still fails and the hint keeps firing on a partial
 under-report, so the honest-coverage rule of #54 stands.
 
+### ADR-017 — A phase-state writer refuses an unreadable file, and the tier ratchet survives an abandon (#77, 2.11.2)
+**Status**: active
+**Tags**: phase-state, gates
+**Context**: `readPhaseState` reports `{exists:true, state:null, parse_error}` on a corrupt file
+(`phase-scope.ts:317-324`), and four writers started from `{}` regardless, replacing whatever the
+file held — the review ledger, the drift record, the plan authorization — with their own block.
+#53 closed the bootstrap path the same way in 2.8.0, through the `readThenStampBootstrap` wrapper.
+**Decision**: `stampContextStale`, `stampClassifyVerdict`, `stampReviewCompleted` and
+`stampPlanDisposition` return `reason: 'unreadable_state'` and write nothing; the result carries
+the same `error` string shape the existing hints print, so every caller reports it without a new
+branch. An ABSENT file is not an unreadable one and is still created. `last_classify` is decided
+explicitly, as the issue demands: it is PRESERVED — added to `PHASE_STATE_PRESERVED_ON_ABANDON`,
+so abandoning a phase no longer resets `tier_max`, the ratchet `rsct_phase_code_start` reads to
+refuse a downgraded tier. That closes the abandon route only; the other ways to reset the verdict
+are #89.
+**Consequences**: a project with a corrupt `phase-state.json` stops recording these stamps until
+the file is repaired or deleted, and says so — the same posture #53 chose for the bootstrap marker.
+The existing abandon test that pinned `last_classify` as cleared was updated with the developer's
+OK; its nine other keys are still asserted, and the allowlist test beside it is untouched.
+
 ### ADR-014 — A leftover task name stops the start and asks the developer (2.11.1)
 **Status**: active
 **Tags**: phases, spec_slug

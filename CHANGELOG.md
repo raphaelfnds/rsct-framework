@@ -23,6 +23,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   glued inside a name still spans anything (ADR-015). The resolver maps `.js` → `.ts`/`.tsx` only
   after today's probes and only when the basename matches exactly, so the graph cannot differ
   between operating systems (ADR-016).
+- **A corrupt `phase-state.json` is no longer overwritten (#77).** `stampContextStale`,
+  `stampClassifyVerdict`, `stampReviewCompleted` and `stampPlanDisposition` refuse with
+  `unreadable_state` and say the file could not be read and that nothing was overwritten — the
+  posture `rsct_phase_code_start`'s bootstrap marker already had. An absent file is still created.
+- **Abandoning a phase no longer resets the tier ratchet (#77).** `last_classify` joins the
+  preserve list, so the highest tier ever classified survives `rsct_phase_abandon` and
+  `rsct_phase_code_start` keeps refusing a downgraded tier. Other ways to reset that verdict are
+  tracked in #89 (ADR-017).
 - **Contract surfaces now block exactly what they declare.** Under `**/api/**`, `api/`, `src/api/`
   and `any/dir/api/` still block a producer commit; `webapi/` and `openapi/billing.yaml`, which no
   declaration asked for, no longer do. The four places that teach the glob rule were corrected with

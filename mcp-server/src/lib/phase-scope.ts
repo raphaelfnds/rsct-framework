@@ -217,6 +217,7 @@ export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'context_stale',
   'review_sweep',
   'review_drift',
+  'last_classify',
 ]
 
 function copyIfPresent<K extends keyof PhaseState>(
@@ -254,6 +255,7 @@ export interface PhaseStateReadResult {
 export type WritePhaseStateResult =
   | { ok: true; path: string }
   | { ok: false; path: string; reason: 'write_failed'; error: string }
+  | { ok: false; path: string; reason: 'unreadable_state'; parse_error: string; error: string }
   | {
       ok: false
       path: string
@@ -421,6 +423,21 @@ export function tierRank(tier: string | undefined | null): number {
   return TIER_RANK[tier] ?? 0
 }
 
+export function refuseUnreadableState(
+  projectRoot: string,
+  read: PhaseStateReadResult,
+): WritePhaseStateResult | null {
+  if (read.parse_error === undefined) return null
+  const path = phaseStatePath(projectRoot)
+  return {
+    ok: false,
+    path,
+    reason: 'unreadable_state',
+    parse_error: read.parse_error,
+    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`,
+  }
+}
+
 export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
 
 export function stampBootstrapMarker(
@@ -444,6 +461,8 @@ export function stampContextStale(
   now: Date = new Date(),
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -557,6 +576,8 @@ export function stampClassifyVerdict(
   },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   const prevMaxRank = tierRank(baseState.last_classify?.tier_max)
   const currentRank = tierRank(args.tier)
@@ -585,6 +606,8 @@ export function stampReviewCompleted(
   patch: { spec_ref: string; completed_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -597,6 +620,8 @@ export function stampPlanDisposition(
   patch: { plan_slug: string; decision: 'keep' | 'delete'; decided_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   const merged: PlanDispositionBlock = {
     plan_slug: patch.plan_slug,

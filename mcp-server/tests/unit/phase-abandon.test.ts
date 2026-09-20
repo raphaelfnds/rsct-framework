@@ -307,14 +307,18 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
       'started_at',
       'plan_authorization',
       'free_commit_budget',
-      'last_classify',
       'disposition',
       'review',
       'review_findings',
     ]) {
       expect(state[key], `${key} must not survive an abandon`).toBeUndefined()
     }
-    expect(completeAudit().preserved_keys).toEqual([])
+    expect(state.last_classify, 'the tier ratchet survives an abandon (#77)').toEqual({
+      tier: 'standard',
+      tier_max: 'standard',
+      classified_at: '2026-06-07T15:30:00.000Z',
+    })
+    expect(completeAudit().preserved_keys).toEqual(['last_classify'])
   })
 
   it('drops a key the preserve-list does not name — allowlist, never wipe-list', async () => {
