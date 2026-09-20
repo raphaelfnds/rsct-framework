@@ -43,11 +43,17 @@ export interface TreeImportEdge {
 export interface TreeMemberUse {
   object: string
   member: string
+  owner: string | null
+}
+
+export interface TreeReference {
+  name: string
+  owner: string | null
 }
 
 export interface TreeSymbols {
   declarations: TreeDeclaration[]
-  references: string[]
+  references: TreeReference[]
   imports: TreeImportEdge[]
   memberUses: TreeMemberUse[]
 }
@@ -242,9 +248,16 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
   return { declarations, nameSites }
 }
 
+function ownerAt(declarations: TreeDeclaration[], index: number): string | null {
+  for (const declaration of declarations) {
+    if (index >= declaration.start && index < declaration.end) return declaration.name
+  }
+  return null
+}
+
 function collectSymbols(root: Node): TreeSymbols {
   const { declarations, nameSites } = topLevelDeclarations(root)
-  const references: string[] = []
+  const references: TreeReference[] = []
   const imports: TreeImportEdge[] = []
   const memberUses: TreeMemberUse[] = []
 
@@ -264,11 +277,15 @@ function collectSymbols(root: Node): TreeSymbols {
       const object = node.childForFieldName('object')
       const property = node.childForFieldName('property')
       if (object && property && object.type === 'identifier') {
-        memberUses.push({ object: object.text, member: property.text })
+        memberUses.push({
+          object: object.text,
+          member: property.text,
+          owner: ownerAt(declarations, node.startIndex),
+        })
       }
     }
     if (REFERENCE_NODES.has(type) && !nameSites.has(node.startIndex)) {
-      references.push(node.text)
+      references.push({ name: node.text, owner: ownerAt(declarations, node.startIndex) })
     }
     for (let i = 0; i < node.childCount; i++) {
       const child = node.child(i)

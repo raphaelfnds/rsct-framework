@@ -222,10 +222,6 @@ export function readCommitPaths(repo: SweepRepo, before: string | null, after: s
     .map((e) => ({ path: e.path, symlink: isSymlink(e) }))
 }
 
-export function readFullSha(repo: SweepRepo, rev: string): string | null {
-  return verifyObject(repo, `${rev}^{commit}`)
-}
-
 export function looksLikeLinkTarget(bytes: Buffer): boolean {
   return bytes.length > 0 && bytes.length <= 4096 && !bytes.includes(0x0a) && !bytes.includes(0)
 }

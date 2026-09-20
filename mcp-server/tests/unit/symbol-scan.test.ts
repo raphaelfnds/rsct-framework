@@ -13,7 +13,11 @@ async function symbols(source: string): Promise<TreeSymbols> {
 }
 
 function named(scan: TreeSymbols, name: string): number {
-  return scan.references.filter((r) => r === name).length
+  return scan.references.filter((r) => r.name === name).length
+}
+
+function ownerOf(scan: TreeSymbols, name: string): string | null | undefined {
+  return scan.references.find((r) => r.name === name)?.owner
 }
 
 describe('scanSymbols — declarations', () => {
@@ -131,7 +135,26 @@ describe('scanSymbols — what must NOT count as a reference', () => {
 describe('scanSymbols — member access through a namespace', () => {
   it('records the object and the member separately', async () => {
     const scan = await symbols("import * as ns from './y.js'\nexport const v = ns.member\n")
-    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'ns', member: 'member' }]))
+    expect(scan.memberUses).toEqual(
+      expect.arrayContaining([{ object: 'ns', member: 'member', owner: 'v' }]),
+    )
+  })
+})
+
+describe('scanSymbols — which declaration a reference sits in', () => {
+  it('attributes a reference to the declaration that encloses it', async () => {
+    const scan = await symbols('function target() {}\nfunction holder() { return target() }\n')
+    expect(ownerOf(scan, 'target')).toBe('holder')
+  })
+
+  it('reports no owner for a reference at the top level', async () => {
+    const scan = await symbols('function target() {}\ntarget()\n')
+    expect(ownerOf(scan, 'target')).toBeNull()
+  })
+
+  it('attributes a reference inside a const initialiser to that const', async () => {
+    const scan = await symbols('function target() {}\nconst held = target()\n')
+    expect(ownerOf(scan, 'target')).toBe('held')
   })
 })
 

@@ -230,7 +230,7 @@ function walkFiles(
   return results
 }
 
-function extractImports(content: string): string[] {
+export function extractImports(content: string): string[] {
   const imports = new Set<string>()
   for (const re of IMPORT_PATTERNS) {
     re.lastIndex = 0
