@@ -96,7 +96,9 @@ Surface globs support exactly three wildcards — `*`, `**`, `?` only:
 | Pattern | Matches |
 |---|---|
 | `*` | Any run of characters **except** `/` (one path segment). |
-| `**` | Any number of path segments, including `/`. |
+| `**/` | Any number of whole path segments, including none. `**/api/**` covers `api/`, `src/api/` and `any/dir/api/`, and does **not** cover `webapi/` or `openapi/`. |
+| `**` at the end | Everything below that directory. `src/**` needs the slash: it never matches `src.ts`. |
+| `**` glued inside a name | Any run of characters, `/` included — `openapi/**.yaml` still covers `openapi/v2/b.yaml`. |
 | `?` | Exactly one character except `/`. |
 
 **Brace alternation (`{a,b}`) and bracket classes (`[abc]`) are NOT supported** —

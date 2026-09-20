@@ -125,3 +125,26 @@ describe('lib/phase-scope — context_stale flag lifecycle (D4)', () => {
     expect(readContextStale(readPhaseState(tmpRoot).state)).toBeNull()
   })
 })
+
+describe('evaluateEditGuard — a path carrying a line terminator is blocked', () => {
+  const LF = String.fromCharCode(10)
+
+  it('blocks it even under a glob that spans directories', () => {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(
+      join(tmpRoot, '.rsct.json'),
+      JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }),
+      'utf8',
+    )
+    writeFileSync(
+      join(tmpRoot, '.rsct', 'phase-state.json'),
+      JSON.stringify({ phase: 'code', spec_slug: 'feat-x', scope_globs: ['**/x.ts'] }),
+      'utf8',
+    )
+    const blocked = evaluateEditGuard({ projectRoot: tmpRoot, rsctInstalled: true, filePath: `a${LF}b/x.ts` })
+    expect(blocked.decision).toBe('block')
+    expect(blocked.status).toBe('out_of_scope')
+    const allowed = evaluateEditGuard({ projectRoot: tmpRoot, rsctInstalled: true, filePath: 'a/b/x.ts' })
+    expect(allowed.decision).toBe('allow')
+  })
+})

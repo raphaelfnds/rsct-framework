@@ -657,3 +657,21 @@ describe('sweep ledger bookkeeping', () => {
     expect(result['gone.ts']).toBeUndefined()
   })
 })
+
+describe('rsct_phase_review_complete — a lock held by another session stops the completion', () => {
+  it('reports the lock and stamps nothing', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    openReview()
+    writeFileSync(
+      join(root, '.rsct', 'phase-state.lock'),
+      JSON.stringify({ session_id: 'someone-else', locked_at: new Date().toISOString() }),
+    )
+    const out = await phaseReviewCompleteHandler(
+      { project_root: root, spec_ref: 'feat-sweep', dev_approval: approval('review_complete:spec_ref=feat-sweep') },
+      { promptFn: prompts().fn },
+    )
+    const hints = (out as PhaseReviewCompleteOutput).hints.join(' ')
+    expect(hints).toContain('another session is editing phase-state.json')
+    expect(readJson('.rsct/phase-state.json').review).toBeUndefined()
+  })
+})

@@ -3411,7 +3411,8 @@ the questions but **NEVER invents** the relationships (the contract content is t
 2. **id** — a unique slug; suggest `<producer>-api`; the dev confirms/edits.
 3. **surface** — ask the dev for path globs in the producer repo. Glob rules (restate from the template
    `_help`): `*` `**` `?` only (no brace/char-class sets); a `dir/**` glob needs the trailing slash and
-   does NOT match a sibling `dir.ext`. Need ≥1 glob — WARN if empty (an empty surface can never gate).
+   does NOT match a sibling `dir.ext`; a leading `**/` spans whole directories, so `**/api/**` covers
+   `api/`, `src/api/` and `any/dir/api/`, never `webapi/` or `openapi/`. Need ≥1 glob — WARN if empty (an empty surface can never gate).
 4. **consumers** — present the OTHER registered apps (EXCLUDE the chosen producer — an app can't consume
    its own surface); the dev picks which depend on the surface.
 5. **description** — optional one-liner.

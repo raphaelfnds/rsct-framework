@@ -17,6 +17,7 @@ import {
 import {
   phaseStatePath,
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   type PhaseState,
   type PhaseVerificationBlock,
@@ -314,6 +315,41 @@ export async function phaseVerificationStartHandler(
       hints: [
         `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting the V phase.`,
       ],
+    }
+  }
+
+  const unreadable = refuseUnreadableState(projectRoot, existing)
+  if (unreadable && !unreadable.ok && unreadable.reason === 'unreadable_state') {
+    const unreadableAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: 'verification.start.rejected',
+        tool: 'rsct_phase_verification_start',
+        spec_ref: input.spec_ref,
+        reject_kind: 'state_unreadable',
+      },
+      config?.audit,
+    )
+    const fields = auditFields(unreadableAudit)
+    return {
+      status: 'state_write_failed',
+      findings_run_id: null,
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk.stats,
+      walk_coverage: walk.coverage,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [`⚠ ${unreadable.error} The V phase did not start.`],
     }
   }
 

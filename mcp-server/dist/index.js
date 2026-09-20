@@ -23642,7 +23642,8 @@ var PHASE_STATE_PRESERVED_ON_ABANDON = [
   "bootstrap_at",
   "context_stale",
   "review_sweep",
-  "review_drift"
+  "review_drift",
+  "last_classify"
 ];
 function copyIfPresent(from, to, key) {
   const value = from[key];
@@ -23704,9 +23705,10 @@ function readPhaseState(projectRoot) {
     return { exists: false, state: null };
   }
   try {
-    const raw = readFileSync(path2, "utf8");
+    const raw = readFileSync(path2, "utf8").replace(/^﻿/, "");
+    if (raw.trim() === "") return { exists: true, state: null };
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { exists: true, state: null, parse_error: "top-level value is not an object" };
     }
     return { exists: true, state: parsed };
@@ -23718,16 +23720,25 @@ function readPhaseState(projectRoot) {
     };
   }
 }
+var globRegexCache = /* @__PURE__ */ new Map();
 function globToRegex(glob) {
+  const cached2 = globRegexCache.get(glob);
+  if (cached2) return cached2;
   let out2 = "^";
   let i2 = 0;
   while (i2 < glob.length) {
     const ch = glob[i2];
     if (ch === "*") {
       if (glob[i2 + 1] === "*") {
-        out2 += ".*";
-        i2 += 2;
-        if (glob[i2] === "/") i2++;
+        const atSegmentStart = i2 === 0 || glob[i2 - 1] === "/";
+        const followedBySlash = glob[i2 + 2] === "/";
+        if (atSegmentStart && followedBySlash && i2 + 3 < glob.length) {
+          out2 += "(?:[^/]*/)*";
+          i2 += 3;
+        } else {
+          out2 += ".*";
+          i2 += followedBySlash ? 3 : 2;
+        }
       } else {
         out2 += "[^/]*";
         i2++;
@@ -23744,7 +23755,13 @@ function globToRegex(glob) {
     }
   }
   out2 += "$";
-  return new RegExp(out2);
+  const re = new RegExp(out2);
+  globRegexCache.set(glob, re);
+  return re;
+}
+var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
+function pathCarriesLineTerminator(path2) {
+  return LINE_TERMINATORS.some((terminator) => path2.includes(terminator));
 }
 function toPosix(p) {
   return p.split("\\").join("/");
@@ -23783,6 +23800,17 @@ var TIER_RANK = {
 function tierRank(tier) {
   if (!tier) return 0;
   return TIER_RANK[tier] ?? 0;
+}
+function refuseUnreadableState(projectRoot, read) {
+  if (read.parse_error === void 0) return null;
+  const path2 = phaseStatePath(projectRoot);
+  return {
+    ok: false,
+    path: path2,
+    reason: "unreadable_state",
+    parse_error: read.parse_error,
+    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`
+  };
 }
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
 function stampBootstrapMarker(projectRoot, opts = {}) {
@@ -23861,6 +23889,8 @@ function bootstrapWriteFailureHint(write, toolName, markerFresh) {
 }
 function stampClassifyVerdict(projectRoot, args2) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   const prevMaxRank = tierRank(baseState.last_classify?.tier_max);
   const currentRank = tierRank(args2.tier);
@@ -23882,6 +23912,8 @@ function stampClassifyVerdict(projectRoot, args2) {
 }
 function stampReviewCompleted(projectRoot, patch) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -23890,6 +23922,8 @@ function stampReviewCompleted(projectRoot, patch) {
 }
 function stampPlanDisposition(projectRoot, patch) {
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal) return refusal;
   const baseState = existing.state ?? {};
   const merged = {
     plan_slug: patch.plan_slug,
@@ -23905,7 +23939,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.11.1";
+var RSCT_MCP_VERSION = "2.11.2";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -26248,12 +26282,12 @@ function parseEnvFileAt(projectRoot, relPath) {
   } catch {
     return null;
   }
-  const basename3 = relPath.split("/").pop() ?? relPath;
-  const isProperties = /\.properties$/i.test(basename3);
-  const isEnv = /^\.env/.test(basename3);
+  const basename4 = relPath.split("/").pop() ?? relPath;
+  const isProperties = /\.properties$/i.test(basename4);
+  const isEnv = /^\.env/.test(basename4);
   if (!isProperties && !isEnv) return null;
   const format = isProperties ? "properties" : "env";
-  const profile = isProperties ? getProfileFromBasename(basename3) : null;
+  const profile = isProperties ? getProfileFromBasename(basename4) : null;
   const entries = isProperties ? parseProperties(content) : parseDotEnv(content);
   return { path: relPath, format, profile, entries };
 }
@@ -27890,7 +27924,7 @@ async function checkEditScopeHandler(rawInput) {
   } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = "unknown";
   } else {
-    const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root);
+    const match = pathCarriesLineTerminator(input.file_path) ? { matched: false } : matchesAnyGlob(input.file_path, scope_globs, resolution.root);
     status = match.matched ? "in_scope" : "out_of_scope";
     matched_glob = match.matched_glob ?? null;
   }
@@ -44863,7 +44897,43 @@ function extractImports(content) {
   }
   return [...imports];
 }
-function resolveImport(importerAbs, spec) {
+var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
+  [".js", [".ts", ".tsx"]]
+]);
+function hasExactEntry(path2, entries) {
+  const dir = dirname(path2);
+  let names = entries.get(dir);
+  if (!names) {
+    try {
+      names = new Set(readdirSync(dir));
+    } catch {
+      names = /* @__PURE__ */ new Set();
+    }
+    entries.set(dir, names);
+  }
+  return names.has(basename(path2));
+}
+function hasExactPath(projectRoot, candidate, entries) {
+  const rel = relPosix(projectRoot, candidate);
+  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
+  let walked = projectRoot;
+  for (const segment of rel.split("/")) {
+    walked = join(walked, segment);
+    if (!hasExactEntry(walked, entries)) return false;
+  }
+  return true;
+}
+function resolveNodeNextSource(projectRoot, target, entries) {
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
+  if (!sourceExtensions) return null;
+  const stem = target.slice(0, target.lastIndexOf("."));
+  for (const ext of sourceExtensions) {
+    const candidate = stem + ext;
+    if (hasExactPath(projectRoot, candidate, entries)) return candidate;
+  }
+  return null;
+}
+function resolveImport(projectRoot, importerAbs, spec, entries) {
   if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
   const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
   if (existsSync(target)) {
@@ -44883,7 +44953,7 @@ function resolveImport(importerAbs, spec) {
     const candidate = target + ext;
     if (existsSync(candidate)) return candidate;
   }
-  return null;
+  return resolveNodeNextSource(projectRoot, target, entries);
 }
 function walkReverseDeps(input) {
   const projectRoot = input.projectRoot;
@@ -44939,6 +45009,7 @@ function walkReverseDeps(input) {
     return notRun();
   }
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
+  const directoryEntries = /* @__PURE__ */ new Map();
   stats.files_scanned = candidates.length;
   const reverseDeps = /* @__PURE__ */ new Map();
   for (const candidateAbs of candidates) {
@@ -44953,7 +45024,7 @@ function walkReverseDeps(input) {
     const candidateRel = relPosix(projectRoot, candidateAbs);
     const imports = extractImports(content);
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(candidateAbs, spec);
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
       if (!resolvedAbs) {
         if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
           stats.unresolved_js_specifiers++;
@@ -45428,6 +45499,35 @@ function startPhaseGeneric(input, config2, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
   const existing = readPhaseState(input.projectRoot);
+  const unreadable = refuseUnreadableState(input.projectRoot, existing);
+  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "state_unreadable"
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "state_write_failed",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: unreadable.path,
+      phase_state_written: false,
+      existing_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [`\u26A0 ${unreadable.error} No phase was started.`]
+    };
+  }
   const baseState = existing.state ?? {};
   const existingPhase = baseState.phase;
   const staleVerificationLabel = isStaleVerificationLabel(baseState);
@@ -45958,6 +46058,40 @@ async function phaseVerificationStartHandler(rawInput) {
       hints: [
         `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting the V phase.`
       ]
+    };
+  }
+  const unreadable = refuseUnreadableState(projectRoot, existing);
+  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
+    const unreadableAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: "verification.start.rejected",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        reject_kind: "state_unreadable"
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(unreadableAudit);
+    return {
+      status: "state_write_failed",
+      findings_run_id: null,
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk2.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk2.stats,
+      walk_coverage: walk2.coverage,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [`\u26A0 ${unreadable.error} The V phase did not start.`]
     };
   }
   const leftover = leftoverTaskSlug(baseState, "verification", input.spec_ref, input.spec_slug);
@@ -46914,23 +47048,29 @@ async function classifyTaskHandler(rawInput) {
   const resolution = resolveProjectRoot(input.project_root);
   const { tier, signals, reasoning } = classify(input.task_description);
   const recommended = RECOMMENDED_PHASES[tier];
+  const stampHints = [];
   if (resolution.rsct_installed) {
-    stampClassifyVerdict(resolution.root, {
+    const stamp = stampClassifyVerdict(resolution.root, {
       tier,
       signalsSummary: signals.join(" | ")
     });
     appendAuditEntry(
       resolution.root,
-      { event: "classify.verdict", tool: "rsct_classify_task", tier },
+      { event: "classify.verdict", tool: "rsct_classify_task", tier, recorded: stamp.ok },
       resolution.config?.audit
     );
+    if (!stamp.ok) {
+      stampHints.push(
+        `\u26A0 tier='${tier}' was NOT recorded (${stamp.reason}): ${stamp.reason === "unreadable_state" ? stamp.error : stamp.path}. rsct_phase_code_start refuses to start until that file is repaired or deleted.`
+      );
+    }
   }
   let activePlan = null;
   if (input.use_active_plan_slug) {
     const plan = findActivePlan(resolution.root);
     if (plan) activePlan = { slug: plan.slug, status: plan.status };
   }
-  const hints = [];
+  const hints = [...stampHints];
   if (tier === "trivial") {
     hints.push(
       "Trivial tier \u2014 no spec or code phases needed. A change that touches code still needs rsct_phase_review_start / _complete before rsct_request_commit accepts it; a docs-only change does not."
@@ -47523,7 +47663,7 @@ function evaluateClassifyGate(args2) {
     spec_tier: specTier,
     tier_max_recorded: block.tier_max,
     classified_at: block.classified_at,
-    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass, OR re-classify with rsct_classify_task if the task scope genuinely changed.`
+    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass. Re-classifying does NOT lower the ceiling: tier_max only ever rises, and it now survives rsct_phase_abandon (ADR-017).`
   };
 }
 var SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -48599,16 +48739,21 @@ Yes = allow these versions. No = reject this REVIEW.`
   if (!auditOk) {
     output.hints.push("\u26A0 REVIEW completed, but the audit log could not record the sweep, so no file was stamped \u2014 rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.");
   } else {
-    const fresh = readPhaseState(projectRoot).state ?? {};
+    const freshRead = readPhaseState(projectRoot);
+    const freshRefusal = refuseUnreadableState(projectRoot, freshRead);
+    const fresh = freshRead.state ?? {};
     const next = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) };
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths);
       if (open.length === 0) delete next.review_drift;
       else next.review_drift = { ...fresh.review_drift, paths: open };
     }
-    const w = writePhaseState(projectRoot, next);
+    const w = freshRefusal ?? writePhaseState(projectRoot, next);
     if (w.ok) summary.stamped = stamps.map((s2) => s2.path);
-    else output.hints.push(`\u26A0 REVIEW completed, but the sweep ledger could not be written (${w.reason}) \u2014 rsct_request_commit will ask for a new REVIEW.`);
+    else
+      output.hints.push(
+        `\u26A0 REVIEW completed, but the sweep ledger could not be written (${w.reason}${w.reason === "unreadable_state" ? `: ${w.error}` : ""}) \u2014 rsct_request_commit will ask for a new REVIEW.`
+      );
   }
   if (summary.changed_during_dialog.length > 0) {
     output.hints.push(`\u26A0 ${summary.changed_during_dialog.length} file(s) changed while the dialog was open and were not stamped: ${summary.changed_during_dialog.join(", ")}.`);

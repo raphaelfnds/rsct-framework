@@ -12,6 +12,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.2] - 2026-09-20
+
+### Fixed
+
+- **The V phase could not see the repository it was auditing (#76, #77).** A leading `**/` in a
+  glob compiled to "any characters", so `**/build/**` excluded `webbuild/`, `app-build/`,
+  `redist/` and `test-coverage/` from the reverse-dependency walk; and a NodeNext specifier
+  (`'./x.js'` for a file stored as `x.ts`) resolved to nothing. MEASURED on this repository before:
+  611 unresolved specifiers and **0 importers**; after: **81 importers, 1 unresolved**.
+  `**/` now spans whole directories, a trailing `**` still covers everything below, and a `**`
+  glued inside a name still spans anything (ADR-015). The resolver maps `.js` → `.ts`/`.tsx` only
+  after today's probes and only when the basename matches exactly, so the graph cannot differ
+  between operating systems (ADR-016).
+- **A corrupt `phase-state.json` is no longer overwritten by the phase machine (#77).** The four
+  stamps (`stampContextStale`, `stampClassifyVerdict`, `stampReviewCompleted`,
+  `stampPlanDisposition`) and **every `rsct_phase_*_start`** refuse with `unreadable_state` and say the file could not be read and
+  that nothing was overwritten — the posture the bootstrap marker already had.
+  `rsct_phase_verification_start`, which has its own plumbing, refuses too. An absent, EMPTY or
+  whitespace-only file is not corruption and is still written, a UTF-8 BOM is tolerated, and an
+  array at the top level is treated as corruption.
+  The sweep-ledger write in `rsct_phase_review_complete` carries the same guard as insurance; that
+  tool already refused earlier with `no_active_phase` (measured with the guard present and removed).
+  `rsct_classify_task` now says when the tier was not recorded, and its audit line
+  carries `recorded: false` instead of implying a stamp. Other writers (`rsct_plan_authorize`,
+  `rsct_plan_revoke`, `rsct_request_commit`'s bookkeeping) still overwrite; that is tracked, not
+  claimed fixed.
+- **The edit-scope guard got stricter.** A `scope_globs` entry starting with `**/` now covers whole
+  directories only, so a file under `webbuild/` is `out_of_scope` for a `**/build/**` scope that
+  used to cover it. A path whose name carries a line terminator (`\n`, `\r`, U+2028, U+2029) is
+  never in scope — `rsct_check_edit_scope` and the PreToolUse guard refuse it outright, because no
+  single glob semantics can fail closed for both a gate that allows on a match and one that blocks
+  on a match.
+- **Abandoning a phase no longer resets the tier ratchet (#77).** `last_classify` joins the
+  preserve list, so the highest tier ever classified survives `rsct_phase_abandon` and
+  `rsct_phase_code_start` keeps refusing a downgraded tier. Other ways to reset that verdict are
+  tracked in #89 (ADR-017).
+- **Contract surfaces now block exactly what they declare.** Under `**/api/**`, `api/`, `src/api/`
+  and `any/dir/api/` still block a producer commit; `webapi/` and `openapi/billing.yaml`, which no
+  declaration asked for, no longer do. The four places that teach the glob rule were corrected with
+  it, and the shipped `contracts.json.template` already promised these semantics.
+
 ## [2.11.1] - 2026-09-18
 
 Three defects the first field test of 2.11.0 hit while running `/rsct-setup` in two

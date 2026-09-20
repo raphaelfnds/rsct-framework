@@ -558,7 +558,8 @@ In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks**
 touches a produced surface (listing the affected consumers) unless
 `dev_approval.override_contract_surface: { reason }` is given. Surface globs support `*` `**`
 `?` only (no `{a,b}` / `[abc]`); `dir/**` needs the trailing slash and does **not** match a
-sibling `dir.ext` file. Fail-graceful: no universe / no `contracts.json` → empty graph + a
+sibling `dir.ext` file. A leading `**/` spans whole directories, so `**/api/**` covers `api/`,
+`src/api/` and `any/dir/api/`, never `webapi/` or `openapi/` (2.11.2). Fail-graceful: no universe / no `contracts.json` → empty graph + a
 hint (never an error).
 
 **Name-mismatch warnings.** Whenever the contract graph and the universe are both
@@ -666,7 +667,10 @@ Compares a file path against the active spec phase's scope globs in
 
 `status='unknown'` when `.rsct/phase-state.json` is missing or empty
 (M3 owns the canonical schema). Glob support v1: `*`, `**`, `?` plus
-regex metachar escape; `{a,b}` and `[abc]` are deferred to v2.
+regex metachar escape; `{a,b}` and `[abc]` are deferred to v2. A leading
+`**/` spans whole directories, so a scope of `**/build/**` covers `build/`
+and `a/b/build/`, never `webbuild/` (2.11.2 — a scope that relied on the
+old wide match now answers `out_of_scope`).
 
 ### §C-gated mutating ops
 
