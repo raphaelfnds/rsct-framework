@@ -321,6 +321,51 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     expect(completeAudit().preserved_keys).toEqual(['last_classify'])
   })
 
+  it('preserves dead_code_keeps — the developer decided those, not the abandoned work (#62)', async () => {
+    // Mutation: remove 'dead_code_keeps' from PHASE_STATE_PRESERVED_ON_ABANDON.
+    // Without it, abandoning a phase re-asks the developer about every symbol they
+    // already chose to keep, and the commit gate refuses until they answer again.
+    writePhaseState({
+      phase: 'code',
+      spec_slug: 'feat-x',
+      dead_code_keeps: [
+        {
+          path: 'src/lib/guard.ts',
+          name: 'compileGuard',
+          declaration_sha256: 'a'.repeat(64),
+          note: 'exists to fail the build when the schema drifts',
+          spec_ref: 'feat-x',
+          at: STAMP,
+        },
+      ],
+    })
+    const r = (await phaseAbandonHandler(
+      {
+        project_root: tmpRoot,
+        reason: 'restarting the task from research',
+        dev_approval: approval(),
+      },
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )) as PhaseAbandonOutput
+    expect(r.status).toBe('abandoned')
+
+    const state = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(state.phase).toBeUndefined() // control: the write really happened
+    expect(state.dead_code_keeps).toEqual([
+      {
+        path: 'src/lib/guard.ts',
+        name: 'compileGuard',
+        declaration_sha256: 'a'.repeat(64),
+        note: 'exists to fail the build when the schema drifts',
+        spec_ref: 'feat-x',
+        at: STAMP,
+      },
+    ])
+    expect(completeAudit().preserved_keys).toEqual(['dead_code_keeps'])
+  })
+
   it('drops a key the preserve-list does not name — allowlist, never wipe-list', async () => {
     // Mutation: rewrite preserveAcrossAbandon as `{...state}` minus a wipe-list.
     // Then a PhaseState key added later leaks through by default, which is exactly

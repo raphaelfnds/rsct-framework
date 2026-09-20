@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { checkDeadCode, declarationSha256 } from '../../src/lib/dead-code/review-gate.js'
+import {
+  checkDeadCode,
+  checkStagedDeadCode,
+  declarationSha256,
+  mergeDeadCodeKeeps,
+  readDeadCodeKeeps,
+} from '../../src/lib/dead-code/review-gate.js'
 
 let tmpRoot: string
 
@@ -142,6 +148,121 @@ describe('checkDeadCode — the REVIEW gate', () => {
       keeps: [],
     })
     expect(check.ok).toBe(true)
+  })
+})
+
+describe('checkStagedDeadCode — the commit gate', () => {
+  it('passes when nothing staged is dead', async () => {
+    writeFile('a.ts', 'export function used(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    commitAll()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+
+  it('refuses a staged file carrying a dead symbol, naming it and the path', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    commitAll()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(false)
+    if (check.ok) return
+    expect(check.reject_kind).toBe('dead_code_staged')
+    expect(check.reason).toContain('a.ts:rotting')
+    expect(check.paths).toEqual(['a.ts'])
+  })
+
+  it('passes once the REVIEW recorded the developer keeping it', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    commitAll()
+    const review = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (review.ok) throw new Error('expected the review to reject first')
+    const pending = review.pending[0]!
+    const records = mergeDeadCodeKeeps(
+      undefined,
+      [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'load-bearing' }],
+      'spec-x',
+      new Date().toISOString(),
+    )
+    const check = await checkStagedDeadCode({
+      projectRoot: tmpRoot,
+      stagedPaths: ['a.ts'],
+      keeps: readDeadCodeKeeps(records),
+    })
+    expect(check.ok).toBe(true)
+    if (check.ok) expect(check.kept).toBe(1)
+  })
+
+  it('refuses again once the kept declaration is edited', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    commitAll()
+    const review = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (review.ok) throw new Error('expected the review to reject first')
+    const pending = review.pending[0]!
+    const records = mergeDeadCodeKeeps(
+      undefined,
+      [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'load-bearing' }],
+      'spec-x',
+      new Date().toISOString(),
+    )
+    writeFile('a.ts', 'export function used(): void {}\nexport function rotting(): number { return 7 }\n')
+    const check = await checkStagedDeadCode({
+      projectRoot: tmpRoot,
+      stagedPaths: ['a.ts'],
+      keeps: readDeadCodeKeeps(records),
+    })
+    expect(check.ok).toBe(false)
+    if (check.ok) return
+    expect(check.reason).toContain('different declaration bytes')
+  })
+})
+
+describe('readDeadCodeKeeps / mergeDeadCodeKeeps', () => {
+  it('drops anything that is not a complete keep record', () => {
+    expect(readDeadCodeKeeps('nope')).toEqual([])
+    expect(readDeadCodeKeeps([{ path: 'a.ts' }])).toEqual([])
+    expect(readDeadCodeKeeps([{ path: 'a.ts', name: 'x', declaration_sha256: 'abc' }])).toEqual([])
+  })
+
+  it('keeps a complete record', () => {
+    const record = { path: 'a.ts', name: 'x', declaration_sha256: 'abc', note: 'why' }
+    expect(readDeadCodeKeeps([record])).toEqual([record])
+  })
+
+  it('carries earlier keeps forward and replaces one granted again for the same bytes', () => {
+    const first = mergeDeadCodeKeeps(
+      undefined,
+      [{ path: 'a.ts', name: 'x', declaration_sha256: 'aa', note: 'first' }],
+      'spec-1',
+      '2026-01-01T00:00:00.000Z',
+    )
+    const second = mergeDeadCodeKeeps(
+      first,
+      [{ path: 'a.ts', name: 'x', declaration_sha256: 'aa', note: 'second' }],
+      'spec-2',
+      '2026-01-02T00:00:00.000Z',
+    )
+    expect(second).toHaveLength(1)
+    expect(second[0]?.note).toBe('second')
+    expect(second[0]?.spec_ref).toBe('spec-2')
+  })
+
+  it('keeps both when the same symbol is kept for different declaration bytes', () => {
+    const first = mergeDeadCodeKeeps(
+      undefined,
+      [{ path: 'a.ts', name: 'x', declaration_sha256: 'aa', note: 'old bytes' }],
+      'spec-1',
+      '2026-01-01T00:00:00.000Z',
+    )
+    const second = mergeDeadCodeKeeps(
+      first,
+      [{ path: 'a.ts', name: 'x', declaration_sha256: 'bb', note: 'new bytes' }],
+      'spec-2',
+      '2026-01-02T00:00:00.000Z',
+    )
+    expect(second).toHaveLength(2)
   })
 })
 

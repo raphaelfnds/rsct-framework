@@ -31,6 +31,11 @@ import {
   type StagedSweepCheck,
 } from '../lib/comment-sweep/review.js'
 import {
+  checkStagedDeadCode,
+  readDeadCodeKeeps,
+  type StagedDeadCodeCheck,
+} from '../lib/dead-code/review-gate.js'
+import {
   effectiveProtectedList,
   isProtectedBranch,
 } from '../lib/branch-protection.js'
@@ -129,6 +134,7 @@ export type RequestCommitRejectKind =
   | 'migration_reverted'
   | 'review_drift'
   | 'review_unreadable'
+  | 'dead_code_staged'
 
 export type CommitAuthVia = 'dev_approval' | 'plan_token' | 'free_commit'
 
@@ -374,8 +380,54 @@ export async function requestCommitHandler(
       hints: withAdvisories([check.reason]),
     }
   }
+  const runDeadCodeCheck = async (paths: readonly string[]): Promise<StagedDeadCodeCheck> =>
+    checkStagedDeadCode({
+      projectRoot,
+      stagedPaths: paths,
+      publicApi: config?.public_api,
+      keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
+    })
+  const rejectDeadCode = (
+    check: Extract<StagedDeadCodeCheck, { ok: false }>,
+    stage: 'before_authorization' | 'before_commit',
+  ): RequestCommitOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: check.reject_kind,
+        reason: check.reason,
+        branch: gitState.branch,
+        paths: check.paths,
+        stage,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: check.reject_kind,
+      reason: check.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([check.reason, ...check.hints]),
+    }
+  }
+
   const sweepBefore = await runSweepCheck()
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, 'before_authorization')
+  const deadBefore = await runDeadCodeCheck(sweepBefore.checked.map((c) => c.path))
+  if (!deadBefore.ok) return rejectDeadCode(deadBefore, 'before_authorization')
 
   let channel: CommitChannel
   let authorizedVia: CommitAuthVia
@@ -726,6 +778,8 @@ export async function requestCommitHandler(
 
   const sweepAtCommit = await runSweepCheck()
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
+  const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked.map((c) => c.path))
+  if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, 'before_commit')
 
   let reservedToken: PlanAuthorizationBlock | null = null
   let reservedFreeBudget: FreeCommitBudget | null = null

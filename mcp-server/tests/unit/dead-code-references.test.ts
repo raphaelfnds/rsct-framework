@@ -7,8 +7,10 @@ import {
   ENTRYPOINT_HINT_PREFIX,
   PUBLIC_API_HINT_PREFIX,
   UNREADABLE_HINT_PREFIX,
+  clearSymbolScanCache,
   findDeadSymbols,
   languageOf,
+  symbolScanCacheSize,
 } from '../../src/lib/dead-code/references.js'
 
 let tmpRoot: string
@@ -304,6 +306,32 @@ describe('findDeadSymbols — a file nobody imports cannot be told from an entry
   it('judges the exports once any file imports it, even for side effects', async () => {
     writeFile('a.ts', 'export function nowJudged(): void {}\n')
     expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['nowJudged'])
+  })
+})
+
+describe('the parse cache — the commit gate runs this check twice', () => {
+  it('reuses a parse for identical content instead of re-parsing', async () => {
+    clearSymbolScanCache()
+    expect(symbolScanCacheSize()).toBe(0)
+    writeFile('a.ts', 'export function used(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    const corpus = ['a.ts', 'b.ts', importerOf('a.ts')]
+    await findDeadSymbols({ projectRoot: tmpRoot, corpus, targets: ['a.ts'] })
+    const afterFirst = symbolScanCacheSize()
+    expect(afterFirst).toBe(3)
+    await findDeadSymbols({ projectRoot: tmpRoot, corpus, targets: ['a.ts'] })
+    expect(symbolScanCacheSize()).toBe(afterFirst)
+  })
+
+  it('does not serve a stale parse after the content changes', async () => {
+    clearSymbolScanCache()
+    writeFile('a.ts', 'export function used(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    const corpus = ['a.ts', 'b.ts', importerOf('a.ts')]
+    expect((await findDeadSymbols({ projectRoot: tmpRoot, corpus, targets: ['a.ts'] })).dead).toEqual([])
+    writeFile('a.ts', 'export function used(): void {}\nexport function fresh(): void {}\n')
+    const second = await findDeadSymbols({ projectRoot: tmpRoot, corpus, targets: ['a.ts'] })
+    expect(second.dead.map((d) => d.name)).toEqual(['fresh'])
   })
 })
 

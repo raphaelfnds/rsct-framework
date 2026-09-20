@@ -156,6 +156,15 @@ export interface SweepLedgerEntry {
 
 export type SweepLedger = Record<string, SweepLedgerEntry[]>
 
+export interface DeadCodeKeepRecord {
+  path: string
+  name: string
+  declaration_sha256: string
+  note: string
+  spec_ref: string
+  at: string
+}
+
 export interface ReviewDriftBlock {
   sha: string
   paths: string[]
@@ -192,6 +201,7 @@ export interface PhaseState {
   review_findings?: PhaseFindingsBlock
   review_sweep?: SweepLedger
   review_drift?: ReviewDriftBlock
+  dead_code_keeps?: DeadCodeKeepRecord[]
   last_classify?: LastClassifyBlock
   plan_authorization?: PlanAuthorizationBlock
   free_commit_budget?: FreeCommitBudget
@@ -218,6 +228,7 @@ export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'review_sweep',
   'review_drift',
   'last_classify',
+  'dead_code_keeps',
 ]
 
 function copyIfPresent<K extends keyof PhaseState>(

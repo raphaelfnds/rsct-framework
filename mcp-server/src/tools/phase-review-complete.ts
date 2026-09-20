@@ -53,6 +53,7 @@ import {
 import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
 import {
   checkDeadCode,
+  mergeDeadCodeKeeps,
   type DeadCodeRejectKind,
   type PendingDeadSymbol,
 } from '../lib/dead-code/review-gate.js'
@@ -675,6 +676,9 @@ export async function phaseReviewCompleteHandler(
     const freshRefusal = refuseUnreadableState(projectRoot, freshRead)
     const fresh = freshRead.state ?? {}
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
+    const keepRecords = mergeDeadCodeKeeps(fresh.dead_code_keeps, sweepInput.data.dead_code_keeps ?? [], input.spec_ref, at)
+    if (keepRecords.length > 0) next.dead_code_keeps = keepRecords
+    else delete next.dead_code_keeps
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths)
       if (open.length === 0) delete next.review_drift

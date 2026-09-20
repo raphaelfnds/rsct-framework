@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, relative, resolve as resolvePath } from 'node:path'
 
@@ -9,6 +10,7 @@ import {
   scanSymbols,
   type DeclarationKind,
   type TreeLanguage,
+  type TreeSymbolScan,
   type TreeSymbols,
 } from '../comment-sweep/tree-engine.js'
 
@@ -96,6 +98,27 @@ function relPosix(projectRoot: string, abs: string): string {
   return toPosix(relative(projectRoot, abs))
 }
 
+const scanCache = new Map<string, TreeSymbolScan>()
+const SCAN_CACHE_MAX = 4000
+
+export function clearSymbolScanCache(): void {
+  scanCache.clear()
+}
+
+export function symbolScanCacheSize(): number {
+  return scanCache.size
+}
+
+async function scanCached(language: TreeLanguage, source: string): Promise<TreeSymbolScan> {
+  const key = `${language}\u0000${createHash('sha256').update(source, 'utf8').digest('hex')}`
+  const cached = scanCache.get(key)
+  if (cached) return cached
+  const scan = await scanSymbols(language, source)
+  if (scanCache.size >= SCAN_CACHE_MAX) scanCache.clear()
+  scanCache.set(key, scan)
+  return scan
+}
+
 function resolveEdge(
   projectRoot: string,
   fromRel: string,
@@ -128,7 +151,7 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
       unreadable.add(rel)
       continue
     }
-    const scan = await scanSymbols(language, source)
+    const scan = await scanCached(language, source)
     if (!scan.ok) {
       unreadable.add(rel)
       for (const specifier of extractImports(source)) {

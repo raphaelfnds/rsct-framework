@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { knownPaths } from '../comment-sweep/review.js'
+import type { DeadCodeKeepRecord } from '../phase-scope.js'
 import { corpusFrom, findDeadSymbols, isAnalysable, type DeadSymbol } from './references.js'
 
 export interface DeadCodeKeep {
@@ -40,6 +41,86 @@ export function declarationSha256(source: string, symbol: DeadSymbol): string {
 
 function keyOf(path: string, name: string): string {
   return `${path}\u0000${name}`
+}
+
+export type StagedDeadCodeCheck =
+  | { ok: true; unknown: number; kept: number }
+  | { ok: false; reject_kind: 'dead_code_staged'; reason: string; hints: string[]; paths: string[] }
+
+export function mergeDeadCodeKeeps(
+  existing: readonly DeadCodeKeepRecord[] | undefined,
+  granted: readonly DeadCodeKeep[],
+  specRef: string,
+  at: string,
+): DeadCodeKeepRecord[] {
+  const byKey = new Map<string, DeadCodeKeepRecord>()
+  for (const record of existing ?? []) {
+    byKey.set(`${keyOf(record.path, record.name)}\u0000${record.declaration_sha256}`, record)
+  }
+  for (const keep of granted) {
+    byKey.set(`${keyOf(keep.path, keep.name)}\u0000${keep.declaration_sha256}`, {
+      path: keep.path,
+      name: keep.name,
+      declaration_sha256: keep.declaration_sha256,
+      note: keep.note,
+      spec_ref: specRef,
+      at,
+    })
+  }
+  return [...byKey.values()]
+}
+
+export function readDeadCodeKeeps(value: unknown): DeadCodeKeep[] {
+  if (!Array.isArray(value)) return []
+  const keeps: DeadCodeKeep[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    if (
+      typeof record.path === 'string' &&
+      typeof record.name === 'string' &&
+      typeof record.declaration_sha256 === 'string' &&
+      typeof record.note === 'string'
+    ) {
+      keeps.push({
+        path: record.path,
+        name: record.name,
+        declaration_sha256: record.declaration_sha256,
+        note: record.note,
+      })
+    }
+  }
+  return keeps
+}
+
+export async function checkStagedDeadCode(args: {
+  projectRoot: string
+  stagedPaths: readonly string[]
+  publicApi?: readonly string[] | undefined
+  keeps: readonly DeadCodeKeep[]
+}): Promise<StagedDeadCodeCheck> {
+  const check = await checkDeadCode({
+    projectRoot: args.projectRoot,
+    touched: args.stagedPaths,
+    ...(args.publicApi !== undefined && { publicApi: args.publicApi }),
+    keeps: args.keeps,
+  })
+  if (check.ok) return { ok: true, unknown: check.unknown, kept: check.kept }
+  const named = check.pending.map((p) => `${p.path}:${p.name}`)
+  const staleKeep = check.reject_kind === 'dead_code_keep_stale'
+  return {
+    ok: false,
+    reject_kind: 'dead_code_staged',
+    reason: staleKeep
+      ? `${named.length} staged symbol(s) carry a keep decided about different declaration bytes: ${named.join(', ')}`
+      : `${named.length} staged symbol(s) are referenced nowhere: ${named.join(', ')}`,
+    hints: [
+      staleKeep
+        ? 'The declaration changed after the developer kept it. Run the REVIEW again so they decide about the bytes being committed.'
+        : 'A completed REVIEW either removes them or records the developer keeping them. Run rsct_phase_review_start / _complete over these paths.',
+    ],
+    paths: [...new Set(check.pending.map((p) => p.path))],
+  }
 }
 
 export async function checkDeadCode(args: {
