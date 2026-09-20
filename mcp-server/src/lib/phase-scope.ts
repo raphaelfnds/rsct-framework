@@ -217,6 +217,7 @@ export const PHASE_STATE_PRESERVED_ON_ABANDON: readonly (keyof PhaseState)[] = [
   'context_stale',
   'review_sweep',
   'review_drift',
+  'last_classify',
 ]
 
 function copyIfPresent<K extends keyof PhaseState>(
@@ -254,6 +255,7 @@ export interface PhaseStateReadResult {
 export type WritePhaseStateResult =
   | { ok: true; path: string }
   | { ok: false; path: string; reason: 'write_failed'; error: string }
+  | { ok: false; path: string; reason: 'unreadable_state'; parse_error: string; error: string }
   | {
       ok: false
       path: string
@@ -311,9 +313,10 @@ export function readPhaseState(projectRoot: string): PhaseStateReadResult {
     return { exists: false, state: null }
   }
   try {
-    const raw = readFileSync(path, 'utf8')
+    const raw = readFileSync(path, 'utf8').replace(/^﻿/, '')
+    if (raw.trim() === '') return { exists: true, state: null }
     const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { exists: true, state: null, parse_error: 'top-level value is not an object' }
     }
     return { exists: true, state: parsed as PhaseState }
@@ -326,16 +329,26 @@ export function readPhaseState(projectRoot: string): PhaseStateReadResult {
   }
 }
 
+const globRegexCache = new Map<string, RegExp>()
+
 export function globToRegex(glob: string): RegExp {
+  const cached = globRegexCache.get(glob)
+  if (cached) return cached
   let out = '^'
   let i = 0
   while (i < glob.length) {
     const ch = glob[i]!
     if (ch === '*') {
       if (glob[i + 1] === '*') {
-        out += '.*'
-        i += 2
-        if (glob[i] === '/') i++
+        const atSegmentStart = i === 0 || glob[i - 1] === '/'
+        const followedBySlash = glob[i + 2] === '/'
+        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
+          out += '(?:[^/]*/)*'
+          i += 3
+        } else {
+          out += '.*'
+          i += followedBySlash ? 3 : 2
+        }
       } else {
         out += '[^/]*'
         i++
@@ -352,12 +365,20 @@ export function globToRegex(glob: string): RegExp {
     }
   }
   out += '$'
-  return new RegExp(out)
+  const re = new RegExp(out)
+  globRegexCache.set(glob, re)
+  return re
 }
 
 export interface ScopeMatch {
   matched: boolean
   matched_glob?: string
+}
+
+const LINE_TERMINATORS = [0x0a, 0x0d, 0x2028, 0x2029].map((code) => String.fromCharCode(code))
+
+export function pathCarriesLineTerminator(path: string): boolean {
+  return LINE_TERMINATORS.some((terminator) => path.includes(terminator))
 }
 
 export function toPosix(p: string): string {
@@ -409,6 +430,21 @@ export function tierRank(tier: string | undefined | null): number {
   return TIER_RANK[tier] ?? 0
 }
 
+export function refuseUnreadableState(
+  projectRoot: string,
+  read: PhaseStateReadResult,
+): WritePhaseStateResult | null {
+  if (read.parse_error === undefined) return null
+  const path = phaseStatePath(projectRoot)
+  return {
+    ok: false,
+    path,
+    reason: 'unreadable_state',
+    parse_error: read.parse_error,
+    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`,
+  }
+}
+
 export const BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1000
 
 export function stampBootstrapMarker(
@@ -432,6 +468,8 @@ export function stampContextStale(
   now: Date = new Date(),
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -545,6 +583,8 @@ export function stampClassifyVerdict(
   },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   const prevMaxRank = tierRank(baseState.last_classify?.tier_max)
   const currentRank = tierRank(args.tier)
@@ -573,6 +613,8 @@ export function stampReviewCompleted(
   patch: { spec_ref: string; completed_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   return writePhaseState(projectRoot, {
     ...baseState,
@@ -585,6 +627,8 @@ export function stampPlanDisposition(
   patch: { plan_slug: string; decision: 'keep' | 'delete'; decided_at: string },
 ): WritePhaseStateResult {
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal) return refusal
   const baseState: PhaseState = existing.state ?? {}
   const merged: PlanDispositionBlock = {
     plan_slug: patch.plan_slug,

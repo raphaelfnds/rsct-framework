@@ -396,3 +396,100 @@ describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
     expect(content).toContain('"phase": "code"')
   })
 })
+
+describe('lib/phase-scope — a leading ** spans whole segments, never part of one (#76)', () => {
+  const wide: Array<[string, string]> = [
+    ['**/build/**', 'webbuild/x.ts'],
+    ['**/build/**', 'packages/app-build/x.ts'],
+    ['**/dist/**', 'redist/x.ts'],
+    ['**/coverage/**', 'test-coverage/x.ts'],
+    ['**/api/**', 'webapi/x.ts'],
+    ['**/api/**', 'openapi/billing.yaml'],
+    ['a/**/b', 'a/xb'],
+  ]
+  for (const [glob, path] of wide) {
+    it(`'${glob}' no longer matches '${path}'`, () => {
+      expect(globToRegex(glob).test(path)).toBe(false)
+    })
+  }
+
+  const kept: Array<[string, string]> = [
+    ['**/build/**', 'build/x.ts'],
+    ['**/build/**', 'a/b/build/x.ts'],
+    ['**/api/**', 'api/x.ts'],
+    ['**/api/**', 'src/api/x.ts'],
+    ['**/*.ts', 'a.ts'],
+    ['**/*.ts', 'src/a.ts'],
+    ['src/**', 'src/a.ts'],
+    ['src/**.ts', 'src/a/b.ts'],
+    ['openapi/**.yaml', 'openapi/v2/b.yaml'],
+    ['**', 'anything/deep.ts'],
+    ['**/', 'a.ts'],
+    ['src/**/', 'src/a.ts'],
+    ['**/**', 'a/b.ts'],
+    ['a/**/b', 'a/x/b'],
+  ]
+  for (const [glob, path] of kept) {
+    it(`'${glob}' still matches '${path}'`, () => {
+      expect(globToRegex(glob).test(path)).toBe(true)
+    })
+  }
+
+  it('a ** glued to the end of a name keeps spanning anything, slash or not', () => {
+    expect(globToRegex('a**/b').test('axxb')).toBe(true)
+    expect(globToRegex('a**/b').test('axx/b')).toBe(true)
+  })
+
+  it('dir/** matches nothing at dir itself, nor a sibling file, as the contract template promises', () => {
+    expect(globToRegex('build/**').test('build')).toBe(false)
+    expect(globToRegex('build/**').test('build.ts')).toBe(false)
+  })
+
+  it('the edit-scope guard stops covering a sibling directory', async () => {
+    const inside = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: 'build/x.ts',
+      phase_state_override: { scope_globs: ['**/build/**'] },
+    })) as CheckEditScopeOutput
+    const outside = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: 'webbuild/x.ts',
+      phase_state_override: { scope_globs: ['**/build/**'] },
+    })) as CheckEditScopeOutput
+    expect(inside.status).toBe('in_scope')
+    expect(outside.status).toBe('out_of_scope')
+  })
+
+  it('matchesAnyGlob answers the same way the walk asks about a directory', () => {
+    const excludes = ['**/node_modules/**', '**/dist/**', '**/build/**']
+    expect(matchesAnyGlob('build/probe', excludes).matched).toBe(true)
+    expect(matchesAnyGlob('mcp-server/node_modules/probe', excludes).matched).toBe(true)
+    expect(matchesAnyGlob('webbuild/probe', excludes).matched).toBe(false)
+  })
+})
+
+describe('lib/phase-scope — a path carrying a line terminator is never in scope', () => {
+  const LF = String.fromCharCode(10)
+
+  it('the glob itself still spans segments the same way', () => {
+    expect(globToRegex('**/x.ts').test(`a${LF}b/x.ts`)).toBe(true)
+  })
+
+  it('but the edit-scope guard refuses such a path', async () => {
+    const out = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: `a${LF}b/x.ts`,
+      phase_state_override: { scope_globs: ['**/x.ts'] },
+    })) as CheckEditScopeOutput
+    expect(out.status).toBe('out_of_scope')
+  })
+
+  it('and a plain path under the same glob is still in scope', async () => {
+    const out = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: 'a/b/x.ts',
+      phase_state_override: { scope_globs: ['**/x.ts'] },
+    })) as CheckEditScopeOutput
+    expect(out.status).toBe('in_scope')
+  })
+})

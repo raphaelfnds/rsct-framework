@@ -370,6 +370,105 @@ scripts (teammates' hooks break).
 unchanged blob passes it. A pre-commit hook that rewrites the script becomes drift, as for any
 other file. Deleting the scripts (uninstall) still follows the deletion rule.
 
+### ADR-015 — One glob semantics: a leading `**/` spans whole segments (#76, 2.11.2)
+**Status**: active
+**Tags**: globs, v-phase, edit-scope, contracts
+**Context**: `globToRegex` compiled a leading `**` to `.*` and then swallowed the following `/`,
+so `**/build/**` became `^.*build/.*$`. MEASURED as the walk calls it (`dir + "/probe"`):
+`webbuild`, `packages/app-build`, `redist`, `test-coverage` and `my_node_modules` were all
+excluded from the V walk. Five call sites share the matcher: the walk's language and exclude
+globs (`reverse-dep-walk.ts:201,222,225,226`), the edit-scope guard (`edit-guard.ts:66`),
+`check-edit-scope.ts:142` and the contract surface (`contracts.ts:124`).
+**Decision**: one semantics for all of them — a `**/` at the start of a segment is zero or more
+WHOLE segments (`(?:[^/]*/)*`); a trailing `**` (and a trailing `**/`) is everything below; a `**`
+glued inside a name keeps today's `.*`, because narrowing that would lose a DECLARED contract
+block (`openapi/**.yaml` vs `openapi/v2/b.yaml`). Compiled regexes are memoised per glob.
+**Direction of each gate**: walk — sees more, the V answer is more complete; edit-scope — matches
+fewer paths, so it refuses more; contract surface — blocks exactly what the surface declares.
+The developer weighed the contract case three times and chose to remove the excess: `api/`,
+`src/api/` and `any/dir/api/` still block under `**/api/**`; `webapi/` and `openapi/billing.yaml`,
+which no declaration asked for, no longer do. A block the declaration never asked for is noise,
+and noise is what makes a gate get ignored. The four places that teach the rule were corrected
+with it (template `_help`, `docs/multi-repo.md`, `prompts/01-setup.md` Q&A, `mcp-server/README.md`),
+and the template already promised these semantics.
+**Line terminators, decided in REVIEW**: `[^/]` matches `\n`, so narrowing `**/` changed what a
+path containing a line terminator matches — and the direction FLIPS by consumer: for the edit-scope
+guard (match = allow) a wider match is weaker, for the walk exclusions and the contract surface
+(match = skip / block) a narrower match is weaker. One regex cannot be strict for both, so the
+regex keeps `[^/]` — consistent with `*` and `?` — and the two allow-side consumers
+(`lib/edit-guard.ts`, `tools/check-edit-scope.ts`) refuse a path carrying `\n`, `\r`, U+2028 or
+U+2029 outright. Both ends fail closed.
+**Consequences**: the V walk scans directories it used to skip (MEASURED: no change on this repo —
+`node_modules`, `dist` and `.git` are still excluded, `files_scanned` unchanged). A project whose
+scope glob relied on the wide match now sees `out_of_scope` — the stricter direction.
+
+### ADR-016 — The walk resolves NodeNext specifiers, case-exactly, as a last resort (#77, 2.11.2)
+**Status**: active
+**Tags**: v-phase, blast-radius, cross-os
+**Context**: under `"module": "NodeNext"` TypeScript source imports `'./x.js'` for a file stored as
+`x.ts`. The walk probed `target + ext` only, so the specifier resolved to nothing. MEASURED on this
+repository (seed `src/lib/phase-scope.ts`, depth 2): 216 files scanned, **611 unresolved
+specifiers, 0 importers** — the blast radius was empty for the framework's own code, and for any
+NodeNext project. #54 stage 1 shipped the honest hint for exactly this, and
+`reverse-dep-walk.test.ts` pinned the gap as "REPORTED, not fixed"; that decision is superseded
+here, and the test now pins a specifier that truly resolves to nothing.
+**Decision**: after today's probes fail, map the specifier extension to its source extensions
+(`.js` → `.ts`, `.tsx`) and accept a candidate only when `readdirSync` of its directory holds that
+exact basename, memoised per walk. The case check is not optional: `existsSync('widget.ts')` is
+true for `Widget.ts` on Windows and macOS, so without it one project would get two different import
+graphs on two operating systems — the invariant this module's own header states. `.mjs`/`.cjs` are
+NOT mapped: `.mts`/`.cts` are not in `DEFAULT_LANG_GLOBS`, so the walk would list importers for a
+seed it also calls uncoverable. That gap is its own issue.
+**Consequences**: MEASURED after, same repo and seed: **81 importers, 1 unresolved**, 166 ms.
+`unresolved_js_specifiers` keeps counting what still fails and the hint keeps firing on a partial
+under-report, so the honest-coverage rule of #54 stands. The case check walks EVERY segment from the
+project root, not just the basename: REVIEW measured that `readdirSync` of a wrongly-cased directory
+succeeds on NTFS, so an import of `'./Sub/widget.js'` resolved on Windows (importer counted, no
+hint) and failed on a case-sensitive filesystem (importer missing, hint fired) — the same divergence
+this ADR forbids, one level up.
+
+### ADR-017 — A phase-state writer refuses an unreadable file, and the tier ratchet survives an abandon (#77, 2.11.2)
+**Status**: active
+**Tags**: phase-state, gates
+**Context**: `readPhaseState` reports `{exists:true, state:null, parse_error}` on a corrupt file
+(`phase-scope.ts:317-324`), and four writers started from `{}` regardless, replacing whatever the
+file held — the review ledger, the drift record, the plan authorization — with their own block.
+#53 closed the bootstrap path the same way in 2.8.0, through the `readThenStampBootstrap` wrapper.
+**Decision**: `stampContextStale`, `stampClassifyVerdict`, `stampReviewCompleted` and
+`stampPlanDisposition` return `reason: 'unreadable_state'` and write nothing; the result carries
+the same `error` string shape the existing hints print, so every caller reports it without a new
+branch. An ABSENT file is not an unreadable one and is still created. `last_classify` is decided
+explicitly, as the issue demands: it is PRESERVED — added to `PHASE_STATE_PRESERVED_ON_ABANDON`,
+so abandoning a phase no longer resets `tier_max`, the ratchet `rsct_phase_code_start` reads to
+refuse a downgraded tier. That closes the abandon route only; the other ways to reset the verdict
+are #89.
+**Extended after REVIEW (2026-09-19, dev decisions)**: the guard also covers the sweep-ledger write
+in `rsct_phase_review_complete` — insurance, not a hole that was measured open: a reviewer reported
+that write as overwriting the corrupt file, and re-measuring the TOOL (corrupt state, valid
+approval, guard present and then removed) returned `no_active_phase` both times with the file
+byte-identical, because the phase precheck rejects first. The claim held only for raw
+`writePhaseState`, which reads nothing by design; the guard stays for the race where the file is
+corrupted mid-call. Also `startPhaseGeneric`, which covers the five
+`rsct_phase_*_start` tools that route through it, and `rsct_phase_verification_start`, which has
+its own plumbing and was measured still replacing the file. An ABSENT, empty or whitespace-only
+file is not corruption — `writePhaseState` writes with `writeFileSync`, so an interrupted write
+leaves exactly an empty file and blocking on it would strand the project; a UTF-8 BOM is stripped
+before parsing, and an array at the top level is corruption, not state. `rsct_classify_task` reports a refusal instead of answering as if it had
+stamped, and its audit line carries `recorded`. Reason the starts had to follow: with the stamps
+refusing, `last_classify` was never written, and `rsct_phase_code_start` reads a missing record as
+"no ratchet", so the tier gate silently turned OFF — a fix that made a gate more permissive, which
+this repo does not accept. Still unguarded, and named rather than implied: `rsct_plan_authorize`,
+`rsct_plan_revoke`, `rsct_request_commit`'s bookkeeping writes and `rsct_phase_abandon`.
+**Not covered by a test, recorded rather than claimed**: the two "could not be written" hints inside
+`phase-review-complete.ts` fire only if the state becomes unwritable BETWEEN the phase precheck and
+the stamp; a held lock or a corrupt file is caught earlier and reports through a different message,
+which is the one the new test pins. `stampContextStale` has no production caller
+(`grep stampContextStale dist/index.js` → 0) — its guard is insurance for the next caller.
+**Consequences**: a project with a corrupt `phase-state.json` stops recording these stamps until
+the file is repaired or deleted, and says so — the same posture #53 chose for the bootstrap marker.
+The existing abandon test that pinned `last_classify` as cleared was updated with the developer's
+OK; its nine other keys are still asserted, and the allowlist test beside it is untouched.
+
 ### ADR-014 — A leftover task name stops the start and asks the developer (2.11.1)
 **Status**: active
 **Tags**: phases, spec_slug

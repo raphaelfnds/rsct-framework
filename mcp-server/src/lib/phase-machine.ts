@@ -2,6 +2,7 @@ import { type RsctConfig } from './project-root.js'
 import { type FindingsGateRejectKind } from './findings.js'
 import {
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   type PhaseState,
 } from './phase-scope.js'
@@ -114,6 +115,35 @@ export function startPhaseGeneric(
   const startedAt = (internal.now ?? new Date()).toISOString()
 
   const existing = readPhaseState(input.projectRoot)
+  const unreadable = refuseUnreadableState(input.projectRoot, existing)
+  if (unreadable && !unreadable.ok && unreadable.reason === 'unreadable_state') {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: 'state_unreadable',
+      },
+      config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'state_write_failed',
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: unreadable.path,
+      phase_state_written: false,
+      existing_phase: null,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      hints: [`⚠ ${unreadable.error} No phase was started.`],
+    }
+  }
   const baseState: PhaseState = existing.state ?? {}
   const existingPhase = baseState.phase
 

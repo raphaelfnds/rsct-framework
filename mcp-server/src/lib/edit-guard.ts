@@ -1,4 +1,4 @@
-import { matchesAnyGlob, readPhaseState } from './phase-scope.js'
+import { matchesAnyGlob, pathCarriesLineTerminator, readPhaseState } from './phase-scope.js'
 
 /**
  * plan-lifecycle-v2 — Bloco 3.3: the decision layer behind the PreToolUse
@@ -62,6 +62,13 @@ export function evaluateEditGuard(args: {
     const scopeGlobs = state?.scope_globs ?? []
     if (!read.exists || state === null || scopeGlobs.length === 0) {
       return { decision: 'allow', status: 'unknown', reason: 'no active phase scope to enforce' }
+    }
+    if (pathCarriesLineTerminator(args.filePath)) {
+      return {
+        decision: 'block',
+        status: 'out_of_scope',
+        reason: `'${args.filePath}' carries a line terminator in its name — no scope glob covers such a path`,
+      }
     }
     const match = matchesAnyGlob(args.filePath, scopeGlobs, args.projectRoot)
     if (match.matched) {

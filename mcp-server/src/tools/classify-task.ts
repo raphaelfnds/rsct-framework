@@ -459,16 +459,22 @@ export async function classifyTaskHandler(
   const { tier, signals, reasoning } = classify(input.task_description)
   const recommended = RECOMMENDED_PHASES[tier]
 
+  const stampHints: string[] = []
   if (resolution.rsct_installed) {
-    stampClassifyVerdict(resolution.root, {
+    const stamp = stampClassifyVerdict(resolution.root, {
       tier,
       signalsSummary: signals.join(' | '),
     })
     appendAuditEntry(
       resolution.root,
-      { event: 'classify.verdict', tool: 'rsct_classify_task', tier },
+      { event: 'classify.verdict', tool: 'rsct_classify_task', tier, recorded: stamp.ok },
       resolution.config?.audit,
     )
+    if (!stamp.ok) {
+      stampHints.push(
+        `⚠ tier='${tier}' was NOT recorded (${stamp.reason}): ${stamp.reason === 'unreadable_state' ? stamp.error : stamp.path}. rsct_phase_code_start refuses to start until that file is repaired or deleted.`,
+      )
+    }
   }
 
   let activePlan: ClassifyTaskOutput['active_plan'] = null
@@ -477,7 +483,7 @@ export async function classifyTaskHandler(
     if (plan) activePlan = { slug: plan.slug, status: plan.status }
   }
 
-  const hints: string[] = []
+  const hints: string[] = [...stampHints]
   if (tier === 'trivial') {
     hints.push(
       'Trivial tier — no spec or code phases needed. A change that touches code still needs rsct_phase_review_start / _complete before rsct_request_commit accepts it; a docs-only change does not.',
