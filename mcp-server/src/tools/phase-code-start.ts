@@ -327,7 +327,7 @@ export function evaluateClassifyGate(args: {
     spec_tier: specTier,
     tier_max_recorded: block.tier_max,
     classified_at: block.classified_at,
-    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass, OR re-classify with rsct_classify_task if the task scope genuinely changed.`,
+    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass. Re-classifying does NOT lower the ceiling: tier_max only ever rises, and it now survives rsct_phase_abandon (ADR-017).`,
   }
 }
 

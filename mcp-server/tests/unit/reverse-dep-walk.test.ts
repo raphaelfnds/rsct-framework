@@ -535,6 +535,14 @@ describe('walkReverseDeps — the NodeNext mapping is a last resort and is case-
     expect(other.discovered).toEqual([])
   })
 
+  it('does not resolve a specifier whose DIRECTORY case differs from the disk', () => {
+    writeFile('src/sub/widget.ts', 'export const w = 1\n')
+    writeFile('src/a.ts', "import { w } from './Sub/widget.js'\n")
+    const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/sub/widget.ts'] })
+    expect(out.discovered).toEqual([])
+    expect(out.stats.unresolved_js_specifiers).toBe(1)
+  })
+
   it('does not resolve a specifier whose case differs from the file on disk', () => {
     writeFile('src/Widget.ts', 'export const w = 1\n')
     writeFile('src/a.ts', "import { w } from './widget.js'\n")

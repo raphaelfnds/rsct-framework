@@ -14,6 +14,7 @@ import {
 import {
   headStaleness,
   readPhaseState,
+  refuseUnreadableState,
   stampReviewCompleted,
   writePhaseState,
   type PhaseState,
@@ -610,14 +611,16 @@ export async function phaseReviewCompleteHandler(
   if (!auditOk) {
     output.hints.push('⚠ REVIEW completed, but the audit log could not record the sweep, so no file was stamped — rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.')
   } else {
-    const fresh = readPhaseState(projectRoot).state ?? {}
+    const freshRead = readPhaseState(projectRoot)
+    const freshRefusal = refuseUnreadableState(projectRoot, freshRead)
+    const fresh = freshRead.state ?? {}
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths)
       if (open.length === 0) delete next.review_drift
       else next.review_drift = { ...fresh.review_drift, paths: open }
     }
-    const w = writePhaseState(projectRoot, next)
+    const w = freshRefusal ?? writePhaseState(projectRoot, next)
     if (w.ok) summary.stamped = stamps.map((s) => s.path)
     else output.hints.push(`⚠ REVIEW completed, but the sweep ledger could not be written (${w.reason}) — rsct_request_commit will ask for a new REVIEW.`)
   }

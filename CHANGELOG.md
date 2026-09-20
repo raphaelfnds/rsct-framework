@@ -23,10 +23,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   glued inside a name still spans anything (ADR-015). The resolver maps `.js` → `.ts`/`.tsx` only
   after today's probes and only when the basename matches exactly, so the graph cannot differ
   between operating systems (ADR-016).
-- **A corrupt `phase-state.json` is no longer overwritten (#77).** `stampContextStale`,
-  `stampClassifyVerdict`, `stampReviewCompleted` and `stampPlanDisposition` refuse with
-  `unreadable_state` and say the file could not be read and that nothing was overwritten — the
-  posture `rsct_phase_code_start`'s bootstrap marker already had. An absent file is still created.
+- **A corrupt `phase-state.json` is no longer overwritten by the phase machine (#77).** The four
+  stamps (`stampContextStale`, `stampClassifyVerdict`, `stampReviewCompleted`,
+  `stampPlanDisposition`), the sweep-ledger write in `rsct_phase_review_complete` and **every
+  `rsct_phase_*_start`** refuse with `unreadable_state` and say the file could not be read and
+  that nothing was overwritten — the posture the bootstrap marker already had. An absent file is
+  still created. `rsct_classify_task` now says when the tier was not recorded, and its audit line
+  carries `recorded: false` instead of implying a stamp. Other writers (`rsct_plan_authorize`,
+  `rsct_plan_revoke`, `rsct_request_commit`'s bookkeeping) still overwrite; that is tracked, not
+  claimed fixed.
+- **The edit-scope guard got stricter.** A `scope_globs` entry starting with `**/` now covers whole
+  directories only, so a file under `webbuild/` is `out_of_scope` for a `**/build/**` scope that
+  used to cover it.
 - **Abandoning a phase no longer resets the tier ratchet (#77).** `last_classify` joins the
   preserve list, so the highest tier ever classified survives `rsct_phase_abandon` and
   `rsct_phase_code_start` keeps refusing a downgraded tier. Other ways to reset that verdict are

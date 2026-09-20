@@ -76,3 +76,27 @@ describe('phase-state writers refuse an unreadable file instead of overwriting i
     expect(readPhaseState(root).state?.last_classify?.tier).toBe('small')
   })
 })
+
+describe('the tools say so when a corrupt phase-state stops them (#77)', () => {
+  it('rsct_classify_task reports that the tier was not recorded', async () => {
+    const { classifyTaskHandler } = await import('../../src/tools/classify-task.js')
+    writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
+    writeFileSync(statePath(), CORRUPT, 'utf8')
+    const out = (await classifyTaskHandler({
+      project_root: root,
+      task_description: 'rewrite the authentication layer across services and migrate the database',
+    })) as { hints: string[] }
+    expect(out.hints.join(' ')).toContain('NOT recorded')
+    expect(raw()).toBe(CORRUPT)
+  })
+
+  it('a phase start refuses instead of replacing the corrupt file', async () => {
+    const { startPhaseGeneric } = await import('../../src/lib/phase-machine.js')
+    writeFileSync(statePath(), CORRUPT, 'utf8')
+    const r = startPhaseGeneric({ projectRoot: root, phase: 'research', specRef: 'feat-new' }, null)
+    expect(r.status).toBe('state_write_failed')
+    expect(r.phase_state_written).toBe(false)
+    expect(r.hints.join(' ')).toContain('could not be read')
+    expect(raw()).toBe(CORRUPT)
+  })
+})

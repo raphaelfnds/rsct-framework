@@ -23732,7 +23732,7 @@ function globToRegex(glob) {
         const atSegmentStart = i2 === 0 || glob[i2 - 1] === "/";
         const followedBySlash = glob[i2 + 2] === "/";
         if (atSegmentStart && followedBySlash && i2 + 3 < glob.length) {
-          out2 += "(?:[^/]*/)*";
+          out2 += "(?:[^/\\r\\n\\u2028\\u2029]*/)*";
           i2 += 3;
         } else {
           out2 += ".*";
@@ -44908,19 +44908,27 @@ function hasExactEntry(path2, entries) {
   }
   return names.has(basename(path2));
 }
-function resolveNodeNextSource(target, entries) {
-  const dot = target.lastIndexOf(".");
-  if (dot < 0) return null;
-  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(dot));
+function hasExactPath(projectRoot, candidate, entries) {
+  const rel = relPosix(projectRoot, candidate);
+  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
+  let walked = projectRoot;
+  for (const segment of rel.split("/")) {
+    walked = join(walked, segment);
+    if (!hasExactEntry(walked, entries)) return false;
+  }
+  return true;
+}
+function resolveNodeNextSource(projectRoot, target, entries) {
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
   if (!sourceExtensions) return null;
-  const stem = target.slice(0, dot);
+  const stem = target.slice(0, target.lastIndexOf("."));
   for (const ext of sourceExtensions) {
     const candidate = stem + ext;
-    if (existsSync(candidate) && hasExactEntry(candidate, entries)) return candidate;
+    if (hasExactPath(projectRoot, candidate, entries)) return candidate;
   }
   return null;
 }
-function resolveImport(importerAbs, spec, entries) {
+function resolveImport(projectRoot, importerAbs, spec, entries) {
   if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
   const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
   if (existsSync(target)) {
@@ -44940,7 +44948,7 @@ function resolveImport(importerAbs, spec, entries) {
     const candidate = target + ext;
     if (existsSync(candidate)) return candidate;
   }
-  return resolveNodeNextSource(target, entries);
+  return resolveNodeNextSource(projectRoot, target, entries);
 }
 function walkReverseDeps(input) {
   const projectRoot = input.projectRoot;
@@ -45011,7 +45019,7 @@ function walkReverseDeps(input) {
     const candidateRel = relPosix(projectRoot, candidateAbs);
     const imports = extractImports(content);
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(candidateAbs, spec, directoryEntries);
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
       if (!resolvedAbs) {
         if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
           stats.unresolved_js_specifiers++;
@@ -45486,6 +45494,35 @@ function startPhaseGeneric(input, config2, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
   const existing = readPhaseState(input.projectRoot);
+  const unreadable = refuseUnreadableState(input.projectRoot, existing);
+  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "state_unreadable"
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "state_write_failed",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: unreadable.path,
+      phase_state_written: false,
+      existing_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [`\u26A0 ${unreadable.error} No phase was started.`]
+    };
+  }
   const baseState = existing.state ?? {};
   const existingPhase = baseState.phase;
   const staleVerificationLabel = isStaleVerificationLabel(baseState);
@@ -46972,23 +47009,29 @@ async function classifyTaskHandler(rawInput) {
   const resolution = resolveProjectRoot(input.project_root);
   const { tier, signals, reasoning } = classify(input.task_description);
   const recommended = RECOMMENDED_PHASES[tier];
+  const stampHints = [];
   if (resolution.rsct_installed) {
-    stampClassifyVerdict(resolution.root, {
+    const stamp = stampClassifyVerdict(resolution.root, {
       tier,
       signalsSummary: signals.join(" | ")
     });
     appendAuditEntry(
       resolution.root,
-      { event: "classify.verdict", tool: "rsct_classify_task", tier },
+      { event: "classify.verdict", tool: "rsct_classify_task", tier, recorded: stamp.ok },
       resolution.config?.audit
     );
+    if (!stamp.ok) {
+      stampHints.push(
+        `\u26A0 tier='${tier}' was NOT recorded (${stamp.reason}): ${stamp.reason === "unreadable_state" ? stamp.error : stamp.path}. rsct_phase_code_start refuses to start until that file is repaired or deleted.`
+      );
+    }
   }
   let activePlan = null;
   if (input.use_active_plan_slug) {
     const plan = findActivePlan(resolution.root);
     if (plan) activePlan = { slug: plan.slug, status: plan.status };
   }
-  const hints = [];
+  const hints = [...stampHints];
   if (tier === "trivial") {
     hints.push(
       "Trivial tier \u2014 no spec or code phases needed. A change that touches code still needs rsct_phase_review_start / _complete before rsct_request_commit accepts it; a docs-only change does not."
@@ -47581,7 +47624,7 @@ function evaluateClassifyGate(args2) {
     spec_tier: specTier,
     tier_max_recorded: block.tier_max,
     classified_at: block.classified_at,
-    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass, OR re-classify with rsct_classify_task if the task scope genuinely changed.`
+    hint: `spec_tier='${specTier}' is lower than recorded tier_max='${block.tier_max}' (classified at ${block.classified_at}). Pass override_classify_downgrade=true (audit-logged) to bypass. Re-classifying does NOT lower the ceiling: tier_max only ever rises, and it now survives rsct_phase_abandon (ADR-017).`
   };
 }
 var SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -48657,14 +48700,16 @@ Yes = allow these versions. No = reject this REVIEW.`
   if (!auditOk) {
     output.hints.push("\u26A0 REVIEW completed, but the audit log could not record the sweep, so no file was stamped \u2014 rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.");
   } else {
-    const fresh = readPhaseState(projectRoot).state ?? {};
+    const freshRead = readPhaseState(projectRoot);
+    const freshRefusal = refuseUnreadableState(projectRoot, freshRead);
+    const fresh = freshRead.state ?? {};
     const next = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) };
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths);
       if (open.length === 0) delete next.review_drift;
       else next.review_drift = { ...fresh.review_drift, paths: open };
     }
-    const w = writePhaseState(projectRoot, next);
+    const w = freshRefusal ?? writePhaseState(projectRoot, next);
     if (w.ok) summary.stamped = stamps.map((s2) => s2.path);
     else output.hints.push(`\u26A0 REVIEW completed, but the sweep ledger could not be written (${w.reason}) \u2014 rsct_request_commit will ask for a new REVIEW.`);
   }

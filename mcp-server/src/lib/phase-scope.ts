@@ -342,7 +342,7 @@ export function globToRegex(glob: string): RegExp {
         const atSegmentStart = i === 0 || glob[i - 1] === '/'
         const followedBySlash = glob[i + 2] === '/'
         if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += '(?:[^/]*/)*'
+          out += '(?:[^/\\r\\n\\u2028\\u2029]*/)*'
           i += 3
         } else {
           out += '.*'

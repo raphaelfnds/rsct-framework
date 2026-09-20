@@ -667,7 +667,10 @@ Compares a file path against the active spec phase's scope globs in
 
 `status='unknown'` when `.rsct/phase-state.json` is missing or empty
 (M3 owns the canonical schema). Glob support v1: `*`, `**`, `?` plus
-regex metachar escape; `{a,b}` and `[abc]` are deferred to v2.
+regex metachar escape; `{a,b}` and `[abc]` are deferred to v2. A leading
+`**/` spans whole directories, so a scope of `**/build/**` covers `build/`
+and `a/b/build/`, never `webbuild/` (2.11.2 — a scope that relied on the
+old wide match now answers `out_of_scope`).
 
 ### §C-gated mutating ops
 

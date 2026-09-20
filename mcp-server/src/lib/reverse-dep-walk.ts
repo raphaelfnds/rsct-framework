@@ -255,20 +255,42 @@ function hasExactEntry(path: string, entries: Map<string, Set<string>>): boolean
   return names.has(basename(path))
 }
 
-function resolveNodeNextSource(target: string, entries: Map<string, Set<string>>): string | null {
-  const dot = target.lastIndexOf('.')
-  if (dot < 0) return null
-  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(dot))
+function hasExactPath(
+  projectRoot: string,
+  candidate: string,
+  entries: Map<string, Set<string>>,
+): boolean {
+  const rel = relPosix(projectRoot, candidate)
+  if (rel.startsWith('../') || isAbsolute(rel)) return hasExactEntry(candidate, entries)
+  let walked = projectRoot
+  for (const segment of rel.split('/')) {
+    walked = join(walked, segment)
+    if (!hasExactEntry(walked, entries)) return false
+  }
+  return true
+}
+
+function resolveNodeNextSource(
+  projectRoot: string,
+  target: string,
+  entries: Map<string, Set<string>>,
+): string | null {
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf('.')))
   if (!sourceExtensions) return null
-  const stem = target.slice(0, dot)
+  const stem = target.slice(0, target.lastIndexOf('.'))
   for (const ext of sourceExtensions) {
     const candidate = stem + ext
-    if (existsSync(candidate) && hasExactEntry(candidate, entries)) return candidate
+    if (hasExactPath(projectRoot, candidate, entries)) return candidate
   }
   return null
 }
 
-function resolveImport(importerAbs: string, spec: string, entries: Map<string, Set<string>>): string | null {
+function resolveImport(
+  projectRoot: string,
+  importerAbs: string,
+  spec: string,
+  entries: Map<string, Set<string>>,
+): string | null {
   if (!spec.startsWith('.') && !isAbsolute(spec)) return null
   const target = isAbsolute(spec) ? spec : resolvePath(dirname(importerAbs), spec)
 
@@ -292,7 +314,7 @@ function resolveImport(importerAbs: string, spec: string, entries: Map<string, S
     if (existsSync(candidate)) return candidate
   }
 
-  return resolveNodeNextSource(target, entries)
+  return resolveNodeNextSource(projectRoot, target, entries)
 }
 
 interface BfsItem {
@@ -389,7 +411,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     const candidateRel = relPosix(projectRoot, candidateAbs)
     const imports = extractImports(content)
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(candidateAbs, spec, directoryEntries)
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries)
       if (!resolvedAbs) {
         // Only a RELATIVE specifier counts. A bare package specifier is
         // rejected on purpose and is not a defect; and an absolute one is

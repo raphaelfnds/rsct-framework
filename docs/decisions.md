@@ -414,7 +414,11 @@ NOT mapped: `.mts`/`.cts` are not in `DEFAULT_LANG_GLOBS`, so the walk would lis
 seed it also calls uncoverable. That gap is its own issue.
 **Consequences**: MEASURED after, same repo and seed: **81 importers, 1 unresolved**, 166 ms.
 `unresolved_js_specifiers` keeps counting what still fails and the hint keeps firing on a partial
-under-report, so the honest-coverage rule of #54 stands.
+under-report, so the honest-coverage rule of #54 stands. The case check walks EVERY segment from the
+project root, not just the basename: REVIEW measured that `readdirSync` of a wrongly-cased directory
+succeeds on NTFS, so an import of `'./Sub/widget.js'` resolved on Windows (importer counted, no
+hint) and failed on a case-sensitive filesystem (importer missing, hint fired) — the same divergence
+this ADR forbids, one level up.
 
 ### ADR-017 — A phase-state writer refuses an unreadable file, and the tier ratchet survives an abandon (#77, 2.11.2)
 **Status**: active
@@ -431,6 +435,20 @@ explicitly, as the issue demands: it is PRESERVED — added to `PHASE_STATE_PRES
 so abandoning a phase no longer resets `tier_max`, the ratchet `rsct_phase_code_start` reads to
 refuse a downgraded tier. That closes the abandon route only; the other ways to reset the verdict
 are #89.
+**Extended after REVIEW (2026-09-19, dev decisions)**: the guard also covers the sweep-ledger write
+in `rsct_phase_review_complete` (measured: it overwrote the corrupt file eight lines before the
+stamp, so the claim above was false for that tool) and `startPhaseGeneric`, which covers all six
+`rsct_phase_*_start` tools. `rsct_classify_task` reports a refusal instead of answering as if it had
+stamped, and its audit line carries `recorded`. Reason the starts had to follow: with the stamps
+refusing, `last_classify` was never written, and `rsct_phase_code_start` reads a missing record as
+"no ratchet", so the tier gate silently turned OFF — a fix that made a gate more permissive, which
+this repo does not accept. Still unguarded, and named rather than implied: `rsct_plan_authorize`,
+`rsct_plan_revoke`, `rsct_request_commit`'s bookkeeping writes and `rsct_phase_abandon`.
+**Not covered by a test, recorded rather than claimed**: the two "could not be written" hints inside
+`phase-review-complete.ts` fire only if the state becomes unwritable BETWEEN the phase precheck and
+the stamp; a held lock or a corrupt file is caught earlier and reports through a different message,
+which is the one the new test pins. `stampContextStale` has no production caller
+(`grep stampContextStale dist/index.js` → 0) — its guard is insurance for the next caller.
 **Consequences**: a project with a corrupt `phase-state.json` stops recording these stamps until
 the file is repaired or deleted, and says so — the same posture #53 chose for the bootstrap marker.
 The existing abandon test that pinned `last_classify` as cleared was updated with the developer's
