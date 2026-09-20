@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.2] - 2026-09-20
+
 ### Fixed
 
 - **The V phase could not see the repository it was auditing (#76, #77).** A leading `**/` in a
