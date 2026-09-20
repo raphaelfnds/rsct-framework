@@ -4437,9 +4437,10 @@ function readPhaseState(projectRoot) {
     return { exists: false, state: null };
   }
   try {
-    const raw = readFileSync(path, "utf8");
+    const raw = readFileSync(path, "utf8").replace(/^﻿/, "");
+    if (raw.trim() === "") return { exists: true, state: null };
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { exists: true, state: null, parse_error: "top-level value is not an object" };
     }
     return { exists: true, state: parsed };
@@ -4464,7 +4465,7 @@ function globToRegex(glob) {
         const atSegmentStart = i === 0 || glob[i - 1] === "/";
         const followedBySlash = glob[i + 2] === "/";
         if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += "(?:[^/\\r\\n\\u2028\\u2029]*/)*";
+          out += "(?:[^/]*/)*";
           i += 3;
         } else {
           out += ".*";
@@ -4489,6 +4490,10 @@ function globToRegex(glob) {
   const re = new RegExp(out);
   globRegexCache.set(glob, re);
   return re;
+}
+var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
+function pathCarriesLineTerminator(path) {
+  return LINE_TERMINATORS.some((terminator) => path.includes(terminator));
 }
 function toPosix(p) {
   return p.split("\\").join("/");
@@ -4540,6 +4545,13 @@ function evaluateEditGuard(args) {
     const scopeGlobs = state?.scope_globs ?? [];
     if (!read.exists || state === null || scopeGlobs.length === 0) {
       return { decision: "allow", status: "unknown", reason: "no active phase scope to enforce" };
+    }
+    if (pathCarriesLineTerminator(args.filePath)) {
+      return {
+        decision: "block",
+        status: "out_of_scope",
+        reason: `'${args.filePath}' carries a line terminator in its name \u2014 no scope glob covers such a path`
+      };
     }
     const match = matchesAnyGlob(args.filePath, scopeGlobs, args.projectRoot);
     if (match.matched) {

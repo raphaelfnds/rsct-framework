@@ -25,16 +25,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   between operating systems (ADR-016).
 - **A corrupt `phase-state.json` is no longer overwritten by the phase machine (#77).** The four
   stamps (`stampContextStale`, `stampClassifyVerdict`, `stampReviewCompleted`,
-  `stampPlanDisposition`), the sweep-ledger write in `rsct_phase_review_complete` and **every
-  `rsct_phase_*_start`** refuse with `unreadable_state` and say the file could not be read and
-  that nothing was overwritten — the posture the bootstrap marker already had. An absent file is
-  still created. `rsct_classify_task` now says when the tier was not recorded, and its audit line
+  `stampPlanDisposition`) and **every `rsct_phase_*_start`** refuse with `unreadable_state` and say the file could not be read and
+  that nothing was overwritten — the posture the bootstrap marker already had.
+  `rsct_phase_verification_start`, which has its own plumbing, refuses too. An absent, EMPTY or
+  whitespace-only file is not corruption and is still written, a UTF-8 BOM is tolerated, and an
+  array at the top level is treated as corruption.
+  The sweep-ledger write in `rsct_phase_review_complete` carries the same guard as insurance; that
+  tool already refused earlier with `no_active_phase` (measured with the guard present and removed).
+  `rsct_classify_task` now says when the tier was not recorded, and its audit line
   carries `recorded: false` instead of implying a stamp. Other writers (`rsct_plan_authorize`,
   `rsct_plan_revoke`, `rsct_request_commit`'s bookkeeping) still overwrite; that is tracked, not
   claimed fixed.
 - **The edit-scope guard got stricter.** A `scope_globs` entry starting with `**/` now covers whole
   directories only, so a file under `webbuild/` is `out_of_scope` for a `**/build/**` scope that
-  used to cover it.
+  used to cover it. A path whose name carries a line terminator (`\n`, `\r`, U+2028, U+2029) is
+  never in scope — `rsct_check_edit_scope` and the PreToolUse guard refuse it outright, because no
+  single glob semantics can fail closed for both a gate that allows on a match and one that blocks
+  on a match.
 - **Abandoning a phase no longer resets the tier ratchet (#77).** `last_classify` joins the
   preserve list, so the highest tier ever classified survives `rsct_phase_abandon` and
   `rsct_phase_code_start` keeps refusing a downgraded tier. Other ways to reset that verdict are

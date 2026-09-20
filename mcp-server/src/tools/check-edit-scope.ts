@@ -3,6 +3,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import {
   matchesAnyGlob,
+  pathCarriesLineTerminator,
   readPhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
@@ -139,7 +140,9 @@ export async function checkEditScopeHandler(
   } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = 'unknown'
   } else {
-    const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root)
+    const match = pathCarriesLineTerminator(input.file_path)
+      ? { matched: false }
+      : matchesAnyGlob(input.file_path, scope_globs, resolution.root)
     status = match.matched ? 'in_scope' : 'out_of_scope'
     matched_glob = match.matched_glob ?? null
   }

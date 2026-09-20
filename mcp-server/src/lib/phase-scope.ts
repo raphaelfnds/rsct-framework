@@ -313,9 +313,10 @@ export function readPhaseState(projectRoot: string): PhaseStateReadResult {
     return { exists: false, state: null }
   }
   try {
-    const raw = readFileSync(path, 'utf8')
+    const raw = readFileSync(path, 'utf8').replace(/^﻿/, '')
+    if (raw.trim() === '') return { exists: true, state: null }
     const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { exists: true, state: null, parse_error: 'top-level value is not an object' }
     }
     return { exists: true, state: parsed as PhaseState }
@@ -342,7 +343,7 @@ export function globToRegex(glob: string): RegExp {
         const atSegmentStart = i === 0 || glob[i - 1] === '/'
         const followedBySlash = glob[i + 2] === '/'
         if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += '(?:[^/\\r\\n\\u2028\\u2029]*/)*'
+          out += '(?:[^/]*/)*'
           i += 3
         } else {
           out += '.*'
@@ -372,6 +373,12 @@ export function globToRegex(glob: string): RegExp {
 export interface ScopeMatch {
   matched: boolean
   matched_glob?: string
+}
+
+const LINE_TERMINATORS = [0x0a, 0x0d, 0x2028, 0x2029].map((code) => String.fromCharCode(code))
+
+export function pathCarriesLineTerminator(path: string): boolean {
+  return LINE_TERMINATORS.some((terminator) => path.includes(terminator))
 }
 
 export function toPosix(p: string): string {

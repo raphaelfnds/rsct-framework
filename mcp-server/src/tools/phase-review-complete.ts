@@ -622,7 +622,10 @@ export async function phaseReviewCompleteHandler(
     }
     const w = freshRefusal ?? writePhaseState(projectRoot, next)
     if (w.ok) summary.stamped = stamps.map((s) => s.path)
-    else output.hints.push(`⚠ REVIEW completed, but the sweep ledger could not be written (${w.reason}) — rsct_request_commit will ask for a new REVIEW.`)
+    else
+      output.hints.push(
+        `⚠ REVIEW completed, but the sweep ledger could not be written (${w.reason}${w.reason === 'unreadable_state' ? `: ${w.error}` : ''}) — rsct_request_commit will ask for a new REVIEW.`,
+      )
   }
   if (summary.changed_during_dialog.length > 0) {
     output.hints.push(`⚠ ${summary.changed_during_dialog.length} file(s) changed while the dialog was open and were not stamped: ${summary.changed_during_dialog.join(', ')}.`)

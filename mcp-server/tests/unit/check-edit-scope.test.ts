@@ -467,3 +467,29 @@ describe('lib/phase-scope — a leading ** spans whole segments, never part of o
     expect(matchesAnyGlob('webbuild/probe', excludes).matched).toBe(false)
   })
 })
+
+describe('lib/phase-scope — a path carrying a line terminator is never in scope', () => {
+  const LF = String.fromCharCode(10)
+
+  it('the glob itself still spans segments the same way', () => {
+    expect(globToRegex('**/x.ts').test(`a${LF}b/x.ts`)).toBe(true)
+  })
+
+  it('but the edit-scope guard refuses such a path', async () => {
+    const out = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: `a${LF}b/x.ts`,
+      phase_state_override: { scope_globs: ['**/x.ts'] },
+    })) as CheckEditScopeOutput
+    expect(out.status).toBe('out_of_scope')
+  })
+
+  it('and a plain path under the same glob is still in scope', async () => {
+    const out = (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path: 'a/b/x.ts',
+      phase_state_override: { scope_globs: ['**/x.ts'] },
+    })) as CheckEditScopeOutput
+    expect(out.status).toBe('in_scope')
+  })
+})

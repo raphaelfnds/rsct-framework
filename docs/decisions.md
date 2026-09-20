@@ -391,6 +391,13 @@ which no declaration asked for, no longer do. A block the declaration never aske
 and noise is what makes a gate get ignored. The four places that teach the rule were corrected
 with it (template `_help`, `docs/multi-repo.md`, `prompts/01-setup.md` Q&A, `mcp-server/README.md`),
 and the template already promised these semantics.
+**Line terminators, decided in REVIEW**: `[^/]` matches `\n`, so narrowing `**/` changed what a
+path containing a line terminator matches — and the direction FLIPS by consumer: for the edit-scope
+guard (match = allow) a wider match is weaker, for the walk exclusions and the contract surface
+(match = skip / block) a narrower match is weaker. One regex cannot be strict for both, so the
+regex keeps `[^/]` — consistent with `*` and `?` — and the two allow-side consumers
+(`lib/edit-guard.ts`, `tools/check-edit-scope.ts`) refuse a path carrying `\n`, `\r`, U+2028 or
+U+2029 outright. Both ends fail closed.
 **Consequences**: the V walk scans directories it used to skip (MEASURED: no change on this repo —
 `node_modules`, `dist` and `.git` are still excluded, `files_scanned` unchanged). A project whose
 scope glob relied on the wide match now sees `out_of_scope` — the stricter direction.
@@ -436,9 +443,17 @@ so abandoning a phase no longer resets `tier_max`, the ratchet `rsct_phase_code_
 refuse a downgraded tier. That closes the abandon route only; the other ways to reset the verdict
 are #89.
 **Extended after REVIEW (2026-09-19, dev decisions)**: the guard also covers the sweep-ledger write
-in `rsct_phase_review_complete` (measured: it overwrote the corrupt file eight lines before the
-stamp, so the claim above was false for that tool) and `startPhaseGeneric`, which covers all six
-`rsct_phase_*_start` tools. `rsct_classify_task` reports a refusal instead of answering as if it had
+in `rsct_phase_review_complete` — insurance, not a hole that was measured open: a reviewer reported
+that write as overwriting the corrupt file, and re-measuring the TOOL (corrupt state, valid
+approval, guard present and then removed) returned `no_active_phase` both times with the file
+byte-identical, because the phase precheck rejects first. The claim held only for raw
+`writePhaseState`, which reads nothing by design; the guard stays for the race where the file is
+corrupted mid-call. Also `startPhaseGeneric`, which covers the five
+`rsct_phase_*_start` tools that route through it, and `rsct_phase_verification_start`, which has
+its own plumbing and was measured still replacing the file. An ABSENT, empty or whitespace-only
+file is not corruption — `writePhaseState` writes with `writeFileSync`, so an interrupted write
+leaves exactly an empty file and blocking on it would strand the project; a UTF-8 BOM is stripped
+before parsing, and an array at the top level is corruption, not state. `rsct_classify_task` reports a refusal instead of answering as if it had
 stamped, and its audit line carries `recorded`. Reason the starts had to follow: with the stamps
 refusing, `last_classify` was never written, and `rsct_phase_code_start` reads a missing record as
 "no ratchet", so the tier gate silently turned OFF — a fix that made a gate more permissive, which

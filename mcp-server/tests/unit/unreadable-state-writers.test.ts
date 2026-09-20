@@ -100,3 +100,38 @@ describe('the tools say so when a corrupt phase-state stops them (#77)', () => {
     expect(raw()).toBe(CORRUPT)
   })
 })
+
+describe('an unreadable phase-state is refused, an empty one is not (#77)', () => {
+  it('rsct_phase_verification_start refuses instead of replacing the file', async () => {
+    const { phaseVerificationStartHandler } = await import('../../src/tools/phase-verification-start.js')
+    writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
+    writeFileSync(statePath(), CORRUPT, 'utf8')
+    const out = (await phaseVerificationStartHandler({
+      project_root: root,
+      spec_ref: 'feat-new',
+      spec_tier: 'complex',
+    })) as { status: string; phase_state_written: boolean; hints: string[] }
+    expect(out.status).toBe('state_write_failed')
+    expect(out.phase_state_written).toBe(false)
+    expect(raw()).toBe(CORRUPT)
+  })
+
+  for (const [label, content] of [
+    ['empty', ''],
+    ['whitespace only', '  \n'],
+    ['a BOM before valid JSON', '﻿{"spec_slug":"feat-foo"}'],
+  ] as const) {
+    it(`treats ${label} as a file to write, not as corruption`, () => {
+      writeFileSync(statePath(), content, 'utf8')
+      expect(readPhaseState(root).parse_error).toBeUndefined()
+      expect(stampClassifyVerdict(root, { tier: 'small' }).ok).toBe(true)
+    })
+  }
+
+  it('an array at the top level is corruption, not state', () => {
+    writeFileSync(statePath(), '["keep-me"]', 'utf8')
+    expect(readPhaseState(root).parse_error).toBeDefined()
+    expect(stampClassifyVerdict(root, { tier: 'small' }).ok).toBe(false)
+    expect(raw()).toBe('["keep-me"]')
+  })
+})

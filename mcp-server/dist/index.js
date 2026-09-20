@@ -23705,9 +23705,10 @@ function readPhaseState(projectRoot) {
     return { exists: false, state: null };
   }
   try {
-    const raw = readFileSync(path2, "utf8");
+    const raw = readFileSync(path2, "utf8").replace(/^﻿/, "");
+    if (raw.trim() === "") return { exists: true, state: null };
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { exists: true, state: null, parse_error: "top-level value is not an object" };
     }
     return { exists: true, state: parsed };
@@ -23732,7 +23733,7 @@ function globToRegex(glob) {
         const atSegmentStart = i2 === 0 || glob[i2 - 1] === "/";
         const followedBySlash = glob[i2 + 2] === "/";
         if (atSegmentStart && followedBySlash && i2 + 3 < glob.length) {
-          out2 += "(?:[^/\\r\\n\\u2028\\u2029]*/)*";
+          out2 += "(?:[^/]*/)*";
           i2 += 3;
         } else {
           out2 += ".*";
@@ -23757,6 +23758,10 @@ function globToRegex(glob) {
   const re = new RegExp(out2);
   globRegexCache.set(glob, re);
   return re;
+}
+var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
+function pathCarriesLineTerminator(path2) {
+  return LINE_TERMINATORS.some((terminator) => path2.includes(terminator));
 }
 function toPosix(p) {
   return p.split("\\").join("/");
@@ -27919,7 +27924,7 @@ async function checkEditScopeHandler(rawInput) {
   } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
     status = "unknown";
   } else {
-    const match = matchesAnyGlob(input.file_path, scope_globs, resolution.root);
+    const match = pathCarriesLineTerminator(input.file_path) ? { matched: false } : matchesAnyGlob(input.file_path, scope_globs, resolution.root);
     status = match.matched ? "in_scope" : "out_of_scope";
     matched_glob = match.matched_glob ?? null;
   }
@@ -46055,6 +46060,40 @@ async function phaseVerificationStartHandler(rawInput) {
       ]
     };
   }
+  const unreadable = refuseUnreadableState(projectRoot, existing);
+  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
+    const unreadableAudit = appendAuditEntry(
+      projectRoot,
+      {
+        event: "verification.start.rejected",
+        tool: "rsct_phase_verification_start",
+        spec_ref: input.spec_ref,
+        reject_kind: "state_unreadable"
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(unreadableAudit);
+    return {
+      status: "state_write_failed",
+      findings_run_id: null,
+      rsct_installed: resolution.rsct_installed,
+      spec_ref: input.spec_ref,
+      spec_tier: input.spec_tier,
+      requested_persona: requestedPersona,
+      declared_paths: walk2.declared,
+      discovered_importers: [],
+      findings: [],
+      walk_stats: walk2.stats,
+      walk_coverage: walk2.coverage,
+      checklist_stats: checklist.stats,
+      phase_state_path: phaseStatePathStr,
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [`\u26A0 ${unreadable.error} The V phase did not start.`]
+    };
+  }
   const leftover = leftoverTaskSlug(baseState, "verification", input.spec_ref, input.spec_slug);
   if (leftover !== null) {
     const leftoverAudit = appendAuditEntry(
@@ -48711,7 +48750,10 @@ Yes = allow these versions. No = reject this REVIEW.`
     }
     const w = freshRefusal ?? writePhaseState(projectRoot, next);
     if (w.ok) summary.stamped = stamps.map((s2) => s2.path);
-    else output.hints.push(`\u26A0 REVIEW completed, but the sweep ledger could not be written (${w.reason}) \u2014 rsct_request_commit will ask for a new REVIEW.`);
+    else
+      output.hints.push(
+        `\u26A0 REVIEW completed, but the sweep ledger could not be written (${w.reason}${w.reason === "unreadable_state" ? `: ${w.error}` : ""}) \u2014 rsct_request_commit will ask for a new REVIEW.`
+      );
   }
   if (summary.changed_during_dialog.length > 0) {
     output.hints.push(`\u26A0 ${summary.changed_during_dialog.length} file(s) changed while the dialog was open and were not stamped: ${summary.changed_during_dialog.join(", ")}.`);
