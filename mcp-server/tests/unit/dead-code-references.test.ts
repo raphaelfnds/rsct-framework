@@ -109,6 +109,38 @@ describe('findDeadSymbols — the basic predicate', () => {
   })
 })
 
+describe('findDeadSymbols — default exports', () => {
+  it('counts a default import as a use of the default-exported symbol', async () => {
+    writeFile('a.ts', 'export default function sized(): number { return 1 }\n')
+    writeFile('b.ts', "import sized from './a.js'\nexport const run = () => sized()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+
+  it('counts it under whatever local name the importer chose', async () => {
+    writeFile('a.ts', 'export default function sized(): number { return 1 }\n')
+    writeFile('b.ts', "import renamed from './a.js'\nexport const run = () => renamed()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+
+  it('still reports the default export when the importer never uses the binding', async () => {
+    writeFile('a.ts', 'export default function sized(): number { return 1 }\n')
+    writeFile('b.ts', "import sized from './a.js'\nexport const unrelated = 1\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['sized'])
+  })
+
+  it('does not let a default import stand in for a NAMED symbol of the same module', async () => {
+    writeFile('a.ts', 'export default function first(): void {}\nexport function second(): void {}\n')
+    writeFile('b.ts', "import first from './a.js'\nexport const run = () => first()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['second'])
+  })
+
+  it('handles a default-exported class', async () => {
+    writeFile('a.ts', 'export default class Holder {}\n')
+    writeFile('b.ts', "import Holder from './a.js'\nexport const run = () => new Holder()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+})
+
 describe('findDeadSymbols — re-export chains', () => {
   it('follows a star re-export, however long the chain', async () => {
     writeFile('deep.ts', 'export function deepThing(): void {}\n')

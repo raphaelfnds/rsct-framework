@@ -60,6 +60,7 @@ export interface SymbolRef {
 export interface DeadSymbol extends SymbolRef {
   kind: DeclarationKind
   exported: boolean
+  defaultExport: boolean
   start: number
   end: number
 }
@@ -239,7 +240,13 @@ function citationsFor(
           }
           continue
         }
-        if (name.imported === DEFAULT_IMPORT) continue
+        if (name.imported === DEFAULT_IMPORT) {
+          if (!symbol.defaultExport) continue
+          for (const reference of facts.symbols.references) {
+            if (reference.name === name.local) citations.push({ file: rel, owner: reference.owner })
+          }
+          continue
+        }
         if (name.imported !== symbol.name) continue
         for (const reference of facts.symbols.references) {
           if (reference.name === name.local) citations.push({ file: rel, owner: reference.owner })
@@ -277,6 +284,7 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
           name: declaration.name,
           kind: declaration.kind,
           exported: true,
+          defaultExport: declaration.defaultExport,
           start: declaration.start,
           end: declaration.end,
         })
@@ -287,6 +295,7 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
         name: declaration.name,
         kind: declaration.kind,
         exported: declaration.exported,
+        defaultExport: declaration.defaultExport,
         start: declaration.start,
         end: declaration.end,
       })

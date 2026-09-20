@@ -25,6 +25,7 @@ export interface TreeDeclaration {
   name: string
   kind: DeclarationKind
   exported: boolean
+  defaultExport: boolean
   start: number
   end: number
 }
@@ -201,6 +202,7 @@ function declaredNamesOf(
   node: Node,
   kind: DeclarationKind,
   exported: boolean,
+  defaultExport: boolean,
   range: { start: number; end: number },
 ): TreeDeclaration[] {
   if (VARIABLE_CONTAINERS.has(node.type)) {
@@ -210,23 +212,35 @@ function declaredNamesOf(
       if (!child || child.type !== 'variable_declarator') continue
       const name = child.childForFieldName('name')
       if (name && name.type === 'identifier') {
-        found.push({ name: name.text, kind: 'value', exported, start: range.start, end: range.end })
+        found.push({ name: name.text, kind: 'value', exported, defaultExport, start: range.start, end: range.end })
       }
     }
     return found
   }
   const name = node.childForFieldName('name')
   if (!name) return []
-  return [{ name: name.text, kind, exported, start: range.start, end: range.end }]
+  return [{ name: name.text, kind, exported, defaultExport, start: range.start, end: range.end }]
+}
+
+function isDefaultExport(node: Node): boolean {
+  for (let i = 0; i < node.childCount; i++) {
+    if (node.child(i)?.type === 'default') return true
+  }
+  return false
 }
 
 function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; nameSites: Set<number> } {
   const declarations: TreeDeclaration[] = []
   const nameSites = new Set<number>()
-  const record = (node: Node, exported: boolean, range: { start: number; end: number }): void => {
+  const record = (
+    node: Node,
+    exported: boolean,
+    defaultExport: boolean,
+    range: { start: number; end: number },
+  ): void => {
     const kind = DECLARATION_KINDS[node.type]
     if (kind === undefined && !VARIABLE_CONTAINERS.has(node.type)) return
-    for (const declaration of declaredNamesOf(node, kind ?? 'value', exported, range)) {
+    for (const declaration of declaredNamesOf(node, kind ?? 'value', exported, defaultExport, range)) {
       declarations.push(declaration)
     }
     if (VARIABLE_CONTAINERS.has(node.type)) {
@@ -245,10 +259,12 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
     if (!node) continue
     if (node.type === 'export_statement') {
       const declaration = node.childForFieldName('declaration')
-      if (declaration) record(declaration, true, { start: node.startIndex, end: node.endIndex })
+      if (declaration) {
+        record(declaration, true, isDefaultExport(node), { start: node.startIndex, end: node.endIndex })
+      }
       continue
     }
-    record(node, false, { start: node.startIndex, end: node.endIndex })
+    record(node, false, false, { start: node.startIndex, end: node.endIndex })
   }
   return { declarations, nameSites }
 }

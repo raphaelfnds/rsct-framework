@@ -32,6 +32,19 @@ describe('scanSymbols — declarations', () => {
     expect(byName.get('g')?.exported).toBe(true)
   })
 
+  it('marks a default export as such, and a named export as not', async () => {
+    const scan = await symbols('export default function first(): void {}\nexport function second(): void {}\n')
+    const byName = new Map(scan.declarations.map((d) => [d.name, d]))
+    expect(byName.get('first')?.defaultExport).toBe(true)
+    expect(byName.get('first')?.exported).toBe(true)
+    expect(byName.get('second')?.defaultExport).toBe(false)
+  })
+
+  it('does not mark a plain local declaration as a default export', async () => {
+    const scan = await symbols('function local(): void {}\n')
+    expect(scan.declarations.find((d) => d.name === 'local')?.defaultExport).toBe(false)
+  })
+
   it('separates type declarations from value declarations', async () => {
     const scan = await symbols('export type A = string\nexport interface B { x: string }\nexport const c = 1\n')
     const kinds = new Map(scan.declarations.map((d) => [d.name, d.kind]))
