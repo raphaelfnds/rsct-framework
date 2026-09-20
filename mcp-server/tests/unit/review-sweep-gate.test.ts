@@ -658,8 +658,8 @@ describe('sweep ledger bookkeeping', () => {
   })
 })
 
-describe('rsct_phase_review_complete — a write it could not make is reported (#77)', () => {
-  it('says the state was not written when another session holds the lock', async () => {
+describe('rsct_phase_review_complete — a lock held by another session stops the completion', () => {
+  it('reports the lock and stamps nothing', async () => {
     write('src/a.ts', 'export const a = 1\n')
     openReview()
     writeFileSync(
