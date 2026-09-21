@@ -69,6 +69,13 @@ export interface AuditCeiling {
   auditLocked: boolean
   readable: boolean
   unverifiedDecisions: Set<string>
+  deadCodeKeepDecisions: Set<string>
+}
+
+export const DEAD_CODE_KEPT_EVENT = 'review.dead_code_kept'
+
+export function deadCodeKeepKey(path: string, name: string, declarationSha256: string): string {
+  return `${path}\u0000${name}\u0000${declarationSha256}`
 }
 
 export function deriveAuditCeiling(
@@ -83,6 +90,7 @@ export function deriveAuditCeiling(
     auditLocked: false,
     readable: false,
     unverifiedDecisions: new Set<string>(),
+    deadCodeKeepDecisions: new Set<string>(),
   }
   const auditPath = resolveAuditPath(projectRoot, config?.audit)
   let raw: string
@@ -99,6 +107,7 @@ export function deriveAuditCeiling(
   let freeCommitsUsed = 0
   let auditLocked = false
   const unverifiedDecisions = new Set<string>()
+  const deadCodeKeepDecisions = new Set<string>()
 
   for (const line of raw.split('\n')) {
     const clean = line.replace(/\r/g, '').trim()
@@ -130,10 +139,25 @@ export function deriveAuditCeiling(
       typeof entry.blob === 'string'
     ) {
       unverifiedDecisions.add(decisionKey(entry.path, entry.blob))
+    } else if (
+      event === DEAD_CODE_KEPT_EVENT &&
+      typeof entry.path === 'string' &&
+      typeof entry.name === 'string' &&
+      typeof entry.declaration_sha256 === 'string'
+    ) {
+      deadCodeKeepDecisions.add(deadCodeKeepKey(entry.path, entry.name, entry.declaration_sha256))
     }
   }
 
-  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true, unverifiedDecisions }
+  return {
+    classifyEvidencePresent,
+    auditTierMax,
+    freeCommitsUsed,
+    auditLocked,
+    readable: true,
+    unverifiedDecisions,
+    deadCodeKeepDecisions,
+  }
 }
 
 export interface ReserveFreeResult {

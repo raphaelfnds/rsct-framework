@@ -185,6 +185,148 @@ describe('scanSymbols — which declaration a reference sits in', () => {
   })
 })
 
+describe('scanSymbols — scope: a local binding is not the top-level symbol', () => {
+  it('does not count a parameter that shadows a top-level name', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(helper: number): number { return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a destructured parameter that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live({ helper }: { helper: number }): number { return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a local const that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(): number { const helper = 1; return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a catch binding that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(): void { try {} catch (helper) { throw helper } }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a var hoisted from a nested block', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(x: boolean): unknown { if (x) { var helper = 1 } return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a single arrow parameter that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport const live = (helper: number) => helper\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a for-of binding that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(): void { for (const helper of [1]) { void helper } }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a function-expression parameter that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport const live = function (helper: number): number { return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a C-style for binding that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport function live(): void { for (let helper = 0; helper < 1; helper++) {} }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('does not count a method parameter that shadows it', async () => {
+    const scan = await symbols('function helper(): void {}\nexport class Live { run(helper: number): number { return helper } }\n')
+    expect(named(scan, 'helper')).toBe(0)
+  })
+
+  it('STILL counts a use in a sibling scope that does not shadow it', async () => {
+    const scan = await symbols(
+      'function helper(): void {}\nexport function a(helper: number): number { return helper }\nexport function b(): void { helper() }\n',
+    )
+    expect(named(scan, 'helper')).toBe(1)
+    expect(ownerOf(scan, 'helper')).toBe('b')
+  })
+
+  it('STILL counts a use in a parameter default, which is evaluated outside the shadow', async () => {
+    const scan = await symbols('function helper(): number { return 1 }\nexport function live(x = helper()): number { return x }\n')
+    expect(named(scan, 'helper')).toBe(1)
+  })
+
+  it('STILL counts a for-of that assigns an outer name instead of declaring one', async () => {
+    const scan = await symbols('let helper = 0\nexport function live(): void { for (helper of [1]) {} }\n')
+    expect(named(scan, 'helper')).toBe(1)
+  })
+
+  it('does not count a namespace member access through a shadowed name', async () => {
+    const scan = await symbols("import * as ns from './a.js'\nexport function live(ns: { x: number }): number { return ns.x }\n")
+    expect(scan.memberUses).toEqual([])
+  })
+})
+
+describe('scanSymbols — each declarator owns only its own initialiser', () => {
+  it('attributes a reference to the declarator whose initialiser holds it', async () => {
+    const scan = await symbols('function compute(): number { return 1 }\nexport const unused = 0, used = compute()\n')
+    expect(ownerOf(scan, 'compute')).toBe('used')
+  })
+})
+
+describe('scanSymbols — exports declared away from the declaration', () => {
+  it('marks a declaration exported by a bare export clause, under its alias', async () => {
+    const scan = await symbols('function a(): void {}\nexport { a as b }\n')
+    const a = scan.declarations.find((d) => d.name === 'a')
+    expect(a?.exported).toBe(true)
+    expect(a?.exposures).toEqual(['b'])
+    expect(named(scan, 'a')).toBe(0)
+  })
+
+  it('marks a declaration exported as default by `export default name`', async () => {
+    const scan = await symbols('function a(): void {}\nexport default a\n')
+    const a = scan.declarations.find((d) => d.name === 'a')
+    expect(a?.defaultExport).toBe(true)
+    expect(a?.exposures).toEqual(['default'])
+    expect(named(scan, 'a')).toBe(0)
+  })
+
+  it('exposes a named export under its own name and a default export only as default', async () => {
+    const scan = await symbols('export function named(): void {}\nexport default function dflt(): void {}\n')
+    const byName = new Map(scan.declarations.map((d) => [d.name, d]))
+    expect(byName.get('named')?.exposures).toEqual(['named'])
+    expect(byName.get('dflt')?.exposures).toEqual(['default'])
+  })
+})
+
+describe('scanSymbols — overload signatures are declarations', () => {
+  it('does not count the name of an overload signature as a reference', async () => {
+    const scan = await symbols('export function f(a: string): void\nexport function f(a: unknown): void {}\n')
+    expect(named(scan, 'f')).toBe(0)
+    expect(scan.declarations.filter((d) => d.name === 'f')).toHaveLength(2)
+  })
+})
+
+describe('scanSymbols — import and re-export edges are told apart', () => {
+  it('marks an import edge as an import and a named re-export as a re-export', async () => {
+    const scan = await symbols("import { a } from './a.js'\nexport { b as c } from './b.js'\nexport const use = () => a\n")
+    const bySpec = new Map(scan.imports.map((e) => [e.specifier, e]))
+    expect(bySpec.get('./a.js')?.kind).toBe('import')
+    expect(bySpec.get('./b.js')?.kind).toBe('reexport')
+    expect(bySpec.get('./b.js')?.names).toEqual([{ imported: 'b', local: 'c' }])
+  })
+
+  it('records `export * as ns from` as a namespace re-export under that name', async () => {
+    const scan = await symbols("export * as ns from './x.js'\n")
+    expect(scan.imports[0]?.kind).toBe('reexport')
+    expect(scan.imports[0]?.namespaceReexport).toBe('ns')
+    expect(scan.imports[0]?.starReexport).toBe(false)
+  })
+
+  it('records a dynamic import() as a dynamic edge', async () => {
+    const scan = await symbols("export async function g(): Promise<unknown> { const m = await import('./a.js'); return m }\n")
+    expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
+  })
+
+  it('records require() of a relative path as a dynamic edge', async () => {
+    const scan = await symbols("const r = require('./a.js')\nexport const use = () => r\n")
+    expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
+  })
+})
+
 describe('scanSymbols — failure modes', () => {
   it('reports a parse error rather than an empty, clean-looking scan', async () => {
     const result = await scanSymbols('typescript', 'function broken( {\n')

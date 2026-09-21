@@ -4,13 +4,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  DEPENDENT_HINT_PREFIX,
+  DYNAMIC_HINT_PREFIX,
   ENTRYPOINT_HINT_PREFIX,
   PUBLIC_API_HINT_PREFIX,
+  PUBLIC_EXEMPTED_HINT_PREFIX,
   UNREADABLE_HINT_PREFIX,
   clearSymbolScanCache,
   findDeadSymbols,
   languageOf,
+  limitSymbolScanCacheForTests,
   symbolScanCacheSize,
+  type SourceReader,
 } from '../../src/lib/dead-code/references.js'
 
 let tmpRoot: string
@@ -150,10 +155,19 @@ describe('findDeadSymbols — re-export chains', () => {
     expect(await deadNames(['deep.ts', 'mid.ts', 'barrel.ts', 'user.ts'], ['deep.ts'])).toEqual([])
   })
 
-  it('still reports a symbol a barrel re-exports that nobody imports', async () => {
+  it('leaves unknown a symbol a barrel re-exports when nothing imports the barrel', async () => {
     writeFile('deep.ts', 'export function unusedThing(): void {}\n')
     writeFile('barrel.ts', "export * from './deep.js'\n")
-    expect(await deadNames(['deep.ts', 'barrel.ts'], ['deep.ts'])).toEqual(['unusedThing'])
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['deep.ts', 'barrel.ts'], targets: ['deep.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['unusedThing'])
+  })
+
+  it('reports a symbol a barrel re-exports when the barrel is imported but the symbol is not', async () => {
+    writeFile('deep.ts', 'export function unusedThing(): void {}\nexport function usedThing(): void {}\n')
+    writeFile('barrel.ts', "export * from './deep.js'\n")
+    writeFile('user.ts', "import { usedThing } from './barrel.js'\nexport const go = () => usedThing()\n")
+    expect(await deadNames(['deep.ts', 'barrel.ts', 'user.ts'], ['deep.ts'])).toEqual(['unusedThing'])
   })
 })
 
@@ -335,9 +349,358 @@ describe('findDeadSymbols — a file nobody imports cannot be told from an entry
     expect(result.dead.map((s) => s.name)).toEqual(['privateDead'])
   })
 
+  it('leaves a private helper that only an entrypoint export uses unknown too, and says why', async () => {
+    writeFile('entry.ts', 'function helper(): void {}\nexport function main(): void { helper() }\n')
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['entry.ts'], targets: ['entry.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name).sort()).toEqual(['helper', 'main'])
+    const hint = result.hints.find((h) => h.startsWith(DEPENDENT_HINT_PREFIX))
+    expect(hint).toContain('entry.ts:helper')
+  })
+
   it('judges the exports once any file imports it, even for side effects', async () => {
     writeFile('a.ts', 'export function nowJudged(): void {}\n')
     expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['nowJudged'])
+  })
+})
+
+describe('findDeadSymbols — re-exports are followed by name, not only by star', () => {
+  it('keeps a symbol alive when it is used through a named re-export', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "export { publicThing } from './impl.js'\n")
+    writeFile('consumer.ts', "import { publicThing } from './index.js'\nexport const go = () => publicThing()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual([])
+  })
+
+  it('follows an aliased named re-export', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "export { publicThing as renamed } from './impl.js'\n")
+    writeFile('consumer.ts', "import { renamed } from './index.js'\nexport const go = () => renamed()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual([])
+  })
+
+  it('follows a chain of named re-exports to the end', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('mid.ts', "export { publicThing as middle } from './impl.js'\n")
+    writeFile('index.ts', "export { middle as outer } from './mid.js'\n")
+    writeFile('consumer.ts', "import { outer } from './index.js'\nexport const go = () => outer()\n")
+    expect(await deadNames(['impl.ts', 'mid.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual([])
+  })
+
+  it('follows `export * as ns from` into a member access', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\nexport function unusedThing(): void {}\n')
+    writeFile('index.ts', "export * as ns from './impl.js'\n")
+    writeFile('consumer.ts', "import { ns } from './index.js'\nexport const go = () => ns.publicThing()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual(['unusedThing'])
+  })
+
+  it('follows a re-export of an imported binding', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "import { publicThing } from './impl.js'\nexport { publicThing }\n")
+    writeFile('consumer.ts', "import { publicThing } from './index.js'\nexport const go = () => publicThing()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual([])
+  })
+
+  it('reports a re-exported imported binding that nobody imports from the barrel', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "import { publicThing } from './impl.js'\nexport { publicThing }\n")
+    writeFile('consumer.ts', "import './index.js'\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual(['publicThing'])
+  })
+
+  it('does not let `export *` pass the default export along, as the language does not', async () => {
+    writeFile('impl.ts', 'export default function thing(): void {}\n')
+    writeFile('barrel.ts', "export * from './impl.js'\n")
+    writeFile('consumer.ts', "import thing from './barrel.js'\nexport const go = () => thing()\n")
+    writeFile('entry.ts', "import './impl.js'\n")
+    expect(await deadNames(['impl.ts', 'barrel.ts', 'consumer.ts', 'entry.ts'], ['impl.ts'])).toEqual(['thing'])
+  })
+
+  it('follows `export { default as X } from`', async () => {
+    writeFile('impl.ts', 'export default function thing(): void {}\n')
+    writeFile('index.ts', "export { default as Thing } from './impl.js'\n")
+    writeFile('consumer.ts', "import { Thing } from './index.js'\nexport const go = () => Thing()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual([])
+  })
+
+  it('still reports a symbol the barrel re-exports by name when the importer never asks for it', async () => {
+    writeFile('impl.ts', 'export function wanted(): void {}\nexport function unwanted(): void {}\n')
+    writeFile('index.ts', "export { wanted, unwanted } from './impl.js'\n")
+    writeFile('consumer.ts', "import { wanted } from './index.js'\nexport const go = () => wanted()\n")
+    expect(await deadNames(['impl.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual(['unwanted'])
+  })
+
+  it('leaves a symbol exposed only through an unimported barrel unknown, not dead', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "export { publicThing } from './impl.js'\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['impl.ts', 'index.ts'], targets: ['impl.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['publicThing'])
+  })
+
+  it('honours public_api declared on the barrel, which is what the hint tells you to do', async () => {
+    writeFile('impl.ts', 'export function publicThing(): void {}\n')
+    writeFile('index.ts', "export { publicThing } from './impl.js'\n")
+    writeFile('consumer.ts', "import './index.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['impl.ts', 'index.ts', 'consumer.ts'],
+      targets: ['impl.ts'],
+      publicApi: ['index.ts'],
+    })
+    expect(result.dead).toEqual([])
+    expect(result.publicExempted.map((s) => s.name)).toEqual(['publicThing'])
+  })
+})
+
+describe('findDeadSymbols — liveness is reachability from a real use', () => {
+  it('reports a function whose only caller is itself', async () => {
+    writeFile('a.ts', 'export function rotting(n: number): number { return n > 0 ? rotting(n - 1) : 0 }\n')
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['rotting'])
+  })
+
+  it('reports two functions that only call each other', async () => {
+    writeFile('a.ts', 'function ping(n: number): number { return n > 0 ? pong(n - 1) : 0 }\nfunction pong(n: number): number { return ping(n) }\n')
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['ping', 'pong'])
+  })
+
+  it('keeps a recursive function alive when something real calls it', async () => {
+    writeFile('a.ts', 'export function walk(n: number): number { return n > 0 ? walk(n - 1) : 0 }\n')
+    writeFile('b.ts', "import { walk } from './a.js'\nexport const go = () => walk(3)\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+})
+
+describe('findDeadSymbols — a local binding does not keep a top-level symbol alive', () => {
+  it('reports a helper whose name is only reused as a parameter', async () => {
+    writeFile('a.ts', 'function deadHelper(): void {}\nexport function live(deadHelper: number): number { return deadHelper }\n')
+    writeFile('b.ts', "import { live } from './a.js'\nexport const go = () => live(1)\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['deadHelper'])
+  })
+})
+
+describe('findDeadSymbols — each declarator is judged on its own', () => {
+  it('does not accuse the function that feeds a used declarator in a shared statement', async () => {
+    writeFile('a.ts', 'function compute(): number { return 1 }\nexport const unusedThing = 0, used = compute()\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const go = () => used\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['unusedThing'])
+  })
+})
+
+describe('findDeadSymbols — exports declared away from the declaration', () => {
+  it('reports a symbol exported by a bare clause that nobody imports', async () => {
+    writeFile('a.ts', 'function rotting(): void {}\nexport { rotting }\n')
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['rotting'])
+  })
+
+  it('keeps it alive when a consumer imports it under the clause alias', async () => {
+    writeFile('a.ts', 'function inner(): void {}\nexport { inner as outer }\n')
+    writeFile('b.ts', "import { outer } from './a.js'\nexport const go = () => outer()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+
+  it('keeps `export default name` alive through a default import', async () => {
+    writeFile('a.ts', 'function inner(): void {}\nexport default inner\n')
+    writeFile('b.ts', "import dflt from './a.js'\nexport const go = () => dflt()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual([])
+  })
+
+  it('reports an overload whose implementation nobody calls', async () => {
+    writeFile('a.ts', 'export function f(a: string): void\nexport function f(a: unknown): void {}\n')
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['f'])
+  })
+})
+
+describe('findDeadSymbols — dynamic imports withhold rather than guess', () => {
+  it('leaves the exports of a dynamically imported module unknown, and says why', async () => {
+    writeFile('a.ts', 'export function lazyThing(): void {}\n')
+    writeFile('b.ts', "export async function go(): Promise<void> { const m = await import('./a.js'); m.lazyThing() }\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', importerOf('b.ts')], targets: ['a.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['lazyThing'])
+    expect(result.hints.some((h) => h.startsWith(DYNAMIC_HINT_PREFIX))).toBe(true)
+  })
+
+  it('treats require() of a relative module the same way', async () => {
+    writeFile('a.ts', 'export function lazyThing(): void {}\n')
+    writeFile('b.ts', "const m = require('./a.js')\nexport const go = () => m.lazyThing()\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', importerOf('b.ts')], targets: ['a.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['lazyThing'])
+  })
+
+  it('still reports a PRIVATE dead symbol of a dynamically imported module', async () => {
+    writeFile('a.ts', 'function privateDead(): void {}\nexport function lazyThing(): void {}\n')
+    writeFile('b.ts', "export async function go(): Promise<void> { await import('./a.js') }\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', importerOf('b.ts')], targets: ['a.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['privateDead'])
+  })
+})
+
+describe('findDeadSymbols — what an unreadable file can and cannot reach', () => {
+  it('does not let an unreadable importer hide a PRIVATE dead symbol', async () => {
+    writeFile('a.ts', 'function privateDead(): void {}\nexport function maybe(): void {}\n')
+    writeFile('broken.ts', "import { maybe } from './a.js'\nfunction oops( {\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'broken.ts', importerOf('a.ts')], targets: ['a.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['privateDead'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['maybe'])
+  })
+
+  it('honours the imports of a .vue component it does not parse', async () => {
+    writeFile('a.ts', 'export function helper(): void {}\n')
+    writeFile('Comp.vue', "<script setup lang=\"ts\">\nimport { helper } from './a.js'\nhelper()\n</script>\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'Comp.vue', importerOf('a.ts')], targets: ['a.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['helper'])
+  })
+})
+
+describe('findDeadSymbols — where the bytes come from', () => {
+  function reader(files: Record<string, string>): SourceReader {
+    return (rel) => (rel in files ? { kind: 'text', text: files[rel] ?? '' } : { kind: 'absent' })
+  }
+
+  it('reads through the supplied reader, never the disk', async () => {
+    writeFile('a.ts', 'export function onDisk(): void {}\n')
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'entry.ts'],
+      targets: ['a.ts'],
+      read: reader({ 'a.ts': 'export function inIndex(): void {}\n', 'entry.ts': "import './a.js'\n" }),
+    })
+    expect(result.dead.map((s) => s.name)).toEqual(['inIndex'])
+  })
+
+  it('counts a use the reader supplies even when the disk disagrees', async () => {
+    writeFile('a.ts', 'export function ghost(): void {}\n')
+    writeFile('b.ts', 'export const unrelated = 1\n')
+    writeFile('entry.ts', "import './a.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'b.ts', 'entry.ts'],
+      targets: ['a.ts'],
+      read: reader({
+        'a.ts': 'export function ghost(): void {}\n',
+        'b.ts': "import { ghost } from './a.js'\nexport const g = () => ghost()\n",
+        'entry.ts': "import './a.js'\n",
+      }),
+    })
+    expect(result.dead).toEqual([])
+  })
+
+  it('skips a path the reader reports absent', async () => {
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'gone.ts', 'entry.ts'],
+      targets: ['a.ts'],
+      read: reader({ 'a.ts': 'export function orphan(): void {}\n', 'entry.ts': "import './a.js'\n" }),
+    })
+    expect(result.dead.map((s) => s.name)).toEqual(['orphan'])
+    expect(result.unreadable).toEqual([])
+  })
+
+  it('withholds every verdict when a file cannot be read for another reason, and says so', async () => {
+    const files: Record<string, string> = { 'a.ts': 'export function orphan(): void {}\n', 'entry.ts': "import './a.js'\n" }
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'locked.ts', 'entry.ts'],
+      targets: ['a.ts'],
+      read: (rel) => (rel === 'locked.ts' ? { kind: 'error' } : rel in files ? { kind: 'text', text: files[rel] ?? '' } : { kind: 'absent' }),
+    })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['orphan'])
+    expect(result.unreadable).toContain('locked.ts')
+    expect(result.hints.some((h) => h.startsWith(UNREADABLE_HINT_PREFIX))).toBe(true)
+  })
+})
+
+describe('findDeadSymbols — names are matched exactly', () => {
+  it('keeps only the member actually used through a namespace import', async () => {
+    writeFile('a.ts', 'export function alpha(): void {}\nexport function beta(): void {}\n')
+    writeFile('b.ts', "import * as ns from './a.js'\nexport const go = () => ns.alpha()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['beta'])
+  })
+
+  it('does not let an import of one name keep another alive', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function other(): void {}\n')
+    writeFile('b.ts', "import { other } from './a.js'\nexport const go = () => other()\n")
+    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['used'])
+  })
+
+  it('maps an upper-case extension onto its grammar', () => {
+    expect(languageOf('A.TS')).toBe('typescript')
+    expect(languageOf('B.MJS')).toBe('javascript')
+  })
+})
+
+describe('findDeadSymbols — resolution the way the bundler does it', () => {
+  it('resolves a directory import to its index file', async () => {
+    writeFile('lib/index.ts', 'export function fromIndex(): void {}\n')
+    writeFile('b.ts', "import { fromIndex } from './lib'\nexport const go = () => fromIndex()\n")
+    writeFile('entry.ts', "import './lib/index.js'\n")
+    expect(await deadNames(['lib/index.ts', 'b.ts', 'entry.ts'], ['lib/index.ts'])).toEqual([])
+  })
+
+  it('resolves a directory import to an index.mts', async () => {
+    writeFile('lib/index.mts', 'export function fromIndex(): void {}\n')
+    writeFile('b.ts', "import { fromIndex } from './lib'\nexport const go = () => fromIndex()\n")
+    writeFile('entry.ts', "import './lib/index.mjs'\n")
+    expect(await deadNames(['lib/index.mts', 'b.ts', 'entry.ts'], ['lib/index.mts'])).toEqual([])
+  })
+
+  it('resolves an extensionless import to a .cts file', async () => {
+    writeFile('mod.cts', 'export function fromCts(): void {}\n')
+    writeFile('b.ts', "import { fromCts } from './mod'\nexport const go = () => fromCts()\n")
+    writeFile('entry.ts', "import './mod.cjs'\n")
+    expect(await deadNames(['mod.cts', 'b.ts', 'entry.ts'], ['mod.cts'])).toEqual([])
+  })
+
+  it('resolves case-exactly, so a wrongly-cased import is not a use on any operating system', async () => {
+    writeFile('Widget.ts', 'export function widget(): void {}\n')
+    writeFile('b.ts', "import { widget } from './widget.js'\nexport const go = () => widget()\n")
+    writeFile('entry.ts', "import './Widget.js'\n")
+    expect(await deadNames(['Widget.ts', 'b.ts', 'entry.ts'], ['Widget.ts'])).toEqual(['widget'])
+  })
+})
+
+describe('findDeadSymbols — robustness', () => {
+  it('ignores an import that resolves outside the project root', async () => {
+    writeFile('a.ts', "import { x } from '../outside.js'\nexport function f(): unknown { return x }\n")
+    expect(await deadNames(['a.ts', importerOf('a.ts')], ['a.ts'])).toEqual(['f'])
+  })
+
+  it('terminates on barrels that re-export each other', async () => {
+    writeFile('a.ts', "export * from './b.js'\nexport function inA(): void {}\n")
+    writeFile('b.ts', "export * from './a.js'\n")
+    writeFile('consumer.ts', "import { inA } from './b.js'\nexport const go = () => inA()\n")
+    expect(await deadNames(['a.ts', 'b.ts', 'consumer.ts'], ['a.ts'])).toEqual([])
+  }, 5_000)
+})
+
+describe('findDeadSymbols — a public_api exemption is reported, never silent', () => {
+  it('lists every export public_api exempted, and hints how many', async () => {
+    writeFile('a.ts', 'export function exposedOne(): void {}\nexport function exposedTwo(): void {}\n')
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', importerOf('a.ts')],
+      targets: ['a.ts'],
+      publicApi: ['**/*'],
+    })
+    expect(result.dead).toEqual([])
+    expect(result.publicExempted.map((s) => s.name).sort()).toEqual(['exposedOne', 'exposedTwo'])
+    expect(result.hints.some((h) => h.startsWith(PUBLIC_EXEMPTED_HINT_PREFIX))).toBe(true)
+  })
+
+  it('does not report an exemption when public_api covers nothing under review', async () => {
+    writeFile('a.ts', 'export function exposed(): void {}\n')
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', importerOf('a.ts')],
+      targets: ['a.ts'],
+      publicApi: ['other/**'],
+    })
+    expect(result.publicExempted).toEqual([])
+    expect(result.hints.some((h) => h.startsWith(PUBLIC_EXEMPTED_HINT_PREFIX))).toBe(false)
   })
 })
 
@@ -353,6 +716,21 @@ describe('the parse cache — the commit gate runs this check twice', () => {
     expect(afterFirst).toBe(3)
     await findDeadSymbols({ projectRoot: tmpRoot, corpus, targets: ['a.ts'] })
     expect(symbolScanCacheSize()).toBe(afterFirst)
+  })
+
+  it('evicts one entry at the limit instead of dropping the whole cache', async () => {
+    clearSymbolScanCache()
+    limitSymbolScanCacheForTests(2)
+    try {
+      writeFile('a.ts', 'export const a = 1\n')
+      writeFile('b.ts', 'export const b = 1\n')
+      writeFile('c.ts', 'export const c = 1\n')
+      await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', 'c.ts'], targets: [] })
+      expect(symbolScanCacheSize()).toBe(2)
+    } finally {
+      limitSymbolScanCacheForTests(null)
+      clearSymbolScanCache()
+    }
   })
 
   it('does not serve a stale parse after the content changes', async () => {

@@ -322,9 +322,6 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
   })
 
   it('preserves dead_code_keeps — the developer decided those, not the abandoned work (#62)', async () => {
-    // Mutation: remove 'dead_code_keeps' from PHASE_STATE_PRESERVED_ON_ABANDON.
-    // Without it, abandoning a phase re-asks the developer about every symbol they
-    // already chose to keep, and the commit gate refuses until they answer again.
     writePhaseState({
       phase: 'code',
       spec_slug: 'feat-x',
@@ -352,7 +349,7 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(state.phase).toBeUndefined() // control: the write really happened
+    expect(state.phase).toBeUndefined()
     expect(state.dead_code_keeps).toEqual([
       {
         path: 'src/lib/guard.ts',

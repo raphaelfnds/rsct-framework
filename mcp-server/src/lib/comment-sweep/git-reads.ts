@@ -200,6 +200,66 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
   return id ? readBlob(repo, id) : null
 }
 
+const REGULAR_FILE_MODES: ReadonlySet<string> = new Set(['100644', '100755'])
+const CAT_FILE_BATCH = 1000
+const BLOB_TEXT_CACHE_MAX = 4000
+const blobTextCache = new Map<string, string>()
+
+export function readIndexEntries(repo: SweepRepo): { paths: Set<string>; blobs: Map<string, string> } | null {
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['ls-files', '-s', '-z', '--full-name']))
+  if (listed === null) return null
+  const paths = new Set<string>()
+  const blobs = new Map<string, string>()
+  for (const entry of listed) {
+    const tab = entry.indexOf('\t')
+    if (tab < 0) continue
+    const [mode, oid, stage] = entry.slice(0, tab).split(' ')
+    const path = entry.slice(tab + 1)
+    paths.add(path)
+    if (stage === '0' && oid && mode && REGULAR_FILE_MODES.has(mode)) blobs.set(path, oid)
+  }
+  return { paths, blobs }
+}
+
+function rememberBlobText(oid: string, text: string): void {
+  while (blobTextCache.size >= BLOB_TEXT_CACHE_MAX) {
+    const oldest = blobTextCache.keys().next().value
+    if (oldest === undefined) break
+    blobTextCache.delete(oldest)
+  }
+  blobTextCache.set(oid, text)
+}
+
+export function readBlobTexts(repo: SweepRepo, oids: readonly string[]): Map<string, string> | null {
+  const texts = new Map<string, string>()
+  const missing: string[] = []
+  for (const oid of new Set(oids)) {
+    const cached = blobTextCache.get(oid)
+    if (cached === undefined) missing.push(oid)
+    else texts.set(oid, cached)
+  }
+  for (let start = 0; start < missing.length; start += CAT_FILE_BATCH) {
+    const chunk = missing.slice(start, start + CAT_FILE_BATCH)
+    const batch = safeGitBuffer(repo.toplevel, ['cat-file', '--batch'], `${chunk.join('\n')}\n`)
+    if (batch === null) return null
+    let offset = 0
+    for (const oid of chunk) {
+      const newline = batch.indexOf(0x0a, offset)
+      if (newline < 0) return null
+      const header = batch.subarray(offset, newline).toString('utf8').split(' ')
+      offset = newline + 1
+      if (header[1] === 'missing' || header.length < 3) continue
+      const size = Number(header[2])
+      if (!Number.isInteger(size) || offset + size > batch.length) return null
+      const text = batch.subarray(offset, offset + size).toString('utf8')
+      texts.set(oid, text)
+      rememberBlobText(oid, text)
+      offset += size + 1
+    }
+  }
+  return texts
+}
+
 export function readKnownPaths(repo: SweepRepo): Set<string> | null {
   const index = nulList(safeGitBuffer(repo.toplevel, ['ls-files', '-z', '--full-name']))
   if (index === null) return null

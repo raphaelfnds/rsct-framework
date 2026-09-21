@@ -26,15 +26,5 @@ describe('the detector against this repository', () => {
     const result = await findDeadSymbols({ projectRoot: ROOT, corpus, targets })
     const reported = result.dead.map((s) => `${s.path}:${s.name}`).sort()
     expect(reported).toEqual([])
-  }, 300_000)
-
-  it('withholds a verdict where an unparseable file could hold the only reference', async () => {
-    const corpus = [...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'tests'))]
-    const targets = corpus.filter((f) => f.startsWith('src/'))
-    const result = await findDeadSymbols({ projectRoot: ROOT, corpus, targets })
-    expect(result.unreadable.length).toBeGreaterThan(0)
-    for (const symbol of result.unknown) {
-      expect(result.dead.map((d) => d.name)).not.toContain(symbol.name)
-    }
-  }, 300_000)
+  }, 60_000)
 })

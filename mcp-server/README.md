@@ -82,6 +82,26 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   A pre-commit hook that slips unreviewed code into the commit returns
   `committed_with_drift` and blocks further commits (`review_drift`) until a
   REVIEW covers those paths; a hook that only reformats is re-stamped.
+- **Dead code (JavaScript/TypeScript, 2.12.0).** In the same REVIEW, a symbol
+  declared in a touched file that nothing in the project references — its own
+  file included — rejects `dead_code_remaining`; `pending_dead_code` lists each
+  one with its declaration text and `declaration_sha256`. References are
+  resolved (imports, aliases, default and namespace imports, re-exports followed
+  to the end, local export clauses, scope shadowing), so a name that merely
+  appears in a comment, a string or an unrelated symbol does not keep code
+  alive, and self or mutual recursion is dead. The developer decides each
+  symbol: remove it, or keep it with a `dead_code_keeps` entry
+  (`path`, `name`, `declaration_sha256`, `note` with the reason given). A new
+  keep forces the §C dialog, is listed in it, is audited as
+  `review.dead_code_kept`, and holds only for those exact declaration bytes
+  (`dead_code_keep_stale` once they change). `rsct_request_commit` re-derives
+  the verdict from the STAGED bytes in the index — never the working tree —
+  at both check points (`dead_code_staged`), honours a keep only when its audit
+  line exists, and re-checks a file a pre-commit hook rewrote. What the scan
+  cannot settle — a file nothing imports (an entrypoint), an importer it cannot
+  parse, an `import()` or `require()` — is left unknown and named in `hints`,
+  never reported dead and never passed silently. Touched files in other
+  languages are reported as not checked. Types are not judged.
 - The two scripts `/rsct-setup` installs (`.rsct/scripts/sanitize-permissions.js`,
   `.rsct/scripts/edit-scope-guard.js`) need no REVIEW when their bytes are exactly
   the copy this `rsct-mcp` ships — shebang, the version stamp of this server, the
@@ -728,7 +748,7 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
-- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
   1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, or present with no hook entry pointing at it; either way what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and on push/merge it also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit falls back to a per-action `dev_approval`.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
@@ -960,6 +980,7 @@ Bounds:
 | `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
 | `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | `sql_dialect` | enum of `postgresql`, `mysql`, `none`; optional | an unknown dialect would make the REVIEW comment sweep read SQL with the wrong comment syntax; rejecting loudly beats sweeping wrongly |
+| `public_api` | array of non-empty path globs; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; every export it exempts is listed in the REVIEW dialog, so a broad glob is visible rather than silent |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

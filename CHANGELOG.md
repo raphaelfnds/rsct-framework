@@ -12,6 +12,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Dead code is refused in the REVIEW and at the commit gate (#62, release 2).** For every
+  JavaScript/TypeScript file a change touches, a declared symbol that nothing in the project
+  references — its own file included — rejects `rsct_phase_review_complete`
+  (`dead_code_remaining`, with `pending_dead_code`) and `rsct_request_commit` (`dead_code_staged`).
+  References are resolved, not searched by name: imports, aliases, default and namespace imports,
+  named, star and `export * as ns` re-exports followed to the end, local `export { a as b }`, scope
+  shadowing, and self or mutual recursion (which is dead). The developer decides each symbol:
+  remove it, or keep it through `dead_code_keeps` — a new keep forces the developer dialog, is
+  written to the audit log, and holds only for those exact declaration bytes. The commit gate reads
+  the staged bytes from the index, never the working tree, and re-checks after a pre-commit hook.
+  What the scan cannot settle (an entrypoint, an unparseable or dynamic importer) is reported as
+  unknown with the reason, never as dead and never silently. Measured on real code: `zod` with
+  `public_api` declared — 6 findings, all true (ADR-018).
+- **`public_api` in `.rsct.json`** — path globs whose exported symbols are consumed outside the
+  repository (a published library), honoured through re-export barrels. Every export it exempts is
+  listed in the REVIEW dialog.
+
+### Fixed
+
+- **The walk now sees `.mts` and `.cts` files and resolves `.mjs`/`.cjs` specifiers to them
+  (#101 Part A).** The coverage hint's suffix list is derived from the scan list, so the two can no
+  longer disagree.
+
+### Removed
+
+- `readFullSha` in `lib/comment-sweep/git-reads.ts` — referenced by nothing, tests included; the
+  dead-code scan's first real finding.
+
 ## [2.11.2] - 2026-09-20
 
 ### Fixed

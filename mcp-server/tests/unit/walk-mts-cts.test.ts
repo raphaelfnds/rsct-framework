@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { coverageHints, seedIsCoverable, walkReverseDeps } from '../../src/lib/reverse-dep-walk.js'
+import { DEFAULT_LANG_GLOBS, coverageHints, seedIsCoverable, walkReverseDeps } from '../../src/lib/reverse-dep-walk.js'
 
 let tmpRoot: string
 
@@ -64,10 +64,13 @@ describe('the walk covers .mts and .cts (#101 Part A)', () => {
     expect(out.discovered.map((d) => d.file)).not.toContain('src/importer.ts')
   })
 
-  it('names the new suffixes in the coverage hint for an uncoverable seed', () => {
+  it('names every scanned suffix in the coverage hint, derived from the scan list itself', () => {
     writeFile('src/seed.ts', 'export const x = 1\n')
     const out = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/thing.py'] })
     const hint = coverageHints(out).join(' ')
+    for (const glob of DEFAULT_LANG_GLOBS) {
+      expect(hint).toContain(glob.slice(glob.lastIndexOf('*') + 1))
+    }
     expect(hint).toContain('.mts')
     expect(hint).toContain('.cts')
   })

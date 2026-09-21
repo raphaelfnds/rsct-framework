@@ -33,7 +33,7 @@ import { matchesAnyGlob, toPosix } from './phase-scope.js'
  * silent about a walk that found nothing.
  */
 
-const DEFAULT_LANG_GLOBS: readonly string[] = [
+export const DEFAULT_LANG_GLOBS: readonly string[] = [
   '**/*.ts',
   '**/*.tsx',
   '**/*.js',
@@ -54,16 +54,7 @@ export const DEFAULT_EXCLUDE_GLOBS: readonly string[] = [
 
 const DEFAULT_MAX_DEPTH = 2
 
-/**
- * Human-readable form of {@link DEFAULT_LANG_GLOBS} for hint text.
- *
- * Safe to hard-code against the defaults: `langGlobs` is not reachable through
- * `rsct_phase_verification_start` — its input schema declares no such field and
- * the handler passes only `projectRoot` / `seedPaths` / `maxDepth`. So in
- * production the wording and the verdict are computed from the same list. A
- * future caller that overrides `langGlobs` must revisit this string.
- */
-const DEFAULT_LANG_SUFFIXES = '.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts'
+const DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf('*') + 1)).join(', ')
 
 const JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/
 
@@ -278,17 +269,36 @@ function hasExactPath(
   return true
 }
 
-function resolveNodeNextSource(
-  projectRoot: string,
-  target: string,
-  entries: Map<string, Set<string>>,
-): string | null {
+export interface ResolveProbe {
+  exists(abs: string): boolean
+  isFile(abs: string): boolean
+  isDirectory(abs: string): boolean
+  hasExactPath(abs: string): boolean
+}
+
+function diskProbe(projectRoot: string, entries: Map<string, Set<string>>): ResolveProbe {
+  const stat = (abs: string): ReturnType<typeof statSync> | null => {
+    try {
+      return statSync(abs)
+    } catch {
+      return null
+    }
+  }
+  return {
+    exists: (abs) => existsSync(abs),
+    isFile: (abs) => stat(abs)?.isFile() ?? false,
+    isDirectory: (abs) => stat(abs)?.isDirectory() ?? false,
+    hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries),
+  }
+}
+
+function resolveNodeNextSource(target: string, probe: ResolveProbe): string | null {
   const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf('.')))
   if (!sourceExtensions) return null
   const stem = target.slice(0, target.lastIndexOf('.'))
   for (const ext of sourceExtensions) {
     const candidate = stem + ext
-    if (hasExactPath(projectRoot, candidate, entries)) return candidate
+    if (probe.hasExactPath(candidate)) return candidate
   }
   return null
 }
@@ -298,31 +308,25 @@ export function resolveImport(
   importerAbs: string,
   spec: string,
   entries: Map<string, Set<string>>,
+  probe: ResolveProbe = diskProbe(projectRoot, entries),
 ): string | null {
   if (!spec.startsWith('.') && !isAbsolute(spec)) return null
   const target = isAbsolute(spec) ? spec : resolvePath(dirname(importerAbs), spec)
 
-  if (existsSync(target)) {
-    try {
-      const s = statSync(target)
-      if (s.isFile()) return target
-      if (s.isDirectory()) {
-        for (const idx of INDEX_RESOLUTIONS) {
-          const candidate = target + idx
-          if (existsSync(candidate)) return candidate
-        }
-      }
-    } catch {
-      // fall through to extension probing
+  if (probe.isFile(target)) return target
+  if (probe.isDirectory(target)) {
+    for (const idx of INDEX_RESOLUTIONS) {
+      const candidate = target + idx
+      if (probe.exists(candidate)) return candidate
     }
   }
 
   for (const ext of RESOLVE_EXTENSIONS) {
     const candidate = target + ext
-    if (existsSync(candidate)) return candidate
+    if (probe.exists(candidate)) return candidate
   }
 
-  return resolveNodeNextSource(projectRoot, target, entries)
+  return resolveNodeNextSource(target, probe)
 }
 
 interface BfsItem {

@@ -489,6 +489,62 @@ to keep passing the chosen `spec_slug` on every later start of the task. Known a
 is: `rsct_phase_code_start` runs its override dialog before this check, as it already did
 before `phase_already_active`, so a start that asks shows that dialog again on the retry.
 
+### ADR-018 — Dead code is decided by resolved references in the touched files, and the developer disposes (#62, 2.12.0)
+**Status**: active
+**Tags**: review, commit-gate, dead-code, cross-os
+**Context**: release 2 of #62. The 2026-09-10 decision said validation follows the graph, but the
+walk is file-level — `DiscoveredImporter` is `{file, via_paths, depth}` and its regexes capture the
+specifier, never the imported names — so a graph verdict cannot settle a symbol question. MEASURED on
+this repository: every source file but the entrypoint has importers, so "the graph wins" would have
+rejected nothing. A name search was tried and rejected (AD-006).
+**Decision**:
+- **Scope**: symbols declared in the touched JavaScript/TypeScript files; the rest of the project is
+  read as evidence and never edited. A symbol that dies because its last caller was removed in another
+  file is caught when that file is touched — the ceiling the comment sweep also has.
+- **Predicate**: referenced nowhere, its own file included, the declaration excluded, through resolved
+  references — named, aliased, default and namespace imports; named, star and `export * as ns`
+  re-exports followed to the end (the walk's depth cap does not apply); local `export { a as b }` and
+  `export default a`; a re-export of an imported binding. References are scope-aware (a parameter, a
+  local, a `catch` or loop binding shadows) and owned per declarator. Liveness is reachability from a
+  real use, so self and mutual recursion are dead. Types are excluded unless asked for.
+- **Unknown, never dead**: a symbol exposed by a file nothing imports (an entrypoint), one a file the
+  scan cannot parse may import (its imports are read by the walk's regex, so the taint stays scoped;
+  `.vue`, `.svelte`, `.astro`, `.html` and `.mdx` importers are honoured the same way), one reached by
+  `import()` or `require()`, one behind a nested namespace re-export, and every verdict when a file
+  cannot be read for a reason other than absence. A private helper used only by an unknown symbol is
+  unknown too. Each reason is a hint with the files named.
+- **Bytes**: the REVIEW reads the working tree; the commit gate reads the INDEX (`git ls-files -s` +
+  `git cat-file --batch`, batched) and resolves imports against the analysed file set, never the disk.
+  MEASURED before the fix: reading the disk let an unstaged edit flip the verdict both ways — an
+  unstaged caller passed a staged dead symbol, an unstaged deletion refused a correct commit. Analysis
+  runs from the repository top level; a subdirectory `project_root` otherwise read the wrong files.
+- **Disposition**: the developer, per symbol. A keep is bound to the sha256 of the declaration text
+  (export keyword included, CRLF normalised) and keyed by path and name. A NEW keep forces the §C
+  dialog (`trust_allowed_for` ignored), is listed in it with the reason, and is written as
+  `review.dead_code_kept`; the commit honours a stored keep only when that audit line exists — the
+  bar ADR-011 sets for `unverified_authorized`. Keeps survive `rsct_phase_abandon` (preserve list) and
+  are pruned when their file leaves the repository. A stale keep and an unkept symbol are reported
+  together.
+- **`public_api`** (`.rsct.json`, path globs through `matchesAnyGlob`): an exported symbol exposed
+  through a matching file — a barrel included — is exempt. Every exemption is listed in the REVIEW
+  dialog, which it forces, and in commit hints. Setup does not ask for it (developer decision; the
+  uninstall note is on #82).
+- **Commit gate**: at both existing sweep points, before authorization and right before `git commit`;
+  after the commit, a pre-commit hook's rewrite is re-derived and a dead symbol lands as drift.
+- `DEFAULT_LANG_SUFFIXES` is derived from `DEFAULT_LANG_GLOBS`, so the coverage hint cannot drift
+  from the scan list (#101 Part A).
+
+**Measured**: this repository — 1 true finding (`readFullSha`, deleted in this release). `got`
+(82 files) — before the default-import fix 34 findings, the obviously live `getBodySize`,
+`proxyEvents` and `decompressResponseBody` among them; after, 0. `zod` (515 files) with `public_api`
+declared — 6 findings, 6 true (each name occurs once in the repository, at its declaration). Cost
+1.2 s cold for 218 files; parses are cached by content, evicting one entry at a time at 4000.
+**Stated limit**: the vendored tree-sitter-typescript 0.23.2 cannot parse variance annotations
+(`interface X<in T>`, `<out T>`) or `export type * from`; such files are unreadable and taint.
+**Residuals, not closed**: a forged `phase-state` keep plus a forged audit line passes (as ADR-011);
+a commit outside `rsct_request_commit` is not checked (#91); dead code in an untouched file; every
+language other than JavaScript/TypeScript is uncovered — and said so in a hint.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -526,6 +582,14 @@ comments, MySQL `#` and backtick identifiers, and reports
 are lexical but dialect-specific: `#` only in MySQL, nested blocks only in PostgreSQL, MySQL
 `--` needs a following space (`SELECT 1--1` is arithmetic), `/*! … */` is executable
 code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function bodies.
+
+### AD-006 — Do not decide dead code by searching for the name
+MEASURED on this repository: "named anywhere else in the project" produced **348 findings, 1 true
+positive** — "else" drops the only evidence that keeps a module-private helper alive. Corrected to
+"anywhere, own file included", a name still collides with an unrelated symbol of the same name, a word
+in a comment or a string (`walk` occurs 113 times, `'walk through'` among them), and cannot see
+through an alias or a re-export. MEASURED by mutation: an injected dead `walk` escaped, and a dead
+callee hid behind its dead caller. ADR-018 resolves references instead.
 
 ---
 

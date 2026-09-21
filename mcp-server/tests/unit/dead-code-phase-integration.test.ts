@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -55,13 +55,19 @@ function approval(scope: string): Record<string, string> {
   }
 }
 
-function prompts(): { fn: (o: DialogOptions) => Promise<DialogResult>; seen: DialogOptions[] } {
+interface Prompts {
+  fn: (o: DialogOptions) => Promise<DialogResult>
+  seen: DialogOptions[]
+}
+
+function prompts(response: DialogResult['response'] = 'yes', onShow?: () => void): Prompts {
   const seen: DialogOptions[] = []
   return {
     seen,
     fn: async (o) => {
       seen.push(o)
-      return { response: 'yes', channel: 'windows' }
+      onShow?.()
+      return { response, channel: response === 'no-channel' ? 'none' : 'windows' }
     },
   }
 }
@@ -73,20 +79,55 @@ function openReview(): void {
   writeFileSync(statePath, JSON.stringify({ ...prev, phase: 'review', spec_slug: 'feat-dead' }))
 }
 
-async function completeReview(extra: Record<string, unknown> = {}): Promise<PhaseReviewCompleteOutput> {
+async function completeReview(extra: Record<string, unknown> = {}, p: Prompts = prompts()): Promise<PhaseReviewCompleteOutput> {
   openReview()
-  const p = prompts()
   return phaseReviewCompleteHandler(
     { project_root: root, spec_ref: 'feat-dead', dev_approval: approval('review_complete:spec_ref=feat-dead'), ...extra },
     { promptFn: p.fn },
   )
 }
 
-async function commit(): Promise<RequestCommitOutput> {
-  const p = prompts()
+async function commit(p: Prompts = prompts()): Promise<RequestCommitOutput> {
   return requestCommitHandler(
     { project_root: root, message: 'feat: dead code test', dev_approval: approval('commit:feat/dead:dead') },
     { promptFn: p.fn },
+  )
+}
+
+function trustReviews(): void {
+  write(
+    '.rsct.json',
+    JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' }, approval_modes: { trust_allowed_for: ['rsct_phase_review_complete'] } }),
+  )
+}
+
+function installHook(body: string): void {
+  mkdirSync(join(root, 'hooks'), { recursive: true })
+  const hook = join(root, 'hooks', 'pre-commit')
+  writeFileSync(hook, `#!/bin/sh\n${body}`)
+  chmodSync(hook, 0o755)
+  git(root, 'config', 'core.hooksPath', 'hooks')
+}
+
+function forgeLedgerFor(path: string): void {
+  const statePath = join(root, '.rsct', 'phase-state.json')
+  const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
+  const blob = execFileSync('git', ['rev-parse', `:0:${path}`], { cwd: root, encoding: 'utf8' }).trim()
+  state.review_sweep = stampLedger(
+    state.review_sweep,
+    [{ path, entry: sweepEntry(blob, 'clean', [], 'forged', 'feat-dead', new Date().toISOString()) }],
+    null,
+  )
+  writeFileSync(statePath, JSON.stringify(state))
+}
+
+async function keepRotting(p: Prompts = prompts()): Promise<PhaseReviewCompleteOutput> {
+  const first = await completeReview()
+  const pending = first.pending_dead_code?.find((s) => s.name === 'rotting')
+  if (!pending) throw new Error(`expected rotting to be pending, got ${JSON.stringify(first.reject_kind)}`)
+  return completeReview(
+    { dead_code_keeps: [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'kept: guards the schema' }] },
+    p,
   )
 }
 
@@ -226,5 +267,148 @@ describe('rsct_request_commit — dead code, through the tool', () => {
     git(root, 'add', '-A')
     const out = await commit()
     expect(out.status).toBe('committed')
+  })
+})
+
+describe('a keep is the developer decision, never the agent claim', () => {
+  it('forces the developer dialog even when the REVIEW is trust-allowed', async () => {
+    trustReviews()
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const refused = await keepRotting(prompts('no-channel'))
+    expect(refused.status).toBe('rejected')
+    expect(refused.reject_kind).toBe('force_dialog_no_channel')
+  })
+
+  it('does not force a dialog on a trust-allowed REVIEW that keeps nothing', async () => {
+    trustReviews()
+    writeLivePair()
+    const out = await completeReview({}, prompts('no-channel'))
+    expect(out.status).toBe('completed')
+    expect(out.channel).toBe('trust')
+  })
+
+  it('shows the kept symbol and the reason in the dialog', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const p = prompts('yes')
+    const out = await keepRotting(p)
+    expect(out.status).toBe('completed')
+    const shown = p.seen.map((o) => `${o.message}\n${o.detail ?? ''}`).join('\n')
+    expect(shown).toContain('src/a.ts:rotting')
+    expect(shown).toContain('kept: guards the schema')
+  })
+
+  it('writes the decision to the audit log', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    expect((await keepRotting()).status).toBe('completed')
+    const kept = auditEvents().filter((e) => e.event === 'review.dead_code_kept')
+    expect(kept.map((e) => [e.path, e.name])).toEqual([['src/a.ts', 'rotting']])
+  })
+
+  it('does not record a keep when the developer says no', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const out = await keepRotting(prompts('no'))
+    expect(out.status).toBe('rejected')
+    expect(auditEvents().some((e) => e.event === 'review.dead_code_kept')).toBe(false)
+    expect(readState().dead_code_keeps).toBeUndefined()
+  })
+
+  it('refuses the commit once the audit line behind a keep is gone, even with the keep still in phase-state', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    expect((await keepRotting()).status).toBe('completed')
+    const auditPath = join(root, '.rsct', 'audit.log')
+    const lines = readFileSync(auditPath, 'utf8').split('\n').filter((l) => l.length > 0 && !l.includes('review.dead_code_kept'))
+    writeFileSync(auditPath, `${lines.join('\n')}\n`)
+    expect(readState().dead_code_keeps).toBeDefined()
+    git(root, 'add', '-A')
+    const out = await commit()
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('dead_code_staged')
+  })
+
+  it('honours a recorded keep on the next REVIEW without asking again', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    expect((await keepRotting()).status).toBe('completed')
+    write('src/b.ts', "import { used } from './a.js'\nexport const run = (): void => used()\nexport const again = (): void => used()\n")
+    trustReviews()
+    const out = await completeReview({}, prompts('no-channel'))
+    expect(out.status).toBe('completed')
+    expect(out.channel).toBe('trust')
+  })
+
+  it('lists what public_api exempted and forces the dialog for it', async () => {
+    write(
+      '.rsct.json',
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'a', org: 'o' },
+        public_api: ['src/a.ts'],
+        approval_modes: { trust_allowed_for: ['rsct_phase_review_complete'] },
+      }),
+    )
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    const refused = await completeReview({}, prompts('no-channel'))
+    expect(refused.reject_kind).toBe('force_dialog_no_channel')
+    const p = prompts('yes')
+    const out = await completeReview({}, p)
+    expect(out.status).toBe('completed')
+    const shown = p.seen.map((o) => `${o.message}\n${o.detail ?? ''}`).join('\n')
+    expect(shown).toContain('src/a.ts:exposed')
+  })
+})
+
+describe('the commit gate re-checks at the last moment and after a hook', () => {
+  it('catches a dead symbol staged while the approval dialog was open', async () => {
+    writeLivePair()
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', '-A')
+    const p = prompts('yes', () => {
+      write('src/a.ts', 'export function used(): void {}\nexport function lateDead(): void {}\n')
+      git(root, 'add', 'src/a.ts')
+      forgeLedgerFor('src/a.ts')
+    })
+    const out = await commit(p)
+    expect(p.seen.length).toBeGreaterThan(0)
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('dead_code_staged')
+    const rejection = auditEvents()
+      .filter((e) => e.reject_kind === 'dead_code_staged')
+      .at(-1)
+    expect(rejection?.stage).toBe('before_commit')
+  })
+
+  it('lands a pre-commit hook that adds a dead symbol as drift, and blocks the next commit', async () => {
+    writeLivePair()
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', '-A')
+    installHook(
+      'printf "export function used(): void {}\\nexport function hookDead(): void {}\\n" > src/a.ts\ngit add src/a.ts\n',
+    )
+    const out = await commit()
+    expect(out.status).toBe('committed_with_drift')
+    const drift = readState().review_drift as { paths: string[] } | undefined
+    expect(drift?.paths).toContain('src/a.ts')
+  })
+
+  it('does not claim a deleted file in another language went unchecked', async () => {
+    write('tool.py', 'def run():\n    return 1\n')
+    commitAll(root, 'python tool')
+    unlinkSync(join(root, 'tool.py'))
+    const out = await completeReview()
+    expect(out.status).toBe('completed')
+    expect(out.hints.join(' ')).not.toContain('tool.py')
+  })
+
+  it('says a touched file in another language was not checked', async () => {
+    write('tool.py', 'def run():\n    return 1\n')
+    const out = await completeReview()
+    expect(out.status).toBe('completed')
+    expect(out.hints.join(' ')).toContain('not checked in tool.py')
   })
 })
