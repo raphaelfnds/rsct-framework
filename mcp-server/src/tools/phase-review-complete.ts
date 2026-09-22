@@ -54,6 +54,7 @@ import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
 import {
   auditBoundKeeps,
   checkDeadCode,
+  keepPrunePaths,
   mergeDeadCodeKeeps,
   readDeadCodeKeeps,
   type DeadCodeRejectKind,
@@ -291,14 +292,30 @@ function listLines(items: string[], limit: number): string {
   return head.join('\n')
 }
 
+interface DeadCodeReport {
+  kept: ReadonlyArray<{ path: string; name: string; note: string }>
+  exempted: ReadonlyArray<{ path: string; name: string }>
+}
+
 function writeReport(
   projectRoot: string,
   specRef: string,
   files: SweepFile[],
   dispositions: readonly Disposition[],
+  deadCode: DeadCodeReport,
 ): { path: string; sha256: string } | null {
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
-  const lines: string[] = [`# REVIEW comment sweep — ${specRef}`, '']
+  const lines: string[] = [`# REVIEW sweep — ${specRef}`, '']
+  if (deadCode.kept.length > 0) {
+    lines.push('## Dead code kept at the developer request')
+    for (const k of deadCode.kept) lines.push(`- ${k.path}:${k.name} — ${k.note}`)
+    lines.push('')
+  }
+  if (deadCode.exempted.length > 0) {
+    lines.push('## Exports nothing here uses, exempted by public_api')
+    for (const e of deadCode.exempted) lines.push(`- ${e.path}:${e.name}`)
+    lines.push('')
+  }
   for (const f of files) {
     lines.push(`## ${f.path} (${f.kind}${f.reason ? `: ${f.reason}` : ''})`)
     for (const c of f.removed) {
@@ -492,6 +509,7 @@ export async function phaseReviewCompleteHandler(
     touched: sweep.files.filter((f) => f.status !== 'deleted').map((f) => f.path),
     publicApi: config?.public_api,
     keeps: [...storedKeeps, ...grantedKeeps],
+    exempt: sweep.files.filter((f) => f.kind === 'unverified').map((f) => f.path),
   })
   if (!deadCheck.ok) {
     return reject({
@@ -533,7 +551,9 @@ export async function phaseReviewCompleteHandler(
   const commentForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
   const deadCodeForce = newlyKept.length > 0 || publicExempted.length > 0
   const mustForce = commentForce || deadCodeForce
-  const report = commentForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null
+  const report = mustForce
+    ? writeReport(projectRoot, input.spec_ref, commentForce ? sweep.files : [], dispositions, { kept: newlyKept, exempted: publicExempted })
+    : null
   summary.report_path = report?.path ?? null
   const reportLine = report
     ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})`
@@ -559,7 +579,7 @@ export async function phaseReviewCompleteHandler(
     const dialog = await promptFn({
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
-        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:\n\n` +
+        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment or dead-code check:\n\n` +
         listLines(
           unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
           40,
@@ -625,8 +645,8 @@ export async function phaseReviewCompleteHandler(
         ),
       )
     }
-    detailParts.push(reportLine)
   }
+  if (mustForce) detailParts.push(reportLine)
 
   const result = await gatePhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -724,7 +744,7 @@ export async function phaseReviewCompleteHandler(
     const freshRefusal = refuseUnreadableState(projectRoot, freshRead)
     const fresh = freshRead.state ?? {}
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
-    const keepRecords = mergeDeadCodeKeeps(fresh.dead_code_keeps, newlyKept, input.spec_ref, at, knownPaths(projectRoot))
+    const keepRecords = mergeDeadCodeKeeps(fresh.dead_code_keeps, newlyKept, input.spec_ref, at, keepPrunePaths(projectRoot))
     if (keepRecords.length > 0) next.dead_code_keeps = keepRecords
     else delete next.dead_code_keeps
     if (fresh.review_drift) {

@@ -380,14 +380,24 @@ export async function requestCommitHandler(
       hints: withAdvisories([check.reason]),
     }
   }
-  const runDeadCodeCheck = async (paths: readonly string[]): Promise<StagedDeadCodeCheck> =>
-    checkStagedDeadCode({
-      projectRoot,
-      stagedPaths: paths,
-      publicApi: config?.public_api,
-      keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
-      keepDecisions: deriveAuditCeiling(projectRoot, config ?? null, '').deadCodeKeepDecisions,
-    })
+  const runDeadCodeCheck = async (
+    entries: ReadonlyArray<{ path: string; unverified: boolean }>,
+  ): Promise<StagedDeadCodeCheck> => {
+    const paths = entries.map((entry) => entry.path)
+    try {
+      return await checkStagedDeadCode({
+        projectRoot,
+        stagedPaths: paths,
+        publicApi: config?.public_api,
+        keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
+        keepDecisions: deriveAuditCeiling(projectRoot, config ?? null, '').deadCodeKeepDecisions,
+        exempt: entries.filter((entry) => entry.unverified).map((entry) => entry.path),
+      })
+    } catch (error) {
+      const reason = `the dead-code check failed: ${error instanceof Error ? error.message : String(error)}`
+      return { ok: false, reject_kind: 'dead_code_staged', reason, hints: [reason], paths }
+    }
+  }
   const rejectDeadCode = (
     check: Extract<StagedDeadCodeCheck, { ok: false }>,
     stage: 'before_authorization' | 'before_commit',
@@ -427,7 +437,7 @@ export async function requestCommitHandler(
 
   const sweepBefore = await runSweepCheck()
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, 'before_authorization')
-  const deadBefore = await runDeadCodeCheck(sweepBefore.checked.map((c) => c.path))
+  const deadBefore = await runDeadCodeCheck(sweepBefore.checked)
   if (!deadBefore.ok) return rejectDeadCode(deadBefore, 'before_authorization')
 
   let channel: CommitChannel
@@ -779,7 +789,7 @@ export async function requestCommitHandler(
 
   const sweepAtCommit = await runSweepCheck()
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
-  const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked.map((c) => c.path))
+  const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked)
   if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, 'before_commit')
 
   let reservedToken: PlanAuthorizationBlock | null = null
@@ -980,7 +990,11 @@ export async function requestCommitHandler(
       after: commit.sha_after,
       checked: sweepAtCommit.checked,
     })
-    const deadAfterHook = committed.rewrites.length > 0 ? await runDeadCodeCheck(committed.rewrites.map((r) => r.path)) : null
+    const unverifiedAtCommit = new Set(sweepAtCommit.checked.filter((c) => c.unverified).map((c) => c.path))
+    const deadAfterHook =
+      committed.rewrites.length > 0
+        ? await runDeadCodeCheck(committed.rewrites.map((r) => ({ path: r.path, unverified: unverifiedAtCommit.has(r.path) })))
+        : null
     const deadRewritten = new Set(deadAfterHook && !deadAfterHook.ok ? deadAfterHook.paths : [])
     const cleanRewrites = committed.rewrites.filter((r) => !deadRewritten.has(r.path))
     const state = readPhaseState(projectRoot).state ?? {}

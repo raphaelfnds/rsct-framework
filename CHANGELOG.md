@@ -19,23 +19,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   references — its own file included — rejects `rsct_phase_review_complete`
   (`dead_code_remaining`, with `pending_dead_code`) and `rsct_request_commit` (`dead_code_staged`).
   References are resolved, not searched by name: imports, aliases, default and namespace imports,
-  named, star and `export * as ns` re-exports followed to the end, local `export { a as b }`, scope
-  shadowing, and self or mutual recursion (which is dead). The developer decides each symbol:
-  remove it, or keep it through `dead_code_keeps` — a new keep forces the developer dialog, is
-  written to the audit log, and holds only for those exact declaration bytes. The commit gate reads
-  the staged bytes from the index, never the working tree, and re-checks after a pre-commit hook.
-  What the scan cannot settle (an entrypoint, an unparseable or dynamic importer) is reported as
-  unknown with the reason, never as dead and never silently. Measured on real code: `zod` with
-  `public_api` declared — 6 findings, all true (ADR-018).
-- **`public_api` in `.rsct.json`** — path globs whose exported symbols are consumed outside the
-  repository (a published library), honoured through re-export barrels. Every export it exempts is
-  listed in the REVIEW dialog.
+  named, star and `export * as ns` re-exports followed to the end, local `export { a as b }`,
+  tsconfig/jsconfig `paths` and `baseUrl`, scope shadowing with values and types kept apart, and
+  self or mutual recursion (which is dead). A declaration that runs code when its module loads is
+  never reported. The developer decides each symbol: remove it, or keep it through
+  `dead_code_keeps` — a new keep forces the developer dialog, is written to the audit log and to the
+  REVIEW report, and holds only for those exact declaration bytes. The commit gate reads the staged
+  bytes from the index, never the working tree, and re-checks after a pre-commit hook; a check that
+  cannot run refuses, or after the commit lands as drift. What the scan cannot settle — an
+  entrypoint, an unparseable or computed import, an import it cannot resolve, a namespace used as a
+  value, a classic script, `eval` — is reported as unknown with the reason, never as dead and never
+  silently. Measured on real code in ADR-018.
+- **`public_api` in `.rsct.json`** — path globs, relative to the project root or the repository
+  root, whose exported symbols are consumed outside the repository (a published library),
+  honoured through re-export barrels. Every export it exempts is written to the REVIEW report the
+  forced dialog names.
 
 ### Fixed
 
 - **The walk now sees `.mts` and `.cts` files and resolves `.mjs`/`.cjs` specifiers to them
   (#101 Part A).** The coverage hint's suffix list is derived from the scan list, so the two can no
   longer disagree.
+- **The walk resolved `./utils` to `utils/index.ts` even when `utils.ts` exists.** It now tries the
+  file and its extensions before a directory index, the order TypeScript and Node use; the V phase
+  sees a different importer only in a project holding both.
 
 ### Removed
 

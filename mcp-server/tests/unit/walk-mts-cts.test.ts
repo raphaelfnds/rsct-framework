@@ -75,6 +75,14 @@ describe('the walk covers .mts and .cts (#101 Part A)', () => {
     expect(hint).toContain('.cts')
   })
 
+  it('resolves an extensionless specifier to the file before a same-named directory index, as TypeScript and Node do', () => {
+    writeFile('src/utils.ts', 'export const x = 1\n')
+    writeFile('src/utils/index.ts', 'export const y = 1\n')
+    writeFile('src/importer.ts', "import { x } from './utils'\n")
+    expect(walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/utils.ts'] }).discovered.map((d) => d.file)).toContain('src/importer.ts')
+    expect(walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/utils/index.ts'] }).discovered.map((d) => d.file)).not.toContain('src/importer.ts')
+  })
+
   it('scans a .mts file for its own imports, not only as a target', () => {
     writeFile('src/seed.ts', 'export const x = 1\n')
     writeFile('src/mid.mts', "import { x } from './seed.js'\nexport const y = x\n")

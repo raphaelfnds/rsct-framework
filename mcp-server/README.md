@@ -69,7 +69,8 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   `engine_unavailable`, `git_filter`, `head_unverified` — the HEAD version could not be
   scanned) and files listed in `exempt_files`
   (generated / vendored) go to one forced OS dialog only the dev answers: Yes
-  makes those exact file versions committable without a mechanical check, No
+  makes those exact file versions committable without a mechanical comment or
+  dead-code check, No
   rejects the REVIEW (`unverified_declined`), no channel rejects
   (`unverified_undecided`).
 - When comments were removed, files are unverified or an allowlisted comment
@@ -87,21 +88,32 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   file included — rejects `dead_code_remaining`; `pending_dead_code` lists each
   one with its declaration text and `declaration_sha256`. References are
   resolved (imports, aliases, default and namespace imports, re-exports followed
-  to the end, local export clauses, scope shadowing), so a name that merely
-  appears in a comment, a string or an unrelated symbol does not keep code
-  alive, and self or mutual recursion is dead. The developer decides each
-  symbol: remove it, or keep it with a `dead_code_keeps` entry
-  (`path`, `name`, `declaration_sha256`, `note` with the reason given). A new
-  keep forces the §C dialog, is listed in it, is audited as
-  `review.dead_code_kept`, and holds only for those exact declaration bytes
-  (`dead_code_keep_stale` once they change). `rsct_request_commit` re-derives
-  the verdict from the STAGED bytes in the index — never the working tree —
-  at both check points (`dead_code_staged`), honours a keep only when its audit
-  line exists, and re-checks a file a pre-commit hook rewrote. What the scan
-  cannot settle — a file nothing imports (an entrypoint), an importer it cannot
-  parse, an `import()` or `require()` — is left unknown and named in `hints`,
-  never reported dead and never passed silently. Touched files in other
-  languages are reported as not checked. Types are not judged.
+  to the end, local export clauses, tsconfig `paths`/`baseUrl`, scope
+  shadowing with values and types kept apart), so a name that merely appears in
+  a comment, a string or an unrelated symbol does not keep code alive, and self
+  or mutual recursion is dead. A declaration whose initializer runs code when
+  the module loads (a call, `new`, `await`, an assignment, a decorator, a static
+  block) is never reported: its binding may be unused, but removing the
+  statement removes the effect. The developer decides each symbol: remove it,
+  or keep it with a `dead_code_keeps` entry (`path`, `name`,
+  `declaration_sha256`, `note` with the reason given). A new keep forces the §C
+  dialog, is written to the REVIEW report the dialog names (the dialog itself
+  shows ten), is audited as `review.dead_code_kept`, and holds only for those
+  exact declaration bytes (`dead_code_keep_stale` once they change — a hook that
+  reformats a kept declaration therefore lands as drift, and the next REVIEW
+  asks again). `rsct_request_commit` re-derives the verdict from the STAGED
+  bytes in the index — never the working tree — at both check points
+  (`dead_code_staged`), honours a keep only when its audit line exists, and
+  re-checks a file a pre-commit hook rewrote; if that check cannot run, every
+  rewrite lands as drift. What the scan cannot settle — a file no resolved
+  import reaches (an entrypoint), an importer it cannot parse, a namespace used
+  as a value, an import it cannot resolve (by the names that import uses), a
+  computed `import()`/`require()`/`import.meta.glob`, a classic script's
+  top-level names, a file that calls `eval` — is left unknown and named in
+  `hints`, never reported dead and never passed silently. Build output
+  (`dist/`, `build/`, `coverage/` directly under a package root), vendored
+  code, files the developer allowed without a mechanical check, and touched
+  files in other languages are reported as not checked. Types are not judged.
 - The two scripts `/rsct-setup` installs (`.rsct/scripts/sanitize-permissions.js`,
   `.rsct/scripts/edit-scope-guard.js`) need no REVIEW when their bytes are exactly
   the copy this `rsct-mcp` ships — shebang, the version stamp of this server, the
@@ -980,7 +992,7 @@ Bounds:
 | `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
 | `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | `sql_dialect` | enum of `postgresql`, `mysql`, `none`; optional | an unknown dialect would make the REVIEW comment sweep read SQL with the wrong comment syntax; rejecting loudly beats sweeping wrongly |
-| `public_api` | array of non-empty path globs; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; every export it exempts is listed in the REVIEW dialog, so a broad glob is visible rather than silent |
+| `public_api` | array of non-empty path globs, relative to the project root (the directory holding `.rsct.json`) or to the repository root; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; an exemption forces the REVIEW dialog, and every export it exempts is written to the report that dialog names, so a broad glob is visible rather than silent |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

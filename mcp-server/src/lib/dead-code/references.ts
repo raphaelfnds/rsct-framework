@@ -1,24 +1,22 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { join, normalize, relative, resolve as resolvePath } from 'node:path'
+import { join } from 'node:path'
 
-import { matchesAnyGlob, toPosix } from '../phase-scope.js'
-import {
-  DEFAULT_EXCLUDE_GLOBS,
-  extractImports,
-  resolveImport,
-  type ResolveProbe,
-} from '../reverse-dep-walk.js'
+import { matchesAnyGlob } from '../phase-scope.js'
+import { extractImports } from '../reverse-dep-walk.js'
 import {
   NAMESPACE_IMPORT,
+  ownerKeyOf,
   scanSymbols,
   type DeclarationKind,
   type TreeEdgeKind,
+  type TreeImportEdge,
   type TreeImportName,
   type TreeLanguage,
   type TreeSymbolScan,
   type TreeSymbols,
 } from '../comment-sweep/tree-engine.js'
+import { createModuleResolver, type ModuleResolver } from './module-resolution.js'
 
 const LANGUAGE_BY_SUFFIX: ReadonlyMap<string, TreeLanguage> = new Map([
   ['.ts', 'typescript'],
@@ -31,7 +29,33 @@ const LANGUAGE_BY_SUFFIX: ReadonlyMap<string, TreeLanguage> = new Map([
   ['.jsx', 'javascript'],
 ])
 
+const MODULE_SUFFIXES: ReadonlySet<string> = new Set(['.mjs', '.cjs', '.mts', '.cts'])
 const FOREIGN_IMPORTER_SUFFIXES: ReadonlySet<string> = new Set(['.vue', '.svelte', '.astro', '.html', '.htm', '.mdx'])
+const BUILD_OUTPUT_DIRS: readonly string[] = ['dist', 'build', 'coverage']
+const VENDORED_SEGMENTS: ReadonlySet<string> = new Set(['node_modules', '.git'])
+const CONFIG_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|jsconfig[^/]*\.json)$/
+const COMPUTED_IMPORT = /\b(?:import|require)\s*\(\s*[^'"\s)]|import\.meta\.glob|require\.context/
+const CODE_FENCE = /^\s*(`{3,}|~{3,})/
+const MDX_ESM_LINE = /^(?:import|export)\b/
+const HINT_LIST_LIMIT = 10
+
+function withoutCodeFences(text: string): string {
+  const kept: string[] = []
+  let open: string | null = null
+  for (const line of text.split('\n')) {
+    const fence = CODE_FENCE.exec(line)?.[1] ?? null
+    if (open !== null) {
+      if (fence !== null && fence[0] === open[0] && fence.length >= open.length) open = null
+      continue
+    }
+    if (fence !== null) {
+      open = fence
+      continue
+    }
+    kept.push(line)
+  }
+  return kept.join('\n')
+}
 
 function suffixOf(path: string): string {
   const dot = path.lastIndexOf('.')
@@ -42,24 +66,34 @@ export function languageOf(path: string): TreeLanguage | null {
   return LANGUAGE_BY_SUFFIX.get(suffixOf(path)) ?? null
 }
 
-function isExcluded(path: string): boolean {
-  return matchesAnyGlob(path, DEFAULT_EXCLUDE_GLOBS).matched
+function isVendored(path: string): boolean {
+  return path.split('/').some((segment) => VENDORED_SEGMENTS.has(segment))
 }
 
-export function isAnalysable(path: string): boolean {
-  return languageOf(path) !== null && !isExcluded(path)
-}
-
-function isForeignImporter(path: string): boolean {
-  return FOREIGN_IMPORTER_SUFFIXES.has(suffixOf(path)) && !isExcluded(path)
-}
-
-export function corpusFrom(knownPaths: Iterable<string>): string[] {
-  const corpus: string[] = []
-  for (const path of knownPaths) {
-    if (isAnalysable(path) || isForeignImporter(path)) corpus.push(path)
+export function packageRootsOf(known: Iterable<string>): string[] {
+  const roots = new Set<string>([''])
+  for (const path of known) {
+    if (isVendored(path)) continue
+    if (path === 'package.json' || path.endsWith('/package.json')) roots.add(path.slice(0, path.length - 'package.json'.length))
   }
-  return corpus
+  return [...roots]
+}
+
+export function isBuildOutput(path: string, packageRoots: readonly string[]): boolean {
+  if (isVendored(path)) return true
+  return packageRoots.some((root) => BUILD_OUTPUT_DIRS.some((dir) => path.startsWith(`${root}${dir}/`)))
+}
+
+export function corpusFrom(known: Iterable<string>): string[] {
+  const paths = [...known]
+  const roots = packageRootsOf(paths)
+  return paths.filter(
+    (path) => (languageOf(path) !== null || FOREIGN_IMPORTER_SUFFIXES.has(suffixOf(path))) && !isBuildOutput(path, roots),
+  )
+}
+
+export function configFilesFrom(known: Iterable<string>): string[] {
+  return [...known].filter((path) => CONFIG_FILE.test(path) && !isVendored(path))
 }
 
 export type SourceRead = { kind: 'text'; text: string } | { kind: 'absent' } | { kind: 'error' }
@@ -67,10 +101,14 @@ export type SourceReader = (rel: string) => SourceRead
 
 const ABSENT_CODES: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR', 'EISDIR'])
 
+export function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n')
+}
+
 export function workingTreeReader(root: string): SourceReader {
   return (rel) => {
     try {
-      return { kind: 'text', text: readFileSync(join(root, rel), 'utf8') }
+      return { kind: 'text', text: normalizeLineEndings(readFileSync(join(root, rel), 'utf8')) }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? ''
       return ABSENT_CODES.has(code) ? { kind: 'absent' } : { kind: 'error' }
@@ -82,7 +120,9 @@ export interface DeadCodeInput {
   projectRoot: string
   corpus: readonly string[]
   targets: readonly string[]
+  configs?: readonly string[]
   publicApi?: readonly string[]
+  publicApiRoot?: string
   includeTypes?: boolean
   read?: SourceReader
 }
@@ -95,7 +135,6 @@ export interface SymbolRef {
 export interface DeadSymbol extends SymbolRef {
   kind: DeclarationKind
   exported: boolean
-  defaultExport: boolean
   start: number
   end: number
 }
@@ -106,25 +145,32 @@ export interface DeadCodeResult {
   publicExempted: DeadSymbol[]
   unreadable: string[]
   filesScanned: number
-  iterations: number
   hints: string[]
 }
 
 export const PUBLIC_API_HINT_PREFIX = 'Dead-code scan: no "public_api" is declared'
 export const PUBLIC_EXEMPTED_HINT_PREFIX = 'Dead-code scan: "public_api" exempted'
 export const UNREADABLE_HINT_PREFIX = 'Dead-code scan: withheld a verdict'
-export const ENTRYPOINT_HINT_PREFIX = 'Dead-code scan: no file imports'
+export const ENTRYPOINT_HINT_PREFIX = 'Dead-code scan: no resolved import reaches'
 export const DYNAMIC_HINT_PREFIX = 'Dead-code scan: dynamically imported'
 export const DEPENDENT_HINT_PREFIX = 'Dead-code scan: used only by symbols left unknown'
+export const NESTED_HINT_PREFIX = 'Dead-code scan: reached through a namespace inside a namespace'
+export const ESCAPED_HINT_PREFIX = 'Dead-code scan: a namespace import is used as a value'
+export const UNRESOLVED_HINT_PREFIX = 'Dead-code scan: could not resolve'
+export const UNBOUND_HINT_PREFIX = 'Dead-code scan: an import with no fixed target'
+export const SCRIPT_HINT_PREFIX = 'Dead-code scan: classic script'
+export const EVAL_HINT_PREFIX = 'Dead-code scan: direct eval'
+export const UNPARSEABLE_TARGET_HINT_PREFIX = 'Dead-code scan: could not parse'
 
 const KEY_SEPARATOR = '\u0000'
 
-function keyOf(path: string, name: string): string {
-  return `${path}${KEY_SEPARATOR}${name}`
+function keyOf(path: string, owner: string): string {
+  return `${path}${KEY_SEPARATOR}${owner}`
 }
 
 const SCAN_CACHE_MAX = 4000
 let scanCacheLimit = SCAN_CACHE_MAX
+let scanMisses = 0
 const scanCache = new Map<string, TreeSymbolScan>()
 
 export function clearSymbolScanCache(): void {
@@ -133,6 +179,10 @@ export function clearSymbolScanCache(): void {
 
 export function symbolScanCacheSize(): number {
   return scanCache.size
+}
+
+export function symbolScanMisses(): number {
+  return scanMisses
 }
 
 export function limitSymbolScanCacheForTests(limit: number | null): void {
@@ -147,6 +197,7 @@ async function scanCached(language: TreeLanguage, source: string): Promise<TreeS
     scanCache.set(key, cached)
     return cached
   }
+  scanMisses += 1
   const scan = await scanSymbols(language, source)
   while (scanCache.size >= scanCacheLimit) {
     const oldest = scanCache.keys().next().value
@@ -155,29 +206,6 @@ async function scanCached(language: TreeLanguage, source: string): Promise<TreeS
   }
   scanCache.set(key, scan)
   return scan
-}
-
-function relPosix(projectRoot: string, abs: string): string {
-  return toPosix(relative(projectRoot, abs))
-}
-
-function corpusProbe(projectRoot: string, corpus: readonly string[]): ResolveProbe {
-  const files = new Set<string>()
-  const directories = new Set<string>()
-  for (const path of corpus) {
-    files.add(resolvePath(projectRoot, path))
-    let slash = path.lastIndexOf('/')
-    while (slash > 0) {
-      directories.add(resolvePath(projectRoot, path.slice(0, slash)))
-      slash = path.lastIndexOf('/', slash - 1)
-    }
-  }
-  return {
-    exists: (abs) => files.has(normalize(abs)) || directories.has(normalize(abs)),
-    isFile: (abs) => files.has(normalize(abs)),
-    isDirectory: (abs) => directories.has(normalize(abs)),
-    hasExactPath: (abs) => files.has(normalize(abs)),
-  }
 }
 
 interface Edge {
@@ -191,42 +219,95 @@ interface Edge {
 interface FileFacts {
   symbols: TreeSymbols
   edges: Edge[]
+  module: boolean
+}
+
+interface Unresolved {
+  from: string
+  specifier: string
+  within: string | null
+  names: ReadonlySet<string> | 'all'
 }
 
 interface Corpus {
   facts: Map<string, FileFacts>
   unreadable: Set<string>
+  unparsed: Set<string>
   taintedTargets: Set<string>
   dynamicTargets: Set<string>
   importedFiles: Set<string>
+  unresolved: Unresolved[]
+  unboundFiles: Set<string>
   blind: boolean
+}
+
+function isUsed(symbols: TreeSymbols, local: string): boolean {
+  return symbols.references.some((r) => r.name === local) || symbols.memberUses.some((u) => u.object === local)
+}
+
+function escapes(symbols: TreeSymbols, local: string): boolean {
+  return symbols.references.some((r) => r.name === local)
+}
+
+function unresolvedNames(edge: TreeImportEdge, symbols: TreeSymbols): ReadonlySet<string> | 'all' {
+  if (edge.kind === 'dynamic') return 'all'
+  if (edge.kind === 'reexport') {
+    if (edge.starReexport || edge.namespaceReexport !== null) return 'all'
+    if (edge.names.some((name) => name.imported === NAMESPACE_IMPORT)) return 'all'
+    return new Set(edge.names.map((name) => name.imported))
+  }
+  const names = new Set<string>()
+  for (const name of edge.names) {
+    if (name.imported === NAMESPACE_IMPORT) {
+      if (escapes(symbols, name.local)) return 'all'
+      for (const use of symbols.memberUses) if (use.object === name.local) names.add(use.member)
+    } else if (isUsed(symbols, name.local)) {
+      names.add(name.imported)
+    }
+  }
+  return names
 }
 
 async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
   const read = input.read ?? workingTreeReader(input.projectRoot)
-  const probe = corpusProbe(input.projectRoot, input.corpus)
-  const entries = new Map<string, Set<string>>()
-  const resolveFrom = (fromRel: string, specifier: string): string | null => {
-    const target = resolveImport(input.projectRoot, resolvePath(input.projectRoot, fromRel), specifier, entries, probe)
-    return target ? relPosix(input.projectRoot, target) : null
-  }
+  const resolver: ModuleResolver = createModuleResolver({
+    projectRoot: input.projectRoot,
+    corpus: input.corpus,
+    configs: input.configs ?? [],
+    readText: (rel) => {
+      const source = read(rel)
+      return source.kind === 'text' ? source.text : null
+    },
+  })
 
   const corpus: Corpus = {
     facts: new Map(),
     unreadable: new Set(),
+    unparsed: new Set(),
     taintedTargets: new Set(),
     dynamicTargets: new Set(),
     importedFiles: new Set(),
+    unresolved: [],
+    unboundFiles: new Set(),
     blind: false,
   }
-  const taintImportsOf = (rel: string, text: string): void => {
+
+  const readByPattern = (rel: string, source: string): void => {
+    const mdx = suffixOf(rel) === '.mdx'
+    const text = mdx ? withoutCodeFences(source) : source
+    const code = mdx ? text.split('\n').filter((line) => MDX_ESM_LINE.test(line)).join('\n') : text
     for (const specifier of extractImports(text)) {
-      const target = resolveFrom(rel, specifier)
-      if (target) {
-        corpus.taintedTargets.add(target)
-        corpus.importedFiles.add(target)
+      const resolution = resolver.resolve(rel, specifier)
+      if (resolution.kind === 'files') {
+        for (const target of resolution.files) {
+          corpus.taintedTargets.add(target)
+          corpus.importedFiles.add(target)
+        }
+      } else if (resolution.kind === 'unknown') {
+        corpus.unresolved.push({ from: rel, specifier, within: resolution.within, names: 'all' })
       }
     }
+    if (COMPUTED_IMPORT.test(code)) corpus.unboundFiles.add(rel)
   }
 
   for (const rel of input.corpus) {
@@ -241,24 +322,43 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
     const scan = language ? await scanCached(language, source.text) : null
     if (!scan || !scan.ok) {
       corpus.unreadable.add(rel)
-      taintImportsOf(rel, source.text)
+      if (language) corpus.unparsed.add(rel)
+      readByPattern(rel, source.text)
       continue
     }
+    const symbols = scan.symbols
     const edges: Edge[] = []
-    for (const edge of scan.symbols.imports) {
-      const target = resolveFrom(rel, edge.specifier)
-      if (!target) continue
-      corpus.importedFiles.add(target)
-      if (edge.kind === 'dynamic') corpus.dynamicTargets.add(target)
-      edges.push({
-        target,
-        kind: edge.kind,
-        names: edge.names,
-        star: edge.starReexport,
-        namespaceReexport: edge.namespaceReexport,
-      })
+    for (const edge of symbols.imports) {
+      const resolution = resolver.resolve(rel, edge.specifier)
+      if (resolution.kind === 'unknown') {
+        const names = unresolvedNames(edge, symbols)
+        if (names === 'all' || names.size > 0) corpus.unresolved.push({ from: rel, specifier: edge.specifier, within: resolution.within, names })
+        continue
+      }
+      if (resolution.kind !== 'files') continue
+      const kind: TreeEdgeKind = resolution.query ? 'dynamic' : edge.kind
+      for (const target of resolution.files) {
+        corpus.importedFiles.add(target)
+        if (kind === 'dynamic') corpus.dynamicTargets.add(target)
+        edges.push({ target, kind, names: edge.names, star: edge.starReexport, namespaceReexport: edge.namespaceReexport })
+      }
     }
-    corpus.facts.set(rel, { symbols: scan.symbols, edges })
+    for (const prefix of symbols.dynamicPrefixes) {
+      const files = resolver.prefixFiles(rel, prefix)
+      if (files === null) {
+        corpus.unboundFiles.add(rel)
+        continue
+      }
+      for (const target of files) {
+        corpus.dynamicTargets.add(target)
+        corpus.importedFiles.add(target)
+      }
+    }
+    if (symbols.unboundDynamic) corpus.unboundFiles.add(rel)
+    const factories = symbols.hasJsx ? resolver.jsxFactories(rel) : []
+    const withFactories: TreeSymbols =
+      factories.length > 0 ? { ...symbols, references: [...symbols.references, ...factories.map((name) => ({ name, owner: null }))] } : symbols
+    corpus.facts.set(rel, { symbols: withFactories, edges, module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)) })
   }
   return corpus
 }
@@ -274,37 +374,26 @@ interface Reexport {
   edge: Edge
 }
 
-function reexportsByTarget(corpus: Corpus): Map<string, Reexport[]> {
-  const byTarget = new Map<string, Reexport[]>()
+interface Importer {
+  file: string
+  facts: FileFacts
+  edge: Edge
+}
+
+function edgesByTarget<T>(corpus: Corpus, kind: TreeEdgeKind, make: (file: string, facts: FileFacts, edge: Edge) => T): Map<string, T[]> {
+  const byTarget = new Map<string, T[]>()
   for (const [file, facts] of corpus.facts) {
     for (const edge of facts.edges) {
-      if (edge.kind !== 'reexport') continue
+      if (edge.kind !== kind) continue
       const list = byTarget.get(edge.target) ?? []
-      list.push({ file, edge })
+      list.push(make(file, facts, edge))
       byTarget.set(edge.target, list)
     }
   }
   return byTarget
 }
 
-function importersByTarget(corpus: Corpus): Map<string, Array<{ file: string; facts: FileFacts; edge: Edge }>> {
-  const byTarget = new Map<string, Array<{ file: string; facts: FileFacts; edge: Edge }>>()
-  for (const [file, facts] of corpus.facts) {
-    for (const edge of facts.edges) {
-      if (edge.kind !== 'import') continue
-      const list = byTarget.get(edge.target) ?? []
-      list.push({ file, facts, edge })
-      byTarget.set(edge.target, list)
-    }
-  }
-  return byTarget
-}
-
-function aliasesOf(
-  path: string,
-  exposures: readonly string[],
-  reexports: Map<string, Reexport[]>,
-): { aliases: Alias[]; nested: boolean } {
+function aliasesOf(path: string, exposures: readonly string[], reexports: Map<string, Reexport[]>): { aliases: Alias[]; nested: boolean } {
   const aliases: Alias[] = []
   const seen = new Set<string>()
   let nested = false
@@ -343,117 +432,182 @@ interface Citation {
   owner: string | null
 }
 
-function citationsThrough(
-  alias: Alias,
-  importers: Map<string, Array<{ file: string; facts: FileFacts; edge: Edge }>>,
-): { citations: Citation[]; nested: boolean } {
-  const citations: Citation[] = []
-  let nested = false
+interface Through {
+  citations: Citation[]
+  nested: boolean
+  escapedIn: string[]
+}
+
+function citeUses(citations: Citation[], file: string, symbols: TreeSymbols, local: string): void {
+  for (const reference of symbols.references) if (reference.name === local) citations.push({ file, owner: reference.owner })
+  for (const use of symbols.memberUses) if (use.object === local) citations.push({ file, owner: use.owner })
+}
+
+function citeMember(citations: Citation[], file: string, symbols: TreeSymbols, local: string, member: string): void {
+  for (const use of symbols.memberUses) if (use.object === local && use.member === member) citations.push({ file, owner: use.owner })
+}
+
+function citationsThrough(alias: Alias, importers: Map<string, Importer[]>): Through {
+  const through: Through = { citations: [], nested: false, escapedIn: [] }
   for (const { file, facts, edge } of importers.get(alias.file) ?? []) {
     for (const name of edge.names) {
       if (name.imported === NAMESPACE_IMPORT) {
         if (alias.member !== null) {
-          nested = true
+          through.nested = true
           continue
         }
-        for (const use of facts.symbols.memberUses) {
-          if (use.object === name.local && use.member === alias.name) citations.push({ file, owner: use.owner })
-        }
+        if (escapes(facts.symbols, name.local)) through.escapedIn.push(file)
+        citeMember(through.citations, file, facts.symbols, name.local, alias.name)
         continue
       }
       if (name.imported !== alias.name) continue
       if (alias.member === null) {
-        for (const reference of facts.symbols.references) {
-          if (reference.name === name.local) citations.push({ file, owner: reference.owner })
-        }
-      } else {
-        for (const use of facts.symbols.memberUses) {
-          if (use.object === name.local && use.member === alias.member) citations.push({ file, owner: use.owner })
-        }
+        citeUses(through.citations, file, facts.symbols, name.local)
+        continue
       }
+      if (escapes(facts.symbols, name.local)) through.escapedIn.push(file)
+      citeMember(through.citations, file, facts.symbols, name.local, alias.member)
     }
   }
-  return { citations, nested }
+  return through
 }
+
+type Uncertainty = 'script' | 'eval' | 'entrypoint' | 'tainted' | 'dynamic' | 'unresolved' | 'escaped' | 'nested' | 'unbound'
 
 interface Candidate {
   symbol: DeadSymbol
   key: string
   citations: Citation[]
   aliasFiles: string[]
-  uncertain: 'entrypoint' | 'tainted' | 'dynamic' | 'nested' | null
+  uncertain: Uncertainty | null
+  because: string[]
   isPublic: boolean
+  effect: boolean
+}
+
+function publicMatcher(input: DeadCodeInput): (file: string) => boolean {
+  const globs = input.publicApi ?? []
+  if (globs.length === 0) return () => false
+  const root = input.publicApiRoot
+  return (file) =>
+    matchesAnyGlob(file, globs).matched || (root !== undefined && matchesAnyGlob(join(input.projectRoot, file), globs, root).matched)
+}
+
+function unresolvedMatches(corpus: Corpus, aliases: readonly Alias[]): string[] {
+  const hits: string[] = []
+  for (const use of corpus.unresolved) {
+    const reaches = aliases.some(
+      (alias) => (use.within === null || alias.file.startsWith(use.within)) && (use.names === 'all' || use.names.has(alias.name)),
+    )
+    if (reaches) hits.push(`${use.specifier} (${use.from})`)
+  }
+  return hits
+}
+
+function uncertaintyOf(
+  path: string,
+  facts: FileFacts,
+  exported: boolean,
+  corpus: Corpus,
+  aliases: readonly Alias[],
+  escapedIn: readonly string[],
+  nested: boolean,
+): { uncertain: Uncertainty | null; because: string[] } {
+  const aliasFiles = [...new Set(aliases.map((alias) => alias.file))]
+  const reasons: Array<[Uncertainty, readonly string[]]> = []
+  if (!facts.module) reasons.push(['script', [path]])
+  if (facts.symbols.directEval) reasons.push(['eval', [path]])
+  if (exported) {
+    const notImported = aliasFiles.filter((file) => !corpus.importedFiles.has(file))
+    if (notImported.length > 0) reasons.push(['entrypoint', notImported])
+    const tainted = aliasFiles.filter((file) => corpus.taintedTargets.has(file))
+    if (tainted.length > 0) reasons.push(['tainted', tainted])
+    const dynamic = aliasFiles.filter((file) => corpus.dynamicTargets.has(file))
+    if (dynamic.length > 0) reasons.push(['dynamic', dynamic])
+    const unresolved = unresolvedMatches(corpus, aliases)
+    if (unresolved.length > 0) reasons.push(['unresolved', unresolved])
+    if (escapedIn.length > 0) reasons.push(['escaped', escapedIn])
+    if (nested) reasons.push(['nested', aliasFiles])
+    if (corpus.unboundFiles.size > 0) reasons.push(['unbound', [...corpus.unboundFiles]])
+  }
+  const first = reasons[0]
+  return first ? { uncertain: first[0], because: [...new Set(first[1])] } : { uncertain: null, because: [] }
 }
 
 function candidatesOf(input: DeadCodeInput, corpus: Corpus): Candidate[] {
   const includeTypes = input.includeTypes === true
-  const reexports = reexportsByTarget(corpus)
-  const importers = importersByTarget(corpus)
-  const publicApi = input.publicApi ?? []
+  const reexports = edgesByTarget(corpus, 'reexport', (file, _facts, edge): Reexport => ({ file, edge }))
+  const importers = edgesByTarget(corpus, 'import', (file, facts, edge): Importer => ({ file, facts, edge }))
+  const isPublicPath = publicMatcher(input)
   const candidates: Candidate[] = []
 
   for (const path of input.targets) {
     const facts = corpus.facts.get(path)
     if (!facts) continue
-    const byName = new Map<string, { symbol: DeadSymbol; exposures: Set<string> }>()
+    const byOwner = new Map<string, { symbol: DeadSymbol; exposures: Set<string>; effect: boolean }>()
     for (const declaration of facts.symbols.declarations) {
       if (!includeTypes && declaration.kind === 'type') continue
-      const existing = byName.get(declaration.name)
+      const owner = ownerKeyOf(declaration.kind, declaration.name)
+      const existing = byOwner.get(owner)
       if (existing) {
         existing.symbol.start = Math.min(existing.symbol.start, declaration.start)
         existing.symbol.end = Math.max(existing.symbol.end, declaration.end)
         existing.symbol.exported = existing.symbol.exported || declaration.exported
-        existing.symbol.defaultExport = existing.symbol.defaultExport || declaration.defaultExport
+        existing.effect = existing.effect || declaration.effect
         for (const exposure of declaration.exposures) existing.exposures.add(exposure)
         continue
       }
-      byName.set(declaration.name, {
+      byOwner.set(owner, {
         symbol: {
           path,
           name: declaration.name,
           kind: declaration.kind,
           exported: declaration.exported,
-          defaultExport: declaration.defaultExport,
           start: declaration.start,
           end: declaration.end,
         },
         exposures: new Set(declaration.exposures),
+        effect: declaration.effect,
       })
     }
 
-    for (const { symbol, exposures } of byName.values()) {
+    for (const [owner, { symbol, exposures, effect }] of byOwner) {
       const citations: Citation[] = []
-      for (const reference of facts.symbols.references) {
-        if (reference.name === symbol.name) citations.push({ file: path, owner: reference.owner })
-      }
+      citeUses(citations, path, facts.symbols, symbol.name)
       const { aliases, nested: nestedAlias } = aliasesOf(path, [...exposures], reexports)
       let nested = nestedAlias
+      const escapedIn: string[] = []
       for (const alias of aliases) {
         const through = citationsThrough(alias, importers)
         citations.push(...through.citations)
         if (through.nested) nested = true
+        escapedIn.push(...through.escapedIn)
       }
       const aliasFiles = [...new Set(aliases.map((alias) => alias.file))]
-      const isPublic = publicApi.length > 0 && aliasFiles.some((file) => matchesAnyGlob(file, publicApi).matched)
-      let uncertain: Candidate['uncertain'] = null
-      if (aliasFiles.some((file) => !corpus.importedFiles.has(file))) uncertain = 'entrypoint'
-      else if (aliasFiles.some((file) => corpus.taintedTargets.has(file))) uncertain = 'tainted'
-      else if (aliasFiles.some((file) => corpus.dynamicTargets.has(file))) uncertain = 'dynamic'
-      else if (nested) uncertain = 'nested'
-      candidates.push({ symbol, key: keyOf(symbol.path, symbol.name), citations, aliasFiles, uncertain, isPublic })
+      const { uncertain, because } = uncertaintyOf(path, facts, exposures.size > 0, corpus, aliases, escapedIn, nested)
+      candidates.push({
+        symbol,
+        key: keyOf(path, owner),
+        citations,
+        aliasFiles,
+        uncertain,
+        because,
+        isPublic: aliasFiles.some(isPublicPath),
+        effect,
+      })
     }
   }
   return candidates
 }
 
-function reach(candidates: readonly Candidate[], roots: ReadonlySet<string>, blocked: ReadonlySet<string>): { reached: Set<string>; waves: number } {
-  const byKey = new Map(candidates.map((candidate) => [candidate.key, candidate]))
+function reach(candidates: readonly Candidate[], roots: ReadonlySet<string>, blocked: ReadonlySet<string>): Set<string> {
+  const known = new Set(candidates.map((candidate) => candidate.key))
   const cites = new Map<string, string[]>()
   for (const candidate of candidates) {
     for (const citation of candidate.citations) {
       if (citation.owner === null) continue
       const ownerKey = keyOf(citation.file, citation.owner)
-      if (!byKey.has(ownerKey) || ownerKey === candidate.key) continue
+      if (!known.has(ownerKey) || ownerKey === candidate.key) continue
       const list = cites.get(ownerKey) ?? []
       list.push(candidate.key)
       cites.set(ownerKey, list)
@@ -462,9 +616,7 @@ function reach(candidates: readonly Candidate[], roots: ReadonlySet<string>, blo
   const reached = new Set<string>()
   let frontier = [...roots].filter((key) => !blocked.has(key))
   for (const key of frontier) reached.add(key)
-  let waves = 0
   while (frontier.length > 0) {
-    waves += 1
     const next: string[] = []
     for (const key of frontier) {
       for (const cited of cites.get(key) ?? []) {
@@ -475,10 +627,11 @@ function reach(candidates: readonly Candidate[], roots: ReadonlySet<string>, blo
     }
     frontier = next
   }
-  return { reached, waves }
+  return reached
 }
 
 function isCertainRoot(candidate: Candidate, candidateKeys: ReadonlySet<string>): boolean {
+  if (candidate.effect) return true
   return candidate.citations.some((citation) => {
     if (citation.owner === null) return true
     const ownerKey = keyOf(citation.file, citation.owner)
@@ -496,15 +649,15 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
   const publicRoots = new Set([...certain, ...candidates.filter((c) => c.isPublic).map((c) => c.key)])
   const live = reach(candidates, publicRoots, new Set())
   const uncertainRoots = new Set(candidates.filter((c) => c.uncertain !== null).map((c) => c.key))
-  const maybe = reach(candidates, uncertainRoots, live.reached)
+  const maybe = reach(candidates, uncertainRoots, live)
 
   const dead: DeadSymbol[] = []
   const unknown: DeadSymbol[] = []
   const publicExempted: DeadSymbol[] = []
   for (const candidate of candidates) {
-    if (candidate.isPublic && !withoutPublic.reached.has(candidate.key)) publicExempted.push(candidate.symbol)
-    if (live.reached.has(candidate.key)) continue
-    if (maybe.reached.has(candidate.key) || corpus.blind) unknown.push(candidate.symbol)
+    if (candidate.isPublic && !withoutPublic.has(candidate.key)) publicExempted.push(candidate.symbol)
+    if (live.has(candidate.key)) continue
+    if (maybe.has(candidate.key) || corpus.blind) unknown.push(candidate.symbol)
     else dead.push(candidate.symbol)
   }
 
@@ -514,9 +667,13 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
     publicExempted,
     unreadable: [...corpus.unreadable],
     filesScanned: corpus.facts.size,
-    iterations: Math.max(live.waves, maybe.waves),
     hints: hintsFor(input, corpus, candidates, dead, unknown, publicExempted),
   }
+}
+
+function listed(items: readonly string[]): string {
+  const shown = items.slice(0, HINT_LIST_LIMIT).join(', ')
+  return items.length > HINT_LIST_LIMIT ? `${shown} and ${items.length - HINT_LIST_LIMIT} more` : shown
 }
 
 function hintsFor(
@@ -528,52 +685,53 @@ function hintsFor(
   publicExempted: readonly DeadSymbol[],
 ): string[] {
   const hints: string[] = []
-  const unknownKeys = new Set(unknown.map((symbol) => keyOf(symbol.path, symbol.name)))
-  const unknownBy = (reason: Candidate['uncertain']): Candidate[] =>
-    candidates.filter((c) => c.uncertain === reason && unknownKeys.has(c.key))
+  const unknownKeys = new Set(unknown.map((symbol) => keyOf(symbol.path, ownerKeyOf(symbol.kind, symbol.name))))
+  const unknownBy = (reason: Uncertainty): Candidate[] => candidates.filter((c) => c.uncertain === reason && unknownKeys.has(c.key))
+  const sourcesOf = (group: readonly Candidate[]): string => listed([...new Set(group.flatMap((c) => c.because))])
 
   if ((input.publicApi ?? []).length === 0 && dead.some((symbol) => symbol.exported)) {
     hints.push(
-      `${PUBLIC_API_HINT_PREFIX} in .rsct.json, so every export is judged by references inside this ` +
-        `repository alone. If consumers live outside it (a published library), declare the public ` +
-        `paths there or those exports will read as dead.`,
+      `${PUBLIC_API_HINT_PREFIX} in .rsct.json, so every export is judged by references inside this repository ` +
+        `alone. If consumers live outside it (a published library, or a framework that loads files by ` +
+        `convention), declare those paths there or their exports will read as dead.`,
     )
   }
   if (publicExempted.length > 0) {
     hints.push(
-      `${PUBLIC_EXEMPTED_HINT_PREFIX} ${publicExempted.length} export(s) nothing in this repository ` +
-        `uses: ${publicExempted.map((symbol) => `${symbol.path}:${symbol.name}`).join(', ')}.`,
+      `${PUBLIC_EXEMPTED_HINT_PREFIX} ${publicExempted.length} export(s) nothing in this repository uses: ` +
+        `${listed(publicExempted.map((symbol) => `${symbol.path}:${symbol.name}`))}.`,
     )
   }
-  const tainted = unknownBy('tainted').length + unknownBy('nested').length
-  if (corpus.blind || tainted > 0) {
+  const tainted = unknownBy('tainted')
+  if (corpus.blind || tainted.length > 0) {
     hints.push(
-      `${UNREADABLE_HINT_PREFIX} on ${corpus.blind ? unknown.length : tainted} symbol(s): a file ` +
-        `the scan could not read may hold the only reference. Unreadable files: ` +
-        `${[...corpus.unreadable].join(', ')}`,
+      `${UNREADABLE_HINT_PREFIX} on ${corpus.blind ? unknown.length : tainted.length} symbol(s): a file the scan ` +
+        `could not parse, and read only for its imports, may hold the only reference. Files: ` +
+        `${listed([...corpus.unreadable])}.`,
     )
   }
-  const entry = unknownBy('entrypoint')
-  if (entry.length > 0) {
-    const files = [...new Set(entry.flatMap((c) => c.aliasFiles.filter((file) => !corpus.importedFiles.has(file))))]
-    hints.push(
-      `${ENTRYPOINT_HINT_PREFIX} ${files.join(', ')}, so what it exports cannot be told apart from an ` +
-        `entrypoint's. ${entry.length} export(s) left as unknown rather than reported dead. ` +
-        `Declare the file in "public_api" if it is an entrypoint or a published surface.`,
-    )
+  const unparsedTargets = input.targets.filter((path) => corpus.unparsed.has(path))
+  if (unparsedTargets.length > 0) {
+    hints.push(`${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)}, so dead code in them is not checked.`)
   }
-  const dynamic = unknownBy('dynamic')
-  if (dynamic.length > 0) {
-    const files = [...new Set(dynamic.flatMap((c) => c.aliasFiles.filter((file) => corpus.dynamicTargets.has(file))))]
-    hints.push(
-      `${DYNAMIC_HINT_PREFIX} ${files.join(', ')}: import() or require() does not say which export ` +
-        `it uses, so ${dynamic.length} export(s) are left as unknown rather than reported dead.`,
-    )
+  const groups: Array<[Uncertainty, string, (group: readonly Candidate[]) => string]> = [
+    ['script', SCRIPT_HINT_PREFIX, (g) => `: ${sourcesOf(g)} declare(s) no import or export, so their top-level names are shared with every other script and page. ${g.length} symbol(s) left unknown.`],
+    ['eval', EVAL_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} can reach any binding of its file. ${g.length} symbol(s) left unknown.`],
+    ['entrypoint', ENTRYPOINT_HINT_PREFIX, (g) => ` ${sourcesOf(g)}, so what it exports cannot be told apart from an entrypoint's. ${g.length} export(s) left unknown rather than reported dead. Declare the file in "public_api" if it is an entrypoint or a published surface.`],
+    ['dynamic', DYNAMIC_HINT_PREFIX, (g) => ` ${sourcesOf(g)}: import(), require() or a query import does not say which export it uses, so ${g.length} export(s) are left unknown rather than reported dead.`],
+    ['unresolved', UNRESOLVED_HINT_PREFIX, (g) => ` ${sourcesOf(g)}: an import this scan cannot follow may name ${g.length} export(s), left unknown. Declare the alias in tsconfig "paths" to make them precise.`],
+    ['escaped', ESCAPED_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} (passed along, spread, destructured or read with a computed key), so any of its exports may be used. ${g.length} export(s) left unknown.`],
+    ['nested', NESTED_HINT_PREFIX, (g) => ` (ns.inner.name), which this scan does not follow: ${g.length} export(s) left unknown.`],
+    ['unbound', UNBOUND_HINT_PREFIX, (g) => ` (import(x), require(x), a glob with no fixed directory) in ${sourcesOf(g)}: any export here may be its target, so ${g.length} export(s) are left unknown.`],
+  ]
+  for (const [reason, prefix, text] of groups) {
+    const group = unknownBy(reason)
+    if (group.length > 0) hints.push(`${prefix}${text(group)}`)
   }
-  const dependent = corpus.blind ? [] : unknownBy(null)
+  const dependent = corpus.blind ? [] : candidates.filter((c) => c.uncertain === null && unknownKeys.has(c.key))
   if (dependent.length > 0) {
     hints.push(
-      `${DEPENDENT_HINT_PREFIX}: ${dependent.map((c) => `${c.symbol.path}:${c.symbol.name}`).join(', ')}. ` +
+      `${DEPENDENT_HINT_PREFIX}: ${listed(dependent.map((c) => `${c.symbol.path}:${c.symbol.name}`))}. ` +
         `They live or die with the symbols above.`,
     )
   }

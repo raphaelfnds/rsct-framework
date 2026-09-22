@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_IMPORT,
   NAMESPACE_IMPORT,
+  ownerKeyOf,
   scanSymbols,
+  type TreeLanguage,
   type TreeSymbols,
 } from '../../src/lib/comment-sweep/tree-engine.js'
 
-async function symbols(source: string): Promise<TreeSymbols> {
-  const result = await scanSymbols('typescript', source)
+async function symbols(source: string, language: TreeLanguage = 'typescript'): Promise<TreeSymbols> {
+  const result = await scanSymbols(language, source)
   if (!result.ok) throw new Error(`expected a scan, got ${result.reason}`)
   return result.symbols
 }
@@ -338,5 +340,282 @@ describe('scanSymbols — failure modes', () => {
     const result = await scanSymbols('typescript', 'const a = 1\n', null)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toBe('engine_unavailable')
+  })
+})
+
+describe('scanSymbols — deeply nested code', () => {
+  it('scans a 20000-term expression without overflowing the stack, and still sees every use', async () => {
+    const scan = await symbols(`function used(): number { return 1 }\nexport const deep = ${'used() + '.repeat(20_000)}1\n`)
+    expect(named(scan, 'used')).toBe(20_000)
+  })
+})
+
+describe('scanSymbols — values and types are separate namespaces', () => {
+  it('does not let a type parameter hide a value of the same name', async () => {
+    const scan = await symbols(
+      'const Schema = { parse: (x: unknown) => x }\nexport function validate<Schema>(input: Schema): unknown { return Schema.parse(input) }\n',
+    )
+    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'Schema', member: 'parse', owner: 'validate' }]))
+  })
+
+  it('still lets a type parameter hide a type of the same name', async () => {
+    const scan = await symbols('type Helper = string\nexport function f<Helper>(x: Helper): Helper { return x }\n')
+    expect(named(scan, 'Helper')).toBe(0)
+  })
+
+  it('does not let a parameter hide a type of the same name', async () => {
+    const scan = await symbols('type Row = { id: number }\nexport function f(Row: number): Row { return { id: Row } }\n')
+    expect(named(scan, 'Row')).toBe(1)
+    expect(ownerOf(scan, 'Row')).toBe('f')
+  })
+
+  it('owns a reference inside a type by the type, never by a value of the same name', async () => {
+    const scan = await symbols('const Status = { on: 1 } as const\nexport type Status = typeof Status\n')
+    const owners = scan.references.filter((r) => r.name === 'Status').map((r) => r.owner)
+    expect(owners).toEqual([ownerKeyOf('type', 'Status')])
+    expect(ownerKeyOf('type', 'Status')).not.toBe(ownerKeyOf('value', 'Status'))
+  })
+})
+
+describe('scanSymbols — a parameter default does not see the function body', () => {
+  it('counts a use in a default even when the body declares a var of the same name', async () => {
+    const scan = await symbols(
+      'function helper(): number { return 1 }\nexport function live(x = helper()): number { var helper = 2; return x + helper }\n',
+    )
+    expect(named(scan, 'helper')).toBe(1)
+  })
+})
+
+describe('scanSymbols — a parameter of a signature is local to that signature', () => {
+  const cases: Array<[string, string]> = [
+    ['an interface method signature', 'export interface I { m(ghost: number): void }'],
+    ['a call signature', 'export interface I { (ghost: number): void }'],
+    ['a construct signature', 'export interface I { new (ghost: number): I }'],
+    ['a function type', 'export type F = (ghost: number) => void'],
+    ['a constructor type', 'export type C = new (ghost: number) => object'],
+    ['an abstract method signature', 'export abstract class A { abstract m(ghost: number): void }'],
+    ['a class overload signature', 'export class K { m(ghost: number): void\n  m(x: unknown): void {} }'],
+    ['a function overload signature', 'export function o(ghost: number): void\nexport function o(x: unknown): void {}'],
+  ]
+  for (const [label, source] of cases) {
+    it(`does not count ${label} parameter as a use`, async () => {
+      const scan = await symbols(`function ghost(): void {}\n${source}\n`)
+      expect(named(scan, 'ghost')).toBe(0)
+    })
+  }
+})
+
+describe('scanSymbols — a binding used as a value is told apart from a member access on it', () => {
+  it('records a bare use as a reference and a member access only as a member use', async () => {
+    const scan = await symbols("import * as ns from './a.js'\nexport const all = Object.values(ns)\nexport const one = ns.x\n")
+    expect(named(scan, 'ns')).toBe(1)
+    expect(ownerOf(scan, 'ns')).toBe('all')
+    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'ns', member: 'x', owner: 'one' }]))
+  })
+
+  it('records a qualified name in a type position as a member use', async () => {
+    const scan = await symbols("import * as ns from './a.js'\nexport let v: ns.Foo | undefined\n")
+    expect(named(scan, 'ns')).toBe(0)
+    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'ns', member: 'Foo', owner: 'v' }]))
+  })
+
+  it('records a JSX member tag as a member use', async () => {
+    const scan = await symbols("import * as ui from './ui.js'\nexport const v = <ui.Button />\n", 'tsx')
+    expect(named(scan, 'ui')).toBe(0)
+    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'ui', member: 'Button', owner: 'v' }]))
+  })
+})
+
+describe('scanSymbols — code that runs when the module loads', () => {
+  const cases: Array<[string, string, boolean]> = [
+    ['export const server = listen()', 'server', true],
+    ['const plain = 1', 'plain', false],
+    ['const lazy = () => boot()', 'lazy', false],
+    ['const inst = new Thing()', 'inst', true],
+    ['const loaded = await load()', 'loaded', true],
+    ['let counter = 0, bumped = counter++', 'bumped', true],
+    ['const assigned = (target.x = 1)', 'assigned', true],
+    ['const removed = delete target.x', 'removed', true],
+    ['const tagged = sql`select 1`', 'tagged', true],
+    ['@register class Decorated {}', 'Decorated', true],
+    ['@register export class ExportDecorated {}', 'ExportDecorated', true],
+    ['class WithStatic { static s = make() }', 'WithStatic', true],
+    ['class WithBlock { static { init() } }', 'WithBlock', true],
+    ['class Instance { y = make() }', 'Instance', false],
+    ['class Method { m() { boot() } }', 'Method', false],
+    ['class Extends extends mix(Base) {}', 'Extends', true],
+    ['class MemberDecorated { @field z = 1 }', 'MemberDecorated', true],
+    ['class MethodDecorated { @field m() {} }', 'MethodDecorated', true],
+    ['class ComputedKey { [key()]() {} }', 'ComputedKey', true],
+    ['enum Computed { A = compute() }', 'Computed', true],
+    ['enum Plain { A = 1 }', 'Plain', false],
+    ['function deferred() { boot() }', 'deferred', false],
+  ]
+  for (const [source, name, effect] of cases) {
+    it(`${effect ? 'marks' : 'does not mark'} \`${source}\``, async () => {
+      const scan = await symbols(`${source}\n`)
+      expect(scan.declarations.find((d) => d.name === name)?.effect).toBe(effect)
+    })
+  }
+})
+
+describe('scanSymbols — `import m = require()`', () => {
+  it('records it as a namespace import of the module', async () => {
+    const scan = await symbols("import m = require('./a')\nexport const v = m.x\n")
+    expect(scan.imports.map((e) => [e.specifier, e.kind, e.names])).toEqual([['./a', 'import', [{ imported: NAMESPACE_IMPORT, local: 'm' }]]])
+    expect(scan.memberUses).toEqual(expect.arrayContaining([{ object: 'm', member: 'x', owner: 'v' }]))
+  })
+})
+
+describe('scanSymbols — a dynamic import whose target is computed', () => {
+  it('records the static prefix of a template', async () => {
+    const scan = await symbols('export const load = (l: string) => import(`./locales/${l}.ts`)\n')
+    expect(scan.dynamicPrefixes).toEqual(['./locales/'])
+    expect(scan.unboundDynamic).toBe(false)
+  })
+
+  it('reads a template with no substitution as a plain specifier', async () => {
+    const scan = await symbols('export const load = () => import(`./a.js`)\n')
+    expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
+  })
+
+  it('records the static prefix of a concatenation', async () => {
+    const scan = await symbols("export const load = (n: string) => require('./handlers/' + n)\n")
+    expect(scan.dynamicPrefixes).toEqual(['./handlers/'])
+  })
+
+  it('records the directory of an import.meta.glob pattern', async () => {
+    const scan = await symbols("export const pages = import.meta.glob('./pages/**/*.tsx')\n")
+    expect(scan.dynamicPrefixes).toEqual(['./pages/'])
+  })
+
+  it('reads every positive pattern of a glob array and skips a negated one', async () => {
+    const scan = await symbols("export const mods = import.meta.glob(['./a/*.ts', '!./a/x.ts', './b/**'])\n")
+    expect(scan.dynamicPrefixes).toEqual(['./a/', './b/'])
+    expect(scan.unboundDynamic).toBe(false)
+  })
+
+  it('records the directory of a require.context', async () => {
+    const scan = await symbols("export const ctx = require.context('./dir', true, /x$/)\n")
+    expect(scan.dynamicPrefixes).toEqual(['./dir/'])
+  })
+
+  it('flags an import whose target has no static part at all', async () => {
+    const scan = await symbols('export const load = (name: string) => import(name)\n')
+    expect(scan.unboundDynamic).toBe(true)
+  })
+
+  it('reads the specifier past a bundler comment', async () => {
+    const scan = await symbols("export const load = () => import(/* webpackChunkName: \"a\" */ './a.js')\n")
+    expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
+  })
+
+  it('does not treat a call through a parameter named require as an import', async () => {
+    const scan = await symbols("export function load(require: (s: string) => unknown): unknown { return require('./a.js') }\n")
+    expect(scan.imports).toEqual([])
+    expect(scan.dynamicPrefixes).toEqual([])
+    expect(scan.unboundDynamic).toBe(false)
+  })
+})
+
+describe('scanSymbols — direct eval', () => {
+  it('flags a direct eval, which can reach every binding of the module', async () => {
+    expect((await symbols("eval('helper()')\n")).directEval).toBe(true)
+  })
+
+  it('does not flag an indirect eval or a shadowed one', async () => {
+    expect((await symbols("window.eval('x')\n")).directEval).toBe(false)
+    expect((await symbols("export function f(eval: (s: string) => void): void { eval('x') }\n")).directEval).toBe(false)
+  })
+})
+
+describe('scanSymbols — module or classic script', () => {
+  const cases: Array<[string, boolean]> = [
+    ['const a = 1\nfunction b() {}', false],
+    ['namespace N { export const a = 1 }', false],
+    ["import './a.js'", true],
+    ['export const a = 1', true],
+    ['export {}', true],
+    ["const x = require('./a')", true],
+    ['module.exports = {}', true],
+    ['exports.a = 1', true],
+  ]
+  for (const [source, isModule] of cases) {
+    it(`reads \`${source.replace(/\n/g, ' ')}\` as ${isModule ? 'a module' : 'a script'}`, async () => {
+      expect((await symbols(`${source}\n`)).module).toBe(isModule)
+    })
+  }
+})
+
+describe('scanSymbols — a JSX factory named by a pragma', () => {
+  it('counts the factory as used when the file holds JSX', async () => {
+    const scan = await symbols("/** @jsx h */\n/** @jsxFrag Fragment */\nimport { h, Fragment } from './jsx.js'\nexport const v = <div />\n", 'tsx')
+    expect(scan.hasJsx).toBe(true)
+    expect(scan.references).toEqual(expect.arrayContaining([{ name: 'h', owner: null }, { name: 'Fragment', owner: null }]))
+  })
+
+  it('does not count it when the file holds no JSX', async () => {
+    const scan = await symbols("/** @jsx h */\nimport { h } from './jsx.js'\nexport const v = 1\n", 'tsx')
+    expect(scan.hasJsx).toBe(false)
+    expect(named(scan, 'h')).toBe(0)
+  })
+})
+
+describe('scanSymbols — forms the first REVIEW left unpinned', () => {
+  it('counts a shorthand property as a use', async () => {
+    const scan = await symbols('function helper(): void {}\nexport const table = { helper }\n')
+    expect(named(scan, 'helper')).toBe(1)
+  })
+
+  it('counts a use in a type position', async () => {
+    const scan = await symbols('class Holder {}\nexport function take(h: Holder): void { void h }\n')
+    expect(named(scan, 'Holder')).toBe(1)
+  })
+
+  it('does not let a var inside a nested function hide the outer name from the outer body', async () => {
+    const scan = await symbols(
+      'function helper(): number { return 1 }\nexport function live(): number { const inner = function () { var helper = 2; return helper }; return helper() + inner() }\n',
+    )
+    expect(named(scan, 'helper')).toBe(1)
+  })
+
+  const shadows: Array<[string, string]> = [
+    ['a renamed destructured parameter', 'export function live({ a: helper }: { a: number }): number { return helper }'],
+    ['an array pattern parameter', 'export function live([helper]: number[]): number { return helper }'],
+    ['a rest parameter', 'export function live(...helper: number[]): number { return helper.length }'],
+    ['an optional parameter', 'export function live(helper?: number): number { return helper ?? 0 }'],
+    ['an unparenthesised arrow parameter', 'export const live = helper => helper'],
+    ['a block-level function declaration', 'export function live(): void { { function helper(): void {} helper() } }'],
+    ['a named function expression', 'export const live = function helper(n: number): number { return n > 0 ? helper(n - 1) : 0 }'],
+    ['a block-level class', 'export function live(): unknown { { class helper {} return new helper() } }'],
+  ]
+  for (const [label, source] of shadows) {
+    it(`does not count ${label} as a use of the top-level name`, async () => {
+      const scan = await symbols(`function helper(): void {}\n${source}\n`)
+      expect(named(scan, 'helper')).toBe(0)
+    })
+  }
+
+  it('counts the default of a destructured parameter, while the binding itself shadows', async () => {
+    const scan = await symbols('function helper(): void {}\nfunction other(): number { return 1 }\nexport function live({ helper = other() }: { helper?: number }): number { return helper }\n')
+    expect(named(scan, 'helper')).toBe(0)
+    expect(named(scan, 'other')).toBe(1)
+  })
+
+  it('records abstract classes and generators as declarations', async () => {
+    const scan = await symbols('export abstract class Base {}\nexport function* gen(): Generator<number> { yield 1 }\n')
+    expect(scan.declarations.map((d) => d.name).sort()).toEqual(['Base', 'gen'])
+  })
+
+  it('re-exports an imported binding under the clause alias', async () => {
+    const scan = await symbols("import { a } from './impl.js'\nexport { a as b }\n")
+    const reexport = scan.imports.find((e) => e.kind === 'reexport')
+    expect(reexport?.specifier).toBe('./impl.js')
+    expect(reexport?.names).toEqual([{ imported: 'a', local: 'b' }])
+  })
+
+  it('reads a call written right after a declaration, with no separator, as a top-level use', async () => {
+    const scan = await symbols('function helper(){}helper()\n')
+    expect(ownerOf(scan, 'helper')).toBeNull()
   })
 })

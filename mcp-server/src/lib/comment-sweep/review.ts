@@ -393,7 +393,7 @@ export function sweepEntry(
 }
 
 export type StagedSweepCheck =
-  | { ok: true; skipped: 'not_git_repo' | null; checked: Array<{ path: string; blob: string }> }
+  | { ok: true; skipped: 'not_git_repo' | null; checked: Array<{ path: string; blob: string; unverified: boolean }> }
   | {
       ok: false
       reject_kind: 'review_missing' | 'comments_present' | 'migration_reverted' | 'review_drift' | 'review_unreadable'
@@ -415,7 +415,7 @@ export async function checkStagedSweep(args: {
     return { ok: false, reject_kind: 'review_unreadable', reason: 'could not read the staged paths from git', paths: [] }
   }
 
-  const checked: Array<{ path: string; blob: string }> = []
+  const checked: Array<{ path: string; blob: string; unverified: boolean }> = []
   const missing: string[] = []
   const withComments: string[] = []
   const reverted: string[] = []
@@ -447,7 +447,7 @@ export async function checkStagedSweep(args: {
     const scan = await scanWithFilter(repo, path, bytes, args.options)
     if (scan.kind === 'not_code') continue
     if (isShippedScript(repo, path, bytes, scan, args.options)) {
-      checked.push({ path, blob })
+      checked.push({ path, blob, unverified: true })
       continue
     }
     const entry = ledgerEntries(args.ledger, path).find((e) => e.blob === blob)
@@ -465,7 +465,7 @@ export async function checkStagedSweep(args: {
       reverted.push(path)
       continue
     }
-    checked.push({ path, blob })
+    checked.push({ path, blob, unverified: authorized })
   }
 
   const driftPaths = args.drift?.paths ?? []

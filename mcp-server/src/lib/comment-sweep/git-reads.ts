@@ -202,8 +202,16 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
 
 const REGULAR_FILE_MODES: ReadonlySet<string> = new Set(['100644', '100755'])
 const CAT_FILE_BATCH = 1000
+const CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024
+const BLOB_READ_MAX_BUFFER = 64 * 1024 * 1024
 const BLOB_TEXT_CACHE_MAX = 4000
 const blobTextCache = new Map<string, string>()
+let blobReadLimits = { batchCount: CAT_FILE_BATCH, batchBytes: CAT_FILE_BATCH_BYTES, maxBuffer: BLOB_READ_MAX_BUFFER }
+
+export function limitBlobReadsForTests(limits: { batchCount: number; batchBytes: number; maxBuffer: number } | null): void {
+  blobReadLimits = limits ?? { batchCount: CAT_FILE_BATCH, batchBytes: CAT_FILE_BATCH_BYTES, maxBuffer: BLOB_READ_MAX_BUFFER }
+  blobTextCache.clear()
+}
 
 export function readIndexEntries(repo: SweepRepo): { paths: Set<string>; blobs: Map<string, string> } | null {
   const listed = nulList(safeGitBuffer(repo.toplevel, ['ls-files', '-s', '-z', '--full-name']))
@@ -230,18 +238,55 @@ function rememberBlobText(oid: string, text: string): void {
   blobTextCache.set(oid, text)
 }
 
-export function readBlobTexts(repo: SweepRepo, oids: readonly string[]): Map<string, string> | null {
+function readBlobSizes(repo: SweepRepo, oids: readonly string[]): Map<string, number> | null {
+  const listed = text(safeGitBuffer(repo.toplevel, ['cat-file', '--batch-check'], `${oids.join('\n')}\n`))
+  if (listed === null) return null
+  const sizes = new Map<string, number>()
+  for (const entry of listed.split('\n')) {
+    const [oid, type, size] = entry.split(' ')
+    if (oid && type === 'blob' && size !== undefined && Number.isInteger(Number(size))) sizes.set(oid, Number(size))
+  }
+  return sizes
+}
+
+function blobBatches(oids: readonly string[], sizes: ReadonlyMap<string, number>): string[][] {
+  const batches: string[][] = []
+  let current: string[] = []
+  let bytes = 0
+  for (const oid of oids) {
+    const size = sizes.get(oid)
+    if (size === undefined) continue
+    if (current.length > 0 && (current.length >= blobReadLimits.batchCount || bytes + size > blobReadLimits.batchBytes)) {
+      batches.push(current)
+      current = []
+      bytes = 0
+    }
+    current.push(oid)
+    bytes += size
+  }
+  if (current.length > 0) batches.push(current)
+  return batches
+}
+
+export function readBlobTexts(repo: SweepRepo, oids: readonly string[]): { texts: Map<string, string>; failed: Set<string> } | null {
   const texts = new Map<string, string>()
+  const failed = new Set<string>()
   const missing: string[] = []
   for (const oid of new Set(oids)) {
     const cached = blobTextCache.get(oid)
     if (cached === undefined) missing.push(oid)
     else texts.set(oid, cached)
   }
-  for (let start = 0; start < missing.length; start += CAT_FILE_BATCH) {
-    const chunk = missing.slice(start, start + CAT_FILE_BATCH)
-    const batch = safeGitBuffer(repo.toplevel, ['cat-file', '--batch'], `${chunk.join('\n')}\n`)
-    if (batch === null) return null
+  if (missing.length === 0) return { texts, failed }
+  const sizes = readBlobSizes(repo, missing)
+  if (sizes === null) return null
+  for (const chunk of blobBatches(missing, sizes)) {
+    const batch = safeGitBuffer(repo.toplevel, ['cat-file', '--batch'], `${chunk.join('\n')}\n`, undefined, blobReadLimits.maxBuffer)
+    if (batch === null) {
+      if (chunk.length > 1) return null
+      for (const oid of chunk) failed.add(oid)
+      continue
+    }
     let offset = 0
     for (const oid of chunk) {
       const newline = batch.indexOf(0x0a, offset)
@@ -251,13 +296,27 @@ export function readBlobTexts(repo: SweepRepo, oids: readonly string[]): Map<str
       if (header[1] === 'missing' || header.length < 3) continue
       const size = Number(header[2])
       if (!Number.isInteger(size) || offset + size > batch.length) return null
-      const text = batch.subarray(offset, offset + size).toString('utf8')
-      texts.set(oid, text)
-      rememberBlobText(oid, text)
+      const content = batch.subarray(offset, offset + size).toString('utf8')
+      texts.set(oid, content)
+      rememberBlobText(oid, content)
       offset += size + 1
     }
   }
-  return texts
+  return { texts, failed }
+}
+
+export function readUntrackedPaths(repo: SweepRepo): string[] | null {
+  return nulList(safeGitBuffer(repo.toplevel, ['ls-files', '--others', '--exclude-standard', '-z', '--full-name']))
+}
+
+export function readSkipWorktreePaths(repo: SweepRepo): Set<string> | null {
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['ls-files', '-v', '-z', '--full-name']))
+  if (listed === null) return null
+  const paths = new Set<string>()
+  for (const entry of listed) {
+    if (entry.startsWith('S ') || entry.startsWith('s ')) paths.add(entry.slice(2))
+  }
+  return paths
 }
 
 export function readKnownPaths(repo: SweepRepo): Set<string> | null {

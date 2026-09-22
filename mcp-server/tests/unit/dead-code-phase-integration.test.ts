@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { stampLedger, sweepEntry } from '../../src/lib/comment-sweep/review.js'
+import { setDeadCodeAnalysisHookForTests } from '../../src/lib/dead-code/review-gate.js'
 
 import { phaseReviewCompleteHandler, type PhaseReviewCompleteOutput } from '../../src/tools/phase-review-complete.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
@@ -134,6 +135,7 @@ async function keepRotting(p: Prompts = prompts()): Promise<PhaseReviewCompleteO
 const LIVE_PAIR = {
   'src/a.ts': 'export function used(): void {}\n',
   'src/b.ts': "import { used } from './a.js'\nexport const run = (): void => used()\n",
+  'src/main.ts': "import { run } from './b.js'\nrun()\n",
 }
 
 function writeLivePair(): void {
@@ -144,10 +146,12 @@ describe('rsct_phase_review_complete — dead code, through the tool', () => {
   it('rejects a touched file carrying a dead symbol, before any dialog', async () => {
     writeLivePair()
     write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
-    const out = await completeReview()
+    const p = prompts()
+    const out = await completeReview({}, p)
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('dead_code_remaining')
-    expect(out.pending_dead_code?.map((p) => p.name)).toEqual(['rotting'])
+    expect(out.pending_dead_code?.map((s) => s.name)).toEqual(['rotting'])
+    expect(p.seen).toHaveLength(0)
   })
 
   it('completes once the symbol is gone', async () => {
@@ -334,7 +338,7 @@ describe('a keep is the developer decision, never the agent claim', () => {
     writeLivePair()
     write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
     expect((await keepRotting()).status).toBe('completed')
-    write('src/b.ts', "import { used } from './a.js'\nexport const run = (): void => used()\nexport const again = (): void => used()\n")
+    write('src/b.ts', "import { used } from './a.js'\nexport const run = (): void => {\n  used()\n  used()\n}\n")
     trustReviews()
     const out = await completeReview({}, prompts('no-channel'))
     expect(out.status).toBe('completed')
@@ -394,6 +398,12 @@ describe('the commit gate re-checks at the last moment and after a hook', () => 
     expect(out.status).toBe('committed_with_drift')
     const drift = readState().review_drift as { paths: string[] } | undefined
     expect(drift?.paths).toContain('src/a.ts')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    write('README.md', 'fixture changed\n')
+    git(root, 'add', 'README.md')
+    const next = await commit()
+    expect(next.status).toBe('rejected')
+    expect(next.reject_kind).toBe('review_drift')
   })
 
   it('does not claim a deleted file in another language went unchecked', async () => {
@@ -410,5 +420,138 @@ describe('the commit gate re-checks at the last moment and after a hook', () => 
     const out = await completeReview()
     expect(out.status).toBe('completed')
     expect(out.hints.join(' ')).toContain('not checked in tool.py')
+  })
+
+  it('passes the dead-code hints through to a successful commit', async () => {
+    writeLivePair()
+    write('tool.py', 'def run():\n    return 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', '-A')
+    const out = await commit()
+    expect(out.status).toBe('committed')
+    expect(out.hints.some((h) => h.startsWith('Dead-code scan: not checked'))).toBe(true)
+  })
+})
+
+describe('the wiring of keeps through the REVIEW', () => {
+  it('names dead code as the reason a keep-only REVIEW forces the dialog', async () => {
+    trustReviews()
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const out = await keepRotting(prompts('no-channel'))
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(out.reason).toContain('dead code')
+  })
+
+  it('does not honour a keep stored in phase-state without its audit line', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const first = await completeReview()
+    const pending = first.pending_dead_code?.[0]
+    if (!pending) throw new Error('expected a pending symbol')
+    const statePath = join(root, '.rsct', 'phase-state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
+    state.dead_code_keeps = [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'forged', spec_ref: 'x', at: new Date().toISOString() }]
+    writeFileSync(statePath, JSON.stringify(state))
+    const out = await completeReview()
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('dead_code_remaining')
+  })
+
+  it('does not ask again for a keep it already recorded', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    const first = await completeReview()
+    const pending = first.pending_dead_code?.[0]
+    if (!pending) throw new Error('expected a pending symbol')
+    const keeps = [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'kept' }]
+    expect((await completeReview({ dead_code_keeps: keeps })).status).toBe('completed')
+    trustReviews()
+    const again = await completeReview({ dead_code_keeps: keeps }, prompts('no-channel'))
+    expect(again.status).toBe('completed')
+    expect(again.channel).toBe('trust')
+  })
+
+  it('prunes a keep whose file left the repository, and drops the empty list', async () => {
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    expect((await keepRotting()).status).toBe('completed')
+    git(root, 'add', '-A')
+    expect((await commit()).status).toBe('committed')
+    rmSync(join(root, 'src', 'a.ts'))
+    write('src/b.ts', 'export const run = (): void => undefined\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', '-A')
+    expect((await commit()).status).toBe('committed')
+    expect(readState().dead_code_keeps).toBeDefined()
+    expect((await completeReview()).status).toBe('completed')
+    expect(readState().dead_code_keeps).toBeUndefined()
+  })
+
+  it('keeps a keep granted on a file not yet added to git', async () => {
+    writeLivePair()
+    write('src/new.ts', "export function keptHelper(): void {}\nexport {}\n")
+    write('src/main.ts', "import { run } from './b.js'\nimport './new.js'\nrun()\n")
+    const first = await completeReview()
+    const pending = first.pending_dead_code?.find((s) => s.name === 'keptHelper')
+    if (!pending) throw new Error(`expected keptHelper pending, got ${JSON.stringify(first.reject_kind)}`)
+    const keeps = [{ path: pending.path, name: pending.name, declaration_sha256: pending.declaration_sha256, note: 'next caller lands soon' }]
+    expect((await completeReview({ dead_code_keeps: keeps })).status).toBe('completed')
+    expect((await completeReview()).status).toBe('completed')
+    expect((readState().dead_code_keeps as unknown[] | undefined)?.length).toBe(1)
+    git(root, 'add', '-A')
+    expect((await commit()).status).toBe('committed')
+  })
+
+  it('writes every kept symbol to the report the dialog points to, beyond the ten it lists', async () => {
+    writeLivePair()
+    const names = Array.from({ length: 12 }, (_, i) => `rotting${i}`)
+    write('src/a.ts', `export function used(): void {}\n${names.map((n) => `export function ${n}(): void {}\n`).join('')}`)
+    const first = await completeReview()
+    const keeps = (first.pending_dead_code ?? []).map((s) => ({ path: s.path, name: s.name, declaration_sha256: s.declaration_sha256, note: 'kept' }))
+    expect(keeps).toHaveLength(12)
+    const p = prompts('yes')
+    const out = await completeReview({ dead_code_keeps: keeps }, p)
+    expect(out.status).toBe('completed')
+    const reportPath = out.comment_sweep?.report_path
+    if (!reportPath) throw new Error('expected a report')
+    const shown = p.seen.map((o) => `${o.message}\n${o.detail ?? ''}`).join('\n')
+    expect(shown).toContain(reportPath)
+    const report = readFileSync(join(root, reportPath), 'utf8')
+    for (const name of names) expect(report).toContain(`src/a.ts:${name}`)
+  })
+})
+
+describe('a vendored file the developer exempts is not judged for dead code', () => {
+  it('completes the REVIEW and commits it', async () => {
+    writeLivePair()
+    write('vendor/lib.js', 'export function unusedVendored() {}\n')
+    write('src/main.ts', "import { run } from './b.js'\nimport '../vendor/lib.js'\nrun()\n")
+    const out = await completeReview({ exempt_files: [{ path: 'vendor/lib.js', reason: 'vendored' }] })
+    expect(out.status).toBe('completed')
+    git(root, 'add', '-A')
+    expect((await commit()).status).toBe('committed')
+  })
+})
+
+describe('the commit fails closed when the check after the commit cannot run', () => {
+  afterEach(() => setDeadCodeAnalysisHookForTests(null))
+
+  it('records the drift, spends the approval and writes the audit line', async () => {
+    writeLivePair()
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', '-A')
+    installHook("printf \"export function used(): void {}\\n\\n\" > src/a.ts\ngit add src/a.ts\n")
+    let calls = 0
+    setDeadCodeAnalysisHookForTests(() => {
+      calls += 1
+      if (calls >= 3) throw new RangeError('boom after the commit')
+    })
+    const out = await commit()
+    expect(calls).toBe(3)
+    expect(out.status).toBe('committed_with_drift')
+    expect(out.anti_replay_persisted).toBe(true)
+    expect((readState().review_drift as { paths: string[] } | undefined)?.paths).toContain('src/a.ts')
+    expect(auditEvents().some((e) => e.event === 'request_commit.committed')).toBe(true)
   })
 })

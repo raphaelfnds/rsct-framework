@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Language, Parser, type Node } from 'web-tree-sitter'
+import { Language, Parser, type Node, type TreeCursor } from 'web-tree-sitter'
 
 export type TreeLanguage = 'javascript' | 'typescript' | 'tsx' | 'java' | 'python' | 'php' | 'css'
 
@@ -26,6 +26,7 @@ export interface TreeDeclaration {
   kind: DeclarationKind
   exported: boolean
   defaultExport: boolean
+  effect: boolean
   exposures: string[]
   start: number
   end: number
@@ -64,6 +65,11 @@ export interface TreeSymbols {
   references: TreeReference[]
   imports: TreeImportEdge[]
   memberUses: TreeMemberUse[]
+  dynamicPrefixes: string[]
+  unboundDynamic: boolean
+  directEval: boolean
+  module: boolean
+  hasJsx: boolean
 }
 
 export type TreeSymbolScan =
@@ -147,6 +153,10 @@ export function resetTreeEngineForTests(): void {
   languages.clear()
 }
 
+export function ownerKeyOf(kind: DeclarationKind, name: string): string {
+  return kind === 'type' ? `type ${name}` : name
+}
+
 const DECLARATION_KINDS: Readonly<Record<string, DeclarationKind>> = {
   function_declaration: 'value',
   generator_function_declaration: 'value',
@@ -159,8 +169,8 @@ const DECLARATION_KINDS: Readonly<Record<string, DeclarationKind>> = {
 }
 
 const VARIABLE_CONTAINERS = new Set(['lexical_declaration', 'variable_declaration'])
-const REFERENCE_NODES = new Set(['identifier', 'type_identifier', 'shorthand_property_identifier'])
-const FUNCTION_SCOPES = new Set([
+const VALUE_REFERENCES = new Set(['identifier', 'shorthand_property_identifier'])
+const BODY_SCOPES = new Set([
   'function_declaration',
   'generator_function_declaration',
   'function_expression',
@@ -169,14 +179,43 @@ const FUNCTION_SCOPES = new Set([
   'arrow_function',
   'method_definition',
 ])
-const NAMED_FUNCTION_EXPRESSIONS = new Set(['function_expression', 'function', 'generator_function'])
-const BLOCK_DECLARATIONS = new Set([
-  'function_declaration',
-  'generator_function_declaration',
-  'class_declaration',
-  'abstract_class_declaration',
+const FUNCTION_SCOPES = new Set([
+  ...BODY_SCOPES,
+  'function_signature',
+  'method_signature',
+  'abstract_method_signature',
+  'call_signature',
+  'construct_signature',
+  'function_type',
+  'constructor_type',
 ])
+const HOISTING_BOUNDARIES = new Set([...FUNCTION_SCOPES, 'class_static_block'])
+const NAMED_FUNCTION_EXPRESSIONS = new Set(['function_expression', 'function', 'generator_function'])
 const LOOP_DECLARATION_KEYWORDS = new Set(['const', 'let', 'var'])
+const EFFECT_NODES = new Set([
+  'call_expression',
+  'new_expression',
+  'await_expression',
+  'assignment_expression',
+  'augmented_assignment_expression',
+  'update_expression',
+  'yield_expression',
+  'decorator',
+  'class_static_block',
+])
+const CLASS_FIELDS = new Set(['public_field_definition', 'field_definition'])
+const GLOB_METHODS = new Set(['glob', 'globEager'])
+const GLOB_META = /[*?[{(!]/
+const JSX_PRAGMA = /@jsx(?:Frag)?\s+([A-Za-z_$][\w$]*)/g
+const COMMONJS_NAMES = new Set(['require', 'module', 'exports'])
+const SKIP = -1
+
+interface Scope {
+  values: ReadonlySet<string>
+  types: ReadonlySet<string>
+}
+
+const NO_NAMES: ReadonlySet<string> = new Set<string>()
 
 function namedChildren(node: Node | null): Node[] {
   const out: Node[] = []
@@ -196,31 +235,41 @@ function childOfType(node: Node, type: string): Node | null {
   return null
 }
 
-function patternNames(node: Node | null, out: Set<string>): void {
-  if (!node) return
-  switch (node.type) {
-    case 'identifier':
-    case 'shorthand_property_identifier_pattern':
-      out.add(node.text)
-      return
-    case 'required_parameter':
-    case 'optional_parameter':
-      patternNames(node.childForFieldName('pattern'), out)
-      return
-    case 'pair_pattern':
-      patternNames(node.childForFieldName('value'), out)
-      return
-    case 'assignment_pattern':
-    case 'object_assignment_pattern':
-      patternNames(node.childForFieldName('left'), out)
-      return
-    case 'object_pattern':
-    case 'array_pattern':
-    case 'rest_pattern':
-      for (const child of namedChildren(node)) patternNames(child, out)
-      return
-    default:
-      return
+function patternNames(root: Node | null, out: Set<string>): void {
+  const stack: Node[] = root ? [root] : []
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node) continue
+    switch (node.type) {
+      case 'identifier':
+      case 'shorthand_property_identifier_pattern':
+        out.add(node.text)
+        break
+      case 'required_parameter':
+      case 'optional_parameter': {
+        const pattern = node.childForFieldName('pattern')
+        if (pattern) stack.push(pattern)
+        break
+      }
+      case 'pair_pattern': {
+        const value = node.childForFieldName('value')
+        if (value) stack.push(value)
+        break
+      }
+      case 'assignment_pattern':
+      case 'object_assignment_pattern': {
+        const left = node.childForFieldName('left')
+        if (left) stack.push(left)
+        break
+      }
+      case 'object_pattern':
+      case 'array_pattern':
+      case 'rest_pattern':
+        for (const child of namedChildren(node)) stack.push(child)
+        break
+      default:
+        break
+    }
   }
 }
 
@@ -230,85 +279,131 @@ function declaratorNames(declaration: Node, out: Set<string>): void {
   }
 }
 
-function typeParameterNames(node: Node, out: Set<string>): void {
-  const params = childOfType(node, 'type_parameters')
-  for (const param of namedChildren(params)) {
-    const name = param.type === 'type_parameter' ? param.childForFieldName('name') : null
-    if (name) out.add(name.text)
-  }
-}
-
-function hoistedVarNames(node: Node | null, out: Set<string>): void {
-  for (const child of namedChildren(node)) {
-    if (FUNCTION_SCOPES.has(child.type)) continue
-    if (child.type === 'variable_declaration') declaratorNames(child, out)
-    hoistedVarNames(child, out)
-  }
-}
-
-function functionBindings(node: Node): Set<string> {
+function hoistedVarNames(root: Node | null): Set<string> {
   const names = new Set<string>()
-  for (const param of namedChildren(node.childForFieldName('parameters'))) patternNames(param, names)
-  patternNames(node.childForFieldName('parameter'), names)
-  if (NAMED_FUNCTION_EXPRESSIONS.has(node.type)) {
-    const own = node.childForFieldName('name')
-    if (own) names.add(own.text)
-  }
-  typeParameterNames(node, names)
-  hoistedVarNames(node.childForFieldName('body'), names)
-  return names
-}
-
-function blockBindings(node: Node): Set<string> {
-  const names = new Set<string>()
-  for (const child of namedChildren(node)) {
-    if (child.type === 'lexical_declaration') {
-      declaratorNames(child, names)
-    } else if (BLOCK_DECLARATIONS.has(child.type)) {
-      const name = child.childForFieldName('name')
-      if (name) names.add(name.text)
+  const stack: Node[] = root ? [root] : []
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node) continue
+    for (const child of namedChildren(node)) {
+      if (HOISTING_BOUNDARIES.has(child.type)) continue
+      if (child.type === 'variable_declaration') declaratorNames(child, names)
+      stack.push(child)
     }
   }
   return names
 }
 
-function loopBindings(node: Node): Set<string> | null {
+function varScope(node: Node): Scope | null {
+  const values = hoistedVarNames(node)
+  return values.size > 0 ? { values, types: NO_NAMES } : null
+}
+
+function parameterScope(node: Node): Scope {
+  const values = new Set<string>()
+  for (const param of namedChildren(node.childForFieldName('parameters'))) patternNames(param, values)
+  patternNames(node.childForFieldName('parameter'), values)
+  if (NAMED_FUNCTION_EXPRESSIONS.has(node.type)) {
+    const own = node.childForFieldName('name')
+    if (own) values.add(own.text)
+  }
+  const types = new Set<string>()
+  for (const param of namedChildren(childOfType(node, 'type_parameters'))) {
+    const name = param.type === 'type_parameter' ? param.childForFieldName('name') : null
+    if (name) types.add(name.text)
+  }
+  return { values, types }
+}
+
+function blockScope(node: Node): Scope | null {
+  const values = new Set<string>()
+  const types = new Set<string>()
+  for (const child of namedChildren(node)) {
+    const name = child.childForFieldName('name')?.text
+    switch (child.type) {
+      case 'lexical_declaration':
+        declaratorNames(child, values)
+        break
+      case 'function_declaration':
+      case 'generator_function_declaration':
+        if (name) values.add(name)
+        break
+      case 'class_declaration':
+      case 'abstract_class_declaration':
+      case 'enum_declaration':
+        if (name) {
+          values.add(name)
+          types.add(name)
+        }
+        break
+      case 'type_alias_declaration':
+      case 'interface_declaration':
+        if (name) types.add(name)
+        break
+      default:
+        break
+    }
+  }
+  return values.size > 0 || types.size > 0 ? { values, types } : null
+}
+
+function loopScope(node: Node): Scope | null {
+  const values = new Set<string>()
   if (node.type === 'for_statement') {
     const initializer = node.childForFieldName('initializer')
-    if (!initializer || !VARIABLE_CONTAINERS.has(initializer.type)) return null
-    const names = new Set<string>()
-    declaratorNames(initializer, names)
-    return names
-  }
-  if (node.type === 'for_in_statement') {
+    if (initializer && VARIABLE_CONTAINERS.has(initializer.type)) declaratorNames(initializer, values)
+  } else {
     let declares = false
     for (let i = 0; i < node.childCount; i++) {
       if (LOOP_DECLARATION_KEYWORDS.has(node.child(i)?.type ?? '')) declares = true
     }
-    if (!declares) return null
-    const names = new Set<string>()
-    patternNames(node.childForFieldName('left'), names)
-    return names
+    if (declares) patternNames(node.childForFieldName('left'), values)
   }
-  return null
+  return values.size > 0 ? { values, types: NO_NAMES } : null
 }
 
-function catchBindings(node: Node): Set<string> {
-  const names = new Set<string>()
-  patternNames(node.childForFieldName('parameter'), names)
-  return names
+function catchScope(node: Node): Scope | null {
+  const values = new Set<string>()
+  patternNames(node.childForFieldName('parameter'), values)
+  return values.size > 0 ? { values, types: NO_NAMES } : null
 }
 
-function stringArgument(call: Node): string | null {
-  const first = namedChildren(call.childForFieldName('arguments'))[0]
-  if (!first || first.type !== 'string') return null
-  return childOfType(first, 'string_fragment')?.text ?? null
+function stringText(node: Node): string | null {
+  if (node.type !== 'string') return null
+  return namedChildren(node)
+    .filter((child) => child.type === 'string_fragment')
+    .map((child) => child.text)
+    .join('')
 }
 
-function namespaceExportName(node: Node): string | null {
-  const namespace = childOfType(node, 'namespace_export')
-  const name = namedChildren(namespace)[0]
-  return name ? name.text : null
+function staticText(node: Node): string | null {
+  if (node.type === 'string') return stringText(node)
+  if (node.type !== 'template_string') return null
+  const parts = namedChildren(node)
+  if (parts.some((part) => part.type !== 'string_fragment')) return null
+  return parts.map((part) => part.text).join('')
+}
+
+function leadingText(root: Node): string {
+  let node: Node | null = root
+  while (node && (node.type === 'parenthesized_expression' || (node.type === 'binary_expression' && node.childForFieldName('operator')?.type === '+'))) {
+    node = node.type === 'parenthesized_expression' ? (namedChildren(node)[0] ?? null) : node.childForFieldName('left')
+  }
+  if (!node) return ''
+  if (node.type === 'string') return stringText(node) ?? ''
+  if (node.type !== 'template_string') return ''
+  let text = ''
+  for (const part of namedChildren(node)) {
+    if (part.type !== 'string_fragment') break
+    text += part.text
+  }
+  return text
+}
+
+function globPrefix(pattern: string): string {
+  const meta = pattern.search(GLOB_META)
+  const head = meta < 0 ? pattern : pattern.slice(0, meta)
+  return head.slice(0, head.lastIndexOf('/') + 1)
 }
 
 function specifierOf(node: Node): string | null {
@@ -319,6 +414,12 @@ function specifierOf(node: Node): string | null {
     if (child && child.type === 'string_fragment') return child.text
   }
   return null
+}
+
+function namespaceExportName(node: Node): string | null {
+  const namespace = childOfType(node, 'namespace_export')
+  const name = namedChildren(namespace)[0]
+  return name ? name.text : null
 }
 
 function importNamesOf(node: Node): TreeImportName[] {
@@ -355,14 +456,36 @@ function importNamesOf(node: Node): TreeImportName[] {
   return names
 }
 
+function hasLoadTimeEffect(root: Node | null): boolean {
+  const stack: Node[] = root ? [root] : []
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node) continue
+    const type = node.type
+    if (EFFECT_NODES.has(type)) return true
+    if (type === 'unary_expression' && node.childForFieldName('operator')?.type === 'delete') return true
+    if (type === 'method_definition' || (CLASS_FIELDS.has(type) && childOfType(node, 'static') === null)) {
+      for (const child of namedChildren(node)) {
+        if (child.type === 'decorator') return true
+        if (child.type === 'computed_property_name') stack.push(child)
+      }
+      continue
+    }
+    if (BODY_SCOPES.has(type)) continue
+    for (const child of namedChildren(node)) stack.push(child)
+  }
+  return false
+}
+
 function isDefaultExport(node: Node): boolean {
   return childOfType(node, 'default') !== null
 }
 
-function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; nameSites: Set<number> } {
+function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; nameSites: Set<number>; esm: boolean } {
   const declarations: TreeDeclaration[] = []
   const nameSites = new Set<number>()
-  const record = (node: Node, statement: Node, exported: boolean, defaultExport: boolean): void => {
+  let esm = false
+  const record = (node: Node, statement: Node, exported: boolean, defaultExport: boolean, decorated: boolean): void => {
     if (VARIABLE_CONTAINERS.has(node.type)) {
       for (const declarator of namedChildren(node)) {
         if (declarator.type !== 'variable_declarator') continue
@@ -374,6 +497,7 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
           kind: 'value',
           exported,
           defaultExport: false,
+          effect: hasLoadTimeEffect(declarator.childForFieldName('value')),
           exposures: exported ? [name.text] : [],
           start: statement.startIndex,
           end: statement.endIndex,
@@ -388,11 +512,13 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
     const name = node.childForFieldName('name')
     if (!name) return
     nameSites.add(name.startIndex)
+    const runsAtLoad = node.type === 'class_declaration' || node.type === 'abstract_class_declaration' || node.type === 'enum_declaration'
     declarations.push({
       name: name.text,
       kind,
       exported,
       defaultExport,
+      effect: decorated || (runsAtLoad && hasLoadTimeEffect(node)),
       exposures: exported ? [defaultExport ? DEFAULT_IMPORT : name.text] : [],
       start: statement.startIndex,
       end: statement.endIndex,
@@ -401,14 +527,16 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
     })
   }
   for (const node of namedChildren(root)) {
+    if (node.type === 'import_statement') esm = true
     if (node.type === 'export_statement') {
+      esm = true
       const declaration = node.childForFieldName('declaration')
-      if (declaration) record(declaration, node, true, isDefaultExport(node))
+      if (declaration) record(declaration, node, true, isDefaultExport(node), childOfType(node, 'decorator') !== null)
       continue
     }
-    record(node, node, false, false)
+    record(node, node, false, false, false)
   }
-  return { declarations, nameSites }
+  return { declarations, nameSites, esm }
 }
 
 function ownerAt(owners: readonly TreeDeclaration[], index: number): string | null {
@@ -420,7 +548,7 @@ function ownerAt(owners: readonly TreeDeclaration[], index: number): string | nu
     if (!candidate) return null
     if (index < candidate.ownerStart) high = mid - 1
     else if (index >= candidate.ownerEnd) low = mid + 1
-    else return candidate.name
+    else return ownerKeyOf(candidate.kind, candidate.name)
   }
   return null
 }
@@ -467,32 +595,99 @@ function applyLocalExports(
 }
 
 function collectSymbols(root: Node): TreeSymbols {
-  const { declarations, nameSites } = topLevelDeclarations(root)
+  const { declarations, nameSites, esm } = topLevelDeclarations(root)
   const owners = [...declarations].sort((a, b) => a.ownerStart - b.ownerStart)
   const references: TreeReference[] = []
   const imports: TreeImportEdge[] = []
   const memberUses: TreeMemberUse[] = []
   const localExports: LocalExport[] = []
-  const scopes: Set<string>[] = []
-  const shadowed = (name: string): boolean => scopes.some((scope) => scope.has(name))
+  const dynamicPrefixes: string[] = []
+  const pragmas = new Set<string>()
+  const flags = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false }
+  const scopes: Scope[] = []
+  const shadowsValue = (name: string): boolean => scopes.some((scope) => scope.values.has(name))
+  const shadowsType = (name: string): boolean => scopes.some((scope) => scope.types.has(name))
 
-  const visitChildren = (node: Node): void => {
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i)
-      if (child) visit(child)
+  const reference = (name: string, index: number): void => {
+    if (COMMONJS_NAMES.has(name)) flags.commonJs = true
+    references.push({ name, owner: ownerAt(owners, index) })
+  }
+
+  const memberUse = (object: Node | null, member: Node | null, index: number): void => {
+    if (!object || !member || object.type !== 'identifier' || shadowsValue(object.text)) return
+    if (COMMONJS_NAMES.has(object.text)) flags.commonJs = true
+    memberUses.push({ object: object.text, member: member.text, owner: ownerAt(owners, index) })
+  }
+
+  const dynamicTarget = (argument: Node | null): void => {
+    if (!argument) return
+    const literal = staticText(argument)
+    if (literal !== null) {
+      if (literal.length > 0) imports.push({ specifier: literal, kind: 'dynamic', names: [], starReexport: false, namespaceReexport: null })
+      return
+    }
+    const prefix = leadingText(argument)
+    if (prefix.length > 0) dynamicPrefixes.push(prefix)
+    else flags.unboundDynamic = true
+  }
+
+  const globTarget = (argument: Node | null): void => {
+    const patterns = argument?.type === 'array' ? namedChildren(argument) : argument ? [argument] : []
+    for (const pattern of patterns) {
+      const text = staticText(pattern)
+      if (text !== null && text.startsWith('!')) continue
+      const prefix = text === null ? '' : globPrefix(text)
+      if (prefix.length > 0) dynamicPrefixes.push(prefix)
+      else flags.unboundDynamic = true
     }
   }
 
-  const visitScoped = (names: Set<string>, node: Node): void => {
-    scopes.push(names)
-    try {
-      visitChildren(node)
-    } finally {
-      scopes.pop()
+  const contextTarget = (argument: Node | null): void => {
+    const text = argument ? staticText(argument) : null
+    if (text === null || text.length === 0) flags.unboundDynamic = true
+    else dynamicPrefixes.push(text.endsWith('/') ? text : `${text}/`)
+  }
+
+  const recordCall = (node: Node): void => {
+    const fn = node.childForFieldName('function')
+    if (!fn) return
+    const args = node.childForFieldName('arguments')
+    const argument = args?.type === 'arguments' ? (namedChildren(args).find((child) => child.type !== 'comment') ?? null) : null
+    const requireInScope = !shadowsValue('require')
+    if (fn.type === 'identifier' && fn.text === 'eval' && !shadowsValue('eval')) flags.directEval = true
+    if (fn.type === 'import' || (fn.type === 'identifier' && fn.text === 'require' && requireInScope)) {
+      dynamicTarget(argument)
+      return
+    }
+    if (fn.type !== 'member_expression') return
+    const object = fn.childForFieldName('object')
+    const property = fn.childForFieldName('property')?.text ?? ''
+    if (object?.type === 'meta_property' && object.text === 'import.meta' && GLOB_METHODS.has(property)) globTarget(argument)
+    else if (object?.type === 'identifier' && object.text === 'require' && property === 'context' && requireInScope) contextTarget(argument)
+  }
+
+  const recordImport = (node: Node): void => {
+    const specifier = specifierOf(node)
+    if (specifier !== null) {
+      imports.push({ specifier, kind: 'import', names: importNamesOf(node), starReexport: false, namespaceReexport: null })
+      return
+    }
+    const clause = childOfType(node, 'import_require_clause')
+    const binding = clause ? namedChildren(clause).find((child) => child.type === 'identifier') : undefined
+    const source = clause?.childForFieldName('source')
+    const required = source ? stringText(source) : null
+    if (binding && required) {
+      imports.push({
+        specifier: required,
+        kind: 'import',
+        names: [{ imported: NAMESPACE_IMPORT, local: binding.text }],
+        starReexport: false,
+        namespaceReexport: null,
+      })
     }
   }
 
-  const visitExport = (node: Node): void => {
+  const recordExport = (node: Node): boolean => {
     const specifier = specifierOf(node)
     if (specifier !== null) {
       const namespaceReexport = namespaceExportName(node)
@@ -504,84 +699,118 @@ function collectSymbols(root: Node): TreeSymbols {
         starReexport: names.length === 0 && namespaceReexport === null,
         namespaceReexport,
       })
-      return
+      return true
     }
     const value = node.childForFieldName('value')
     if (value?.type === 'identifier' && node.childForFieldName('declaration') === null) {
       localExports.push({ local: value.text, exposed: DEFAULT_IMPORT })
-      return
+      return true
     }
     const clause = childOfType(node, 'export_clause')
-    if (clause) {
-      for (const entry of namedChildren(clause)) {
-        if (entry.type !== 'export_specifier') continue
-        const name = entry.childForFieldName('name')
-        const alias = entry.childForFieldName('alias')
-        if (name) localExports.push({ local: name.text, exposed: (alias ?? name).text })
-      }
-      return
+    if (!clause) return false
+    for (const entry of namedChildren(clause)) {
+      if (entry.type !== 'export_specifier') continue
+      const name = entry.childForFieldName('name')
+      const alias = entry.childForFieldName('alias')
+      if (name) localExports.push({ local: name.text, exposed: (alias ?? name).text })
     }
-    visitChildren(node)
+    return true
   }
 
-  const recordDynamicEdge = (node: Node): void => {
-    const fn = node.childForFieldName('function')
-    if (!fn) return
-    const isImport = fn.type === 'import'
-    const isRequire = fn.type === 'identifier' && fn.text === 'require' && !shadowed('require')
-    if (!isImport && !isRequire) return
-    const specifier = stringArgument(node)
-    if (specifier === null) return
-    imports.push({ specifier, kind: 'dynamic', names: [], starReexport: false, namespaceReexport: null })
-  }
-
-  const visit = (node: Node): void => {
-    const type = node.type
+  const enter = (cursor: TreeCursor, parentType: string | undefined): number => {
+    const type = cursor.nodeType
+    if (type === 'comment') {
+      const text = cursor.nodeText
+      if (text.includes('@jsx')) for (const match of text.matchAll(JSX_PRAGMA)) if (match[1]) pragmas.add(match[1])
+      return SKIP
+    }
+    if (type.startsWith('jsx_')) flags.hasJsx = true
+    let current: Node | null = null
+    const node = (): Node => (current ??= cursor.currentNode)
     if (type === 'import_statement') {
-      const specifier = specifierOf(node)
-      if (specifier !== null) {
-        imports.push({ specifier, kind: 'import', names: importNamesOf(node), starReexport: false, namespaceReexport: null })
-      }
-      return
+      recordImport(node())
+      return SKIP
     }
-    if (type === 'export_statement') {
-      visitExport(node)
-      return
-    }
-    if (type === 'call_expression') recordDynamicEdge(node)
-    if (FUNCTION_SCOPES.has(type)) {
-      visitScoped(functionBindings(node), node)
-      return
-    }
-    if (type === 'statement_block') {
-      visitScoped(blockBindings(node), node)
-      return
-    }
-    if (type === 'catch_clause') {
-      visitScoped(catchBindings(node), node)
-      return
-    }
-    const loop = loopBindings(node)
-    if (loop) {
-      visitScoped(loop, node)
-      return
-    }
-    if (type === 'member_expression') {
-      const object = node.childForFieldName('object')
-      const property = node.childForFieldName('property')
-      if (object && property && object.type === 'identifier' && !shadowed(object.text)) {
-        memberUses.push({ object: object.text, member: property.text, owner: ownerAt(owners, node.startIndex) })
-      }
-    }
-    if (REFERENCE_NODES.has(type) && !nameSites.has(node.startIndex) && !shadowed(node.text)) {
-      references.push({ name: node.text, owner: ownerAt(owners, node.startIndex) })
-    }
-    visitChildren(node)
-  }
-  visit(root)
-  applyLocalExports(declarations, localExports, imports, references)
+    if (type === 'export_statement' && recordExport(node())) return SKIP
+    if (type === 'call_expression') recordCall(node())
+    else if (type === 'member_expression') memberUse(node().childForFieldName('object'), node().childForFieldName('property'), cursor.startIndex)
+    else if (type === 'nested_type_identifier') memberUse(node().childForFieldName('module'), node().childForFieldName('name'), cursor.startIndex)
 
-  return { declarations, references, imports, memberUses }
+    const field = cursor.currentFieldName
+    if (VALUE_REFERENCES.has(type)) {
+      if ((parentType === 'member_expression' && field === 'object') || parentType === 'nested_type_identifier') return 0
+      const start = cursor.startIndex
+      const name = cursor.nodeText
+      if (!nameSites.has(start) && !shadowsValue(name)) reference(name, start)
+      return 0
+    }
+    if (type === 'type_identifier') {
+      if (parentType === 'nested_type_identifier') return 0
+      const start = cursor.startIndex
+      const name = cursor.nodeText
+      if (!nameSites.has(start) && !shadowsType(name)) reference(name, start)
+      return 0
+    }
+
+    let pushed = 0
+    const push = (scope: Scope | null): void => {
+      if (!scope) return
+      scopes.push(scope)
+      pushed++
+    }
+    if (field === 'body' && parentType !== undefined && BODY_SCOPES.has(parentType)) push(varScope(node()))
+    if (FUNCTION_SCOPES.has(type)) push(parameterScope(node()))
+    else if (type === 'statement_block') push(blockScope(node()))
+    else if (type === 'class_static_block') push(varScope(node()))
+    else if (type === 'catch_clause') push(catchScope(node()))
+    else if (type === 'for_statement' || type === 'for_in_statement') push(loopScope(node()))
+    return pushed
+  }
+
+  const cursor = root.walk()
+  const path: string[] = []
+  const pushedAt: number[] = []
+  try {
+    let descend = true
+    for (;;) {
+      if (descend) {
+        const type = cursor.nodeType
+        const pushed = enter(cursor, path[path.length - 1])
+        if (pushed !== SKIP && cursor.gotoFirstChild()) {
+          path.push(type)
+          pushedAt.push(pushed)
+          continue
+        }
+        if (pushed > 0) scopes.length -= pushed
+      }
+      if (cursor.gotoNextSibling()) {
+        descend = true
+        continue
+      }
+      if (!cursor.gotoParent()) break
+      path.pop()
+      const pushed = pushedAt.pop() ?? 0
+      if (pushed > 0) scopes.length -= pushed
+      descend = false
+    }
+  } finally {
+    cursor.delete()
+  }
+
+  applyLocalExports(declarations, localExports, imports, references)
+  if (flags.hasJsx) for (const name of pragmas) references.push({ name, owner: null })
+
+  return {
+    declarations,
+    references,
+    imports,
+    memberUses,
+    dynamicPrefixes,
+    unboundDynamic: flags.unboundDynamic,
+    directEval: flags.directEval,
+    module: esm || flags.commonJs,
+    hasJsx: flags.hasJsx,
+  }
 }
 
 export async function scanSymbols(

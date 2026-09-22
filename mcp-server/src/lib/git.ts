@@ -226,6 +226,7 @@ export function safeGitBuffer(
   args: string[],
   input?: string,
   env?: Record<string, string>,
+  maxBuffer: number = 64 * 1024 * 1024,
 ): Buffer | null {
   try {
     return execFileSync('git', args, {
@@ -233,7 +234,7 @@ export function safeGitBuffer(
       input: input ?? '',
       ...(env !== undefined && { env: { ...process.env, ...env } }),
       stdio: ['pipe', 'pipe', 'ignore'],
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer,
       timeout: GIT_READ_TIMEOUT_MS,
     })
   } catch {

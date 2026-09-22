@@ -1,20 +1,25 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX,
   UNCOVERED_LANGUAGE_HINT_PREFIX,
   auditBoundKeeps,
   checkDeadCode,
   checkStagedDeadCode,
   declarationSha256,
+  keepPrunePaths,
   mergeDeadCodeKeeps,
   readDeadCodeKeeps,
+  setDeadCodeAnalysisHookForTests,
   type DeadCodeKeep,
 } from '../../src/lib/dead-code/review-gate.js'
+import { UNREADABLE_HINT_PREFIX } from '../../src/lib/dead-code/references.js'
+import { limitBlobReadsForTests, openSweepRepo, readIndexEntries } from '../../src/lib/comment-sweep/git-reads.js'
 import { deadCodeKeepKey } from '../../src/lib/free-commit.js'
 
 let tmpRoot: string
@@ -50,6 +55,7 @@ const LIVE_PAIR = {
   used: 'export function used(): void {}\n',
   withRotting: 'export function used(): void {}\nexport function rotting(): void {}\n',
   caller: "import { used } from './a.js'\nexport const run = () => used()\n",
+  main: "import { run } from './b.js'\nrun()\n",
 }
 
 function decisionsFor(keeps: readonly DeadCodeKeep[]): Set<string> {
@@ -60,9 +66,11 @@ describe('checkDeadCode — the REVIEW gate reads the working tree', () => {
   it('passes when the touched files carry no dead symbol', async () => {
     writeFile('a.ts', LIVE_PAIR.used)
     writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
     commitAll()
     const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
     expect(check.ok).toBe(true)
+    if (check.ok) expect(check.unknown).toBe(0)
   })
 
   it('rejects a dead symbol in a touched file and names it', async () => {
@@ -231,9 +239,11 @@ describe('checkStagedDeadCode — the commit gate reads the index, never the wor
   it('passes when nothing staged is dead', async () => {
     writeFile('a.ts', LIVE_PAIR.used)
     writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
     commitAll()
     const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
     expect(check.ok).toBe(true)
+    if (check.ok) expect(check.unknown).toBe(0)
   })
 
   it('refuses a staged file carrying a dead symbol, naming it and the path', async () => {
@@ -321,6 +331,244 @@ describe('checkStagedDeadCode — the commit gate reads the index, never the wor
       expect(check.unknown).toBe(1)
       expect(check.hints.join(' ')).toContain('entry.ts')
     }
+  })
+})
+
+describe('the gate says what it did not read', () => {
+  it('names the other-language files it did not read as evidence when it reports a dead export', async () => {
+    writeFile('a.ts', 'export function fromPython(): void {}\n')
+    writeFile('entry.ts', "import './a.js'\n")
+    writeFile('caller.py', 'import subprocess\nsubprocess.run(["node", "a.js"])\n')
+    writeFile('styles.css', 'a { color: red }\n')
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (check.ok) throw new Error('expected a rejection')
+    const hint = check.hints.find((h) => h.startsWith(OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX))
+    expect(hint).toContain('.py')
+    expect(hint).not.toContain('.css')
+  })
+
+  it('does not raise that hint when only a private symbol is dead', async () => {
+    writeFile('a.ts', 'function rotting(): void {}\nexport {}\n')
+    writeFile('caller.py', 'print(1)\n')
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (check.ok) throw new Error('expected a rejection')
+    expect(check.hints.some((h) => h.startsWith(OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX))).toBe(false)
+  })
+
+  it('names a touched shell script as not checked, and never a markdown file', async () => {
+    writeFile('run.sh', 'echo hi\n')
+    writeFile('README.md', '# readme\n')
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['run.sh', 'README.md'], keeps: [] })
+    const hints = check.hints.join(' ')
+    expect(hints).toContain('not checked in run.sh')
+    expect(hints).not.toContain('README.md')
+  })
+
+  it('calls a touched file under a root dist/ build output, not an unread language', async () => {
+    writeFile('dist/index.js', 'export function bundled() {}\n')
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['dist/index.js'], keeps: [] })
+    expect(check.ok).toBe(true)
+    const hint = check.hints.find((h) => h.includes('dist/index.js'))
+    expect(hint).toContain('build output')
+    expect(hint).not.toContain('reads JavaScript and TypeScript only')
+  })
+})
+
+describe('what counts as build output', () => {
+  it('reads a nested build/ directory as ordinary source, so its imports are uses', async () => {
+    writeFile('src/lib/x.ts', 'export function forBuild(): void {}\n')
+    writeFile('src/commands/build/run.ts', "import { forBuild } from '../../lib/x.js'\nforBuild()\n")
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['src/lib/x.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+    if (check.ok) expect(check.unknown).toBe(0)
+  })
+
+  it('never lets an HTML page under a root dist/ keep a symbol alive', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('dist/index.html', '<script type="module">import { rotting } from "../a.js"; rotting()</script>\n')
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(false)
+  })
+})
+
+describe('the REVIEW reads the working tree as the developer sees it', () => {
+  it('counts a use in an untracked .vue component the change adds', async () => {
+    writeFile('a.ts', 'export function useThing(): void {}\n')
+    writeFile('entry.ts', "import './a.js'\n")
+    commitAll()
+    writeFile('Foo.vue', "<script setup lang=\"ts\">\nimport { useThing } from './a.js'\nuseThing()\n</script>\n")
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts', 'Foo.vue'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+
+  it('reads a sparse-checkout file from the index instead of dropping its uses', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    writeFile('side.ts', "import './a.js'\n")
+    commitAll()
+    git('update-index', '--skip-worktree', 'b.ts')
+    unlinkSync(join(tmpRoot, 'b.ts'))
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+
+  it('is not blinded by a tracked file deleted from the working tree', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('old.ts', 'export const legacy = 1\n')
+    commitAll()
+    unlinkSync(join(tmpRoot, 'old.ts'))
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(false)
+  })
+
+  it('normalises CRLF before slicing a declaration, so the preview and the hash agree with LF', async () => {
+    writeFile('a.ts', 'export function used(): void {}\r\nexport function rotting(): void {\r\n  return\r\n}\r\n')
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (check.ok) throw new Error('expected a rejection')
+    const lf = 'export function rotting(): void {\n  return\n}'
+    expect(check.pending[0]?.declaration).toBe(lf)
+    expect(check.pending[0]?.declaration_sha256).toBe(createHash('sha256').update(lf, 'utf8').digest('hex'))
+  })
+
+  it('matches public_api relative to a project root below the repository root', async () => {
+    writeFile('pkg/src/index.ts', 'export function publicThing(): void {}\n')
+    writeFile('pkg/entry.ts', "import './src/index.js'\n")
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: join(tmpRoot, 'pkg'), touched: ['pkg/src/index.ts'], publicApi: ['src/index.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+    if (check.ok) expect(check.public_exempted.map((p) => p.name)).toEqual(['publicThing'])
+  })
+})
+
+describe('a file the developer allowed without a mechanical check is not judged', () => {
+  it('skips an exempt file in the REVIEW and says so', async () => {
+    writeFile('vendor/lib.js', 'export function unusedVendored() {}\n')
+    writeFile('entry.ts', "import './vendor/lib.js'\n")
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['vendor/lib.js'], keeps: [], exempt: ['vendor/lib.js'] })
+    expect(check.ok).toBe(true)
+    expect(check.hints.join(' ')).toContain('not checked in vendor/lib.js')
+  })
+
+  it('skips it at the commit too', async () => {
+    writeFile('vendor/lib.js', 'export function unusedVendored() {}\n')
+    writeFile('entry.ts', "import './vendor/lib.js'\n")
+    commitAll()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['vendor/lib.js'], keeps: [], keepDecisions: new Set(), exempt: ['vendor/lib.js'] })
+    expect(check.ok).toBe(true)
+  })
+})
+
+describe('the gate fails closed when it cannot finish', () => {
+  afterEach(() => setDeadCodeAnalysisHookForTests(null))
+
+  it('refuses the REVIEW, with the reason, when the scan throws', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    commitAll()
+    setDeadCodeAnalysisHookForTests(() => {
+      throw new RangeError('boom')
+    })
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(false)
+    if (!check.ok) {
+      expect(check.reject_kind).toBe('dead_code_unreadable')
+      expect(check.reason).toContain('boom')
+    }
+  })
+
+  it('refuses the commit and names every path it was asked about when the scan throws', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    setDeadCodeAnalysisHookForTests(() => {
+      throw new RangeError('boom')
+    })
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts', 'b.ts'], keeps: [], keepDecisions: new Set() })
+    expect(check.ok).toBe(false)
+    if (!check.ok) expect(check.paths).toEqual(['a.ts', 'b.ts'])
+  })
+
+  it('refuses the commit when git cannot list the index', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    writeFileSync(join(tmpRoot, '.git', 'index'), 'DIRCgarbage')
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
+    expect(check.ok).toBe(false)
+  })
+})
+
+describe('the commit gate reads the staged contents in bounded batches', () => {
+  afterEach(() => limitBlobReadsForTests(null))
+
+  it('reads every staged file when they must be split across several batches', async () => {
+    const filler = `export const pad = '${'x'.repeat(1500)}'\n`
+    for (const name of ['c', 'd', 'e', 'f']) writeFile(`${name}.ts`, `${filler}export const ${name}Value = 1\n`)
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    limitBlobReadsForTests({ batchCount: 2, batchBytes: 2000, maxBuffer: 2500 })
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
+    expect(check.ok).toBe(false)
+    if (!check.ok) expect(check.reason).toContain('a.ts:rotting')
+  })
+
+  it('withholds verdicts, and names the file, when one staged file is too large to read', async () => {
+    writeFile('big.ts', `export const big = '${'x'.repeat(6000)}'\n`)
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    limitBlobReadsForTests({ batchCount: 1000, batchBytes: 3000, maxBuffer: 4000 })
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
+    expect(check.ok).toBe(true)
+    if (check.ok) expect(check.hints.find((h) => h.startsWith(UNREADABLE_HINT_PREFIX))).toContain('big.ts')
+  })
+
+  it('refuses the commit when a batch holding several files cannot be read', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    limitBlobReadsForTests({ batchCount: 1000, batchBytes: 1_000_000, maxBuffer: 10 })
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
+    expect(check.ok).toBe(false)
+  })
+
+  it('never reads a symlink or a submodule entry as text', () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    commitAll()
+    const link = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: tmpRoot, input: 'a.ts', encoding: 'utf8' }).trim()
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpRoot, encoding: 'utf8' }).trim()
+    git('update-index', '--add', '--cacheinfo', `120000,${link},link.ts`)
+    git('update-index', '--add', '--cacheinfo', `160000,${head},sub`)
+    const repo = openSweepRepo(tmpRoot)
+    if (!repo) throw new Error('expected a repository')
+    const index = readIndexEntries(repo)
+    expect(index?.paths.has('link.ts')).toBe(true)
+    expect(index?.blobs.has('link.ts')).toBe(false)
+    expect(index?.blobs.has('sub')).toBe(false)
+    expect(index?.blobs.has('a.ts')).toBe(true)
+  })
+})
+
+describe('keep pruning', () => {
+  it('knows an untracked file, so a keep granted on it survives the next REVIEW', () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    commitAll()
+    writeFile('new.ts', 'export const fresh = 1\n')
+    const known = keepPrunePaths(tmpRoot)
+    expect(known?.has('new.ts')).toBe(true)
+    expect(known?.has('a.ts')).toBe(true)
   })
 })
 
