@@ -108,7 +108,6 @@ describe('rsct_phase_abandon — §C-gated path', () => {
     )) as PhaseAbandonOutput
     expect(r.status).toBe('rejected')
     expect(r.reject_kind).toBe('dialog_no')
-    // Phase still present
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
@@ -191,20 +190,9 @@ describe('rsct_phase_abandon — §C-gated path', () => {
   })
 })
 
-// #53: `phase-abandon.ts` used to write `const newState: PhaseState = {}` — a full
-// replace, and the ONLY non-read-modify-write writer in the tree. It now writes an
-// ALLOWLIST copy (PHASE_STATE_PRESERVED_ON_ABANDON). The tests below pin the rule in
-// both directions, because a preserve-list that only ever gains keys is how a live
-// batch token would survive an abandon with the suite still green.
-//
-// Every one of them asserts `status === 'abandoned'` AND a control clear first: a
-// rejected gate returns at phase-abandon.ts:155-186 WITHOUT writing, so a fixture that
-// silently fails the §C gate makes every "this key survived" assertion pass for the
-// wrong reason — including under its own mutation.
 describe('rsct_phase_abandon — the preserve-list (#53)', () => {
   const STAMP = '2026-06-07T14:00:00.000Z'
 
-  /** The phase_abandon.complete entry from the audit log. */
   const completeAudit = (): Record<string, unknown> =>
     readFileSync(join(tmpRoot, '.rsct/audit.log'), 'utf8')
       .trim()
@@ -213,7 +201,6 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
       .find((l) => l.event === 'phase_abandon.complete')!
 
   it('preserves bootstrap_at — the §0 session marker, not state of the work', async () => {
-    // Mutation: remove 'bootstrap_at' from PHASE_STATE_PRESERVED_ON_ABANDON.
     writePhaseState({
       phase: 'code',
       spec_slug: 'feat-x',
@@ -232,21 +219,12 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(state.phase).toBeUndefined() // control: the write really happened
-    // toBe, not toBeDefined: nothing in phase-abandon re-stamps, so the exact
-    // value is free to assert and it guards a future writer that does.
+    expect(state.phase).toBeUndefined()
     expect(state.bootstrap_at).toBe(STAMP)
-
-    // The audit says what survived. Mutation: compute preserved_keys from the
-    // constant instead of from the state actually written, or drop the field.
     expect(completeAudit().preserved_keys).toEqual(['bootstrap_at'])
   })
 
   it('clears every key that describes the abandoned work', async () => {
-    // Mutation: add any of these to PHASE_STATE_PRESERVED_ON_ABANDON.
-    // Four of them (plan_authorization, free_commit_budget, review, disposition)
-    // are documented "wiped by phase_abandon" in lib/phase-scope; the rest had no
-    // assertion at all before #53 — 4 of 13 keys were covered.
     writePhaseState({
       phase: 'code',
       spec_slug: 'feat-x',
@@ -321,10 +299,49 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     expect(completeAudit().preserved_keys).toEqual(['last_classify'])
   })
 
+  it('preserves dead_code_keeps — the developer decided those, not the abandoned work (#62)', async () => {
+    writePhaseState({
+      phase: 'code',
+      spec_slug: 'feat-x',
+      dead_code_keeps: [
+        {
+          path: 'src/lib/guard.ts',
+          name: 'compileGuard',
+          declaration_sha256: 'a'.repeat(64),
+          note: 'exists to fail the build when the schema drifts',
+          spec_ref: 'feat-x',
+          at: STAMP,
+        },
+      ],
+    })
+    const r = (await phaseAbandonHandler(
+      {
+        project_root: tmpRoot,
+        reason: 'restarting the task from research',
+        dev_approval: approval(),
+      },
+      { now: FIXED_NOW, promptFn: alwaysYes() },
+    )) as PhaseAbandonOutput
+    expect(r.status).toBe('abandoned')
+
+    const state = JSON.parse(
+      readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(state.phase).toBeUndefined()
+    expect(state.dead_code_keeps).toEqual([
+      {
+        path: 'src/lib/guard.ts',
+        name: 'compileGuard',
+        declaration_sha256: 'a'.repeat(64),
+        note: 'exists to fail the build when the schema drifts',
+        spec_ref: 'feat-x',
+        at: STAMP,
+      },
+    ])
+    expect(completeAudit().preserved_keys).toEqual(['dead_code_keeps'])
+  })
+
   it('drops a key the preserve-list does not name — allowlist, never wipe-list', async () => {
-    // Mutation: rewrite preserveAcrossAbandon as `{...state}` minus a wipe-list.
-    // Then a PhaseState key added later leaks through by default, which is exactly
-    // how a forgotten `plan_authorization` would keep a live §C token alive.
     writePhaseState({
       phase: 'code',
       spec_slug: 'feat-x',
@@ -345,15 +362,10 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
     ) as Record<string, unknown>
     expect(state.phase).toBeUndefined()
     expect(state.future_key_not_yet_invented).toBeUndefined()
-    // Nothing was preserved here, so the hint must not say anything was.
-    // Mutation: make the "session markers preserved" clause unconditional — it
-    // then asserts preservation on the common case, a phase abandoned with no
-    // bootstrap marker and no re-bootstrap flag.
     expect(r.hints.some((h) => h.includes('session markers preserved'))).toBe(false)
   })
 
   it('no longer claims "State cleared" when a session marker survived', async () => {
-    // Mutation: restore the old sentence. The hint is what the agent reads back.
     writePhaseState({ phase: 'code', spec_slug: 'feat-x', bootstrap_at: STAMP })
     const r = (await phaseAbandonHandler(
       {
@@ -364,31 +376,14 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as PhaseAbandonOutput
     expect(r.status).toBe('abandoned')
-    // Asserts what the hint RENDERS (preservedKeys), not the absence of the old
-    // sentence: a negative on deleted wording goes red the day someone writes
-    // "State cleared." in a correct implementation, and stays green under any
-    // reworded-but-broken one. Restoring the old hint drops this clause, so this
-    // positive assertion catches it anyway.
     expect(
       r.hints.some((h) => h.includes('session markers preserved (bootstrap_at)')),
     ).toBe(true)
   })
 })
 
-// #53: the bypass this fix exists to close, pinned end-to-end.
-//
-// Note the fixture shape. `context_stale` is armed by completePhaseGeneric, whose
-// SAME write deletes `phase` (lib/phase-machine.ts) — and phaseAbandonHandler
-// early-returns `no_active_phase` without writing when `phase` is absent. Seeded with
-// context_stale alone, the abandon is a no-op, the flag survives trivially, and this
-// test would pass with or without the preserve-list. The flag only reaches a wipe
-// after a phase_*_start re-arms `phase` while carrying it forward, which is what
-// `{phase, spec_slug, context_stale}` reproduces.
 describe('rsct_phase_abandon — the context_stale bypass is closed (#53)', () => {
   it('leaves a blocked agent still blocked: abandon is not a re-load', async () => {
-    // Mutation: remove 'context_stale' from PHASE_STATE_PRESERVED_ON_ABANDON.
-    // The post-abandon state then has no scope_globs either, so check_edit_scope
-    // falls to 'unknown' (check-edit-scope.ts:139-140) and the edit is let through.
     writePhaseState({
       phase: 'code',
       spec_slug: 'feat-x',
@@ -408,11 +403,8 @@ describe('rsct_phase_abandon — the context_stale bypass is closed (#53)', () =
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(state.phase).toBeUndefined() // control: the write really happened
+    expect(state.phase).toBeUndefined()
     expect(state.context_stale).toBeDefined()
-
-    // Read from DISK — no phase_state_override, or this would prove nothing about
-    // what the abandon actually wrote.
     const scope = await checkEditScopeHandler({
       project_root: tmpRoot,
       file_path: join(tmpRoot, 'src', 'a.ts'),

@@ -153,6 +153,32 @@ describe('lib/project-root — sql_dialect (#62)', () => {
   })
 })
 
+describe('lib/project-root — public_api (#62)', () => {
+  it('reads the declared globs', () => {
+    writeConfig({ ...VALID_MIN, public_api: ['src/index.ts', 'src/public/**'] })
+    const r = resolveProjectRoot()
+    expect(r.rsct_installed).toBe(true)
+    expect(r.config?.public_api).toEqual(['src/index.ts', 'src/public/**'])
+  })
+
+  it('is absent when nothing declares it, so no surface is assumed public', () => {
+    writeConfig({ ...VALID_MIN })
+    expect(resolveProjectRoot().config?.public_api).toBeUndefined()
+  })
+
+  it('drops a malformed value instead of rejecting the whole config', () => {
+    writeConfig({ ...VALID_MIN, public_api: 'src/index.ts' })
+    const r = resolveProjectRoot()
+    expect(r.rsct_installed).toBe(true)
+    expect(r.config?.public_api).toBeUndefined()
+  })
+
+  it('drops an entry list holding an empty string', () => {
+    writeConfig({ ...VALID_MIN, public_api: ['src/index.ts', ''] })
+    expect(resolveProjectRoot().config?.public_api).toBeUndefined()
+  })
+})
+
 describe('lib/project-root — HIGH-4 bounds violations are rejected + audited', () => {
   it('rejects audit.enabled: false', () => {
     writeConfig({ ...VALID_MIN, audit: { enabled: false } })

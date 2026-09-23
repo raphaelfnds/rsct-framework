@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createRequire } from 'module';
-import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posix } from 'path';
+import { createRequire, builtinModules } from 'module';
+import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, realpathSync } from 'fs';
@@ -2267,8 +2267,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize) {
-      if (normalize !== false)
+    function getFullPath(resolver, id = "", normalize2) {
+      if (normalize2 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -2505,8 +2505,8 @@ var require_validate = __commonJS({
         gen.code((0, codegen_1._)`${names_1.default.self}.logger.log(${msg})`);
       } else if (typeof opts.$comment == "function") {
         const schemaPath = (0, codegen_1.str)`${errSchemaPath}/$comment`;
-        const rootName = gen.scopeValue("root", { ref: schemaEnv.root });
-        gen.code((0, codegen_1._)`${names_1.default.self}.opts.$comment(${msg}, ${schemaPath}, ${rootName}.schema)`);
+        const rootName2 = gen.scopeValue("root", { ref: schemaEnv.root });
+        gen.code((0, codegen_1._)`${names_1.default.self}.opts.$comment(${msg}, ${schemaPath}, ${rootName2}.schema)`);
       }
     }
     function returnResults(it) {
@@ -3862,7 +3862,7 @@ var require_fast_uri = __commonJS({
       }
       return decodedScheme;
     }
-    function normalize(uri, options) {
+    function normalize2(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         normalizeString(uri, options);
@@ -3905,49 +3905,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative4, options, skipNormalization) {
+    function resolveComponent(base, relative5, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative4 = parse4(serialize2(relative4, options), options);
+        relative5 = parse4(serialize2(relative5, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative4.scheme) {
-        target.scheme = relative4.scheme;
-        target.userinfo = relative4.userinfo;
-        target.host = relative4.host;
-        target.port = relative4.port;
-        target.path = removeDotSegments(relative4.path || "");
-        target.query = relative4.query;
+      if (!options.tolerant && relative5.scheme) {
+        target.scheme = relative5.scheme;
+        target.userinfo = relative5.userinfo;
+        target.host = relative5.host;
+        target.port = relative5.port;
+        target.path = removeDotSegments(relative5.path || "");
+        target.query = relative5.query;
       } else {
-        if (relative4.userinfo !== void 0 || relative4.host !== void 0 || relative4.port !== void 0) {
-          target.userinfo = relative4.userinfo;
-          target.host = relative4.host;
-          target.port = relative4.port;
-          target.path = removeDotSegments(relative4.path || "");
-          target.query = relative4.query;
+        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
+          target.userinfo = relative5.userinfo;
+          target.host = relative5.host;
+          target.port = relative5.port;
+          target.path = removeDotSegments(relative5.path || "");
+          target.query = relative5.query;
         } else {
-          if (!relative4.path) {
+          if (!relative5.path) {
             target.path = base.path;
-            if (relative4.query !== void 0) {
-              target.query = relative4.query;
+            if (relative5.query !== void 0) {
+              target.query = relative5.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative4.path[0] === "/") {
-              target.path = removeDotSegments(relative4.path);
+            if (relative5.path[0] === "/") {
+              target.path = removeDotSegments(relative5.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative4.path;
+                target.path = "/" + relative5.path;
               } else if (!base.path) {
-                target.path = relative4.path;
+                target.path = relative5.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative4.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative4.query;
+            target.query = relative5.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3955,7 +3955,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative4.fragment;
+      target.fragment = relative5.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4239,7 +4239,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize,
+      normalize: normalize2,
       resolve: resolve8,
       resolveComponent,
       equal,
@@ -4919,8 +4919,8 @@ var require_ref = __commonJS({
         function callRootRef() {
           if (env === root)
             return callRef(cxt, validateName, env, env.$async);
-          const rootName = gen.scopeValue("root", { ref: root });
-          return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
+          const rootName2 = gen.scopeValue("root", { ref: root });
+          return callRef(cxt, (0, codegen_1._)`${rootName2}.validate`, root, root.$async);
         }
         function callValidate(sch) {
           const v = getValidate(cxt, sch);
@@ -9221,7 +9221,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join32 } = __require("path");
+    var { join: join34 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9264,7 +9264,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join32(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join34(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9667,7 +9667,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join32, isAbsolute: isAbsolute7, sep: sep2 } = __require("path");
+    var { join: join34, isAbsolute: isAbsolute8, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9730,7 +9730,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join32(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9748,7 +9748,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join32(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9766,11 +9766,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute7(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute8(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join32(__dirname$1, "..", "file.js");
+          return join34(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10760,7 +10760,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join32 = ",";
+            let join34 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10774,7 +10774,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join32 = `,
+                join34 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10782,13 +10782,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join32;
+                res += join34;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join32}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10809,7 +10809,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join32 = `,
+              join34 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10823,13 +10823,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join32;
+                separator = join34;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join32;
+              separator = join34;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10870,7 +10870,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join32 = ",";
+            let join34 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10883,7 +10883,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join32 = `,
+                join34 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10891,13 +10891,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join32;
+                res += join34;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join32}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10910,7 +10910,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join32 = `,
+              join34 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10919,7 +10919,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join32;
+                separator = join34;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10977,20 +10977,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join33 = `,
+              const join35 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join33;
+                res2 += join35;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join33}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11006,16 +11006,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join32 = `,
+            const join34 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join32, maximumBreadth);
+              res += stringifyTypedArray(value, join34, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join32;
+              separator = join34;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11026,13 +11026,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join32;
+                separator = join34;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join32;
+              separator = join34;
             }
             if (separator !== "") {
               res = `
@@ -11433,11 +11433,11 @@ var require_pino = __commonJS({
       depthLimit: 5,
       edgeLimit: 100
     };
-    var normalize = createArgsNormalizer(defaultOptions);
+    var normalize2 = createArgsNormalizer(defaultOptions);
     var serializers = Object.assign(/* @__PURE__ */ Object.create(null), stdSerializers);
     function pino2(...args2) {
       const instance2 = {};
-      const { opts, stream } = normalize(instance2, caller(), ...args2);
+      const { opts, stream } = normalize2(instance2, caller(), ...args2);
       if (opts.level && typeof opts.level === "string" && DEFAULT_LEVELS[opts.level.toLowerCase()] !== void 0) opts.level = opts.level.toLowerCase();
       const {
         redact,
@@ -23044,14 +23044,14 @@ function safeGitRaw(cwd2, args2) {
     return null;
   }
 }
-function safeGitBuffer(cwd2, args2, input, env) {
+function safeGitBuffer(cwd2, args2, input, env, maxBuffer = 64 * 1024 * 1024) {
   try {
     return execFileSync("git", args2, {
       cwd: cwd2,
       input: input ?? "",
       ...env !== void 0 && { env: { ...process.env, ...env } },
       stdio: ["pipe", "pipe", "ignore"],
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer,
       timeout: GIT_READ_TIMEOUT_MS
     });
   } catch {
@@ -23413,6 +23413,7 @@ var RsctConfigSchema = external_exports.object({
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
   commit_message_max_lines: external_exports.number().optional().catch(void 0),
   sql_dialect: external_exports.enum(["postgresql", "mysql", "none"]).optional(),
+  public_api: external_exports.array(external_exports.string().min(1)).optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),
@@ -23643,7 +23644,8 @@ var PHASE_STATE_PRESERVED_ON_ABANDON = [
   "context_stale",
   "review_sweep",
   "review_drift",
-  "last_classify"
+  "last_classify",
+  "dead_code_keeps"
 ];
 function copyIfPresent(from, to, key) {
   const value = from[key];
@@ -23939,7 +23941,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.11.2";
+var RSCT_MCP_VERSION = "2.12.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -24654,11 +24656,11 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
     return script ? readRegistration(settings, script) : "unknown";
   };
   let entries = [];
-  let listed = true;
+  let listed2 = true;
   try {
     entries = readdirSync(installedDir).filter((f) => f.endsWith(".js"));
   } catch (err2) {
-    listed = err2?.code === "ENOENT";
+    listed2 = err2?.code === "ENOENT";
   }
   const names = [.../* @__PURE__ */ new Set([...entries, ...ENFORCEMENT_SCRIPTS.keys()])].sort();
   const evidence = [];
@@ -24668,7 +24670,7 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
     if (!entries.includes(name2)) {
       evidence.push({
         name: name2,
-        state: listed ? "absent" : "unreadable",
+        state: listed2 ? "absent" : "unreadable",
         security_relevant,
         stamp_version: null,
         registration
@@ -28096,6 +28098,14 @@ function resolveFreeBudgetLimits(config2) {
     )
   };
 }
+var DEAD_CODE_KEPT_EVENT = "review.dead_code_kept";
+var PUBLIC_API_APPROVED_EVENT = "review.public_api_approved";
+function deadCodeKeepKey(path2, name2, declarationSha2562) {
+  return `${path2}\0${name2}\0${declarationSha2562}`;
+}
+function publicApiApprovalKey(publicApiSha256, path2, name2, declarationSha2562) {
+  return `${publicApiSha256}\0${path2}\0${name2}\0${declarationSha2562}`;
+}
 function deriveAuditCeiling(projectRoot, config2, planSlug) {
   const failClosed = {
     classifyEvidencePresent: false,
@@ -28103,7 +28113,9 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
     freeCommitsUsed: 0,
     auditLocked: false,
     readable: false,
-    unverifiedDecisions: /* @__PURE__ */ new Set()
+    unverifiedDecisions: /* @__PURE__ */ new Set(),
+    deadCodeKeepDecisions: /* @__PURE__ */ new Set(),
+    publicApiApprovals: /* @__PURE__ */ new Set()
   };
   const auditPath = resolveAuditPath(projectRoot, config2?.audit);
   let raw;
@@ -28119,6 +28131,8 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
   let freeCommitsUsed = 0;
   let auditLocked = false;
   const unverifiedDecisions = /* @__PURE__ */ new Set();
+  const deadCodeKeepDecisions = /* @__PURE__ */ new Set();
+  const publicApiApprovals = /* @__PURE__ */ new Set();
   for (const line2 of raw.split("\n")) {
     const clean = line2.replace(/\r/g, "").trim();
     if (!clean) continue;
@@ -28144,9 +28158,22 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
       auditLocked = true;
     } else if (event === "review.unverified_decision" && entry.answer === "yes" && typeof entry.path === "string" && typeof entry.blob === "string") {
       unverifiedDecisions.add(decisionKey(entry.path, entry.blob));
+    } else if (event === DEAD_CODE_KEPT_EVENT && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
+      deadCodeKeepDecisions.add(deadCodeKeepKey(entry.path, entry.name, entry.declaration_sha256));
+    } else if (event === PUBLIC_API_APPROVED_EVENT && typeof entry.public_api_sha256 === "string" && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
+      publicApiApprovals.add(publicApiApprovalKey(entry.public_api_sha256, entry.path, entry.name, entry.declaration_sha256));
     }
   }
-  return { classifyEvidencePresent, auditTierMax, freeCommitsUsed, auditLocked, readable: true, unverifiedDecisions };
+  return {
+    classifyEvidencePresent,
+    auditTierMax,
+    freeCommitsUsed,
+    auditLocked,
+    readable: true,
+    unverifiedDecisions,
+    deadCodeKeepDecisions,
+    publicApiApprovals
+  };
 }
 function reserveFreeBudget(args2) {
   const prev = args2.prev && args2.prev.plan_slug === args2.planSlug ? args2.prev : void 0;
@@ -28403,6 +28430,122 @@ function readHeadContent(repo, path2) {
   if (!repo.headCommit) return null;
   const id = readCommitBlobId(repo, repo.headCommit, path2);
   return id ? readBlob(repo, id) : null;
+}
+var REGULAR_FILE_MODES = /* @__PURE__ */ new Set(["100644", "100755"]);
+var CAT_FILE_BATCH = 1e3;
+var CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024;
+var BLOB_READ_MAX_BUFFER = 64 * 1024 * 1024;
+var BLOB_TEXT_CACHE_MAX = 4e3;
+var blobTextCache = /* @__PURE__ */ new Map();
+var blobReadLimits = { batchCount: CAT_FILE_BATCH, batchBytes: CAT_FILE_BATCH_BYTES, maxBuffer: BLOB_READ_MAX_BUFFER };
+function readIndexEntries(repo) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]));
+  if (listed2 === null) return null;
+  const paths = /* @__PURE__ */ new Set();
+  const blobs = /* @__PURE__ */ new Map();
+  for (const entry of listed2) {
+    const tab = entry.indexOf("	");
+    if (tab < 0) continue;
+    const [mode, oid, stage] = entry.slice(0, tab).split(" ");
+    const path2 = entry.slice(tab + 1);
+    paths.add(path2);
+    if (stage === "0" && oid && mode && REGULAR_FILE_MODES.has(mode)) blobs.set(path2, oid);
+  }
+  return { paths, blobs };
+}
+function rememberBlobText(oid, text2) {
+  while (blobTextCache.size >= BLOB_TEXT_CACHE_MAX) {
+    const oldest = blobTextCache.keys().next().value;
+    if (oldest === void 0) break;
+    blobTextCache.delete(oldest);
+  }
+  blobTextCache.set(oid, text2);
+}
+function readBlobSizes(repo, oids) {
+  const listed2 = text(safeGitBuffer(repo.toplevel, ["cat-file", "--batch-check"], `${oids.join("\n")}
+`));
+  if (listed2 === null) return null;
+  const sizes = /* @__PURE__ */ new Map();
+  for (const entry of listed2.split("\n")) {
+    const [oid, type, size] = entry.split(" ");
+    if (oid && type === "blob" && size !== void 0 && Number.isInteger(Number(size))) sizes.set(oid, Number(size));
+  }
+  return sizes;
+}
+function blobBatches(oids, sizes) {
+  const batches = [];
+  let current = [];
+  let bytes = 0;
+  for (const oid of oids) {
+    const size = sizes.get(oid);
+    if (size === void 0) continue;
+    if (current.length > 0 && (current.length >= blobReadLimits.batchCount || bytes + size > blobReadLimits.batchBytes)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(oid);
+    bytes += size;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+function readBlobTexts(repo, oids) {
+  const texts = /* @__PURE__ */ new Map();
+  const failed = /* @__PURE__ */ new Set();
+  const missing = [];
+  for (const oid of new Set(oids)) {
+    const cached2 = blobTextCache.get(oid);
+    if (cached2 === void 0) missing.push(oid);
+    else texts.set(oid, cached2);
+  }
+  if (missing.length === 0) return { texts, failed };
+  const sizes = readBlobSizes(repo, missing);
+  if (sizes === null) return null;
+  for (const chunk of blobBatches(missing, sizes)) {
+    const batch = safeGitBuffer(repo.toplevel, ["cat-file", "--batch"], `${chunk.join("\n")}
+`, void 0, blobReadLimits.maxBuffer);
+    if (batch === null) {
+      if (chunk.length > 1) return null;
+      for (const oid of chunk) failed.add(oid);
+      continue;
+    }
+    let offset = 0;
+    for (const oid of chunk) {
+      const newline = batch.indexOf(10, offset);
+      if (newline < 0) return null;
+      const header = batch.subarray(offset, newline).toString("utf8").split(" ");
+      offset = newline + 1;
+      if (header[1] === "missing" || header.length < 3) continue;
+      const size = Number(header[2]);
+      if (!Number.isInteger(size) || offset + size > batch.length) return null;
+      const content = batch.subarray(offset, offset + size).toString("utf8");
+      texts.set(oid, content);
+      rememberBlobText(oid, content);
+      offset += size + 1;
+    }
+  }
+  return { texts, failed };
+}
+function readUntrackedPaths(repo) {
+  return nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"]));
+}
+function readSkipWorktreePaths(repo) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-v", "-z", "--full-name"]));
+  if (listed2 === null) return null;
+  const paths = /* @__PURE__ */ new Set();
+  for (const entry of listed2) {
+    const tag = entry.slice(0, 1);
+    if (tag === "S" || tag !== "" && tag === tag.toLowerCase() && tag !== tag.toUpperCase()) paths.add(entry.slice(2));
+  }
+  return paths;
+}
+function readWorktreeChangedPaths(repo) {
+  return nulList(safeGitBuffer(repo.toplevel, ["diff", "--name-only", "--no-renames", "-z"]));
+}
+function readIndexFingerprint(repo) {
+  const listed2 = safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]);
+  return listed2 === null ? null : createHash("sha256").update(listed2).digest("hex");
 }
 function readKnownPaths(repo) {
   const index = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-z", "--full-name"]));
@@ -40707,6 +40850,9 @@ var Parser2 = class {
 };
 
 // src/lib/comment-sweep/tree-engine.ts
+var NAMESPACE_IMPORT = "*";
+var DEFAULT_IMPORT = "default";
+var JSX_PRAGMA_OWNER = "@jsx";
 var GRAMMAR_FILES = {
   javascript: "tree-sitter-javascript.wasm",
   typescript: "tree-sitter-typescript.wasm",
@@ -40767,6 +40913,634 @@ function loadLanguage(grammarsDir, language) {
   });
   languages.set(language, loading);
   return loading;
+}
+function ownerKeyOf(kind, name2) {
+  return kind === "type" ? `type ${name2}` : name2;
+}
+var DECLARATION_KINDS = {
+  function_declaration: "value",
+  generator_function_declaration: "value",
+  function_signature: "value",
+  class_declaration: "value",
+  abstract_class_declaration: "value",
+  enum_declaration: "value",
+  type_alias_declaration: "type",
+  interface_declaration: "type"
+};
+var VARIABLE_CONTAINERS = /* @__PURE__ */ new Set(["lexical_declaration", "variable_declaration"]);
+var VALUE_REFERENCES = /* @__PURE__ */ new Set(["identifier", "shorthand_property_identifier"]);
+var BODY_SCOPES = /* @__PURE__ */ new Set([
+  "function_declaration",
+  "generator_function_declaration",
+  "function_expression",
+  "function",
+  "generator_function",
+  "arrow_function",
+  "method_definition"
+]);
+var FUNCTION_SCOPES = /* @__PURE__ */ new Set([
+  ...BODY_SCOPES,
+  "function_signature",
+  "method_signature",
+  "abstract_method_signature",
+  "call_signature",
+  "construct_signature",
+  "function_type",
+  "constructor_type"
+]);
+var HOISTING_BOUNDARIES = /* @__PURE__ */ new Set([...FUNCTION_SCOPES, "class_static_block"]);
+var NAMED_FUNCTION_EXPRESSIONS = /* @__PURE__ */ new Set(["function_expression", "function", "generator_function"]);
+var LOOP_DECLARATION_KEYWORDS = /* @__PURE__ */ new Set(["const", "let", "var"]);
+var EFFECT_NODES = /* @__PURE__ */ new Set([
+  "call_expression",
+  "new_expression",
+  "await_expression",
+  "assignment_expression",
+  "augmented_assignment_expression",
+  "update_expression",
+  "yield_expression",
+  "decorator",
+  "class_static_block"
+]);
+var CLASS_FIELDS = /* @__PURE__ */ new Set(["public_field_definition", "field_definition"]);
+var GLOB_METHODS = /* @__PURE__ */ new Set(["glob", "globEager"]);
+var GLOB_META = /[*?[{(!]/;
+var JSX_PRAGMA = /@jsx(?:Frag)?\s+([A-Za-z_$][\w$]*)/g;
+var COMMONJS_NAMES = /* @__PURE__ */ new Set(["require", "module", "exports"]);
+var PLAIN_VALUES = /* @__PURE__ */ new Set(["identifier", "member_expression", "string", "number", "true", "false", "null", "undefined"]);
+var DUAL_MODE_GUARDS = /* @__PURE__ */ new Set(["module", "exports", "define"]);
+var SKIP = -1;
+var NO_NAMES = /* @__PURE__ */ new Set();
+function namedChildren(node) {
+  const out2 = [];
+  if (!node) return out2;
+  for (let i2 = 0; i2 < node.childCount; i2++) {
+    const child = node.child(i2);
+    if (child?.isNamed) out2.push(child);
+  }
+  return out2;
+}
+function childOfType(node, type) {
+  for (let i2 = 0; i2 < node.childCount; i2++) {
+    const child = node.child(i2);
+    if (child?.type === type) return child;
+  }
+  return null;
+}
+function patternNames(root, out2) {
+  const stack = root ? [root] : [];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    switch (node.type) {
+      case "identifier":
+      case "shorthand_property_identifier_pattern":
+        out2.add(node.text);
+        break;
+      case "required_parameter":
+      case "optional_parameter": {
+        const pattern = node.childForFieldName("pattern");
+        if (pattern) stack.push(pattern);
+        break;
+      }
+      case "pair_pattern": {
+        const value = node.childForFieldName("value");
+        if (value) stack.push(value);
+        break;
+      }
+      case "assignment_pattern":
+      case "object_assignment_pattern": {
+        const left = node.childForFieldName("left");
+        if (left) stack.push(left);
+        break;
+      }
+      case "object_pattern":
+      case "array_pattern":
+      case "rest_pattern":
+        for (const child of namedChildren(node)) stack.push(child);
+        break;
+    }
+  }
+}
+function declaratorNames(declaration, out2) {
+  for (const declarator of namedChildren(declaration)) {
+    if (declarator.type === "variable_declarator") patternNames(declarator.childForFieldName("name"), out2);
+  }
+}
+function hoistedVarNames(root) {
+  const names = /* @__PURE__ */ new Set();
+  const stack = root ? [root] : [];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    for (const child of namedChildren(node)) {
+      if (HOISTING_BOUNDARIES.has(child.type)) continue;
+      if (child.type === "variable_declaration") declaratorNames(child, names);
+      stack.push(child);
+    }
+  }
+  return names;
+}
+function varScope(node) {
+  const values = hoistedVarNames(node);
+  return values.size > 0 ? { values, types: NO_NAMES } : null;
+}
+function parameterScope(node) {
+  const values = /* @__PURE__ */ new Set();
+  for (const param of namedChildren(node.childForFieldName("parameters"))) patternNames(param, values);
+  patternNames(node.childForFieldName("parameter"), values);
+  if (NAMED_FUNCTION_EXPRESSIONS.has(node.type)) {
+    const own = node.childForFieldName("name");
+    if (own) values.add(own.text);
+  }
+  const types = /* @__PURE__ */ new Set();
+  for (const param of namedChildren(childOfType(node, "type_parameters"))) {
+    const name2 = param.type === "type_parameter" ? param.childForFieldName("name") : null;
+    if (name2) types.add(name2.text);
+  }
+  return { values, types };
+}
+function blockScope(node) {
+  const values = /* @__PURE__ */ new Set();
+  const types = /* @__PURE__ */ new Set();
+  for (const child of namedChildren(node)) {
+    const name2 = child.childForFieldName("name")?.text;
+    switch (child.type) {
+      case "lexical_declaration":
+        declaratorNames(child, values);
+        break;
+      case "function_declaration":
+      case "generator_function_declaration":
+        if (name2) values.add(name2);
+        break;
+      case "class_declaration":
+      case "abstract_class_declaration":
+      case "enum_declaration":
+        if (name2) {
+          values.add(name2);
+          types.add(name2);
+        }
+        break;
+      case "type_alias_declaration":
+      case "interface_declaration":
+        if (name2) types.add(name2);
+        break;
+    }
+  }
+  return values.size > 0 || types.size > 0 ? { values, types } : null;
+}
+function loopScope(node) {
+  const values = /* @__PURE__ */ new Set();
+  if (node.type === "for_statement") {
+    const initializer3 = node.childForFieldName("initializer");
+    if (initializer3 && VARIABLE_CONTAINERS.has(initializer3.type)) declaratorNames(initializer3, values);
+  } else {
+    let declares = false;
+    for (let i2 = 0; i2 < node.childCount; i2++) {
+      if (LOOP_DECLARATION_KEYWORDS.has(node.child(i2)?.type ?? "")) declares = true;
+    }
+    if (declares) patternNames(node.childForFieldName("left"), values);
+  }
+  return values.size > 0 ? { values, types: NO_NAMES } : null;
+}
+function catchScope(node) {
+  const values = /* @__PURE__ */ new Set();
+  patternNames(node.childForFieldName("parameter"), values);
+  return values.size > 0 ? { values, types: NO_NAMES } : null;
+}
+function stringText(node) {
+  if (node.type !== "string") return null;
+  return namedChildren(node).filter((child) => child.type === "string_fragment").map((child) => child.text).join("");
+}
+function staticText(node) {
+  if (node.type === "string") return stringText(node);
+  if (node.type !== "template_string") return null;
+  const parts2 = namedChildren(node);
+  if (parts2.some((part) => part.type !== "string_fragment")) return null;
+  return parts2.map((part) => part.text).join("");
+}
+function leadingText(root) {
+  let node = root;
+  while (node && (node.type === "parenthesized_expression" || node.type === "binary_expression" && node.childForFieldName("operator")?.type === "+")) {
+    node = node.type === "parenthesized_expression" ? namedChildren(node)[0] ?? null : node.childForFieldName("left");
+  }
+  if (!node) return "";
+  if (node.type === "string") return stringText(node) ?? "";
+  if (node.type !== "template_string") return "";
+  let text2 = "";
+  for (const part of namedChildren(node)) {
+    if (part.type !== "string_fragment") break;
+    text2 += part.text;
+  }
+  return text2;
+}
+function globPrefix(pattern) {
+  const meta = pattern.search(GLOB_META);
+  const head = meta < 0 ? pattern : pattern.slice(0, meta);
+  return head.slice(0, head.lastIndexOf("/") + 1);
+}
+function specifierOf(node) {
+  const source = node.childForFieldName("source");
+  if (!source) return null;
+  for (let i2 = 0; i2 < source.childCount; i2++) {
+    const child = source.child(i2);
+    if (child && child.type === "string_fragment") return child.text;
+  }
+  return null;
+}
+function namespaceExportName(node) {
+  const namespace = childOfType(node, "namespace_export");
+  const name2 = namedChildren(namespace)[0];
+  return name2 ? name2.text : null;
+}
+function importNamesOf(node) {
+  const names = [];
+  const stack = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    if (current.type === "import_specifier" || current.type === "export_specifier") {
+      const name2 = current.childForFieldName("name");
+      const alias = current.childForFieldName("alias");
+      if (name2) names.push({ imported: name2.text, local: alias ? alias.text : name2.text });
+      continue;
+    }
+    if (current.type === "namespace_import") {
+      const binding = current.child(current.childCount - 1);
+      if (binding) names.push({ imported: NAMESPACE_IMPORT, local: binding.text });
+      continue;
+    }
+    if (current.type === "import_clause") {
+      for (let i2 = 0; i2 < current.childCount; i2++) {
+        const child = current.child(i2);
+        if (!child) continue;
+        if (child.type === "identifier") names.push({ imported: DEFAULT_IMPORT, local: child.text });
+        else stack.push(child);
+      }
+      continue;
+    }
+    for (let i2 = 0; i2 < current.childCount; i2++) {
+      const child = current.child(i2);
+      if (child) stack.push(child);
+    }
+  }
+  return names;
+}
+function hasLoadTimeEffect(root) {
+  const stack = root ? [root] : [];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    const type = node.type;
+    if (EFFECT_NODES.has(type)) return true;
+    if (type === "unary_expression" && node.childForFieldName("operator")?.type === "delete") return true;
+    if (type === "method_definition" || CLASS_FIELDS.has(type) && childOfType(node, "static") === null) {
+      for (const child of namedChildren(node)) {
+        if (child.type === "decorator") return true;
+        if (child.type === "computed_property_name") stack.push(child);
+      }
+      continue;
+    }
+    if (BODY_SCOPES.has(type)) continue;
+    for (const child of namedChildren(node)) stack.push(child);
+  }
+  return false;
+}
+function isDefaultExport(node) {
+  return childOfType(node, "default") !== null;
+}
+function topLevelDeclarations(root) {
+  const declarations = [];
+  const nameSites = /* @__PURE__ */ new Set();
+  let esm = false;
+  const record2 = (node, statement, exported, defaultExport, decorated) => {
+    if (VARIABLE_CONTAINERS.has(node.type)) {
+      for (const declarator of namedChildren(node)) {
+        if (declarator.type !== "variable_declarator") continue;
+        const name3 = declarator.childForFieldName("name");
+        if (!name3 || name3.type !== "identifier") continue;
+        nameSites.add(name3.startIndex);
+        declarations.push({
+          name: name3.text,
+          kind: "value",
+          exported,
+          effect: hasLoadTimeEffect(declarator.childForFieldName("value")),
+          typeCheck: name3.text.startsWith("_") && declarator.childForFieldName("type") !== null && PLAIN_VALUES.has(declarator.childForFieldName("value")?.type ?? ""),
+          exposures: exported ? [name3.text] : [],
+          start: statement.startIndex,
+          end: statement.endIndex,
+          ownerStart: declarator.startIndex,
+          ownerEnd: declarator.endIndex
+        });
+      }
+      return;
+    }
+    const kind = DECLARATION_KINDS[node.type];
+    if (kind === void 0) return;
+    const name2 = node.childForFieldName("name");
+    if (!name2) return;
+    nameSites.add(name2.startIndex);
+    const runsAtLoad = node.type === "class_declaration" || node.type === "abstract_class_declaration" || node.type === "enum_declaration";
+    declarations.push({
+      name: name2.text,
+      kind,
+      exported,
+      effect: decorated || runsAtLoad && hasLoadTimeEffect(node),
+      typeCheck: false,
+      exposures: exported ? [defaultExport ? DEFAULT_IMPORT : name2.text] : [],
+      start: statement.startIndex,
+      end: statement.endIndex,
+      ownerStart: node.startIndex,
+      ownerEnd: node.endIndex
+    });
+  };
+  for (const node of namedChildren(root)) {
+    if (node.type === "import_statement") esm = true;
+    if (node.type === "export_statement") {
+      esm = true;
+      const declaration = node.childForFieldName("declaration");
+      if (declaration) record2(declaration, node, true, isDefaultExport(node), childOfType(node, "decorator") !== null);
+      continue;
+    }
+    record2(node, node, false, false, false);
+  }
+  return { declarations, nameSites, esm };
+}
+function ownerAt(owners, index) {
+  let low = 0;
+  let high = owners.length - 1;
+  while (low <= high) {
+    const mid = low + high >> 1;
+    const candidate = owners[mid];
+    if (!candidate) return null;
+    if (index < candidate.ownerStart) high = mid - 1;
+    else if (index >= candidate.ownerEnd) low = mid + 1;
+    else return ownerKeyOf(candidate.kind, candidate.name);
+  }
+  return null;
+}
+function applyLocalExports(declarations, localExports, imports, references) {
+  const importBindings = /* @__PURE__ */ new Map();
+  for (const edge of imports) {
+    if (edge.kind !== "import") continue;
+    for (const name2 of edge.names) importBindings.set(name2.local, { specifier: edge.specifier, imported: name2.imported });
+  }
+  for (const entry of localExports) {
+    const owned = declarations.filter((declaration) => declaration.name === entry.local);
+    if (owned.length > 0) {
+      for (const declaration of owned) {
+        declaration.exported = true;
+        if (!declaration.exposures.includes(entry.exposed)) declaration.exposures.push(entry.exposed);
+      }
+      continue;
+    }
+    const imported = importBindings.get(entry.local);
+    if (imported) {
+      imports.push({
+        specifier: imported.specifier,
+        kind: "reexport",
+        names: [{ imported: imported.imported, local: entry.exposed }],
+        starReexport: false,
+        namespaceReexport: null
+      });
+      continue;
+    }
+    references.push({ name: entry.local, owner: null });
+  }
+}
+function collectSymbols(root) {
+  const { declarations, nameSites, esm } = topLevelDeclarations(root);
+  const owners = [...declarations].sort((a, b) => a.ownerStart - b.ownerStart);
+  const references = [];
+  const imports = [];
+  const memberUses = [];
+  const localExports = [];
+  const dynamicPrefixes = [];
+  const pragmas = /* @__PURE__ */ new Set();
+  const flags2 = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false, dualMode: false };
+  const scopes = [];
+  const shadowsValue = (name2) => scopes.some((scope) => scope.values.has(name2));
+  const shadowsType = (name2) => scopes.some((scope) => scope.types.has(name2));
+  const reference = (name2, index) => {
+    if (COMMONJS_NAMES.has(name2)) flags2.commonJs = true;
+    references.push({ name: name2, owner: ownerAt(owners, index) });
+  };
+  const memberUse = (object3, member, index) => {
+    if (!object3 || !member || object3.type !== "identifier" || shadowsValue(object3.text)) return;
+    if (COMMONJS_NAMES.has(object3.text)) flags2.commonJs = true;
+    memberUses.push({ object: object3.text, member: member.text, owner: ownerAt(owners, index) });
+  };
+  const dynamicTarget = (argument, followComputed) => {
+    if (!argument) return;
+    const literal2 = staticText(argument);
+    if (literal2 !== null) {
+      if (literal2.length > 0) imports.push({ specifier: literal2, kind: "dynamic", names: [], starReexport: false, namespaceReexport: null });
+      return;
+    }
+    if (!followComputed) return;
+    const prefix = leadingText(argument);
+    if (prefix.length > 0) dynamicPrefixes.push(prefix);
+    else flags2.unboundDynamic = true;
+  };
+  const globTarget = (argument) => {
+    const patterns = argument?.type === "array" ? namedChildren(argument) : argument ? [argument] : [];
+    for (const pattern of patterns) {
+      const text2 = staticText(pattern);
+      if (text2 !== null && text2.startsWith("!")) continue;
+      const prefix = text2 === null ? "" : globPrefix(text2);
+      if (prefix.length > 0) dynamicPrefixes.push(prefix);
+      else flags2.unboundDynamic = true;
+    }
+  };
+  const contextTarget = (argument) => {
+    const text2 = argument ? staticText(argument) : null;
+    if (text2 === null || text2.length === 0) flags2.unboundDynamic = true;
+    else dynamicPrefixes.push(text2.endsWith("/") ? text2 : `${text2}/`);
+  };
+  const recordCall = (node) => {
+    const fn = node.childForFieldName("function");
+    if (!fn) return;
+    const args2 = node.childForFieldName("arguments");
+    const argument = args2?.type === "arguments" ? namedChildren(args2).find((child) => child.type !== "comment") ?? null : null;
+    const requireInScope = !shadowsValue("require");
+    if (fn.type === "identifier" && fn.text === "eval" && !shadowsValue("eval")) flags2.directEval = true;
+    if (fn.type === "import" || fn.type === "identifier" && fn.text === "require") {
+      dynamicTarget(argument, fn.type === "import" || requireInScope);
+      return;
+    }
+    if (fn.type !== "member_expression") return;
+    const object3 = fn.childForFieldName("object");
+    const property = fn.childForFieldName("property")?.text ?? "";
+    if (object3?.type === "meta_property" && object3.text === "import.meta" && GLOB_METHODS.has(property)) globTarget(argument);
+    else if (object3?.type === "identifier" && object3.text === "require" && property === "context" && requireInScope) contextTarget(argument);
+  };
+  const recordTypeofGuard = (node) => {
+    if (node.childForFieldName("operator")?.type !== "typeof") return;
+    const argument = node.childForFieldName("argument");
+    if (argument?.type === "identifier" && DUAL_MODE_GUARDS.has(argument.text) && !shadowsValue(argument.text)) flags2.dualMode = true;
+  };
+  const recordImport = (node) => {
+    const specifier = specifierOf(node);
+    if (specifier !== null) {
+      imports.push({ specifier, kind: "import", names: importNamesOf(node), starReexport: false, namespaceReexport: null });
+      return;
+    }
+    const clause = childOfType(node, "import_require_clause");
+    const binding = clause ? namedChildren(clause).find((child) => child.type === "identifier") : void 0;
+    const source = clause?.childForFieldName("source");
+    const required2 = source ? stringText(source) : null;
+    if (binding && required2) {
+      imports.push({
+        specifier: required2,
+        kind: "import",
+        names: [{ imported: NAMESPACE_IMPORT, local: binding.text }],
+        starReexport: false,
+        namespaceReexport: null
+      });
+    }
+  };
+  const recordExport = (node) => {
+    const specifier = specifierOf(node);
+    if (specifier !== null) {
+      const namespaceReexport = namespaceExportName(node);
+      const names = importNamesOf(node);
+      imports.push({
+        specifier,
+        kind: "reexport",
+        names,
+        starReexport: names.length === 0 && namespaceReexport === null,
+        namespaceReexport
+      });
+      return true;
+    }
+    const value = node.childForFieldName("value");
+    if (value?.type === "identifier" && node.childForFieldName("declaration") === null) {
+      localExports.push({ local: value.text, exposed: DEFAULT_IMPORT });
+      return true;
+    }
+    const clause = childOfType(node, "export_clause");
+    if (!clause) return false;
+    for (const entry of namedChildren(clause)) {
+      if (entry.type !== "export_specifier") continue;
+      const name2 = entry.childForFieldName("name");
+      const alias = entry.childForFieldName("alias");
+      if (name2) localExports.push({ local: name2.text, exposed: (alias ?? name2).text });
+    }
+    return true;
+  };
+  const enter = (cursor2, parentType) => {
+    const type = cursor2.nodeType;
+    if (type === "comment") {
+      const text2 = cursor2.nodeText;
+      if (text2.includes("@jsx")) {
+        for (const match of text2.matchAll(JSX_PRAGMA)) if (match[1]) pragmas.add(match[1]);
+      }
+      return SKIP;
+    }
+    if (type.startsWith("jsx_")) flags2.hasJsx = true;
+    let current = null;
+    const node = () => current ??= cursor2.currentNode;
+    if (type === "import_statement") {
+      recordImport(node());
+      return SKIP;
+    }
+    if (type === "export_statement" && recordExport(node())) return SKIP;
+    if (type === "call_expression") recordCall(node());
+    else if (type === "unary_expression") recordTypeofGuard(node());
+    else if (type === "member_expression") memberUse(node().childForFieldName("object"), node().childForFieldName("property"), cursor2.startIndex);
+    else if (type === "nested_type_identifier") memberUse(node().childForFieldName("module"), node().childForFieldName("name"), cursor2.startIndex);
+    const field = cursor2.currentFieldName;
+    if (VALUE_REFERENCES.has(type)) {
+      if (parentType === "member_expression" && field === "object" || parentType === "nested_type_identifier") return 0;
+      const start2 = cursor2.startIndex;
+      const name2 = cursor2.nodeText;
+      if (!nameSites.has(start2) && !shadowsValue(name2)) reference(name2, start2);
+      return 0;
+    }
+    if (type === "type_identifier") {
+      if (parentType === "nested_type_identifier") return 0;
+      const start2 = cursor2.startIndex;
+      const name2 = cursor2.nodeText;
+      if (!nameSites.has(start2) && !shadowsType(name2)) reference(name2, start2);
+      return 0;
+    }
+    let pushed = 0;
+    const push = (scope) => {
+      if (!scope) return;
+      scopes.push(scope);
+      pushed++;
+    };
+    if (field === "body" && parentType !== void 0 && BODY_SCOPES.has(parentType)) push(varScope(node()));
+    if (FUNCTION_SCOPES.has(type)) push(parameterScope(node()));
+    else if (type === "statement_block") push(blockScope(node()));
+    else if (type === "class_static_block") push(varScope(node()));
+    else if (type === "catch_clause") push(catchScope(node()));
+    else if (type === "for_statement" || type === "for_in_statement") push(loopScope(node()));
+    return pushed;
+  };
+  const cursor = root.walk();
+  const path2 = [];
+  const pushedAt = [];
+  try {
+    let descend = true;
+    for (; ; ) {
+      if (descend) {
+        const type = cursor.nodeType;
+        const pushed2 = enter(cursor, path2[path2.length - 1]);
+        if (pushed2 !== SKIP && cursor.gotoFirstChild()) {
+          path2.push(type);
+          pushedAt.push(pushed2);
+          continue;
+        }
+        if (pushed2 > 0) scopes.length -= pushed2;
+      }
+      if (cursor.gotoNextSibling()) {
+        descend = true;
+        continue;
+      }
+      if (!cursor.gotoParent()) break;
+      path2.pop();
+      const pushed = pushedAt.pop() ?? 0;
+      if (pushed > 0) scopes.length -= pushed;
+      descend = false;
+    }
+  } finally {
+    cursor.delete();
+  }
+  applyLocalExports(declarations, localExports, imports, references);
+  if (flags2.hasJsx) for (const name2 of pragmas) references.push({ name: name2, owner: JSX_PRAGMA_OWNER });
+  return {
+    declarations,
+    references,
+    imports,
+    memberUses,
+    dynamicPrefixes,
+    unboundDynamic: flags2.unboundDynamic,
+    directEval: flags2.directEval,
+    module: esm || flags2.commonJs,
+    dualMode: flags2.dualMode && !esm,
+    hasJsx: flags2.hasJsx
+  };
+}
+async function scanSymbols(language, source, grammarsDir = locateGrammarsDir()) {
+  if (!grammarsDir) return { ok: false, reason: "engine_unavailable" };
+  if (!await initRuntime2(grammarsDir)) return { ok: false, reason: "engine_unavailable" };
+  const lang = await loadLanguage(grammarsDir, language);
+  if (!lang) return { ok: false, reason: "engine_unavailable" };
+  const parser = new Parser2();
+  try {
+    parser.setLanguage(lang);
+    const tree = parser.parse(source);
+    if (!tree) return { ok: false, reason: "engine_unavailable" };
+    try {
+      if (tree.rootNode.hasError) return { ok: false, reason: "parse_error" };
+      return { ok: true, symbols: collectSymbols(tree.rootNode) };
+    } finally {
+      tree.delete();
+    }
+  } finally {
+    parser.delete();
+  }
 }
 async function scanTree(language, source, grammarsDir = locateGrammarsDir()) {
   if (!grammarsDir) return { ok: false, reason: "engine_unavailable" };
@@ -41286,7 +42060,7 @@ async function checkStagedSweep(args2) {
     const scan = await scanWithFilter(repo, path2, bytes, args2.options);
     if (scan.kind === "not_code") continue;
     if (isShippedScript(repo, path2, bytes, scan, args2.options)) {
-      checked.push({ path: path2, blob });
+      checked.push({ path: path2, blob, unverified: true });
       continue;
     }
     const entry = ledgerEntries(args2.ledger, path2).find((e) => e.blob === blob);
@@ -41303,7 +42077,7 @@ async function checkStagedSweep(args2) {
       reverted.push(path2);
       continue;
     }
-    checked.push({ path: path2, blob });
+    checked.push({ path: path2, blob, unverified: authorized });
   }
   const driftPaths = args2.drift?.paths ?? [];
   if (driftPaths.length > 0) {
@@ -41406,6 +42180,1752 @@ function driftCovered(projectRoot, ledger, paths) {
     open.push(path2);
   }
   return { covered, open };
+}
+
+// src/lib/dead-code/review-gate.ts
+init_esm_shims();
+
+// src/lib/dead-code/references.ts
+init_esm_shims();
+
+// src/lib/reverse-dep-walk.ts
+init_esm_shims();
+var DEFAULT_LANG_GLOBS = [
+  "**/*.ts",
+  "**/*.tsx",
+  "**/*.js",
+  "**/*.jsx",
+  "**/*.mjs",
+  "**/*.cjs",
+  "**/*.mts",
+  "**/*.cts"
+];
+var DEFAULT_EXCLUDE_GLOBS = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.git/**",
+  "**/coverage/**"
+];
+var DEFAULT_MAX_DEPTH = 2;
+var DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf("*") + 1)).join(", ");
+var JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/;
+var RESOLVE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts"
+];
+var INDEX_RESOLUTIONS = [
+  "/index.ts",
+  "/index.tsx",
+  "/index.js",
+  "/index.jsx",
+  "/index.mjs",
+  "/index.cjs",
+  "/index.mts",
+  "/index.cts"
+];
+var IMPORT_PATTERNS = [
+  /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
+  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g
+];
+var DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/;
+var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
+var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
+function relPosix(projectRoot, abs) {
+  return toPosix(relative(projectRoot, abs));
+}
+function seedIsCoverable(rel, langGlobs = DEFAULT_LANG_GLOBS) {
+  if (isAbsolute(rel) || rel.startsWith("../")) return false;
+  return matchesAnyGlob(rel, langGlobs).matched;
+}
+function walkFiles(root, langGlobs, excludeGlobs) {
+  const results = [];
+  const recurse = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      const rel = relPosix(root, full);
+      if (entry.isDirectory()) {
+        if (matchesAnyGlob(`${rel}/probe`, excludeGlobs).matched) continue;
+        recurse(full);
+      } else if (entry.isFile()) {
+        if (matchesAnyGlob(rel, excludeGlobs).matched) continue;
+        if (matchesAnyGlob(rel, langGlobs).matched) results.push(full);
+      }
+    }
+  };
+  recurse(root);
+  return results;
+}
+function extractImports(content) {
+  const imports = /* @__PURE__ */ new Set();
+  for (const re of IMPORT_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      const spec = m[1];
+      if (spec) imports.add(spec);
+    }
+  }
+  return [...imports];
+}
+var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
+  [".js", [".ts", ".tsx"]],
+  [".mjs", [".mts"]],
+  [".cjs", [".cts"]]
+]);
+function hasExactEntry(path2, entries) {
+  const dir = dirname(path2);
+  let names = entries.get(dir);
+  if (!names) {
+    try {
+      names = new Set(readdirSync(dir));
+    } catch {
+      names = /* @__PURE__ */ new Set();
+    }
+    entries.set(dir, names);
+  }
+  return names.has(basename(path2));
+}
+function hasExactPath(projectRoot, candidate, entries) {
+  const rel = relPosix(projectRoot, candidate);
+  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
+  let walked = projectRoot;
+  for (const segment of rel.split("/")) {
+    walked = join(walked, segment);
+    if (!hasExactEntry(walked, entries)) return false;
+  }
+  return true;
+}
+function diskProbe(projectRoot, entries) {
+  const stat = (abs) => {
+    try {
+      return statSync(abs, { throwIfNoEntry: false }) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    exists: (abs) => existsSync(abs),
+    isFile: (abs) => stat(abs)?.isFile() ?? false,
+    isDirectory: (abs) => stat(abs)?.isDirectory() ?? false,
+    hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries)
+  };
+}
+function resolveNodeNextSource(target, probe) {
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
+  if (!sourceExtensions) return null;
+  const stem = target.slice(0, target.lastIndexOf("."));
+  for (const ext of sourceExtensions) {
+    const candidate = stem + ext;
+    if (probe.hasExactPath(candidate)) return candidate;
+  }
+  return null;
+}
+function resolveImport(projectRoot, importerAbs, spec, entries, probe = diskProbe(projectRoot, entries)) {
+  if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
+  const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec);
+  if (!directoryOnly && probe.isFile(target)) return target;
+  for (const ext of directoryOnly ? [] : RESOLVE_EXTENSIONS) {
+    const candidate = target + ext;
+    if (probe.exists(candidate)) return candidate;
+  }
+  if (probe.isDirectory(target)) {
+    for (const idx of INDEX_RESOLUTIONS) {
+      const candidate = target + idx;
+      if (probe.exists(candidate)) return candidate;
+    }
+  }
+  return resolveNodeNextSource(target, probe);
+}
+function resolveImportCandidates(projectRoot, importerAbs, spec, entries, probe) {
+  const primary = resolveImport(projectRoot, importerAbs, spec, entries, probe);
+  if (!primary) return [];
+  const source = resolveNodeNextSource(primary, probe);
+  return source && source !== primary ? [primary, source] : [primary];
+}
+function walkReverseDeps(input) {
+  const projectRoot = input.projectRoot;
+  const langGlobs = input.langGlobs ?? DEFAULT_LANG_GLOBS;
+  const excludeGlobs = input.excludeGlobs ?? DEFAULT_EXCLUDE_GLOBS;
+  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const declared = input.seedPaths.map((p) => {
+    const abs = isAbsolute(p) ? p : resolve(projectRoot, p);
+    return relPosix(projectRoot, abs);
+  });
+  const hints = [];
+  const stats = {
+    files_scanned: 0,
+    files_parsed: 0,
+    parse_errors: 0,
+    cycles_skipped: 0,
+    unresolved_js_specifiers: 0
+  };
+  const notRun = () => ({
+    declared,
+    discovered: [],
+    stats,
+    hints,
+    coverage: "not-run",
+    uncovered_seeds: []
+  });
+  if (declared.length === 0) {
+    hints.push("No seed paths provided \u2014 reverse-dep walk skipped.");
+    return notRun();
+  }
+  if (!existsSync(projectRoot)) {
+    hints.push(
+      `projectRoot '${projectRoot}' does not exist \u2014 reverse-dep walk skipped.`
+    );
+    return notRun();
+  }
+  let rootIsDirectory = false;
+  try {
+    rootIsDirectory = statSync(projectRoot).isDirectory();
+  } catch {
+    rootIsDirectory = false;
+  }
+  if (!rootIsDirectory) {
+    hints.push(
+      `projectRoot '${projectRoot}' is not a directory \u2014 reverse-dep walk skipped.`
+    );
+    return notRun();
+  }
+  if (maxDepth < 1) {
+    hints.push(
+      `maxDepth=${maxDepth} < 1 \u2014 reverse-dep walk has no depth budget; returning declared only.`
+    );
+    return notRun();
+  }
+  const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
+  const directoryEntries = /* @__PURE__ */ new Map();
+  stats.files_scanned = candidates.length;
+  const reverseDeps = /* @__PURE__ */ new Map();
+  for (const candidateAbs of candidates) {
+    let content;
+    try {
+      content = readFileSync(candidateAbs, "utf8");
+      stats.files_parsed++;
+    } catch {
+      stats.parse_errors++;
+      continue;
+    }
+    const candidateRel = relPosix(projectRoot, candidateAbs);
+    const imports = extractImports(content);
+    for (const spec of imports) {
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
+      if (!resolvedAbs) {
+        if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
+          stats.unresolved_js_specifiers++;
+        }
+        continue;
+      }
+      const resolvedRel = relPosix(projectRoot, resolvedAbs);
+      if (resolvedRel === candidateRel) continue;
+      let set = reverseDeps.get(resolvedRel);
+      if (!set) {
+        set = /* @__PURE__ */ new Set();
+        reverseDeps.set(resolvedRel, set);
+      }
+      set.add(candidateRel);
+    }
+  }
+  const seen = new Set(declared);
+  const discoveredMap = /* @__PURE__ */ new Map();
+  const queue = declared.map((d) => ({ file: d, depth: 0, via: [d] }));
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item.depth >= maxDepth) continue;
+    const importers = reverseDeps.get(item.file);
+    if (!importers) continue;
+    for (const importer of importers) {
+      if (seen.has(importer)) {
+        if (declared.includes(importer)) stats.cycles_skipped++;
+        continue;
+      }
+      seen.add(importer);
+      const nextDepth = item.depth + 1;
+      const nextVia = [...item.via, importer];
+      discoveredMap.set(importer, {
+        file: importer,
+        via_paths: nextVia,
+        depth: nextDepth
+      });
+      if (nextDepth < maxDepth) {
+        queue.push({ file: importer, depth: nextDepth, via: nextVia });
+      }
+    }
+  }
+  const discovered = [...discoveredMap.values()].sort((a, b) => {
+    if (a.depth !== b.depth) return a.depth - b.depth;
+    return a.file.localeCompare(b.file);
+  });
+  const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs));
+  const coverage = uncoveredSeeds.length === 0 ? "analyzed" : uncoveredSeeds.length === declared.length ? "uncovered" : "partial";
+  if (discovered.length === 0 && stats.files_scanned > 0) {
+    if (coverage === "uncovered") {
+      hints.push(
+        `${ZERO_IMPORTER_HINT_PREFIX}: none of the ${declared.length} declared path(s) is a file this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root. The importer set is UNAVAILABLE, not empty.`
+      );
+    } else if (stats.unresolved_js_specifiers === 0) {
+      hints.push(
+        `${ZERO_IMPORTER_HINT_PREFIX} across ${stats.files_scanned} scanned files. If you expected importers, check that seed paths use project-relative posix form (e.g., 'src/lib/foo.ts') and that the project does not rely on tsconfig path aliases (not resolved in v1).`
+      );
+    }
+  }
+  if (stats.unresolved_js_specifiers > 0) {
+    hints.push(
+      `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE \u2014 treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`
+    );
+  }
+  if (stats.parse_errors > 0) {
+    hints.push(
+      `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`
+    );
+  }
+  if (stats.cycles_skipped > 0) {
+    hints.push(
+      `${stats.cycles_skipped} cycle path(s) skipped where a seed is also an importer of another seed.`
+    );
+  }
+  return {
+    declared,
+    discovered,
+    stats,
+    hints,
+    coverage,
+    uncovered_seeds: uncoveredSeeds
+  };
+}
+function coverageHints(result) {
+  if (result.coverage === "not-run") return [];
+  const lines = [];
+  const uncovered = result.uncovered_seeds;
+  if (uncovered.length > 0) {
+    const shown = uncovered.slice(0, 10).join(", ");
+    const overflow = uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : "";
+    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
+    lines.push(
+      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`
+    );
+  }
+  if (result.stats.files_scanned === 0) {
+    lines.push(
+      `${COVERAGE_HINT_PREFIX} 0 files matched the walk's file-type list (${DEFAULT_LANG_SUFFIXES}) under the project root after the default exclusions (node_modules, dist, build, coverage). No import graph was built, so an empty importer set here means UNKNOWN, not clean. Candidate causes: the project is written in another language; its sources sit under an excluded directory; project_root points somewhere unexpected.`
+    );
+  }
+  return lines;
+}
+
+// src/lib/dead-code/module-resolution.ts
+init_esm_shims();
+var DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+var ASSET_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".styl",
+  ".pcss",
+  ".json",
+  ".jsonc",
+  ".json5",
+  ".md",
+  ".txt",
+  ".csv",
+  ".tsv",
+  ".xml",
+  ".yml",
+  ".yaml",
+  ".toml",
+  ".ini",
+  ".graphql",
+  ".gql",
+  ".glsl",
+  ".wgsl",
+  ".wasm",
+  ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".bmp",
+  ".ico",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".ogg",
+  ".webm",
+  ".pdf"
+]);
+var RUNTIME_SUFFIX = /\.(?:js|jsx|mjs|cjs)$/;
+var PACKAGE_ENTRY_FIELDS = ["main", "module", "source", "types", "exports"];
+var CONFIG_NAMES = ["tsconfig.json", "jsconfig.json"];
+var MAX_EXTENDS_DEPTH = 16;
+var BUILTINS = new Set(builtinModules);
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function skipInsignificant(text2, from) {
+  let i2 = from;
+  while (i2 < text2.length) {
+    const ch = text2[i2];
+    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
+      i2++;
+    } else if (ch === "/" && text2[i2 + 1] === "/") {
+      while (i2 < text2.length && text2[i2] !== "\n") i2++;
+    } else if (ch === "/" && text2[i2 + 1] === "*") {
+      const end = text2.indexOf("*/", i2 + 2);
+      i2 = end < 0 ? text2.length : end + 2;
+    } else {
+      break;
+    }
+  }
+  return i2;
+}
+function parseJsonc(source) {
+  const text2 = source.startsWith("\uFEFF") ? source.slice(1) : source;
+  let out2 = "";
+  let i2 = 0;
+  while (i2 < text2.length) {
+    const ch = text2[i2];
+    if (ch === '"') {
+      let j = i2 + 1;
+      while (j < text2.length && text2[j] !== '"') j += text2[j] === "\\" ? 2 : 1;
+      out2 += text2.slice(i2, j + 1);
+      i2 = j + 1;
+      continue;
+    }
+    if (ch === "/" && (text2[i2 + 1] === "/" || text2[i2 + 1] === "*")) {
+      i2 = skipInsignificant(text2, i2);
+      continue;
+    }
+    if (ch === ",") {
+      const next = text2[skipInsignificant(text2, i2 + 1)];
+      if (next === "}" || next === "]") {
+        i2++;
+        continue;
+      }
+    }
+    out2 += ch;
+    i2++;
+  }
+  try {
+    return JSON.parse(out2);
+  } catch {
+    return null;
+  }
+}
+function packageNameOf(specifier) {
+  const segments = specifier.split("/");
+  return specifier.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0] ?? specifier;
+}
+function isBuiltin(specifier) {
+  return BUILTINS.has(specifier) || BUILTINS.has(packageNameOf(specifier));
+}
+function isAsset(path2) {
+  const segment = path2.slice(path2.lastIndexOf("/") + 1);
+  const dot = segment.lastIndexOf(".");
+  return dot > 0 && ASSET_EXTENSIONS.has(segment.slice(dot).toLowerCase());
+}
+function entryStrings(value, out2) {
+  if (typeof value === "string") {
+    out2.push(value);
+    return;
+  }
+  if (!isRecord(value)) return;
+  const root = value["."];
+  if (root !== void 0) {
+    entryStrings(root, out2);
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (!key.startsWith(".")) entryStrings(nested, out2);
+  }
+}
+function splitQuery(specifier) {
+  const cut = specifier.search(/[?#]/);
+  if (cut <= 0) return { path: specifier, query: false };
+  return { path: specifier.slice(0, cut), query: true };
+}
+function rootName(expression) {
+  if (typeof expression !== "string") return null;
+  const root = expression.split(".")[0]?.trim();
+  return root && /^[A-Za-z_$][\w$]*$/.test(root) ? root : null;
+}
+function matchPattern(pattern, specifier) {
+  const star = pattern.indexOf("*");
+  if (star < 0) return pattern === specifier ? "" : null;
+  const prefix = pattern.slice(0, star);
+  const suffix = pattern.slice(star + 1);
+  if (specifier.length < prefix.length + suffix.length) return null;
+  if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) return null;
+  return specifier.slice(prefix.length, specifier.length - suffix.length);
+}
+function prefixLength(pattern) {
+  const star = pattern.indexOf("*");
+  return star < 0 ? pattern.length : star;
+}
+function corpusProbe(projectRoot, corpus) {
+  const files = /* @__PURE__ */ new Set();
+  const directories = /* @__PURE__ */ new Set();
+  for (const path2 of corpus) {
+    files.add(resolve(projectRoot, path2));
+    let slash = path2.lastIndexOf("/");
+    while (slash > 0) {
+      directories.add(resolve(projectRoot, path2.slice(0, slash)));
+      slash = path2.lastIndexOf("/", slash - 1);
+    }
+  }
+  return {
+    exists: (abs) => files.has(normalize(abs)) || directories.has(normalize(abs)),
+    isFile: (abs) => files.has(normalize(abs)),
+    isDirectory: (abs) => directories.has(normalize(abs)),
+    hasExactPath: (abs) => files.has(normalize(abs))
+  };
+}
+function createModuleResolver(args2) {
+  const { projectRoot, corpus } = args2;
+  const probe = corpusProbe(projectRoot, corpus);
+  const entries = /* @__PURE__ */ new Map();
+  const configSet = new Set(args2.configs);
+  const parsed = /* @__PURE__ */ new Map();
+  const settingsByConfig = /* @__PURE__ */ new Map();
+  const settingsByDir = /* @__PURE__ */ new Map();
+  const relOf = (abs) => toPosix(relative(projectRoot, abs));
+  const insideRepo = (rel) => !rel.startsWith("..") && !isAbsolute(rel);
+  const json = (rel) => {
+    if (parsed.has(rel)) return parsed.get(rel);
+    const text2 = args2.readText(rel);
+    const value = text2 === null ? null : parseJsonc(text2);
+    parsed.set(rel, value);
+    return value;
+  };
+  const workspaces = /* @__PURE__ */ new Map();
+  const declared = /* @__PURE__ */ new Set();
+  for (const rel of args2.configs) {
+    if (rel !== "package.json" && !rel.endsWith("/package.json")) continue;
+    const manifest = json(rel);
+    if (!isRecord(manifest)) continue;
+    if (typeof manifest.name === "string" && manifest.name.length > 0) {
+      workspaces.set(manifest.name, rel.slice(0, rel.length - "package.json".length));
+    }
+    for (const field of DEPENDENCY_FIELDS) {
+      const deps = manifest[field];
+      if (isRecord(deps)) for (const name2 of Object.keys(deps)) declared.add(name2);
+    }
+  }
+  const extendsTarget = (fromRel, target) => {
+    if (!target.startsWith(".") && !isAbsolute(target)) return null;
+    const abs = resolve(projectRoot, dirname(fromRel), target);
+    for (const candidate of [abs, `${abs}.json`, resolve(abs, "tsconfig.json")]) {
+      const rel = relOf(candidate);
+      if (insideRepo(rel) && json(rel) !== null) return rel;
+    }
+    return null;
+  };
+  const settingsOf = (rel, depth) => {
+    if (settingsByConfig.has(rel)) return settingsByConfig.get(rel) ?? null;
+    if (depth > MAX_EXTENDS_DEPTH) return null;
+    settingsByConfig.set(rel, null);
+    const config2 = json(rel);
+    if (!isRecord(config2)) return null;
+    const dirAbs = resolve(projectRoot, dirname(rel));
+    let settings = { baseUrl: null, paths: null, pathsDir: dirAbs, jsx: null, jsxFactories: [], jsxImportSource: null };
+    const parents = typeof config2.extends === "string" ? [config2.extends] : Array.isArray(config2.extends) ? config2.extends : [];
+    for (const parent of parents) {
+      const parentRel = typeof parent === "string" ? extendsTarget(rel, parent) : null;
+      const inherited = parentRel ? settingsOf(parentRel, depth + 1) : null;
+      if (!inherited) continue;
+      settings = {
+        baseUrl: inherited.baseUrl ?? settings.baseUrl,
+        paths: inherited.paths ?? settings.paths,
+        pathsDir: inherited.paths ? inherited.pathsDir : settings.pathsDir,
+        jsx: inherited.jsx ?? settings.jsx,
+        jsxFactories: inherited.jsxFactories.length > 0 ? inherited.jsxFactories : settings.jsxFactories,
+        jsxImportSource: inherited.jsxImportSource ?? settings.jsxImportSource
+      };
+    }
+    const options = config2.compilerOptions;
+    if (isRecord(options)) {
+      if (typeof options.baseUrl === "string") settings.baseUrl = resolve(dirAbs, options.baseUrl);
+      if (isRecord(options.paths)) {
+        settings.paths = Object.entries(options.paths).map(([pattern, targets]) => ({
+          pattern,
+          targets: Array.isArray(targets) ? targets.filter((t) => typeof t === "string") : []
+        }));
+        settings.pathsDir = dirAbs;
+      }
+      if (typeof options.jsx === "string") settings.jsx = options.jsx;
+      const factories = [rootName(options.jsxFactory), rootName(options.jsxFragmentFactory)].filter((n) => n !== null);
+      if (factories.length > 0) settings.jsxFactories = factories;
+      if (typeof options.jsxImportSource === "string") settings.jsxImportSource = options.jsxImportSource;
+    }
+    if (Array.isArray(config2.references)) {
+      for (const reference of config2.references) {
+        const target = isRecord(reference) && typeof reference.path === "string" ? extendsTarget(rel, reference.path) : null;
+        const referenced = target ? settingsOf(target, depth + 1) : null;
+        if (!referenced) continue;
+        if (settings.paths === null && referenced.paths) {
+          settings = { ...settings, baseUrl: settings.baseUrl ?? referenced.baseUrl, paths: referenced.paths, pathsDir: referenced.pathsDir };
+        }
+        if (settings.jsx === null) settings.jsx = referenced.jsx;
+        if (settings.jsxFactories.length === 0) settings.jsxFactories = referenced.jsxFactories;
+        if (settings.jsxImportSource === null) settings.jsxImportSource = referenced.jsxImportSource;
+      }
+    }
+    settingsByConfig.set(rel, settings);
+    return settings;
+  };
+  const settingsFor = (fromRel) => {
+    let dir = dirname(fromRel) === "." ? "" : toPosix(dirname(fromRel));
+    const visited = [];
+    let found = null;
+    for (; ; ) {
+      if (settingsByDir.has(dir)) {
+        found = settingsByDir.get(dir) ?? null;
+        break;
+      }
+      visited.push(dir);
+      const config2 = CONFIG_NAMES.map((name2) => dir ? `${dir}/${name2}` : name2).find((rel) => configSet.has(rel));
+      if (config2) {
+        found = settingsOf(config2, 0);
+        break;
+      }
+      if (dir === "") break;
+      const slash = dir.lastIndexOf("/");
+      dir = slash < 0 ? "" : dir.slice(0, slash);
+    }
+    for (const seen of visited) settingsByDir.set(seen, found);
+    return found;
+  };
+  const manifestIn = (dirRel) => dirRel === "" ? "package.json" : `${dirRel}/package.json`;
+  const filesAt = (fromRel, target) => {
+    const importerAbs = resolve(projectRoot, fromRel);
+    const found = resolveImportCandidates(projectRoot, importerAbs, target, entries, probe).map(relOf);
+    const abs = isAbsolute(target) ? resolve(target) : resolve(dirname(importerAbs), target);
+    const manifest = manifestIn(relOf(abs));
+    if (probe.isDirectory(abs) && configSet.has(manifest)) {
+      const pkg = json(manifest);
+      const declaredEntries = [];
+      if (isRecord(pkg)) for (const field of PACKAGE_ENTRY_FIELDS) entryStrings(pkg[field], declaredEntries);
+      for (const entry of declaredEntries) {
+        for (const file of resolveImportCandidates(projectRoot, importerAbs, resolve(abs, entry), entries, probe)) {
+          found.push(relOf(file));
+        }
+      }
+    }
+    return [...new Set(found)];
+  };
+  const rootsFor = (fromRel) => {
+    let dir = dirname(fromRel) === "." ? "" : toPosix(dirname(fromRel));
+    for (; ; ) {
+      if (configSet.has(manifestIn(dir))) return [.../* @__PURE__ */ new Set([resolve(projectRoot, dir), resolve(projectRoot)])];
+      if (dir === "") return [resolve(projectRoot)];
+      const slash = dir.lastIndexOf("/");
+      dir = slash < 0 ? "" : dir.slice(0, slash);
+    }
+  };
+  const mapped = (settings, specifier) => {
+    if (!settings.paths) return null;
+    let best = null;
+    let bestMatch = "";
+    for (const mapping of settings.paths) {
+      const match = matchPattern(mapping.pattern, specifier);
+      if (match === null) continue;
+      if (!best || prefixLength(mapping.pattern) > prefixLength(best.pattern)) {
+        best = mapping;
+        bestMatch = match;
+      }
+    }
+    if (!best) return null;
+    const base = settings.baseUrl ?? settings.pathsDir;
+    return best.targets.map((target) => resolve(base, target.replace("*", bestMatch)));
+  };
+  const lowered = corpus.map((rel) => [rel.toLowerCase(), rel]);
+  const caseCorrected = (targetRel) => {
+    const runtime2 = RUNTIME_SUFFIX.exec(targetRel)?.[0] ?? "";
+    const stem = targetRel.slice(0, targetRel.length - runtime2.length);
+    const lower = stem.toLowerCase();
+    const corrected = /* @__PURE__ */ new Set();
+    for (const [low, real] of lowered) {
+      if (low === lower || low.startsWith(`${lower}.`) || low.startsWith(`${lower}/`)) corrected.add(real.slice(0, stem.length) + runtime2);
+    }
+    corrected.delete(targetRel);
+    return [...corrected];
+  };
+  const caseOnlyFiles = (fromRel, spec) => {
+    const targetRel = relOf(resolve(projectRoot, dirname(fromRel), spec));
+    if (!insideRepo(targetRel)) return [];
+    const suffix = DIRECTORY_SPECIFIER.test(spec) ? "/" : "";
+    const files = /* @__PURE__ */ new Set();
+    for (const corrected of caseCorrected(targetRel)) {
+      for (const file of filesAt(fromRel, resolve(projectRoot, corrected) + suffix)) files.add(file);
+    }
+    return [...files];
+  };
+  const resolve8 = (fromRel, specifier) => {
+    const { path: path2, query } = splitQuery(specifier);
+    if (path2.startsWith(".")) {
+      const files = filesAt(fromRel, path2);
+      if (files.length > 0) return { kind: "files", files, query };
+      const caseOnly = caseOnlyFiles(fromRel, path2);
+      return caseOnly.length === 0 ? { kind: "missing" } : { kind: "unknown", within: caseOnly };
+    }
+    if (path2.startsWith("/")) {
+      for (const root of rootsFor(fromRel)) {
+        const files = filesAt(fromRel, resolve(root, `.${path2}`));
+        if (files.length > 0) return { kind: "files", files, query };
+      }
+      return isAsset(path2) ? { kind: "missing" } : { kind: "unknown", within: null };
+    }
+    if (path2.startsWith("node:")) return { kind: "external" };
+    const settings = settingsFor(fromRel);
+    if (settings) {
+      for (const abs of mapped(settings, path2) ?? []) {
+        const files = filesAt(fromRel, abs);
+        if (files.length > 0) return { kind: "files", files, query };
+      }
+      if (settings.baseUrl) {
+        const files = filesAt(fromRel, resolve(settings.baseUrl, path2));
+        if (files.length > 0) return { kind: "files", files, query };
+      }
+    }
+    if (isBuiltin(path2)) return { kind: "external" };
+    if (isAsset(path2)) return { kind: "missing" };
+    const name2 = packageNameOf(path2);
+    const workspace = workspaces.get(name2);
+    if (workspace !== void 0) return { kind: "unknown", within: workspace === "" ? null : [workspace] };
+    if (declared.has(name2)) return { kind: "external" };
+    return { kind: "unknown", within: null };
+  };
+  const underPrefix = (abs) => {
+    const rel = relOf(abs);
+    if (!insideRepo(rel)) return [];
+    return corpus.filter((path2) => rel === "" || path2.startsWith(rel));
+  };
+  const prefixFiles = (fromRel, prefix) => {
+    if (prefix.startsWith(".")) return underPrefix(resolve(projectRoot, dirname(fromRel), prefix));
+    if (prefix.startsWith("/")) {
+      for (const root of rootsFor(fromRel)) {
+        const files = underPrefix(resolve(root, `.${prefix}`)) ?? [];
+        if (files.length > 0) return files;
+      }
+      return null;
+    }
+    const settings = settingsFor(fromRel);
+    if (settings?.paths) {
+      const files = /* @__PURE__ */ new Set();
+      let matched = false;
+      for (const mapping of settings.paths) {
+        const head = mapping.pattern.slice(0, prefixLength(mapping.pattern));
+        if (!mapping.pattern.includes("*") || !prefix.startsWith(head)) continue;
+        matched = true;
+        const rest = prefix.slice(head.length);
+        const base = settings.baseUrl ?? settings.pathsDir;
+        for (const target of mapping.targets) {
+          const star = target.indexOf("*");
+          for (const file of underPrefix(resolve(base, (star < 0 ? target : target.slice(0, star)) + rest)) ?? []) files.add(file);
+        }
+      }
+      if (matched) return [...files];
+    }
+    if (settings?.baseUrl) {
+      const files = underPrefix(resolve(settings.baseUrl, prefix)) ?? [];
+      if (files.length > 0) return files;
+    }
+    const name2 = packageNameOf(prefix);
+    const workspace = workspaces.get(name2);
+    if (workspace !== void 0) return corpus.filter((path2) => path2.startsWith(workspace));
+    if (prefix.startsWith("node:") || isBuiltin(prefix) || declared.has(name2)) return [];
+    return null;
+  };
+  const jsxFactories = (fromRel) => {
+    const settings = settingsFor(fromRel);
+    if (!settings) return [];
+    if (settings.jsxFactories.length > 0) return settings.jsxFactories;
+    return settings.jsx === "react" ? ["React"] : [];
+  };
+  const jsxRuntimes = (fromRel) => {
+    const source = settingsFor(fromRel)?.jsxImportSource;
+    return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
+  };
+  return { resolve: resolve8, prefixFiles, jsxFactories, jsxRuntimes };
+}
+
+// src/lib/dead-code/references.ts
+var LANGUAGE_BY_SUFFIX = /* @__PURE__ */ new Map([
+  [".ts", "typescript"],
+  [".mts", "typescript"],
+  [".cts", "typescript"],
+  [".tsx", "tsx"],
+  [".js", "javascript"],
+  [".mjs", "javascript"],
+  [".cjs", "javascript"],
+  [".jsx", "javascript"]
+]);
+var MODULE_SUFFIXES = /* @__PURE__ */ new Set([".mjs", ".cjs", ".mts", ".cts"]);
+var FOREIGN_IMPORTER_SUFFIXES = /* @__PURE__ */ new Set([".vue", ".svelte", ".astro", ".html", ".htm", ".mdx", ".md"]);
+var MARKDOWN_SUFFIXES = /* @__PURE__ */ new Set([".md", ".mdx"]);
+var SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+var JSX_RUNTIME_NAMES = ["jsx", "jsxs", "jsxDEV", "Fragment"];
+var IMPLICIT_BINDING = "";
+var BUILD_OUTPUT_DIRS = ["dist", "build", "coverage"];
+var VENDORED_SEGMENTS = /* @__PURE__ */ new Set(["node_modules", ".git"]);
+var CONFIG_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|jsconfig[^/]*\.json)$/;
+var COMPUTED_IMPORT = /\b(?:import|require)\s*\(\s*[^'"\s)]|import\.meta\.glob|require\.context/;
+var CODE_FENCE = /^\s*(`{3,}|~{3,})/;
+var MDX_ESM_LINE = /^(?:import|export)\b/;
+var HINT_LIST_LIMIT = 10;
+function markdownCode(text2) {
+  const esm = text2.split("\n").filter((line2) => MDX_ESM_LINE.test(line2));
+  const scripts = [...text2.matchAll(SCRIPT_BLOCK)].map((match) => match[1] ?? "");
+  return [...esm, ...scripts].join("\n");
+}
+function withoutCodeFences(text2) {
+  const kept = [];
+  let open = null;
+  for (const line2 of text2.split("\n")) {
+    const fence = CODE_FENCE.exec(line2)?.[1] ?? null;
+    if (open !== null) {
+      if (fence !== null && fence[0] === open[0] && fence.length >= open.length) open = null;
+      continue;
+    }
+    if (fence !== null) {
+      open = fence;
+      continue;
+    }
+    kept.push(line2);
+  }
+  return kept.join("\n");
+}
+function suffixOf(path2) {
+  const dot = path2.lastIndexOf(".");
+  return dot > path2.lastIndexOf("/") ? path2.slice(dot).toLowerCase() : "";
+}
+function languageOf(path2) {
+  return LANGUAGE_BY_SUFFIX.get(suffixOf(path2)) ?? null;
+}
+function isVendored(path2) {
+  return path2.split("/").some((segment) => VENDORED_SEGMENTS.has(segment));
+}
+function packageRootsOf(known) {
+  const roots = /* @__PURE__ */ new Set([""]);
+  for (const path2 of known) {
+    if (isVendored(path2)) continue;
+    if (path2 === "package.json" || path2.endsWith("/package.json")) roots.add(path2.slice(0, path2.length - "package.json".length));
+  }
+  return [...roots];
+}
+function isBuildOutput(path2, packageRoots) {
+  if (isVendored(path2)) return true;
+  return packageRoots.some((root) => BUILD_OUTPUT_DIRS.some((dir) => path2.startsWith(`${root}${dir}/`)));
+}
+function corpusFrom(known) {
+  const paths = [...known];
+  const roots = packageRootsOf(paths);
+  return paths.filter(
+    (path2) => (languageOf(path2) !== null || FOREIGN_IMPORTER_SUFFIXES.has(suffixOf(path2))) && !isBuildOutput(path2, roots)
+  );
+}
+function configFilesFrom(known) {
+  return [...known].filter((path2) => CONFIG_FILE.test(path2) && !isVendored(path2));
+}
+var ABSENT_CODES = /* @__PURE__ */ new Set(["ENOENT", "ENOTDIR", "EISDIR"]);
+function normalizeLineEndings(text2) {
+  return text2.replace(/\r\n/g, "\n");
+}
+function workingTreeReader(root) {
+  return (rel) => {
+    try {
+      return { kind: "text", text: normalizeLineEndings(readFileSync(join(root, rel), "utf8")) };
+    } catch (error2) {
+      const code = error2.code ?? "";
+      return ABSENT_CODES.has(code) ? { kind: "absent" } : { kind: "error" };
+    }
+  };
+}
+var PUBLIC_API_HINT_PREFIX = 'Dead-code scan: no "public_api" is declared';
+var PUBLIC_EXEMPTED_HINT_PREFIX = 'Dead-code scan: "public_api" exempted';
+var UNREADABLE_HINT_PREFIX = "Dead-code scan: withheld a verdict";
+var ENTRYPOINT_HINT_PREFIX = "Dead-code scan: no resolved import reaches";
+var DYNAMIC_HINT_PREFIX = "Dead-code scan: dynamically imported";
+var DEPENDENT_HINT_PREFIX = "Dead-code scan: used only by symbols left unknown";
+var NESTED_HINT_PREFIX = "Dead-code scan: reached through a namespace inside a namespace";
+var ESCAPED_HINT_PREFIX = "Dead-code scan: a namespace import is used as a value";
+var UNRESOLVED_HINT_PREFIX = "Dead-code scan: could not resolve";
+var UNBOUND_HINT_PREFIX = "Dead-code scan: an import with no fixed target";
+var SCRIPT_HINT_PREFIX = "Dead-code scan: classic script";
+var DUAL_MODE_HINT_PREFIX = "Dead-code scan: also runs as a plain script";
+var EVAL_HINT_PREFIX = "Dead-code scan: direct eval";
+var UNPARSEABLE_TARGET_HINT_PREFIX = "Dead-code scan: could not parse";
+var PRAGMA_HINT_PREFIX = "Dead-code scan: kept alive only by a JSX pragma";
+var TYPE_CHECK_HINT_PREFIX = "Dead-code scan: a type check, not a value";
+var KEY_SEPARATOR = "\0";
+function keyOf(path2, owner) {
+  return `${path2}${KEY_SEPARATOR}${owner}`;
+}
+var SCAN_CACHE_MAX = 4e3;
+var PARSE_SIZE_LIMIT = 2 * 1024 * 1024;
+var parseSizeLimit = PARSE_SIZE_LIMIT;
+var scanCacheLimit = SCAN_CACHE_MAX;
+var scanGeneration = 0;
+var scanCache = /* @__PURE__ */ new Map();
+function parseSizeLimitText() {
+  return `${Math.round(parseSizeLimit / 1048576)} MB` ;
+}
+async function scanCached(language, source) {
+  const key = `${language}${KEY_SEPARATOR}${createHash("sha256").update(source, "utf8").digest("hex")}`;
+  const cached2 = scanCache.get(key);
+  if (cached2) {
+    scanCache.delete(key);
+    scanCache.set(key, { scan: cached2.scan, generation: scanGeneration });
+    return cached2.scan;
+  }
+  const scan = await scanSymbols(language, source);
+  while (scanCache.size >= scanCacheLimit) {
+    const oldest = scanCache.entries().next().value;
+    if (oldest === void 0 || oldest[1].generation === scanGeneration) return scan;
+    scanCache.delete(oldest[0]);
+  }
+  scanCache.set(key, { scan, generation: scanGeneration });
+  return scan;
+}
+function isUsed(symbols, local) {
+  return symbols.references.some((r) => r.name === local) || symbols.memberUses.some((u) => u.object === local);
+}
+function escapes(symbols, local) {
+  return symbols.references.some((r) => r.name === local);
+}
+function unresolvedNames(edge, symbols) {
+  if (edge.kind === "dynamic") return "all";
+  if (edge.kind === "reexport") {
+    if (edge.starReexport || edge.namespaceReexport !== null) return "all";
+    if (edge.names.some((name2) => name2.imported === NAMESPACE_IMPORT)) return "all";
+    return new Set(edge.names.map((name2) => name2.imported));
+  }
+  const names = /* @__PURE__ */ new Set();
+  for (const name2 of edge.names) {
+    if (name2.imported === NAMESPACE_IMPORT) {
+      if (escapes(symbols, name2.local)) return "all";
+      for (const use of symbols.memberUses) if (use.object === name2.local) names.add(use.member);
+    } else if (isUsed(symbols, name2.local)) {
+      names.add(name2.imported);
+    }
+  }
+  return names;
+}
+async function readCorpus(input) {
+  scanGeneration += 1;
+  const read = input.read ?? workingTreeReader(input.projectRoot);
+  const resolver = createModuleResolver({
+    projectRoot: input.projectRoot,
+    corpus: input.corpus,
+    configs: input.configs ?? [],
+    readText: (rel) => {
+      const source = read(rel);
+      return source.kind === "text" ? source.text : null;
+    }
+  });
+  const corpus = {
+    facts: /* @__PURE__ */ new Map(),
+    unreadable: /* @__PURE__ */ new Set(),
+    unparsed: /* @__PURE__ */ new Set(),
+    oversized: /* @__PURE__ */ new Set(),
+    taintedTargets: /* @__PURE__ */ new Set(),
+    dynamicTargets: /* @__PURE__ */ new Set(),
+    importedFiles: /* @__PURE__ */ new Set(),
+    unresolved: [],
+    unboundFiles: /* @__PURE__ */ new Set(),
+    blind: false
+  };
+  const readByPattern = (rel, source) => {
+    const markdown = MARKDOWN_SUFFIXES.has(suffixOf(rel));
+    const text2 = markdown ? withoutCodeFences(source) : source;
+    const code = markdown ? markdownCode(text2) : text2;
+    for (const specifier of extractImports(code)) {
+      const resolution = resolver.resolve(rel, specifier);
+      if (resolution.kind === "files") {
+        for (const target of resolution.files) {
+          corpus.taintedTargets.add(target);
+          corpus.importedFiles.add(target);
+        }
+      } else if (resolution.kind === "unknown") {
+        corpus.unresolved.push({ from: rel, specifier, within: resolution.within, names: "all" });
+      }
+    }
+    if (COMPUTED_IMPORT.test(code)) corpus.unboundFiles.add(rel);
+  };
+  for (const rel of input.corpus) {
+    const source = read(rel);
+    if (source.kind === "absent") continue;
+    if (source.kind === "error") {
+      corpus.unreadable.add(rel);
+      corpus.blind = true;
+      continue;
+    }
+    const language = languageOf(rel);
+    const oversized = language !== null && Buffer.byteLength(source.text, "utf8") > parseSizeLimit;
+    if (oversized) corpus.oversized.add(rel);
+    const scan = language && !oversized ? await scanCached(language, source.text) : null;
+    if (!scan || !scan.ok) {
+      corpus.unreadable.add(rel);
+      if (language) corpus.unparsed.add(rel);
+      readByPattern(rel, source.text);
+      continue;
+    }
+    const symbols = scan.symbols;
+    const edges = [];
+    for (const edge of symbols.imports) {
+      const resolution = resolver.resolve(rel, edge.specifier);
+      if (resolution.kind === "unknown") {
+        const names = unresolvedNames(edge, symbols);
+        if (names === "all" || names.size > 0) corpus.unresolved.push({ from: rel, specifier: edge.specifier, within: resolution.within, names });
+        continue;
+      }
+      if (resolution.kind !== "files") continue;
+      const kind = resolution.query ? "dynamic" : edge.kind;
+      for (const target of resolution.files) {
+        corpus.importedFiles.add(target);
+        if (kind === "dynamic") corpus.dynamicTargets.add(target);
+        edges.push({ target, kind, names: edge.names, star: edge.starReexport, namespaceReexport: edge.namespaceReexport });
+      }
+    }
+    for (const prefix of symbols.dynamicPrefixes) {
+      const files = resolver.prefixFiles(rel, prefix);
+      if (files === null) {
+        corpus.unboundFiles.add(rel);
+        continue;
+      }
+      for (const target of files) {
+        corpus.dynamicTargets.add(target);
+        corpus.importedFiles.add(target);
+      }
+    }
+    if (symbols.unboundDynamic) corpus.unboundFiles.add(rel);
+    const implicit = [];
+    if (symbols.hasJsx) {
+      for (const name2 of resolver.jsxFactories(rel)) implicit.push({ name: name2, owner: null });
+      const runtimeNames = JSX_RUNTIME_NAMES.map((name2) => ({ imported: name2, local: `${IMPLICIT_BINDING}${name2}` }));
+      for (const specifier of resolver.jsxRuntimes(rel)) {
+        const resolution = resolver.resolve(rel, specifier);
+        if (resolution.kind === "files") {
+          for (const target of resolution.files) {
+            corpus.importedFiles.add(target);
+            edges.push({ target, kind: "import", names: runtimeNames, star: false, namespaceReexport: null });
+          }
+        } else if (resolution.kind === "unknown") {
+          corpus.unresolved.push({ from: rel, specifier, within: resolution.within, names: new Set(JSX_RUNTIME_NAMES) });
+        }
+      }
+      for (const { local } of runtimeNames) implicit.push({ name: local, owner: null });
+    }
+    const withImplicit = implicit.length > 0 ? { ...symbols, references: [...symbols.references, ...implicit] } : symbols;
+    corpus.facts.set(rel, {
+      symbols: withImplicit,
+      edges,
+      module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)),
+      dualMode: symbols.dualMode && !MODULE_SUFFIXES.has(suffixOf(rel))
+    });
+  }
+  return corpus;
+}
+function edgesByTarget(corpus, kind, make) {
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const [file, facts] of corpus.facts) {
+    for (const edge of facts.edges) {
+      if (edge.kind !== kind) continue;
+      const list = byTarget.get(edge.target) ?? [];
+      list.push(make(file, facts, edge));
+      byTarget.set(edge.target, list);
+    }
+  }
+  return byTarget;
+}
+function aliasesOf(path2, exposures, reexports) {
+  const aliases = [];
+  const seen = /* @__PURE__ */ new Set();
+  let nested = false;
+  const queue = [];
+  const add = (alias) => {
+    const key = `${alias.file}${KEY_SEPARATOR}${alias.name}${KEY_SEPARATOR}${alias.member ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    aliases.push(alias);
+    queue.push(alias);
+  };
+  for (const name2 of exposures) add({ file: path2, name: name2, member: null });
+  while (queue.length > 0) {
+    const alias = queue.shift();
+    if (!alias) continue;
+    for (const { file, edge } of reexports.get(alias.file) ?? []) {
+      if (edge.star && alias.name !== "default") add({ file, name: alias.name, member: alias.member });
+      if (edge.namespaceReexport !== null) {
+        if (alias.member === null) add({ file, name: edge.namespaceReexport, member: alias.name });
+        else nested = true;
+      }
+      for (const name2 of edge.names) {
+        if (name2.imported === alias.name) add({ file, name: name2.local, member: alias.member });
+        else if (name2.imported === NAMESPACE_IMPORT) {
+          if (alias.member === null) add({ file, name: name2.local, member: alias.name });
+          else nested = true;
+        }
+      }
+    }
+  }
+  return { aliases, nested };
+}
+function citeUses(citations, file, symbols, local) {
+  for (const reference of symbols.references) if (reference.name === local) citations.push({ file, owner: reference.owner });
+  for (const use of symbols.memberUses) if (use.object === local) citations.push({ file, owner: use.owner });
+}
+function citeMember(citations, file, symbols, local, member) {
+  for (const use of symbols.memberUses) if (use.object === local && use.member === member) citations.push({ file, owner: use.owner });
+}
+function citationsThrough(alias, importers) {
+  const through = { citations: [], nested: false, escapedIn: [] };
+  for (const { file, facts, edge } of importers.get(alias.file) ?? []) {
+    for (const name2 of edge.names) {
+      if (name2.imported === NAMESPACE_IMPORT) {
+        if (alias.member !== null) {
+          through.nested = true;
+          continue;
+        }
+        if (escapes(facts.symbols, name2.local)) through.escapedIn.push(file);
+        citeMember(through.citations, file, facts.symbols, name2.local, alias.name);
+        continue;
+      }
+      if (name2.imported !== alias.name) continue;
+      if (alias.member === null) {
+        citeUses(through.citations, file, facts.symbols, name2.local);
+        continue;
+      }
+      if (escapes(facts.symbols, name2.local)) through.escapedIn.push(file);
+      citeMember(through.citations, file, facts.symbols, name2.local, alias.member);
+    }
+  }
+  return through;
+}
+function publicMatcher(input) {
+  const globs = input.publicApi ?? [];
+  if (globs.length === 0) return () => false;
+  const prefix = input.publicApiPrefix ?? "";
+  return (file) => matchesAnyGlob(file, globs).matched || prefix !== "" && file.startsWith(prefix) && matchesAnyGlob(file.slice(prefix.length), globs).matched;
+}
+function unresolvedMatches(corpus, aliases) {
+  const hits2 = [];
+  for (const use of corpus.unresolved) {
+    const reaches = aliases.some(
+      (alias) => (use.within === null || use.within.some((where) => where.endsWith("/") ? alias.file.startsWith(where) : alias.file === where)) && (use.names === "all" || use.names.has(alias.name))
+    );
+    if (reaches) hits2.push(`${use.specifier} (${use.from})`);
+  }
+  return hits2;
+}
+function uncertaintyOf(path2, facts, exported, corpus, aliases, escapedIn, nested, typeCheck) {
+  const aliasFiles = [...new Set(aliases.map((alias) => alias.file))];
+  const reasons = [];
+  if (typeCheck) reasons.push(["typeCheck", [path2]]);
+  if (!facts.module) reasons.push(["script", [path2]]);
+  if (facts.symbols.directEval) reasons.push(["eval", [path2]]);
+  if (exported) {
+    const notImported = aliasFiles.filter((file) => !corpus.importedFiles.has(file));
+    if (notImported.length > 0) reasons.push(["entrypoint", notImported]);
+    const tainted = aliasFiles.filter((file) => corpus.taintedTargets.has(file));
+    if (tainted.length > 0) reasons.push(["tainted", tainted]);
+    const dynamic = aliasFiles.filter((file) => corpus.dynamicTargets.has(file));
+    if (dynamic.length > 0) reasons.push(["dynamic", dynamic]);
+    const unresolved = unresolvedMatches(corpus, aliases);
+    if (unresolved.length > 0) reasons.push(["unresolved", unresolved]);
+    if (escapedIn.length > 0) reasons.push(["escaped", escapedIn]);
+    if (nested) reasons.push(["nested", aliasFiles]);
+    if (corpus.unboundFiles.size > 0) reasons.push(["unbound", [...corpus.unboundFiles]]);
+  }
+  const first = reasons[0];
+  return first ? { uncertain: first[0], because: [...new Set(first[1])] } : { uncertain: null, because: [] };
+}
+function candidatesOf(input, corpus) {
+  const includeTypes = input.includeTypes === true;
+  const reexports = edgesByTarget(corpus, "reexport", (file, _facts, edge) => ({ file, edge }));
+  const importers = edgesByTarget(corpus, "import", (file, facts, edge) => ({ file, facts, edge }));
+  const isPublicPath = publicMatcher(input);
+  const candidates = [];
+  for (const path2 of input.targets) {
+    const facts = corpus.facts.get(path2);
+    if (!facts) continue;
+    const byOwner = /* @__PURE__ */ new Map();
+    for (const declaration of facts.symbols.declarations) {
+      if (!includeTypes && declaration.kind === "type") continue;
+      const owner = ownerKeyOf(declaration.kind, declaration.name);
+      const existing = byOwner.get(owner);
+      if (existing) {
+        existing.symbol.start = Math.min(existing.symbol.start, declaration.start);
+        existing.symbol.end = Math.max(existing.symbol.end, declaration.end);
+        existing.symbol.exported = existing.symbol.exported || declaration.exported;
+        existing.effect = existing.effect || declaration.effect;
+        existing.typeCheck = existing.typeCheck || declaration.typeCheck;
+        for (const exposure of declaration.exposures) existing.exposures.add(exposure);
+        continue;
+      }
+      byOwner.set(owner, {
+        symbol: {
+          path: path2,
+          name: declaration.name,
+          kind: declaration.kind,
+          exported: declaration.exported,
+          start: declaration.start,
+          end: declaration.end
+        },
+        exposures: new Set(declaration.exposures),
+        effect: declaration.effect,
+        typeCheck: declaration.typeCheck
+      });
+    }
+    for (const [owner, { symbol, exposures, effect, typeCheck }] of byOwner) {
+      const citations = [];
+      citeUses(citations, path2, facts.symbols, symbol.name);
+      const { aliases, nested: nestedAlias } = aliasesOf(path2, [...exposures], reexports);
+      let nested = nestedAlias;
+      const escapedIn = [];
+      for (const alias of aliases) {
+        const through = citationsThrough(alias, importers);
+        citations.push(...through.citations);
+        if (through.nested) nested = true;
+        escapedIn.push(...through.escapedIn);
+      }
+      const aliasFiles = [...new Set(aliases.map((alias) => alias.file))];
+      const { uncertain, because } = uncertaintyOf(path2, facts, exposures.size > 0, corpus, aliases, escapedIn, nested, typeCheck);
+      candidates.push({
+        symbol,
+        key: keyOf(path2, owner),
+        citations,
+        aliasFiles,
+        uncertain,
+        because,
+        isPublic: aliasFiles.some(isPublicPath),
+        effect
+      });
+    }
+  }
+  return candidates;
+}
+function reach(candidates, roots, blocked) {
+  const known = new Set(candidates.map((candidate) => candidate.key));
+  const cites = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    for (const citation of candidate.citations) {
+      if (citation.owner === null) continue;
+      const ownerKey = keyOf(citation.file, citation.owner);
+      if (!known.has(ownerKey) || ownerKey === candidate.key) continue;
+      const list = cites.get(ownerKey) ?? [];
+      list.push(candidate.key);
+      cites.set(ownerKey, list);
+    }
+  }
+  const reached = /* @__PURE__ */ new Set();
+  let frontier = [...roots].filter((key) => !blocked.has(key));
+  for (const key of frontier) reached.add(key);
+  while (frontier.length > 0) {
+    const next = [];
+    for (const key of frontier) {
+      for (const cited of cites.get(key) ?? []) {
+        if (reached.has(cited) || blocked.has(cited)) continue;
+        reached.add(cited);
+        next.push(cited);
+      }
+    }
+    frontier = next;
+  }
+  return reached;
+}
+function isCertainRoot(candidate, candidateKeys) {
+  if (candidate.effect) return true;
+  return candidate.citations.some((citation) => {
+    if (citation.owner === null) return true;
+    const ownerKey = keyOf(citation.file, citation.owner);
+    return ownerKey !== candidate.key && !candidateKeys.has(ownerKey);
+  });
+}
+async function findDeadSymbols(input) {
+  const corpus = await readCorpus(input);
+  const candidates = candidatesOf(input, corpus);
+  const candidateKeys = new Set(candidates.map((candidate) => candidate.key));
+  const certain = new Set(candidates.filter((c) => isCertainRoot(c, candidateKeys)).map((c) => c.key));
+  const withoutPublic = reach(candidates, certain, /* @__PURE__ */ new Set());
+  const publicRoots = /* @__PURE__ */ new Set([...certain, ...candidates.filter((c) => c.isPublic).map((c) => c.key)]);
+  const live = reach(candidates, publicRoots, /* @__PURE__ */ new Set());
+  const uncertainRoots = new Set(candidates.filter((c) => c.uncertain !== null).map((c) => c.key));
+  const maybe = reach(candidates, uncertainRoots, live);
+  const dead = [];
+  const unknown2 = [];
+  const publicExempted = [];
+  for (const candidate of candidates) {
+    if (candidate.isPublic && !withoutPublic.has(candidate.key)) publicExempted.push(candidate.symbol);
+    if (live.has(candidate.key)) continue;
+    if (maybe.has(candidate.key) || corpus.blind) unknown2.push(candidate.symbol);
+    else dead.push(candidate.symbol);
+  }
+  return {
+    dead,
+    unknown: unknown2,
+    publicExempted,
+    unreadable: [...corpus.unreadable],
+    oversized: input.targets.filter((path2) => corpus.oversized.has(path2)),
+    hints: hintsFor(input, corpus, candidates, dead, unknown2, publicExempted)
+  };
+}
+function listed(items) {
+  const shown = items.slice(0, HINT_LIST_LIMIT).join(", ");
+  return items.length > HINT_LIST_LIMIT ? `${shown} and ${items.length - HINT_LIST_LIMIT} more` : shown;
+}
+function hintsFor(input, corpus, candidates, dead, unknown2, publicExempted) {
+  const hints = [];
+  const unknownKeys = new Set(unknown2.map((symbol) => keyOf(symbol.path, ownerKeyOf(symbol.kind, symbol.name))));
+  const unknownBy = (reason) => candidates.filter((c) => c.uncertain === reason && unknownKeys.has(c.key));
+  const sourcesOf = (group) => listed([...new Set(group.flatMap((c) => c.because))]);
+  if ((input.publicApi ?? []).length === 0 && dead.some((symbol) => symbol.exported)) {
+    hints.push(
+      `${PUBLIC_API_HINT_PREFIX} in .rsct.json, so every export is judged by references inside this repository alone. If consumers live outside it (a published library, or a framework that loads files by convention), declare those paths there or their exports will read as dead.`
+    );
+  }
+  if (publicExempted.length > 0) {
+    hints.push(
+      `${PUBLIC_EXEMPTED_HINT_PREFIX} ${publicExempted.length} export(s) nothing in this repository uses: ${listed(publicExempted.map((symbol) => `${symbol.path}:${symbol.name}`))}.`
+    );
+  }
+  const tainted = unknownBy("tainted");
+  if (corpus.blind || tainted.length > 0) {
+    hints.push(
+      `${UNREADABLE_HINT_PREFIX} on ${corpus.blind ? unknown2.length : tainted.length} symbol(s): a file the scan could not parse, and read only for its imports, may hold the only reference. Files: ${listed([...corpus.unreadable])}.`
+    );
+  }
+  const pragmaOnly = candidates.filter(
+    (c) => c.citations.length > 0 && c.citations.every((citation) => citation.owner === JSX_PRAGMA_OWNER && citation.file === c.symbol.path)
+  );
+  if (pragmaOnly.length > 0) {
+    hints.push(
+      `${PRAGMA_HINT_PREFIX}: ${listed(pragmaOnly.map((c) => `${c.symbol.path}:${c.symbol.name}`))}. A @jsx comment in the same file names it and nothing else uses it; if that file's JSX is not compiled with that factory, it is dead.`
+    );
+  }
+  const dualModeDead = dead.filter((symbol) => corpus.facts.get(symbol.path)?.dualMode === true);
+  if (dualModeDead.length > 0) {
+    hints.push(
+      `${DUAL_MODE_HINT_PREFIX}: ${listed([...new Set(dualModeDead.map((symbol) => symbol.path))])} check(s) for \`module\`, \`exports\` or \`define\` before exporting, so a page can also load them with a script tag. The ${dualModeDead.length} symbol(s) reported there are referenced nowhere in this repository; if a page calls them as globals, keep them through the developer.`
+    );
+  }
+  const unparsedTargets = input.targets.filter((path2) => corpus.unparsed.has(path2));
+  if (unparsedTargets.length > 0) {
+    hints.push(
+      `${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)} \u2014 a syntax the grammar does not know, or over ${parseSizeLimitText()} \u2014 so dead code in them is not checked.`
+    );
+  }
+  const groups = [
+    ["typeCheck", TYPE_CHECK_HINT_PREFIX, (g) => `: ${listed(g.map((c) => `${c.symbol.path}:${c.symbol.name}`))} \u2014 a \`_name: Type = value\` declaration exists for the compiler to check a type; nothing reads it, so it is left unknown, never reported dead.`],
+    ["script", SCRIPT_HINT_PREFIX, (g) => `: ${sourcesOf(g)} declare(s) no import or export, so their top-level names are shared with every other script and page. ${g.length} symbol(s) left unknown.`],
+    ["eval", EVAL_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} can reach any binding of its file. ${g.length} symbol(s) left unknown.`],
+    ["entrypoint", ENTRYPOINT_HINT_PREFIX, (g) => ` ${sourcesOf(g)}, so what it exports cannot be told apart from an entrypoint's. ${g.length} export(s) left unknown rather than reported dead. Declare the file in "public_api" if it is an entrypoint or a published surface.`],
+    ["dynamic", DYNAMIC_HINT_PREFIX, (g) => ` ${sourcesOf(g)}: import(), require() or a query import does not say which export it uses, so ${g.length} export(s) are left unknown rather than reported dead.`],
+    ["unresolved", UNRESOLVED_HINT_PREFIX, (g) => ` ${sourcesOf(g)}: an import this scan cannot follow may name ${g.length} export(s), left unknown. Declare the alias in tsconfig "paths" to make them precise.`],
+    ["escaped", ESCAPED_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} (passed along, spread, destructured or read with a computed key), so any of its exports may be used. ${g.length} export(s) left unknown.`],
+    ["nested", NESTED_HINT_PREFIX, (g) => ` (ns.inner.name), which this scan does not follow: ${g.length} export(s) left unknown.`],
+    ["unbound", UNBOUND_HINT_PREFIX, (g) => ` (import(x), require(x), a glob with no fixed directory) in ${sourcesOf(g)}: any export here may be its target, so ${g.length} export(s) are left unknown.`]
+  ];
+  for (const [reason, prefix, text2] of groups) {
+    const group = unknownBy(reason);
+    if (group.length > 0) hints.push(`${prefix}${text2(group)}`);
+  }
+  const dependent = corpus.blind ? [] : candidates.filter((c) => c.uncertain === null && unknownKeys.has(c.key));
+  if (dependent.length > 0) {
+    hints.push(
+      `${DEPENDENT_HINT_PREFIX}: ${listed(dependent.map((c) => `${c.symbol.path}:${c.symbol.name}`))}. They live or die with the symbols above.`
+    );
+  }
+  return hints;
+}
+
+// src/lib/dead-code/review-gate.ts
+var UNCOVERED_LANGUAGE_HINT_PREFIX = "Dead-code scan: not checked";
+var OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX = "Dead-code scan: references from other languages are not read";
+var UNSTAGED_MENTION_HINT_PREFIX = "Files not staged yet mention the refused symbol(s)";
+var DECLARATION_PREVIEW = 400;
+var NO_REFERENCES_TO_CODE = /* @__PURE__ */ new Set(["css", "sql", "scss", "sass", "less"]);
+var analysisHook = null;
+function publicApiDigest(globs) {
+  if (!globs || globs.length === 0) return null;
+  return createHash("sha256").update(JSON.stringify([...new Set(globs)].sort()), "utf8").digest("hex");
+}
+function unstagedMentions(projectRoot, stagedPaths, names) {
+  const repo = openSweepRepo(projectRoot);
+  if (!repo || names.length === 0) return [];
+  const staged = new Set(stagedPaths);
+  const pending = [.../* @__PURE__ */ new Set([...readWorktreeChangedPaths(repo) ?? [], ...readUntrackedPaths(repo) ?? []])];
+  const patterns = [...new Set(names)].map((name2) => ({ name: name2, re: new RegExp(`(^|[^\\w$])${name2.replace(/\$/g, "\\$")}(?![\\w$])`) }));
+  const mentions = [];
+  for (const path2 of pending) {
+    if (staged.has(path2) || corpusFrom([path2]).length === 0) continue;
+    let text2;
+    try {
+      text2 = readFileSync(join(repo.toplevel, path2), "utf8");
+    } catch {
+      continue;
+    }
+    const hits2 = patterns.filter((pattern) => pattern.re.test(text2)).map((pattern) => pattern.name);
+    if (hits2.length > 0) mentions.push(`${path2} (${hits2.join(", ")})`);
+  }
+  return mentions;
+}
+function declarationSha256(source, symbol) {
+  const text2 = source.slice(symbol.start, symbol.end).replace(/\r\n/g, "\n");
+  return createHash("sha256").update(text2, "utf8").digest("hex");
+}
+function keyOf2(path2, name2) {
+  return `${path2}\0${name2}`;
+}
+function mergeDeadCodeKeeps(existing, granted, specRef, at, known) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const record2 of existing ?? []) {
+    if (known && !known.has(record2.path)) continue;
+    byKey.set(deadCodeKeepKey(record2.path, record2.name, record2.declaration_sha256), record2);
+  }
+  for (const keep of granted) {
+    byKey.set(deadCodeKeepKey(keep.path, keep.name, keep.declaration_sha256), {
+      path: keep.path,
+      name: keep.name,
+      declaration_sha256: keep.declaration_sha256,
+      note: keep.note,
+      spec_ref: specRef,
+      at
+    });
+  }
+  return [...byKey.values()];
+}
+function readDeadCodeKeeps(value) {
+  if (!Array.isArray(value)) return [];
+  const keeps = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record2 = entry;
+    if (typeof record2.path === "string" && typeof record2.name === "string" && typeof record2.declaration_sha256 === "string" && typeof record2.note === "string") {
+      keeps.push({
+        path: record2.path,
+        name: record2.name,
+        declaration_sha256: record2.declaration_sha256,
+        note: record2.note
+      });
+    }
+  }
+  return keeps;
+}
+function auditBoundKeeps(keeps, decisions) {
+  return keeps.filter((keep) => decisions.has(deadCodeKeepKey(keep.path, keep.name, keep.declaration_sha256)));
+}
+function keepPrunePaths(projectRoot) {
+  const repo = openSweepRepo(projectRoot);
+  if (!repo) return null;
+  const known = readKnownPaths(repo);
+  const untracked = readUntrackedPaths(repo);
+  if (!known || !untracked) return null;
+  for (const path2 of untracked) known.add(path2);
+  return known;
+}
+function languageBucket(path2) {
+  const classified = classifyPath(path2, null);
+  if (classified.bucket === "supported" || classified.bucket === "unsupported") return { code: true, language: classified.language };
+  return { code: false, language: null };
+}
+function notCheckedHints(paths, roots, exempt) {
+  const hints = [];
+  const exempted = paths.filter((path2) => exempt.has(path2));
+  if (exempted.length > 0) {
+    hints.push(
+      `${UNCOVERED_LANGUAGE_HINT_PREFIX} in ${exempted.join(", ")}: the developer allowed these versions without a mechanical check (vendored, generated or unscannable), so dead code in them is uncovered, not cleared.`
+    );
+  }
+  const rest = paths.filter((path2) => !exempt.has(path2));
+  const output = rest.filter((path2) => languageOf(path2) !== null && isBuildOutput(path2, roots));
+  if (output.length > 0) {
+    hints.push(
+      `${UNCOVERED_LANGUAGE_HINT_PREFIX} in ${output.join(", ")}: build output (dist/, build/ or coverage/ at a package root) and vendored code are outside the dead-code scan, so dead code in them is uncovered, not cleared.`
+    );
+  }
+  const uncovered = rest.filter((path2) => languageOf(path2) === null && languageBucket(path2).code);
+  if (uncovered.length > 0) {
+    hints.push(
+      `${UNCOVERED_LANGUAGE_HINT_PREFIX} in ${uncovered.join(", ")}: this release reads JavaScript and TypeScript only, so dead code in those files is uncovered, not cleared.`
+    );
+  }
+  return hints;
+}
+function otherLanguageHint(known, corpus, roots) {
+  const suffixes = /* @__PURE__ */ new Map();
+  for (const path2 of known) {
+    if (corpus.has(path2) || isBuildOutput(path2, roots)) continue;
+    const bucket = languageBucket(path2);
+    if (!bucket.code || bucket.language === null || NO_REFERENCES_TO_CODE.has(bucket.language)) continue;
+    const dot = path2.lastIndexOf(".");
+    const suffix = dot > path2.lastIndexOf("/") ? path2.slice(dot) : path2.slice(path2.lastIndexOf("/") + 1);
+    suffixes.set(suffix, (suffixes.get(suffix) ?? 0) + 1);
+  }
+  if (suffixes.size === 0) return [];
+  const total = [...suffixes.values()].reduce((sum, n) => sum + n, 0);
+  return [
+    `${OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX} (${total} file(s): ${[...suffixes.keys()].sort().join(", ")}): an export used only from them, through a bridge this scan cannot see, reads as dead. Keep it through the developer if so.`
+  ];
+}
+function memoised(reader) {
+  const cache = /* @__PURE__ */ new Map();
+  const read = (rel) => {
+    const cached2 = cache.get(rel);
+    if (cached2) return cached2;
+    const fresh = reader(rel);
+    cache.set(rel, fresh);
+    return fresh;
+  };
+  const text2 = (rel) => {
+    const source = read(rel);
+    return source.kind === "text" ? source.text : "";
+  };
+  return { read, text: text2 };
+}
+function indexReader(repo, paths, blobs) {
+  const oids = paths.map((path2) => blobs.get(path2)).filter((oid) => oid !== void 0);
+  const read = readBlobTexts(repo, oids);
+  if (!read) return null;
+  return (rel) => {
+    const oid = blobs.get(rel);
+    if (oid === void 0) return { kind: "absent" };
+    if (!read.texts.has(oid) && !read.failed.has(oid)) {
+      const late2 = readBlobTexts(repo, [oid]);
+      if (!late2) return { kind: "error" };
+      for (const [id, text3] of late2.texts) read.texts.set(id, text3);
+      for (const id of late2.failed) read.failed.add(id);
+    }
+    if (read.failed.has(oid)) return { kind: "error" };
+    const text2 = read.texts.get(oid);
+    return text2 === void 0 ? { kind: "absent" } : { kind: "text", text: normalizeLineEndings(text2) };
+  };
+}
+function worktreeReader(repo, paths) {
+  const disk = workingTreeReader(repo.toplevel);
+  const sparse = readSkipWorktreePaths(repo);
+  if (!sparse) return null;
+  if (sparse.size === 0) return disk;
+  const index = readIndexEntries(repo);
+  if (!index) return null;
+  const fromIndex = indexReader(repo, paths.filter((path2) => sparse.has(path2)), index.blobs);
+  if (!fromIndex) return null;
+  return (rel) => {
+    const source = disk(rel);
+    return source.kind === "absent" && sparse.has(rel) ? fromIndex(rel) : source;
+  };
+}
+async function analyse(args2) {
+  const empty = { ok: true, pending: [], stale: [], kept: [], publicExempted: [], unknown: 0, hints: [] };
+  const repo = openSweepRepo(args2.projectRoot);
+  const candidates = args2.paths.filter((path2) => languageOf(path2) !== null && !args2.exempt.has(path2));
+  if (!repo) {
+    const hints2 = notCheckedHints(args2.paths, [""], args2.exempt);
+    return candidates.length === 0 ? { ...empty, hints: hints2 } : { ...empty, hints: [...hints2, "Dead-code scan skipped: not inside a git repository."] };
+  }
+  const index = args2.source === "index" ? readIndexEntries(repo) : null;
+  if (args2.source === "index" && !index) return { ok: false, reason: "could not list the staged files for the dead-code scan" };
+  let known;
+  if (index) {
+    known = [...index.paths];
+  } else {
+    const tracked = readKnownPaths(repo);
+    const untracked = readUntrackedPaths(repo);
+    if (!tracked || !untracked) return { ok: false, reason: "could not list the repository files for the dead-code scan" };
+    known = [.../* @__PURE__ */ new Set([...tracked, ...untracked])];
+  }
+  const roots = packageRootsOf(known);
+  const hints = notCheckedHints(args2.paths, roots, args2.exempt);
+  const targets = candidates.filter((path2) => !isBuildOutput(path2, roots));
+  if (targets.length === 0) return { ...empty, hints };
+  const corpus = corpusFrom(known);
+  for (const target of targets) {
+    if (!corpus.includes(target)) corpus.push(target);
+  }
+  const configs = configFilesFrom(known);
+  const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : worktreeReader(repo, [...corpus, ...configs]);
+  if (!base) return { ok: false, reason: "could not read the contents for the dead-code scan" };
+  const bytes = memoised(base);
+  const result = await findDeadSymbols({
+    projectRoot: repo.toplevel,
+    corpus,
+    targets,
+    configs,
+    ...args2.publicApi !== void 0 && { publicApi: args2.publicApi },
+    publicApiPrefix: repo.prefix,
+    read: bytes.read
+  });
+  if (result.oversized.length > 0) {
+    return {
+      ok: false,
+      reason: `too large for the dead-code scan to parse (over ${parseSizeLimitText()}): ${result.oversized.join(", ")}`,
+      hints: ["List each one in exempt_files of rsct_phase_review_complete with its reason \u2014 the developer confirms it in the dialog \u2014 or take it out of the change."],
+      paths: result.oversized
+    };
+  }
+  const describe2 = (symbol, keepStale) => {
+    const text2 = bytes.text(symbol.path);
+    return {
+      path: symbol.path,
+      name: symbol.name,
+      kind: symbol.kind,
+      exported: symbol.exported,
+      declaration_sha256: declarationSha256(text2, symbol),
+      declaration: text2.slice(symbol.start, symbol.end).slice(0, DECLARATION_PREVIEW),
+      keep_stale: keepStale
+    };
+  };
+  const keepByKey = new Map(args2.keeps.map((keep) => [keyOf2(keep.path, keep.name), keep]));
+  const analysis = { ...empty, hints: [...hints, ...result.hints], unknown: result.unknown.length };
+  for (const symbol of result.dead) {
+    const current = describe2(symbol, false);
+    const keep = keepByKey.get(keyOf2(symbol.path, symbol.name));
+    if (!keep) analysis.pending.push(current);
+    else if (keep.declaration_sha256 !== current.declaration_sha256) analysis.stale.push({ ...current, keep_stale: true });
+    else analysis.kept.push(current);
+  }
+  if (result.dead.some((symbol) => symbol.exported)) analysis.hints.push(...otherLanguageHint(known, new Set(corpus), roots));
+  analysis.publicExempted = result.publicExempted.map((symbol) => describe2(symbol, false));
+  return analysis;
+}
+var stagedMemo = null;
+function stagedKey(args2) {
+  if (args2.source !== "index") return null;
+  const repo = openSweepRepo(args2.projectRoot);
+  const fingerprint = repo ? readIndexFingerprint(repo) : null;
+  if (!repo || !fingerprint) return null;
+  const inputs = JSON.stringify([repo.toplevel, repo.prefix, args2.paths, args2.publicApi ?? null, args2.keeps, [...args2.exempt].sort()]);
+  return createHash("sha256").update(fingerprint).update(inputs).digest("hex");
+}
+async function guardedAnalyse(args2) {
+  try {
+    const key = stagedKey(args2);
+    if (key !== null && stagedMemo?.key === key) return stagedMemo.result;
+    analysisHook?.();
+    const result = await analyse(args2);
+    if (key !== null && result.ok) stagedMemo = { key, result };
+    return result;
+  } catch (error2) {
+    return { ok: false, reason: `the dead-code scan failed: ${error2 instanceof Error ? error2.message : String(error2)}` };
+  }
+}
+async function checkDeadCode(args2) {
+  const analysis = await guardedAnalyse({
+    projectRoot: args2.projectRoot,
+    paths: args2.touched,
+    publicApi: args2.publicApi,
+    keeps: args2.keeps,
+    exempt: new Set(args2.exempt ?? []),
+    source: "working_tree"
+  });
+  if (!analysis.ok) {
+    return { ok: false, reject_kind: "dead_code_unreadable", reason: analysis.reason, hints: [analysis.reason, ...analysis.hints ?? []], pending: [] };
+  }
+  const blocking = [...analysis.stale, ...analysis.pending];
+  if (blocking.length === 0) {
+    return {
+      ok: true,
+      kept: analysis.kept,
+      public_exempted: analysis.publicExempted,
+      unknown: analysis.unknown,
+      hints: analysis.hints
+    };
+  }
+  const names = blocking.map((p) => `${p.path}:${p.name}`).join(", ");
+  const parts2 = [];
+  if (analysis.pending.length > 0) parts2.push(`${analysis.pending.length} referenced nowhere`);
+  if (analysis.stale.length > 0) parts2.push(`${analysis.stale.length} kept about different declaration bytes`);
+  return {
+    ok: false,
+    reject_kind: analysis.stale.length > 0 ? "dead_code_keep_stale" : "dead_code_remaining",
+    reason: `dead code in the touched files (${parts2.join("; ")}): ${names}`,
+    hints: [
+      "Remove each one, or put it to the developer and pass it back in dead_code_keeps with the declaration_sha256 from pending_dead_code and the reason they gave.",
+      ...analysis.hints
+    ],
+    pending: blocking
+  };
+}
+async function checkStagedDeadCode(args2) {
+  const analysis = await guardedAnalyse({
+    projectRoot: args2.projectRoot,
+    paths: args2.stagedPaths,
+    publicApi: args2.publicApi,
+    keeps: auditBoundKeeps(args2.keeps, args2.keepDecisions),
+    exempt: new Set(args2.exempt ?? []),
+    source: "index"
+  });
+  if (!analysis.ok) {
+    return {
+      ok: false,
+      reject_kind: "dead_code_staged",
+      reason: analysis.reason,
+      hints: [analysis.reason, ...analysis.hints ?? []],
+      paths: analysis.paths ?? [...args2.stagedPaths]
+    };
+  }
+  const digest = publicApiDigest(args2.publicApi);
+  const approvals = args2.publicApiApprovals ?? /* @__PURE__ */ new Set();
+  const unapproved = analysis.publicExempted.filter(
+    (p) => digest === null || !approvals.has(publicApiApprovalKey(digest, p.path, p.name, p.declaration_sha256))
+  );
+  const blocking = [...analysis.stale, ...analysis.pending];
+  if (blocking.length === 0 && unapproved.length === 0) {
+    return { ok: true, kept: analysis.kept.length, unknown: analysis.unknown, hints: analysis.hints };
+  }
+  if (blocking.length === 0) {
+    const exempted = unapproved.map((p) => `${p.path}:${p.name}`);
+    return {
+      ok: false,
+      reject_kind: "dead_code_staged",
+      reason: `${exempted.length} staged export(s) nothing here uses are exempt through "public_api" without the developer's recorded approval: ${exempted.join(", ")}`,
+      hints: [
+        'Run rsct_phase_review_start / _complete over these paths: the REVIEW puts every "public_api" exemption to the developer and records their answer in the audit log.',
+        ...analysis.hints
+      ],
+      paths: [...new Set(unapproved.map((p) => p.path))]
+    };
+  }
+  const named = blocking.map((p) => `${p.path}:${p.name}`);
+  const mentions = unstagedMentions(args2.projectRoot, args2.stagedPaths, blocking.map((p) => p.name));
+  return {
+    ok: false,
+    reject_kind: "dead_code_staged",
+    reason: analysis.stale.length > 0 ? `${named.length} staged symbol(s) are dead, ${analysis.stale.length} of them kept about different declaration bytes: ${named.join(", ")}` : `${named.length} staged symbol(s) are referenced nowhere in what is staged: ${named.join(", ")}`,
+    hints: [
+      "If a caller exists but is not staged, stage it in this same commit. Otherwise a completed REVIEW either removes them or records the developer keeping them, through the developer-only dialog: run rsct_phase_review_start / _complete over these paths.",
+      ...mentions.length > 0 ? [`${UNSTAGED_MENTION_HINT_PREFIX}: ${mentions.slice(0, 10).join(", ")}${mentions.length > 10 ? ` and ${mentions.length - 10} more` : ""}.`] : [],
+      ...analysis.hints
+    ],
+    paths: [...new Set(blocking.map((p) => p.path))]
+  };
 }
 
 // src/lib/dev-approval.ts
@@ -42113,7 +44633,7 @@ var requestCommitInputSchema = external_exports.object({
 }).strict();
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: "object",
     properties: {
@@ -42276,8 +44796,61 @@ async function requestCommitHandler(rawInput, internal = {}) {
       hints: withAdvisories([check2.reason])
     };
   };
+  const runDeadCodeCheck = async (entries) => {
+    const paths = entries.map((entry) => entry.path);
+    const ceiling = deriveAuditCeiling(projectRoot, config2 ?? null, "");
+    try {
+      return await checkStagedDeadCode({
+        projectRoot,
+        stagedPaths: paths,
+        publicApi: config2?.public_api,
+        keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
+        keepDecisions: ceiling.deadCodeKeepDecisions,
+        publicApiApprovals: ceiling.publicApiApprovals,
+        exempt: entries.filter((entry) => entry.unverified).map((entry) => entry.path)
+      });
+    } catch (error2) {
+      const reason = `the dead-code check failed: ${error2 instanceof Error ? error2.message : String(error2)}`;
+      return { ok: false, reject_kind: "dead_code_staged", reason, hints: [reason], paths };
+    }
+  };
+  const rejectDeadCode = (check2, stage) => {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.rejected",
+        tool: "rsct_request_commit",
+        reject_kind: check2.reject_kind,
+        reason: check2.reason,
+        branch: gitState.branch,
+        paths: check2.paths,
+        stage
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: check2.reject_kind,
+      reason: check2.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([check2.reason, ...check2.hints])
+    };
+  };
   const sweepBefore = await runSweepCheck();
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, "before_authorization");
+  const deadBefore = await runDeadCodeCheck(sweepBefore.checked);
+  if (!deadBefore.ok) return rejectDeadCode(deadBefore, "before_authorization");
   let channel;
   let authorizedVia;
   let approval = null;
@@ -42598,6 +45171,8 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
   }
   const sweepAtCommit = await runSweepCheck();
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, "before_commit");
+  const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked);
+  if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, "before_commit");
   let reservedToken = null;
   let reservedFreeBudget = null;
   let freeNewlyLocked = false;
@@ -42780,9 +45355,13 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       after: commit.sha_after,
       checked: sweepAtCommit.checked
     });
+    const unverifiedAtCommit = new Set(sweepAtCommit.checked.filter((c) => c.unverified).map((c) => c.path));
+    const deadAfterHook = committed.rewrites.length > 0 ? await runDeadCodeCheck(committed.rewrites.map((r) => ({ path: r.path, unverified: unverifiedAtCommit.has(r.path) }))) : null;
+    const deadRewritten = new Set(deadAfterHook && !deadAfterHook.ok ? deadAfterHook.paths : []);
+    const cleanRewrites = committed.rewrites.filter((r) => !deadRewritten.has(r.path));
     const state = readPhaseState(projectRoot).state ?? {};
     const at = now.toISOString();
-    const stamps = committed.rewrites.map((r) => {
+    const stamps = cleanRewrites.map((r) => {
       const original = ledgerEntries(state.review_sweep, r.path).find(
         (e) => e.blob === sweepAtCommit.checked.find((c) => c.path === r.path)?.blob
       );
@@ -42793,9 +45372,9 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       );
       return { path: r.path, entry: sweepEntry(r.blob, "clean", original?.migrations ?? [], "hook_rewrite", original?.spec_ref ?? "hook_rewrite", at) };
     });
-    if (committed.rewrites.length > 0) {
+    if (cleanRewrites.length > 0) {
       bookkeepingHints.push(
-        `\u2139 a pre-commit hook rewrote ${committed.rewrites.map((r) => r.path).join(", ")} \u2014 the committed bytes carry no comment and were re-stamped.`
+        `\u2139 a pre-commit hook rewrote ${cleanRewrites.map((r) => r.path).join(", ")} \u2014 the committed bytes carry no comment and no dead code, and were re-stamped.`
       );
     }
     const next = { ...state };
@@ -42805,19 +45384,20 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       if (open.length === 0) delete next.review_drift;
       else next.review_drift = { ...state.review_drift, paths: open };
     }
-    if (committed.drift.length > 0) {
-      sweepDrift = committed.drift;
-      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at };
+    const drift = [.../* @__PURE__ */ new Set([...committed.drift, ...deadRewritten])];
+    if (drift.length > 0) {
+      sweepDrift = drift;
+      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: drift, at };
       appendAudit(
         projectRoot,
-        { event: "review.commit_drift", tool: "rsct_request_commit", paths: committed.drift, sha_after: committed.full_sha ?? commit.sha_after },
+        { event: "review.commit_drift", tool: "rsct_request_commit", paths: drift, sha_after: committed.full_sha ?? commit.sha_after },
         config2?.audit
       );
       bookkeepingHints.push(
-        `\u26A0 the commit landed code no REVIEW covers (${committed.drift.join(", ")}) \u2014 most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`
+        `\u26A0 the commit landed code no REVIEW covers (${drift.join(", ")}) \u2014 most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`
       );
     }
-    if (stamps.length > 0 || committed.drift.length > 0 || state.review_drift) {
+    if (stamps.length > 0 || drift.length > 0 || state.review_drift) {
       const w = writePhaseState(projectRoot, next);
       if (!w.ok) {
         bookkeepingHints.push(`\u26A0 could not record the post-commit sweep result in phase-state (${w.reason}).`);
@@ -42936,6 +45516,7 @@ message: ${input.message}` + gateDialogFooter(projectRoot, config2)
       freeSummary.locked ? `Free commit on '${freeSummary.plan_slug}' \u2014 budget is now LOCKED (${freeSummary.locked_reason}). Further commits need a per-action dev_approval or a batch token (rsct_plan_authorize).` : `Free (dialog-free) commit on '${freeSummary.plan_slug}' \u2014 ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`
     );
   }
+  hints.push(...deadAtCommit.hints);
   hints.push(...bookkeepingHints);
   const afields = auditFields(audit);
   if (afields.audit_error !== null) {
@@ -44809,324 +47390,6 @@ async function requestRebaseHandler(rawInput, internal = {}) {
 
 // src/tools/phase-verification-start.ts
 init_esm_shims();
-
-// src/lib/reverse-dep-walk.ts
-init_esm_shims();
-var DEFAULT_LANG_GLOBS = [
-  "**/*.ts",
-  "**/*.tsx",
-  "**/*.js",
-  "**/*.jsx",
-  "**/*.mjs",
-  "**/*.cjs"
-];
-var DEFAULT_EXCLUDE_GLOBS = [
-  "**/node_modules/**",
-  "**/dist/**",
-  "**/build/**",
-  "**/.git/**",
-  "**/coverage/**"
-];
-var DEFAULT_MAX_DEPTH = 2;
-var DEFAULT_LANG_SUFFIXES = ".ts, .tsx, .js, .jsx, .mjs, .cjs";
-var JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/;
-var RESOLVE_EXTENSIONS = [
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs"
-];
-var INDEX_RESOLUTIONS = [
-  "/index.ts",
-  "/index.tsx",
-  "/index.js",
-  "/index.jsx",
-  "/index.mjs",
-  "/index.cjs"
-];
-var IMPORT_PATTERNS = [
-  /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
-  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g
-];
-var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
-var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
-function relPosix(projectRoot, abs) {
-  return toPosix(relative(projectRoot, abs));
-}
-function seedIsCoverable(rel, langGlobs = DEFAULT_LANG_GLOBS) {
-  if (isAbsolute(rel) || rel.startsWith("../")) return false;
-  return matchesAnyGlob(rel, langGlobs).matched;
-}
-function walkFiles(root, langGlobs, excludeGlobs) {
-  const results = [];
-  const recurse = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry.name);
-      const rel = relPosix(root, full);
-      if (entry.isDirectory()) {
-        if (matchesAnyGlob(`${rel}/probe`, excludeGlobs).matched) continue;
-        recurse(full);
-      } else if (entry.isFile()) {
-        if (matchesAnyGlob(rel, excludeGlobs).matched) continue;
-        if (matchesAnyGlob(rel, langGlobs).matched) results.push(full);
-      }
-    }
-  };
-  recurse(root);
-  return results;
-}
-function extractImports(content) {
-  const imports = /* @__PURE__ */ new Set();
-  for (const re of IMPORT_PATTERNS) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(content)) !== null) {
-      const spec = m[1];
-      if (spec) imports.add(spec);
-    }
-  }
-  return [...imports];
-}
-var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
-  [".js", [".ts", ".tsx"]]
-]);
-function hasExactEntry(path2, entries) {
-  const dir = dirname(path2);
-  let names = entries.get(dir);
-  if (!names) {
-    try {
-      names = new Set(readdirSync(dir));
-    } catch {
-      names = /* @__PURE__ */ new Set();
-    }
-    entries.set(dir, names);
-  }
-  return names.has(basename(path2));
-}
-function hasExactPath(projectRoot, candidate, entries) {
-  const rel = relPosix(projectRoot, candidate);
-  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
-  let walked = projectRoot;
-  for (const segment of rel.split("/")) {
-    walked = join(walked, segment);
-    if (!hasExactEntry(walked, entries)) return false;
-  }
-  return true;
-}
-function resolveNodeNextSource(projectRoot, target, entries) {
-  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
-  if (!sourceExtensions) return null;
-  const stem = target.slice(0, target.lastIndexOf("."));
-  for (const ext of sourceExtensions) {
-    const candidate = stem + ext;
-    if (hasExactPath(projectRoot, candidate, entries)) return candidate;
-  }
-  return null;
-}
-function resolveImport(projectRoot, importerAbs, spec, entries) {
-  if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
-  const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
-  if (existsSync(target)) {
-    try {
-      const s = statSync(target);
-      if (s.isFile()) return target;
-      if (s.isDirectory()) {
-        for (const idx of INDEX_RESOLUTIONS) {
-          const candidate = target + idx;
-          if (existsSync(candidate)) return candidate;
-        }
-      }
-    } catch {
-    }
-  }
-  for (const ext of RESOLVE_EXTENSIONS) {
-    const candidate = target + ext;
-    if (existsSync(candidate)) return candidate;
-  }
-  return resolveNodeNextSource(projectRoot, target, entries);
-}
-function walkReverseDeps(input) {
-  const projectRoot = input.projectRoot;
-  const langGlobs = input.langGlobs ?? DEFAULT_LANG_GLOBS;
-  const excludeGlobs = input.excludeGlobs ?? DEFAULT_EXCLUDE_GLOBS;
-  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
-  const declared = input.seedPaths.map((p) => {
-    const abs = isAbsolute(p) ? p : resolve(projectRoot, p);
-    return relPosix(projectRoot, abs);
-  });
-  const hints = [];
-  const stats = {
-    files_scanned: 0,
-    files_parsed: 0,
-    parse_errors: 0,
-    cycles_skipped: 0,
-    unresolved_js_specifiers: 0
-  };
-  const notRun = () => ({
-    declared,
-    discovered: [],
-    stats,
-    hints,
-    coverage: "not-run",
-    uncovered_seeds: []
-  });
-  if (declared.length === 0) {
-    hints.push("No seed paths provided \u2014 reverse-dep walk skipped.");
-    return notRun();
-  }
-  if (!existsSync(projectRoot)) {
-    hints.push(
-      `projectRoot '${projectRoot}' does not exist \u2014 reverse-dep walk skipped.`
-    );
-    return notRun();
-  }
-  let rootIsDirectory = false;
-  try {
-    rootIsDirectory = statSync(projectRoot).isDirectory();
-  } catch {
-    rootIsDirectory = false;
-  }
-  if (!rootIsDirectory) {
-    hints.push(
-      `projectRoot '${projectRoot}' is not a directory \u2014 reverse-dep walk skipped.`
-    );
-    return notRun();
-  }
-  if (maxDepth < 1) {
-    hints.push(
-      `maxDepth=${maxDepth} < 1 \u2014 reverse-dep walk has no depth budget; returning declared only.`
-    );
-    return notRun();
-  }
-  const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
-  const directoryEntries = /* @__PURE__ */ new Map();
-  stats.files_scanned = candidates.length;
-  const reverseDeps = /* @__PURE__ */ new Map();
-  for (const candidateAbs of candidates) {
-    let content;
-    try {
-      content = readFileSync(candidateAbs, "utf8");
-      stats.files_parsed++;
-    } catch {
-      stats.parse_errors++;
-      continue;
-    }
-    const candidateRel = relPosix(projectRoot, candidateAbs);
-    const imports = extractImports(content);
-    for (const spec of imports) {
-      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
-      if (!resolvedAbs) {
-        if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
-          stats.unresolved_js_specifiers++;
-        }
-        continue;
-      }
-      const resolvedRel = relPosix(projectRoot, resolvedAbs);
-      if (resolvedRel === candidateRel) continue;
-      let set = reverseDeps.get(resolvedRel);
-      if (!set) {
-        set = /* @__PURE__ */ new Set();
-        reverseDeps.set(resolvedRel, set);
-      }
-      set.add(candidateRel);
-    }
-  }
-  const seen = new Set(declared);
-  const discoveredMap = /* @__PURE__ */ new Map();
-  const queue = declared.map((d) => ({ file: d, depth: 0, via: [d] }));
-  while (queue.length > 0) {
-    const item = queue.shift();
-    if (item.depth >= maxDepth) continue;
-    const importers = reverseDeps.get(item.file);
-    if (!importers) continue;
-    for (const importer of importers) {
-      if (seen.has(importer)) {
-        if (declared.includes(importer)) stats.cycles_skipped++;
-        continue;
-      }
-      seen.add(importer);
-      const nextDepth = item.depth + 1;
-      const nextVia = [...item.via, importer];
-      discoveredMap.set(importer, {
-        file: importer,
-        via_paths: nextVia,
-        depth: nextDepth
-      });
-      if (nextDepth < maxDepth) {
-        queue.push({ file: importer, depth: nextDepth, via: nextVia });
-      }
-    }
-  }
-  const discovered = [...discoveredMap.values()].sort((a, b) => {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.file.localeCompare(b.file);
-  });
-  const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs));
-  const coverage = uncoveredSeeds.length === 0 ? "analyzed" : uncoveredSeeds.length === declared.length ? "uncovered" : "partial";
-  if (discovered.length === 0 && stats.files_scanned > 0) {
-    if (coverage === "uncovered") {
-      hints.push(
-        `${ZERO_IMPORTER_HINT_PREFIX}: none of the ${declared.length} declared path(s) is a file this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root. The importer set is UNAVAILABLE, not empty.`
-      );
-    } else if (stats.unresolved_js_specifiers === 0) {
-      hints.push(
-        `${ZERO_IMPORTER_HINT_PREFIX} across ${stats.files_scanned} scanned files. If you expected importers, check that seed paths use project-relative posix form (e.g., 'src/lib/foo.ts') and that the project does not rely on tsconfig path aliases (not resolved in v1).`
-      );
-    }
-  }
-  if (stats.unresolved_js_specifiers > 0) {
-    hints.push(
-      `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE \u2014 treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`
-    );
-  }
-  if (stats.parse_errors > 0) {
-    hints.push(
-      `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`
-    );
-  }
-  if (stats.cycles_skipped > 0) {
-    hints.push(
-      `${stats.cycles_skipped} cycle path(s) skipped where a seed is also an importer of another seed.`
-    );
-  }
-  return {
-    declared,
-    discovered,
-    stats,
-    hints,
-    coverage,
-    uncovered_seeds: uncoveredSeeds
-  };
-}
-function coverageHints(result) {
-  if (result.coverage === "not-run") return [];
-  const lines = [];
-  const uncovered = result.uncovered_seeds;
-  if (uncovered.length > 0) {
-    const shown = uncovered.slice(0, 10).join(", ");
-    const overflow = uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : "";
-    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
-    lines.push(
-      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`
-    );
-  }
-  if (result.stats.files_scanned === 0) {
-    lines.push(
-      `${COVERAGE_HINT_PREFIX} 0 files matched the walk's file-type list (${DEFAULT_LANG_SUFFIXES}) under the project root after the default exclusions (node_modules, dist, build, coverage). No import graph was built, so an empty importer set here means UNKNOWN, not clean. Candidate causes: the project is written in another language; its sources sit under an excluded directory; project_root points somewhere unexpected.`
-    );
-  }
-  return lines;
-}
 
 // src/lib/verification-checklist.ts
 init_esm_shims();
@@ -48321,9 +50584,16 @@ var exemptFileSchema = external_exports.object({
   path: external_exports.string().min(1),
   reason: external_exports.enum(["generated", "vendored"])
 }).strict();
+var deadCodeKeepSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  name: external_exports.string().min(1),
+  declaration_sha256: external_exports.string().regex(/^[0-9a-f]{64}$/, "declaration_sha256 must be a sha256 hex digest"),
+  note: external_exports.string().min(1, "a keep needs the reason the developer gave")
+}).strict();
 var sweepInputSchema = external_exports.object({
   comment_dispositions: external_exports.array(dispositionSchema).optional(),
-  exempt_files: external_exports.array(exemptFileSchema).optional()
+  exempt_files: external_exports.array(exemptFileSchema).optional(),
+  dead_code_keeps: external_exports.array(deadCodeKeepSchema).optional()
 });
 var phaseReviewCompleteInputSchema = external_exports.object({
   project_root: external_exports.string().optional(),
@@ -48336,11 +50606,14 @@ var phaseReviewCompleteInputSchema = external_exports.object({
     "The findings_run_id returned by rsct_phase_review_start. Echo it back so answers prepared before a re-run are rejected as a stale set."
   ),
   comment_dispositions: external_exports.unknown().optional(),
-  exempt_files: external_exports.unknown().optional()
+  exempt_files: external_exports.unknown().optional(),
+  dead_code_keeps: external_exports.unknown().optional().describe(
+    "One entry per dead symbol the DEVELOPER decided to keep: path, name, the declaration_sha256 from pending_dead_code, and the reason they gave. A keep is bound to those exact declaration bytes \u2014 editing the declaration asks again."
+  )
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -48379,6 +50652,21 @@ var phaseReviewCompleteTool = {
             comment_id: { type: "string" },
             action: { type: "string", enum: ["migrated", "discarded"] },
             destination: { type: "string", enum: [...MIGRATION_DESTINATIONS] }
+          },
+          additionalProperties: false
+        }
+      },
+      dead_code_keeps: {
+        type: "array",
+        description: "One entry per dead symbol the DEVELOPER decided to keep. Take path, name and declaration_sha256 verbatim from pending_dead_code, and put the reason they gave in note. The keep is bound to those declaration bytes: edit the declaration and it is asked again.",
+        items: {
+          type: "object",
+          required: ["path", "name", "declaration_sha256", "note"],
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+            declaration_sha256: { type: "string" },
+            note: { type: "string" }
           },
           additionalProperties: false
         }
@@ -48425,9 +50713,19 @@ function listLines(items, limit) {
   if (items.length > limit) head.push(`\u2026 and ${items.length - limit} more`);
   return head.join("\n");
 }
-function writeReport(projectRoot, specRef, files, dispositions) {
+function writeReport(projectRoot, specRef, files, dispositions, deadCode) {
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]));
-  const lines = [`# REVIEW comment sweep \u2014 ${specRef}`, ""];
+  const lines = [`# REVIEW sweep \u2014 ${specRef}`, ""];
+  if (deadCode.kept.length > 0) {
+    lines.push("## Dead code kept at the developer request");
+    for (const k of deadCode.kept) lines.push(`- ${k.path}:${k.name} \u2014 ${k.note}`);
+    lines.push("");
+  }
+  if (deadCode.exempted.length > 0) {
+    lines.push("## Exports nothing here uses, exempted by public_api");
+    for (const e of deadCode.exempted) lines.push(`- ${e.path}:${e.name}`);
+    lines.push("");
+  }
   for (const f of files) {
     lines.push(`## ${f.path} (${f.kind}${f.reason ? `: ${f.reason}` : ""})`);
     for (const c of f.removed) {
@@ -48480,7 +50778,8 @@ function reject(args2) {
     head_stale: args2.head_stale,
     comment_sweep: args2.comment_sweep,
     ...args2.open_findings !== void 0 && { open_findings: args2.open_findings },
-    ...args2.pending_dispositions !== void 0 && { pending_dispositions: args2.pending_dispositions }
+    ...args2.pending_dispositions !== void 0 && { pending_dispositions: args2.pending_dispositions },
+    ...args2.pending_dead_code !== void 0 && { pending_dead_code: args2.pending_dead_code }
   };
 }
 async function phaseReviewCompleteHandler(rawInput, internal = {}) {
@@ -48500,10 +50799,11 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   const base = { projectRoot, config: config2, specRef: input.spec_ref, actions_summary, evidence_mix, head_stale: staleness.head_stale, appendAudit };
   const sweepInput = sweepInputSchema.safeParse({
     comment_dispositions: input.comment_dispositions,
-    exempt_files: input.exempt_files
+    exempt_files: input.exempt_files,
+    dead_code_keeps: input.dead_code_keeps
   });
   if (!sweepInput.success) {
-    const reason = `comment_dispositions / exempt_files are malformed: ${sweepInput.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ")}`;
+    const reason = `comment_dispositions / exempt_files / dead_code_keeps are malformed: ${sweepInput.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ")}`;
     return reject({ ...base, rejectKind: "sweep_input_invalid", reason, hints: [reason], comment_sweep: null });
   }
   const dispositions = sweepInput.data.comment_dispositions ?? [];
@@ -48577,6 +50877,28 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       extra: { paths: withComments.map((f) => f.path) }
     });
   }
+  const ceiling = deriveAuditCeiling(projectRoot, config2, "");
+  const keepDecisions = ceiling.deadCodeKeepDecisions;
+  const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions);
+  const grantedKeeps = sweepInput.data.dead_code_keeps ?? [];
+  const deadCheck = await checkDeadCode({
+    projectRoot,
+    touched: sweep.files.filter((f) => f.status !== "deleted").map((f) => f.path),
+    publicApi: config2?.public_api,
+    keeps: [...storedKeeps, ...grantedKeeps],
+    exempt: sweep.files.filter((f) => f.kind === "unverified").map((f) => f.path)
+  });
+  if (!deadCheck.ok) {
+    return reject({
+      ...base,
+      rejectKind: deadCheck.reject_kind,
+      reason: deadCheck.reason,
+      hints: [deadCheck.reason, ...deadCheck.hints],
+      comment_sweep: summary,
+      extra: { dead_symbols: deadCheck.pending.length },
+      pending_dead_code: deadCheck.pending
+    });
+  }
   const dispositionCheck = checkDispositions(sweep.repo, sweep.files, dispositions);
   if (!dispositionCheck.ok) {
     return reject({
@@ -48591,10 +50913,18 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   }
   summary.migrated = dispositionCheck.migrated;
   summary.discarded = dispositionCheck.discarded;
+  const storedKeepKeys = new Set(storedKeeps.map((k) => deadCodeKeepKey(k.path, k.name, k.declaration_sha256)));
+  const grantedNotes = new Map(grantedKeeps.map((k) => [deadCodeKeepKey(k.path, k.name, k.declaration_sha256), k.note]));
+  const newlyKept = deadCheck.kept.map((k) => ({ ...k, key: deadCodeKeepKey(k.path, k.name, k.declaration_sha256) })).filter((k) => grantedNotes.has(k.key) && !storedKeepKeys.has(k.key)).map((k) => ({ path: k.path, name: k.name, declaration_sha256: k.declaration_sha256, note: grantedNotes.get(k.key) ?? "" }));
+  const publicExempted = deadCheck.public_exempted;
+  const publicApiSha = publicApiDigest(config2?.public_api);
+  const publicApiPending = publicApiSha === null ? publicExempted : publicExempted.filter((p) => !ceiling.publicApiApprovals.has(publicApiApprovalKey(publicApiSha, p.path, p.name, p.declaration_sha256)));
   const removedFiles = sweep.files.filter((f) => f.removed.length > 0);
   const unverified = sweep.files.filter((f) => f.kind === "unverified");
-  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0;
-  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null;
+  const commentForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0;
+  const deadCodeForce = newlyKept.length > 0 || publicApiPending.length > 0;
+  const mustForce = commentForce || deadCodeForce;
+  const report = mustForce ? writeReport(projectRoot, input.spec_ref, commentForce ? sweep.files : [], dispositions, { kept: newlyKept, exempted: publicExempted }) : null;
   summary.report_path = report?.path ?? null;
   const reportLine = report ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})` : "Full list: report could not be written.";
   if (unverified.length > 0) {
@@ -48616,7 +50946,7 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
     }
     const dialog = await promptFn({
       title: `RSCT \u2014 ${unverified.length} file(s) the comment sweep cannot verify`,
-      message: `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:
+      message: `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment or dead-code check:
 
 ` + listLines(
         unverified.map((f) => `${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`),
@@ -48651,7 +50981,19 @@ Yes = allow these versions. No = reject this REVIEW.`
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]));
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })));
   const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`];
-  if (mustForce) {
+  if (newlyKept.length > 0) {
+    detailParts.push(
+      `Dead code KEPT at your request: ${newlyKept.length}. Each stays until its declaration changes.`,
+      listLines(newlyKept.map((k) => `${k.path}:${k.name} \u2014 ${k.note.slice(0, 100)}`), 10)
+    );
+  }
+  if (publicApiPending.length > 0) {
+    detailParts.push(
+      `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
+      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10)
+    );
+  }
+  if (commentForce) {
     detailParts.push(
       `Comments removed: ${summary.removed_count} (migrated ${summary.migrated}, discarded ${summary.discarded}).`,
       listLines(
@@ -48669,8 +51011,8 @@ Yes = allow these versions. No = reject this REVIEW.`
         )
       );
     }
-    detailParts.push(reportLine);
   }
+  if (mustForce) detailParts.push(reportLine);
   const result = await gatePhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
     config2,
@@ -48679,7 +51021,7 @@ Yes = allow these versions. No = reject this REVIEW.`
       dialogDetail: detailParts.filter(Boolean).join("\n"),
       ...mustForce && {
         forceDialog: true,
-        forceDialogReason: "this REVIEW removed comments, allows unverified files or changes allowlisted comments"
+        forceDialogReason: commentForce ? "this REVIEW removed comments, allows unverified files or changes allowlisted comments" : "this REVIEW keeps dead code at your request or exempts exports through public_api"
       }
     }
   );
@@ -48736,6 +51078,44 @@ Yes = allow these versions. No = reject this REVIEW.`
     );
     if (!w.ok) auditOk = false;
   }
+  for (const keep of newlyKept) {
+    const w = appendAudit(
+      projectRoot,
+      {
+        event: DEAD_CODE_KEPT_EVENT,
+        tool: "rsct_phase_review_complete",
+        spec_ref: input.spec_ref,
+        path: keep.path,
+        name: keep.name,
+        declaration_sha256: keep.declaration_sha256,
+        note: keep.note,
+        channel
+      },
+      config2?.audit
+    );
+    if (!w.ok) auditOk = false;
+  }
+  if (publicApiSha !== null) {
+    for (const exempted of publicApiPending) {
+      const w = appendAudit(
+        projectRoot,
+        {
+          event: PUBLIC_API_APPROVED_EVENT,
+          tool: "rsct_phase_review_complete",
+          spec_ref: input.spec_ref,
+          public_api: config2?.public_api,
+          public_api_sha256: publicApiSha,
+          path: exempted.path,
+          name: exempted.name,
+          declaration_sha256: exempted.declaration_sha256,
+          channel
+        },
+        config2?.audit
+      );
+      if (!w.ok) auditOk = false;
+    }
+  }
+  output.hints.push(...deadCheck.hints);
   if (!auditOk) {
     output.hints.push("\u26A0 REVIEW completed, but the audit log could not record the sweep, so no file was stamped \u2014 rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.");
   } else {
@@ -48743,6 +51123,9 @@ Yes = allow these versions. No = reject this REVIEW.`
     const freshRefusal = refuseUnreadableState(projectRoot, freshRead);
     const fresh = freshRead.state ?? {};
     const next = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) };
+    const keepRecords = mergeDeadCodeKeeps(fresh.dead_code_keeps, newlyKept, input.spec_ref, at, keepPrunePaths(projectRoot));
+    if (keepRecords.length > 0) next.dead_code_keeps = keepRecords;
+    else delete next.dead_code_keeps;
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths);
       if (open.length === 0) delete next.review_drift;

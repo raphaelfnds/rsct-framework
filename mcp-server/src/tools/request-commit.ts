@@ -31,6 +31,11 @@ import {
   type StagedSweepCheck,
 } from '../lib/comment-sweep/review.js'
 import {
+  checkStagedDeadCode,
+  readDeadCodeKeeps,
+  type StagedDeadCodeCheck,
+} from '../lib/dead-code/review-gate.js'
+import {
   effectiveProtectedList,
   isProtectedBranch,
 } from '../lib/branch-protection.js'
@@ -129,6 +134,7 @@ export type RequestCommitRejectKind =
   | 'migration_reverted'
   | 'review_drift'
   | 'review_unreadable'
+  | 'dead_code_staged'
 
 export type CommitAuthVia = 'dev_approval' | 'plan_token' | 'free_commit'
 
@@ -199,7 +205,7 @@ export interface RequestCommitInternal {
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -374,8 +380,67 @@ export async function requestCommitHandler(
       hints: withAdvisories([check.reason]),
     }
   }
+  const runDeadCodeCheck = async (
+    entries: ReadonlyArray<{ path: string; unverified: boolean }>,
+  ): Promise<StagedDeadCodeCheck> => {
+    const paths = entries.map((entry) => entry.path)
+    const ceiling = deriveAuditCeiling(projectRoot, config ?? null, '')
+    try {
+      return await checkStagedDeadCode({
+        projectRoot,
+        stagedPaths: paths,
+        publicApi: config?.public_api,
+        keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
+        keepDecisions: ceiling.deadCodeKeepDecisions,
+        publicApiApprovals: ceiling.publicApiApprovals,
+        exempt: entries.filter((entry) => entry.unverified).map((entry) => entry.path),
+      })
+    } catch (error) {
+      const reason = `the dead-code check failed: ${error instanceof Error ? error.message : String(error)}`
+      return { ok: false, reject_kind: 'dead_code_staged', reason, hints: [reason], paths }
+    }
+  }
+  const rejectDeadCode = (
+    check: Extract<StagedDeadCodeCheck, { ok: false }>,
+    stage: 'before_authorization' | 'before_commit',
+  ): RequestCommitOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: check.reject_kind,
+        reason: check.reason,
+        branch: gitState.branch,
+        paths: check.paths,
+        stage,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: check.reject_kind,
+      reason: check.reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([check.reason, ...check.hints]),
+    }
+  }
+
   const sweepBefore = await runSweepCheck()
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, 'before_authorization')
+  const deadBefore = await runDeadCodeCheck(sweepBefore.checked)
+  if (!deadBefore.ok) return rejectDeadCode(deadBefore, 'before_authorization')
 
   let channel: CommitChannel
   let authorizedVia: CommitAuthVia
@@ -726,6 +791,8 @@ export async function requestCommitHandler(
 
   const sweepAtCommit = await runSweepCheck()
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
+  const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked)
+  if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, 'before_commit')
 
   let reservedToken: PlanAuthorizationBlock | null = null
   let reservedFreeBudget: FreeCommitBudget | null = null
@@ -925,9 +992,16 @@ export async function requestCommitHandler(
       after: commit.sha_after,
       checked: sweepAtCommit.checked,
     })
+    const unverifiedAtCommit = new Set(sweepAtCommit.checked.filter((c) => c.unverified).map((c) => c.path))
+    const deadAfterHook =
+      committed.rewrites.length > 0
+        ? await runDeadCodeCheck(committed.rewrites.map((r) => ({ path: r.path, unverified: unverifiedAtCommit.has(r.path) })))
+        : null
+    const deadRewritten = new Set(deadAfterHook && !deadAfterHook.ok ? deadAfterHook.paths : [])
+    const cleanRewrites = committed.rewrites.filter((r) => !deadRewritten.has(r.path))
     const state = readPhaseState(projectRoot).state ?? {}
     const at = now.toISOString()
-    const stamps = committed.rewrites.map((r) => {
+    const stamps = cleanRewrites.map((r) => {
       const original = ledgerEntries(state.review_sweep, r.path).find(
         (e) => e.blob === sweepAtCommit.checked.find((c) => c.path === r.path)?.blob,
       )
@@ -938,9 +1012,9 @@ export async function requestCommitHandler(
       )
       return { path: r.path, entry: sweepEntry(r.blob, 'clean', original?.migrations ?? [], 'hook_rewrite', original?.spec_ref ?? 'hook_rewrite', at) }
     })
-    if (committed.rewrites.length > 0) {
+    if (cleanRewrites.length > 0) {
       bookkeepingHints.push(
-        `ℹ a pre-commit hook rewrote ${committed.rewrites.map((r) => r.path).join(', ')} — the committed bytes carry no comment and were re-stamped.`,
+        `ℹ a pre-commit hook rewrote ${cleanRewrites.map((r) => r.path).join(', ')} — the committed bytes carry no comment and no dead code, and were re-stamped.`,
       )
     }
     const next: PhaseState = { ...state }
@@ -950,19 +1024,20 @@ export async function requestCommitHandler(
       if (open.length === 0) delete next.review_drift
       else next.review_drift = { ...state.review_drift, paths: open }
     }
-    if (committed.drift.length > 0) {
-      sweepDrift = committed.drift
-      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: committed.drift, at }
+    const drift = [...new Set([...committed.drift, ...deadRewritten])]
+    if (drift.length > 0) {
+      sweepDrift = drift
+      next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: drift, at }
       appendAudit(
         projectRoot,
-        { event: 'review.commit_drift', tool: 'rsct_request_commit', paths: committed.drift, sha_after: committed.full_sha ?? commit.sha_after },
+        { event: 'review.commit_drift', tool: 'rsct_request_commit', paths: drift, sha_after: committed.full_sha ?? commit.sha_after },
         config?.audit,
       )
       bookkeepingHints.push(
-        `⚠ the commit landed code no REVIEW covers (${committed.drift.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
+        `⚠ the commit landed code no REVIEW covers (${drift.join(', ')}) — most likely a pre-commit hook changed the index. Every further commit is refused until rsct_phase_review_start / _complete covers those paths.`,
       )
     }
-    if (stamps.length > 0 || committed.drift.length > 0 || state.review_drift) {
+    if (stamps.length > 0 || drift.length > 0 || state.review_drift) {
       const w = writePhaseState(projectRoot, next)
       if (!w.ok) {
         bookkeepingHints.push(`⚠ could not record the post-commit sweep result in phase-state (${w.reason}).`)
@@ -1086,6 +1161,7 @@ export async function requestCommitHandler(
         : `Free (dialog-free) commit on '${freeSummary.plan_slug}' — ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`,
     )
   }
+  hints.push(...deadAtCommit.hints)
   hints.push(...bookkeepingHints)
   const afields = auditFields(audit)
   if (afields.audit_error !== null) {
