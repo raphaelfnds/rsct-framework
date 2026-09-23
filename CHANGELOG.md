@@ -12,6 +12,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Dead code is refused in the REVIEW and at the commit gate (#62, release 2).** For every
+  JavaScript/TypeScript file a change touches, a declared symbol that nothing in the project
+  references — its own file included — rejects `rsct_phase_review_complete`
+  (`dead_code_remaining`, with `pending_dead_code`) and `rsct_request_commit` (`dead_code_staged`).
+  References are resolved, not searched by name: imports, aliases, default and namespace imports,
+  named, star and `export * as ns` re-exports followed to the end, local `export { a as b }`,
+  tsconfig/jsconfig `paths` and `baseUrl`, scope shadowing with values and types kept apart, and
+  self or mutual recursion (which is dead). A declaration that runs code when its module loads is
+  never reported. The developer decides each symbol: remove it, or keep it through
+  `dead_code_keeps` — a new keep forces the developer dialog, is written to the audit log and to the
+  REVIEW report, and holds only for those exact declaration bytes. The commit gate reads the staged
+  bytes from the index, never the working tree, and re-checks after a pre-commit hook; a check that
+  cannot run refuses, or after the commit lands as drift. What the scan cannot settle — an
+  entrypoint, an unparseable or computed import, an import it cannot resolve or that matches a file
+  only in another letter case, a namespace used as a value, a classic script, `eval` — is reported
+  as unknown with the reason, never as dead and never silently. A file that checks for `module`,
+  `exports` or `define` before exporting is judged like any other, and the report says a page could
+  still load it with a script tag and reach what was reported. A touched file over 2 MB is not
+  parsed: it is refused, named, until the developer lets it through `exempt_files`. When the commit
+  gate refuses a symbol, it names the files not staged yet that mention it. Measured on real code in
+  ADR-018.
+- **`public_api` in `.rsct.json`** — path globs, relative to the project root or the repository
+  root, whose exported symbols are consumed outside the repository (a published library),
+  honoured through re-export barrels, and matched the same when the project root is reached through
+  a symlink or junction. Every export it exempts is written to the REVIEW report, and each one is
+  put to the developer once: the dialog is forced until the audit log holds their yes for that exact
+  declaration and that exact list, so a new export, a changed declaration or a changed list asks
+  again. `rsct_request_commit` refuses a staged export the exemption covers while that yes is
+  missing, the bar a kept dead symbol already had.
+
+### Fixed
+
+- **The walk now sees `.mts` and `.cts` files and resolves `.mjs`/`.cjs` specifiers to them
+  (#101 Part A).** The coverage hint's suffix list is derived from the scan list, so the two can no
+  longer disagree.
+- **The walk resolved `./utils` to `utils/index.ts` even when `utils.ts` exists.** It now tries the
+  file and its extensions before a directory index, the order TypeScript and Node use — and, as they
+  do, `.`, `..` and a trailing `/` still mean the directory. The V phase sees a different importer
+  only in a project holding both.
+- **The walk missed an importer whose import braces hold a comment with a quote in it**
+  (`import { a, // it's used` …). The import reader now also matches the braced form across quotes.
+
+### Removed
+
+- `readFullSha` in `lib/comment-sweep/git-reads.ts` — referenced by nothing, tests included; the
+  dead-code scan's first real finding.
+
 ## [2.11.2] - 2026-09-20
 
 ### Fixed

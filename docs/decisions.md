@@ -489,6 +489,185 @@ to keep passing the chosen `spec_slug` on every later start of the task. Known a
 is: `rsct_phase_code_start` runs its override dialog before this check, as it already did
 before `phase_already_active`, so a start that asks shows that dialog again on the retry.
 
+### ADR-018 — Dead code is decided by resolved references in the touched files, and the developer disposes (#62, 2.12.0)
+**Status**: active
+**Tags**: review, commit-gate, dead-code, cross-os
+**Context**: release 2 of #62. The 2026-09-10 decision said validation follows the graph, but the
+walk is file-level — `DiscoveredImporter` is `{file, via_paths, depth}` and its regexes capture the
+specifier, never the imported names — so a graph verdict cannot settle a symbol question. MEASURED on
+this repository: every source file but the entrypoint has importers, so "the graph wins" would have
+rejected nothing. A name search was tried and rejected (AD-006).
+**Decision**:
+- **Scope**: symbols declared in the touched JavaScript/TypeScript files; the rest of the project is
+  read as evidence and never edited. A symbol that dies because its last caller was removed in another
+  file is caught when that file is touched — the ceiling the comment sweep also has.
+- **Predicate**: referenced nowhere, its own file included, the declaration excluded, through resolved
+  references — named, aliased, default and namespace imports; named, star and `export * as ns`
+  re-exports followed to the end (the walk's depth cap does not apply); local `export { a as b }` and
+  `export default a`; a re-export of an imported binding; `import m = require()`. References are
+  scope-aware and owned per declarator; values and types are separate namespaces (a type parameter
+  hides only types, a parameter only values), a parameter default does not see the body's `var`, and
+  a signature's parameters are local to it. A bare use of a binding is told apart from `x.member`.
+  Liveness is reachability from a real use, so self and mutual recursion are dead. Types are excluded
+  unless asked for.
+- **A file that also runs as a plain script** — it checks `typeof module`, `exports` or `define`
+  before exporting — is judged like any other module (developer decision 2026-09-23). What it hands
+  to `module.exports` or to a `define` factory is a reference, so its public surface stays alive by
+  itself; what is left is reported, with a hint saying a page could load the file with a script tag
+  and call those names as globals, so the developer can keep them. Leaving every name in such a file
+  unknown was tried for a day and REVERTED: MEASURED (Rv4 lens 2), pasting that one guard line into
+  any CommonJS file hid every dead symbol in it, which an agent can do at will.
+- **Never reported — code that runs at load** (developer decision 2026-09-22): a declaration whose
+  initializer runs code when the module loads — a call, `new`, `await`, an assignment, `delete`, a
+  decorator, a static block, a call in `extends` — is a root. Its binding may be unused, but removing
+  the statement removes the effect. MEASURED: when self-reference stopped counting, `got` went from 0
+  to 8 false findings (`const server = app.listen(…, () => server.address())`). The cost is
+  detection: an unused `z.object(…)` schema or `new Map()` is not reported.
+- **Unknown, never dead** — each reason is a hint naming the files: a file no resolved import reaches
+  (an entrypoint); an importer the grammar cannot parse (its imports are read by the walk's regex, so
+  the taint stays scoped; `.vue`, `.svelte`, `.astro`, `.html`, `.mdx` importers the same way); a
+  target of `import()`, `require()` or a query import (`./w.ts?worker`); files under the static
+  prefix of a computed import (`` import(`./locales/${l}`) ``, `import.meta.glob`, `require.context`),
+  and EVERY export when an import has no static part at all; a namespace used as a value (passed,
+  spread, destructured, read with a computed key); a nested namespace (`ns.inner.x`); an import the
+  scan cannot resolve, by the names that import actually uses (a workspace package narrows it to its
+  directory — an unused import rescues nothing); a classic script's top-level names (no import,
+  export or CommonJS marker at all; `.mjs`/`.cjs`/`.mts`/`.cts` are modules); a target of
+  `require('<literal>')` even
+  through a parameter named `require` (AMD factories receive it) — but a COMPUTED `require(x)` counts
+  only through the real `require`, never through a shadowed one, since otherwise one parameter named
+  `require` blankets every export in the project (MEASURED, Rv4 lens 2); a file calling direct `eval`; and
+  every verdict when a file cannot be read for a reason other than absence. A private helper used
+  only by an unknown symbol is unknown too. A declaration that only a `@jsx` pragma of its own file
+  names stays alive (a classic JSX build calls it) but is named in a hint, never silently.
+  `const _name: Type = value` — a leading underscore, a declared type and a plain value (a name, a
+  member, a literal) — is a compile-time type check, unknown with a hint (developer decision
+  2026-09-22; MEASURED: the one "dead" report on `zod` was such a type-test line, `_sameTree`).
+- **Resolution** reuses the walk's resolver, never a second one: the file and its extensions before a
+  directory index (the TypeScript and Node order — the walk itself now matches, which changes the V
+  phase only where both `x.ts` and `x/index.ts` exist), except that `.`, `..` and a trailing `/` mean
+  the directory, as in Node; a directory holding a `package.json` also credits its `main`/`module`/
+  `source`/`types`/`exports` entries; a `.js` specifier whose `.ts` source sits beside it credits
+  both; tsconfig/jsconfig `paths` (most specific pattern), `baseUrl`, relative `extends` and
+  `references` (for paths and the JSX settings), read as JSONC. `paths` and `baseUrl` are tried
+  BEFORE the Node builtins, as tsc does (MEASURED, Rv3 lens 1: `baseUrl: "src"` plus
+  `import 'domain/user'` read as the builtin `domain`, and live code was reported dead); `node:` is
+  always external, and so are declared dependencies; a package whose `name` a `package.json` here
+  declares is a place in this repository. A specifier is an asset only by a known asset extension
+  (`.css`, `.json`, `.png`, …) and only after resolution fails — `./users.service` is code. A
+  relative import that matches only when letter case is ignored (`./Utils` for `utils.ts`) resolves
+  nowhere, as on Linux, but the names it uses are unknown, on every OS, in exactly the files the
+  same resolution names once the case is corrected — one file, or a directory's index or
+  `package.json` entry, never everything under a prefix (MEASURED, Rv3 lens 2: `./Utils` beside
+  `./utils` made a used `helper` read dead; Rv4 lens 2: a prefix let `import * as z from './'`
+  blanket a whole directory). A `/`
+  specifier or glob is tried against the importer's package root, then the repository root; a glob
+  that matches nothing there has no fixed target. `jsxImportSource` makes every file with JSX an
+  importer of `<source>/jsx-runtime` and `/jsx-dev-runtime`.
+- **Corpus**: JavaScript/TypeScript plus the importers above (`.md` included: a VitePress or
+  Docusaurus page imports components); in `.md`/`.mdx` EVERY import is read from the import/export
+  lines and `<script>` blocks alone — fenced code and prose are not code, so neither a fenced
+  example nor a sentence reading "callers do import { x } from '…'" reaches the graph (MEASURED,
+  Rv4 lens 2: reading the prose let one sentence in any `.md` file blanket a file's exports).
+  The shared import reader also matches braces holding a
+  comment with a quote in it. Excluded: `node_modules` and `.git`
+  anywhere, and `dist/`, `build/`, `coverage/` directly under a package root (the repository root or
+  a directory holding `package.json`), so build output never keeps code alive. MEASURED (Rv2 lens 1):
+  an unanchored `**/build/**` hid a real `src/commands/build/` and made its uses read dead.
+- **Bytes**: the REVIEW reads the files git knows plus the untracked non-ignored ones, as the
+  developer sees them: from disk, with the index used only for a file that is not on disk and is
+  marked skip-worktree or assume-unchanged (a sparse checkout). Reading every file git calls
+  unchanged from the index instead was tried and REVERTED (Rv4 lens 1, MEASURED): `git diff` does
+  not compare an `assume-unchanged` path at all, and skips the comparison whenever its stat cache
+  matches, so "unchanged" is not "identical" — the REVIEW judged committed bytes while the disk
+  held the caller, and reported a live symbol dead. The commit gate reads the INDEX
+  (`git ls-files -s` + `git cat-file --batch` in batches bounded by bytes; a blob git cannot hand over
+  alone makes every verdict unknown, named; a failing multi-file batch refuses). Line endings are
+  normalised at read, so both share parses. A path the pre-read did not cover — a config an
+  `extends` names, whatever it is called — is fetched from the index on demand, so the commit gate
+  resolves exactly what the REVIEW does (MEASURED, Rv3 lens 3: before that, a `configs/base.json`
+  read as absent at the commit gate, the alias stayed unresolved and a dead export passed). MEASURED
+  before: reading the disk at commit let an unstaged edit flip the verdict both ways. MEASURED
+  (2026-09-22, idle machine, 5,000 files): opening them one by one off the disk took 2.4 s on every
+  round, against 1.7 s for the first read through `git cat-file --batch` and 0.3 s for each round
+  after — which is why the commit gate, which must read the index anyway, is the cheap one, and why
+  replacing the REVIEW's disk reads was tempting. Analysis runs from the repository top level.
+- **Size**: a file whose UTF-8 bytes pass 2 MB is not parsed (bytes, not characters: a file of
+  accented or CJK text is judged by its real size). Touched, the REVIEW and the commit refuse it, named
+  (`dead_code_unreadable` / `dead_code_staged`), until the developer lets it through `exempt_files`
+  — refusing rather than skipping keeps a padded file from hiding its dead code; untouched, it is
+  read for its imports only, and what it imports is unknown. MEASURED (Rv3 lens 2): one 20 MB
+  generated `.ts` made the first REVIEW take 87 s and left the server at 1.5 GB for its lifetime
+  (tree-sitter's memory never shrinks).
+- **Fails closed**: an exception in the scan rejects the REVIEW (`dead_code_unreadable`) and the commit
+  (`dead_code_staged`, every asked path named); after the commit, every hook rewrite becomes drift.
+  MEASURED before (Rv2 lens 2): a throw after `git commit` skipped drift, anti-replay and the audit
+  line, and an analysis failure re-stamped rewrites as clean — a lock loosened.
+- **Disposition**: the developer, per symbol. A keep is bound to the sha256 of the declaration text
+  (export keyword included, CRLF normalised) and keyed by path and name. A NEW keep forces the §C
+  dialog (`trust_allowed_for` ignored), is written to the REVIEW report the dialog names (the dialog
+  itself lists ten) and to the audit log as `review.dead_code_kept`; the commit honours a stored keep
+  only when that audit line exists — the bar ADR-011 sets for `unverified_authorized`. Keeps survive
+  `rsct_phase_abandon` and are pruned only when their file is gone from the index, HEAD and the
+  working tree. A hook that reformats a kept declaration un-keeps it: the commit lands as drift and
+  the next REVIEW asks again. A stale keep and an unkept symbol are reported together.
+- **Not judged**: files the developer allowed without a mechanical check (`exempt_files`, unscannable
+  files, the scripts setup ships) — the dialog says "comment or dead-code check" — and build output.
+- **`public_api`** (`.rsct.json`, path globs through `matchesAnyGlob`, relative to the project root or
+  the repository root): an exported symbol exposed through a matching file — a barrel included — is
+  exempt. The project root is the directory git names (`--show-prefix`), so a root reached through a
+  junction or symlink matches too — MEASURED (Rv3 lens 2): a junction made `api` read dead. Every
+  exemption is written to the REVIEW report, and the commit gate refuses a staged export the
+  exemption covers while the audit log holds no approval for it — the bar a keep already had. Each
+  exempted export is put to the developer once
+  (developer decision 2026-09-22): the §C dialog is forced while any of them lacks a
+  `review.public_api_approved` audit line for that exact declaration sha256 AND that exact
+  `public_api` list (sha256 of the sorted globs), and the line is written only after the developer
+  answers yes. A new export, a changed declaration or a changed list asks again. Asking on every
+  REVIEW instead would leave a library project that has no dialog channel unable to finish one, and
+  trains the developer to click yes; the keep rule this mirrors was already decided that way. Setup
+  does not ask for `public_api` (developer decision; the uninstall note is on #82).
+- **Commit gate**: at both existing sweep points, before authorization and right before `git commit`;
+  after the commit, a pre-commit hook's rewrite is re-derived and a dead symbol lands as drift. The
+  verdict is reused while the index listing (hashed), the project root and the inputs are unchanged,
+  so the two checks of one commit analyse once. A refusal names the code files not staged yet that
+  mention a refused name exactly — MEASURED (Rv3 lens 2): committing a library before its consumer
+  otherwise loops, since the REVIEW then has nothing left to keep.
+- `DEFAULT_LANG_SUFFIXES` is derived from `DEFAULT_LANG_GLOBS`, so the coverage hint cannot drift
+  from the scan list (#101 Part A).
+
+**Measured** (2026-09-22, every file a target, idle machine): this repository, 228 files — 0 dead
+(`readFullSha`, its one true finding, is deleted in this release); cold 2.0–2.4 s, warm 0.2 s.
+`got`, 90 files — 0 dead, 12 unknown; at the previous commit 8 live declarations were reported dead,
+`const server = app.listen(…)` among them. `zod`, 549 files — 1 dead, `const _sameTree: T =
+userSchema` in a type-test fixture; 397 exports unknown (102 with `public_api` declared, 272 exempted):
+three files load a module through a computed path (benchmarks, a tree-shake test), so any export may
+be their target, and four files the grammar cannot parse taint what they import. Before this
+revision, imports inside MDX code fences, prose reading "import (" and an aliased `.png` blinded it
+too. Cold 3.3–3.9 s, warm 0.6 s. A cached parse holds ~21 KB (522 files: 10.8 MB), so the cache
+stops at 4000 files (~85 MB). Above that, a check keeps the parses it already holds — an entry an
+earlier check put there gives way, one this check has used does not — instead of evicting in a
+cycle. MEASURED (2026-09-22, 5,000 generated files, idle machine, through the gate): the first
+REVIEW parsed 5,001 files in 4.1 s and every later one 1,001 in 1.1–1.4 s, where before it
+re-parsed all 5,000 every time; a commit's second check, with the index unchanged, reuses the
+verdict — 0 parses, 0.24 s. The
+spec's "scan only the files that can reference the touched symbols" is NOT done: a cheap pre-filter
+would read imports from text, and the text reader misses forms the parser sees (template and glob
+imports), which would turn into false "dead".
+**Stated limit**: the vendored tree-sitter-typescript 0.23.2 cannot parse variance annotations
+(`interface X<in T>`, `<out T>`) or `export type * from`; such files are unreadable, taint what they
+import, and a touched one is named as not checked. A bundler alias no config declares resolves by
+name only. Case-exact resolution (ADR-016) holds on every OS; a case-only match is unknown, never
+resolved.
+**Not reported, by construction (false negatives, never false "dead")**: a value that only a type
+names (`type K = ReturnType<typeof f>`, types being out of scope), only an ambient declaration names
+(`declare const k: typeof f`), or only a destructuring initializer names (`const [x] = [f]`) stays
+alive; so does anything a JSX pragma names.
+**Residuals, not closed**: a forged `phase-state` keep plus a forged audit line passes (as ADR-011);
+a commit outside `rsct_request_commit` is not checked (#91); dead code in an untouched file; every
+language other than JavaScript/TypeScript is uncovered — and said so in a hint, including when an
+export is reported dead in a repository that holds files in other languages.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -526,6 +705,14 @@ comments, MySQL `#` and backtick identifiers, and reports
 are lexical but dialect-specific: `#` only in MySQL, nested blocks only in PostgreSQL, MySQL
 `--` needs a following space (`SELECT 1--1` is arithmetic), `/*! … */` is executable
 code in MySQL, and 84 of 927 real files carry `--` inside dollar-quoted function bodies.
+
+### AD-006 — Do not decide dead code by searching for the name
+MEASURED on this repository: "named anywhere else in the project" produced **348 findings, 1 true
+positive** — "else" drops the only evidence that keeps a module-private helper alive. Corrected to
+"anywhere, own file included", a name still collides with an unrelated symbol of the same name, a word
+in a comment or a string (`walk` occurs 113 times, `'walk through'` among them), and cannot see
+through an alias or a re-export. MEASURED by mutation: an injected dead `walk` escaped, and a dead
+callee hid behind its dead caller. ADR-018 resolves references instead.
 
 ---
 
@@ -705,6 +892,32 @@ those files. Keyed by module and symbol; restatements of what the code says were
   empty range; merge and rebase fail closed on an unreadable range (measured: unrelated
   histories, rebase onto an orphan ref), push fails open.
 
+### `lib/reverse-dep-walk.ts`
+
+- An empty importer set means either "nothing depends on this" or "the walk could not look" (#54).
+  `WalkCoverage` says which, keyed on the declared seeds (file type, inside the root), never on a
+  path shape, so the verdict cannot differ between operating systems. Every early return is
+  `not-run`, the zero-seed case first, so `uncovered` is never vacuously true.
+- `seedIsCoverable` needs both halves: on POSIX an out-of-tree seed relativizes to `../…`, on
+  Windows a different-drive seed to an absolute `D:/…`. A seed inside an excluded directory stays
+  coverable on purpose (importers of `dist/x.js` are discoverable). It is exported so a test reaches
+  the `isAbsolute` half, which no POSIX `relative()` produces.
+- Only a relative `.js`/`.mjs`/`.cjs` specifier that resolves to nothing counts in
+  `unresolved_js_specifiers`: `isAbsolute` is platform-bound (`'C:/vendor/x.js'` is absolute on
+  win32 and bare on POSIX), so counting it would make the number, and the hint it selects, differ
+  by OS. The hint fires on any non-zero count — "nearly empty reads as complete" is the same defect
+  as "empty reads as clean".
+- A `project_root` that is a FILE passes `existsSync`, then `readdirSync` throws ENOTDIR into the
+  walk's swallow and yields `files_scanned: 0`, identical to an empty project — hence the explicit
+  "is not a directory" refusal (a directory that exists but cannot be read is not addressed).
+- Directory exclusion probes a virtual child (`<dir>/probe`) so `**/node_modules/**` matches the
+  directory itself.
+- Facts about the walk go to `hints` and reach every caller; V-phase advice comes from
+  `coverageHints`, which the caller gates, because a tier-skipped V phase still runs the walk. Each
+  advisory line states an observation and lists candidate causes without picking one; the
+  uncovered-seeds line drops its closing sentence when the zero-scan line fires, so two long
+  paragraphs never repeat each other.
+
 ### `tools/request-commit.ts`
 
 - The message-length check (#20) and the REVIEW gate run before authorization, so a commit
@@ -787,6 +1000,14 @@ those files. Keyed by module and symbol; restatements of what the code says were
   break recovery of findings stored before #75.
 - `phase-machine.test.ts`: the #15 exception is tested mostly through negatives — a stale
   `code` label carries no completion evidence and has no claim on it.
+- `phase-abandon.test.ts` (#53): the abandon writes an allowlist copy
+  (`PHASE_STATE_PRESERVED_ON_ABANDON`) instead of `{}`; the tests pin it in both directions, since a
+  list that only gains keys is how a live batch token would survive. Every test asserts
+  `status === 'abandoned'` and a cleared control key first — a rejected §C gate returns without
+  writing, so a failing fixture would pass every "this key survived" assertion. The `context_stale`
+  fixture must carry `phase`: `completePhaseGeneric` deletes `phase` in the same write that arms the
+  flag, and the abandon early-returns without writing when `phase` is absent. State is read from
+  disk, never through `phase_state_override`.
 
 ---
 

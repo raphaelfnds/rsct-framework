@@ -51,6 +51,17 @@ import {
   type SweepFile,
 } from '../lib/comment-sweep/review.js'
 import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
+import {
+  auditBoundKeeps,
+  checkDeadCode,
+  keepPrunePaths,
+  mergeDeadCodeKeeps,
+  publicApiDigest,
+  readDeadCodeKeeps,
+  type DeadCodeRejectKind,
+  type PendingDeadSymbol,
+} from '../lib/dead-code/review-gate.js'
+import { DEAD_CODE_KEPT_EVENT, PUBLIC_API_APPROVED_EVENT, deadCodeKeepKey, deriveAuditCeiling, publicApiApprovalKey } from '../lib/free-commit.js'
 import { validateDevApproval } from '../lib/dev-approval.js'
 import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 
@@ -77,9 +88,19 @@ const exemptFileSchema = z
   })
   .strict()
 
+const deadCodeKeepSchema = z
+  .object({
+    path: z.string().min(1),
+    name: z.string().min(1),
+    declaration_sha256: z.string().regex(/^[0-9a-f]{64}$/, 'declaration_sha256 must be a sha256 hex digest'),
+    note: z.string().min(1, 'a keep needs the reason the developer gave'),
+  })
+  .strict()
+
 const sweepInputSchema = z.object({
   comment_dispositions: z.array(dispositionSchema).optional(),
   exempt_files: z.array(exemptFileSchema).optional(),
+  dead_code_keeps: z.array(deadCodeKeepSchema).optional(),
 })
 
 export const phaseReviewCompleteInputSchema = z
@@ -101,6 +122,12 @@ export const phaseReviewCompleteInputSchema = z
       ),
     comment_dispositions: z.unknown().optional(),
     exempt_files: z.unknown().optional(),
+    dead_code_keeps: z
+      .unknown()
+      .optional()
+      .describe(
+        'One entry per dead symbol the DEVELOPER decided to keep: path, name, the declaration_sha256 from pending_dead_code, and the reason they gave. A keep is bound to those exact declaration bytes — editing the declaration asks again.',
+      ),
   })
   .strict()
 
@@ -117,6 +144,7 @@ export type PhaseReviewSweepRejectKind =
   | 'migration_missing'
   | 'unverified_declined'
   | 'unverified_undecided'
+  | DeadCodeRejectKind
 
 export type PhaseReviewCompleteRejectKind =
   | GateRejectKind
@@ -150,13 +178,14 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
   head_stale: boolean | null
   open_findings?: StoredFinding[]
   pending_dispositions?: PendingDisposition[]
+  pending_dead_code?: PendingDeadSymbol[]
   comment_sweep: CommentSweepSummary | null
 }
 
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code — a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle — an importer it cannot parse, an import() or require(), a file nothing imports — is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -198,6 +227,22 @@ export const phaseReviewCompleteTool: Tool = {
             comment_id: { type: 'string' },
             action: { type: 'string', enum: ['migrated', 'discarded'] },
             destination: { type: 'string', enum: [...MIGRATION_DESTINATIONS] },
+          },
+          additionalProperties: false,
+        },
+      },
+      dead_code_keeps: {
+        type: 'array',
+        description:
+          'One entry per dead symbol the DEVELOPER decided to keep. Take path, name and declaration_sha256 verbatim from pending_dead_code, and put the reason they gave in note. The keep is bound to those declaration bytes: edit the declaration and it is asked again.',
+        items: {
+          type: 'object',
+          required: ['path', 'name', 'declaration_sha256', 'note'],
+          properties: {
+            path: { type: 'string' },
+            name: { type: 'string' },
+            declaration_sha256: { type: 'string' },
+            note: { type: 'string' },
           },
           additionalProperties: false,
         },
@@ -248,14 +293,30 @@ function listLines(items: string[], limit: number): string {
   return head.join('\n')
 }
 
+interface DeadCodeReport {
+  kept: ReadonlyArray<{ path: string; name: string; note: string }>
+  exempted: ReadonlyArray<{ path: string; name: string }>
+}
+
 function writeReport(
   projectRoot: string,
   specRef: string,
   files: SweepFile[],
   dispositions: readonly Disposition[],
+  deadCode: DeadCodeReport,
 ): { path: string; sha256: string } | null {
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
-  const lines: string[] = [`# REVIEW comment sweep — ${specRef}`, '']
+  const lines: string[] = [`# REVIEW sweep — ${specRef}`, '']
+  if (deadCode.kept.length > 0) {
+    lines.push('## Dead code kept at the developer request')
+    for (const k of deadCode.kept) lines.push(`- ${k.path}:${k.name} — ${k.note}`)
+    lines.push('')
+  }
+  if (deadCode.exempted.length > 0) {
+    lines.push('## Exports nothing here uses, exempted by public_api')
+    for (const e of deadCode.exempted) lines.push(`- ${e.path}:${e.name}`)
+    lines.push('')
+  }
   for (const f of files) {
     lines.push(`## ${f.path} (${f.kind}${f.reason ? `: ${f.reason}` : ''})`)
     for (const c of f.removed) {
@@ -292,6 +353,7 @@ interface RejectArgs {
   extra?: Record<string, unknown>
   open_findings?: StoredFinding[]
   pending_dispositions?: PendingDisposition[]
+  pending_dead_code?: PendingDeadSymbol[]
 }
 
 function reject(args: RejectArgs): PhaseReviewCompleteOutput {
@@ -326,6 +388,7 @@ function reject(args: RejectArgs): PhaseReviewCompleteOutput {
     comment_sweep: args.comment_sweep,
     ...(args.open_findings !== undefined && { open_findings: args.open_findings }),
     ...(args.pending_dispositions !== undefined && { pending_dispositions: args.pending_dispositions }),
+    ...(args.pending_dead_code !== undefined && { pending_dead_code: args.pending_dead_code }),
   }
 }
 
@@ -353,9 +416,10 @@ export async function phaseReviewCompleteHandler(
   const sweepInput = sweepInputSchema.safeParse({
     comment_dispositions: input.comment_dispositions,
     exempt_files: input.exempt_files,
+    dead_code_keeps: input.dead_code_keeps,
   })
   if (!sweepInput.success) {
-    const reason = `comment_dispositions / exempt_files are malformed: ${sweepInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
+    const reason = `comment_dispositions / exempt_files / dead_code_keeps are malformed: ${sweepInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
     return reject({ ...base, rejectKind: 'sweep_input_invalid', reason, hints: [reason], comment_sweep: null })
   }
   const dispositions: Disposition[] = sweepInput.data.comment_dispositions ?? []
@@ -438,6 +502,29 @@ export async function phaseReviewCompleteHandler(
     })
   }
 
+  const ceiling = deriveAuditCeiling(projectRoot, config, '')
+  const keepDecisions = ceiling.deadCodeKeepDecisions
+  const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions)
+  const grantedKeeps = sweepInput.data.dead_code_keeps ?? []
+  const deadCheck = await checkDeadCode({
+    projectRoot,
+    touched: sweep.files.filter((f) => f.status !== 'deleted').map((f) => f.path),
+    publicApi: config?.public_api,
+    keeps: [...storedKeeps, ...grantedKeeps],
+    exempt: sweep.files.filter((f) => f.kind === 'unverified').map((f) => f.path),
+  })
+  if (!deadCheck.ok) {
+    return reject({
+      ...base,
+      rejectKind: deadCheck.reject_kind,
+      reason: deadCheck.reason,
+      hints: [deadCheck.reason, ...deadCheck.hints],
+      comment_sweep: summary,
+      extra: { dead_symbols: deadCheck.pending.length },
+      pending_dead_code: deadCheck.pending,
+    })
+  }
+
   const dispositionCheck = checkDispositions(sweep.repo, sweep.files, dispositions)
   if (!dispositionCheck.ok) {
     return reject({
@@ -453,10 +540,27 @@ export async function phaseReviewCompleteHandler(
   summary.migrated = dispositionCheck.migrated
   summary.discarded = dispositionCheck.discarded
 
+  const storedKeepKeys = new Set(storedKeeps.map((k) => deadCodeKeepKey(k.path, k.name, k.declaration_sha256)))
+  const grantedNotes = new Map(grantedKeeps.map((k) => [deadCodeKeepKey(k.path, k.name, k.declaration_sha256), k.note]))
+  const newlyKept = deadCheck.kept
+    .map((k) => ({ ...k, key: deadCodeKeepKey(k.path, k.name, k.declaration_sha256) }))
+    .filter((k) => grantedNotes.has(k.key) && !storedKeepKeys.has(k.key))
+    .map((k) => ({ path: k.path, name: k.name, declaration_sha256: k.declaration_sha256, note: grantedNotes.get(k.key) ?? '' }))
+  const publicExempted = deadCheck.public_exempted
+  const publicApiSha = publicApiDigest(config?.public_api)
+  const publicApiPending =
+    publicApiSha === null
+      ? publicExempted
+      : publicExempted.filter((p) => !ceiling.publicApiApprovals.has(publicApiApprovalKey(publicApiSha, p.path, p.name, p.declaration_sha256)))
+
   const removedFiles = sweep.files.filter((f) => f.removed.length > 0)
   const unverified = sweep.files.filter((f) => f.kind === 'unverified')
-  const mustForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
-  const report = mustForce ? writeReport(projectRoot, input.spec_ref, sweep.files, dispositions) : null
+  const commentForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
+  const deadCodeForce = newlyKept.length > 0 || publicApiPending.length > 0
+  const mustForce = commentForce || deadCodeForce
+  const report = mustForce
+    ? writeReport(projectRoot, input.spec_ref, commentForce ? sweep.files : [], dispositions, { kept: newlyKept, exempted: publicExempted })
+    : null
   summary.report_path = report?.path ?? null
   const reportLine = report
     ? `Full list: ${report.path} (sha256 ${report.sha256.slice(0, 16)})`
@@ -482,7 +586,7 @@ export async function phaseReviewCompleteHandler(
     const dialog = await promptFn({
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
-        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment check:\n\n` +
+        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment or dead-code check:\n\n` +
         listLines(
           unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
           40,
@@ -518,7 +622,19 @@ export async function phaseReviewCompleteHandler(
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })))
   const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`]
-  if (mustForce) {
+  if (newlyKept.length > 0) {
+    detailParts.push(
+      `Dead code KEPT at your request: ${newlyKept.length}. Each stays until its declaration changes.`,
+      listLines(newlyKept.map((k) => `${k.path}:${k.name} — ${k.note.slice(0, 100)}`), 10),
+    )
+  }
+  if (publicApiPending.length > 0) {
+    detailParts.push(
+      `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
+      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10),
+    )
+  }
+  if (commentForce) {
     detailParts.push(
       `Comments removed: ${summary.removed_count} (migrated ${summary.migrated}, discarded ${summary.discarded}).`,
       listLines(
@@ -536,8 +652,8 @@ export async function phaseReviewCompleteHandler(
         ),
       )
     }
-    detailParts.push(reportLine)
   }
+  if (mustForce) detailParts.push(reportLine)
 
   const result = await gatePhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -547,7 +663,9 @@ export async function phaseReviewCompleteHandler(
       dialogDetail: detailParts.filter(Boolean).join('\n'),
       ...(mustForce && {
         forceDialog: true,
-        forceDialogReason: 'this REVIEW removed comments, allows unverified files or changes allowlisted comments',
+        forceDialogReason: commentForce
+          ? 'this REVIEW removed comments, allows unverified files or changes allowlisted comments'
+          : 'this REVIEW keeps dead code at your request or exempts exports through public_api',
       }),
     },
   )
@@ -607,6 +725,44 @@ export async function phaseReviewCompleteHandler(
     )
     if (!w.ok) auditOk = false
   }
+  for (const keep of newlyKept) {
+    const w = appendAudit(
+      projectRoot,
+      {
+        event: DEAD_CODE_KEPT_EVENT,
+        tool: 'rsct_phase_review_complete',
+        spec_ref: input.spec_ref,
+        path: keep.path,
+        name: keep.name,
+        declaration_sha256: keep.declaration_sha256,
+        note: keep.note,
+        channel,
+      },
+      config?.audit,
+    )
+    if (!w.ok) auditOk = false
+  }
+  if (publicApiSha !== null) {
+    for (const exempted of publicApiPending) {
+      const w = appendAudit(
+        projectRoot,
+        {
+          event: PUBLIC_API_APPROVED_EVENT,
+          tool: 'rsct_phase_review_complete',
+          spec_ref: input.spec_ref,
+          public_api: config?.public_api,
+          public_api_sha256: publicApiSha,
+          path: exempted.path,
+          name: exempted.name,
+          declaration_sha256: exempted.declaration_sha256,
+          channel,
+        },
+        config?.audit,
+      )
+      if (!w.ok) auditOk = false
+    }
+  }
+  output.hints.push(...deadCheck.hints)
 
   if (!auditOk) {
     output.hints.push('⚠ REVIEW completed, but the audit log could not record the sweep, so no file was stamped — rsct_request_commit will ask for a new REVIEW. Check .rsct/audit.log and re-run the REVIEW.')
@@ -615,6 +771,9 @@ export async function phaseReviewCompleteHandler(
     const freshRefusal = refuseUnreadableState(projectRoot, freshRead)
     const fresh = freshRead.state ?? {}
     const next: PhaseState = { ...fresh, review_sweep: stampLedger(fresh.review_sweep, stamps, knownPaths(projectRoot)) }
+    const keepRecords = mergeDeadCodeKeeps(fresh.dead_code_keeps, newlyKept, input.spec_ref, at, keepPrunePaths(projectRoot))
+    if (keepRecords.length > 0) next.dead_code_keeps = keepRecords
+    else delete next.dead_code_keeps
     if (fresh.review_drift) {
       const { open } = driftCovered(projectRoot, next.review_sweep, fresh.review_drift.paths)
       if (open.length === 0) delete next.review_drift

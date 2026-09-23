@@ -4308,6 +4308,7 @@ var RsctConfigSchema = external_exports.object({
   plan_file_retention: external_exports.enum(["ephemeral", "documented"]).optional(),
   commit_message_max_lines: external_exports.number().optional().catch(void 0),
   sql_dialect: external_exports.enum(["postgresql", "mysql", "none"]).optional(),
+  public_api: external_exports.array(external_exports.string().min(1)).optional().catch(void 0),
   install: external_exports.object({
     applied_at: external_exports.string().optional(),
     mode: external_exports.string().optional(),

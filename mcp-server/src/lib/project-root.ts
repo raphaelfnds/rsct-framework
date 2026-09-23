@@ -40,6 +40,7 @@ export interface RsctConfig {
   plan_file_retention?: 'ephemeral' | 'documented'
   commit_message_max_lines?: number
   sql_dialect?: 'postgresql' | 'mysql' | 'none'
+  public_api?: string[]
   install?: {
     applied_at?: string
     mode?: string
@@ -128,6 +129,7 @@ const RsctConfigSchema = z
     plan_file_retention: z.enum(['ephemeral', 'documented']).optional(),
     commit_message_max_lines: z.number().optional().catch(undefined),
     sql_dialect: z.enum(['postgresql', 'mysql', 'none']).optional(),
+    public_api: z.array(z.string().min(1)).optional().catch(undefined),
     install: z
       .object({
         applied_at: z.string().optional(),
