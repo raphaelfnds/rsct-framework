@@ -14,8 +14,10 @@ import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
 
 let root: string
 let tick = 0
+let clock = Date.now()
 
 beforeEach(() => {
+  clock = Date.now()
   root = mkdtempSync(join(tmpdir(), 'rsct-dc-integ-'))
   initSweepRepo(root)
   write('.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
@@ -49,8 +51,9 @@ function auditEvents(): Array<Record<string, unknown>> {
 
 function approval(scope: string): Record<string, string> {
   tick++
+  clock += 2_000
   return {
-    timestamp: new Date(Date.now() - 5_000 - tick).toISOString(),
+    timestamp: new Date(clock - 5_000).toISOString(),
     action_scope: scope,
     reason: `dead code integration approval ${tick} for ${scope}`,
   }
@@ -82,17 +85,13 @@ function openReview(): void {
 
 async function completeReview(extra: Record<string, unknown> = {}, p: Prompts = prompts()): Promise<PhaseReviewCompleteOutput> {
   openReview()
-  return phaseReviewCompleteHandler(
-    { project_root: root, spec_ref: 'feat-dead', dev_approval: approval('review_complete:spec_ref=feat-dead'), ...extra },
-    { promptFn: p.fn },
-  )
+  const dev_approval = approval('review_complete:spec_ref=feat-dead')
+  return phaseReviewCompleteHandler({ project_root: root, spec_ref: 'feat-dead', dev_approval, ...extra }, { promptFn: p.fn, now: new Date(clock) })
 }
 
 async function commit(p: Prompts = prompts()): Promise<RequestCommitOutput> {
-  return requestCommitHandler(
-    { project_root: root, message: 'feat: dead code test', dev_approval: approval('commit:feat/dead:dead') },
-    { promptFn: p.fn },
-  )
+  const dev_approval = approval('commit:feat/dead:dead')
+  return requestCommitHandler({ project_root: root, message: 'feat: dead code test', dev_approval }, { promptFn: p.fn, now: new Date(clock) })
 }
 
 function trustReviews(): void {
