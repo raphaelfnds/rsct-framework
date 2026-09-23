@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-23
+
 ### Added
 
 - **Dead code is refused in the REVIEW and at the commit gate (#62, release 2).** For every
