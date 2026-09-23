@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -8,19 +8,21 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX,
   UNCOVERED_LANGUAGE_HINT_PREFIX,
+  UNSTAGED_MENTION_HINT_PREFIX,
   auditBoundKeeps,
   checkDeadCode,
   checkStagedDeadCode,
   declarationSha256,
   keepPrunePaths,
   mergeDeadCodeKeeps,
+  publicApiDigest,
   readDeadCodeKeeps,
   setDeadCodeAnalysisHookForTests,
   type DeadCodeKeep,
 } from '../../src/lib/dead-code/review-gate.js'
-import { UNREADABLE_HINT_PREFIX } from '../../src/lib/dead-code/references.js'
+import { PUBLIC_API_HINT_PREFIX, UNREADABLE_HINT_PREFIX, limitParseSizeForTests } from '../../src/lib/dead-code/references.js'
 import { limitBlobReadsForTests, openSweepRepo, readIndexEntries } from '../../src/lib/comment-sweep/git-reads.js'
-import { deadCodeKeepKey } from '../../src/lib/free-commit.js'
+import { deadCodeKeepKey, publicApiApprovalKey } from '../../src/lib/free-commit.js'
 
 let tmpRoot: string
 
@@ -322,6 +324,16 @@ describe('checkStagedDeadCode — the commit gate reads the index, never the wor
     if (!check.ok) expect(check.reason).toContain('different declaration bytes')
   })
 
+  it('says to stage the caller when the symbol is referenced nowhere in what is staged', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set() })
+    if (check.ok) throw new Error('expected a rejection')
+    expect(check.reason).toContain('in what is staged')
+    expect(check.hints.join(' ')).toContain('stage it in this same commit')
+  })
+
   it('passes its hints through on success, so an unknown is never a silent pass', async () => {
     writeFile('entry.ts', 'export function looksOrphaned(): void {}\n')
     commitAll()
@@ -561,6 +573,341 @@ describe('the commit gate reads the staged contents in bounded batches', () => {
   })
 })
 
+describe('third REVIEW, lens 2', () => {
+  afterEach(() => setDeadCodeAnalysisHookForTests(null))
+
+  it('matches public_api when the project root is reached through a junction or symlink', async () => {
+    writeFile('pkg/src/index.ts', 'export function api(): void {}\n')
+    writeFile('pkg/entry.ts', "import './src/index.js'\n")
+    commitAll()
+    const link = join(tmpdir(), `rsct-dc-link-${process.pid}-${Date.now()}`)
+    symlinkSync(join(tmpRoot, 'pkg'), link, 'junction')
+    try {
+      const check = await checkDeadCode({ projectRoot: link, touched: ['pkg/src/index.ts'], publicApi: ['src/index.ts'], keeps: [] })
+      expect(check.ok).toBe(true)
+      if (check.ok) expect(check.public_exempted.map((p) => p.name)).toEqual(['api'])
+    } finally {
+      rmSync(link, { force: true })
+    }
+  })
+
+  it('names an unstaged file that mentions a refused symbol', async () => {
+    writeFile('lib.ts', 'export function used(): void {}\n')
+    writeFile('main.ts', "import { used } from './lib.js'\nused()\n")
+    commitAll()
+    writeFile('lib.ts', 'export function used(): void {}\nexport function added(): void {}\n')
+    writeFile('main.ts', "import { used, added } from './lib.js'\nused()\nadded()\n")
+    git('add', 'lib.ts')
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['lib.ts'], keeps: [], keepDecisions: new Set() })
+    if (check.ok) throw new Error('expected a rejection')
+    const hint = check.hints.find((h) => h.startsWith(UNSTAGED_MENTION_HINT_PREFIX))
+    expect(hint).toContain('main.ts')
+    expect(hint).toContain('added')
+  })
+
+  it('names only code outside the commit that mentions the exact refused name', async () => {
+    writeFile('lib.ts', 'export function used(): void {}\n')
+    writeFile('main.ts', "import { used } from './lib.js'\nused()\n")
+    commitAll()
+    writeFile('lib.ts', 'export function used(): void {}\nexport function added(): void {}\n')
+    git('add', 'lib.ts')
+    writeFile('lib.ts', 'export function used(): void {}\nexport function added(): void {}\n\n')
+    writeFile('main.ts', "import { used, added } from './lib.js'\nused()\nadded()\n")
+    writeFile('notes.txt', 'remember to call added()\n')
+    writeFile('other.ts', 'export const addedToo = 1\n')
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['lib.ts'], keeps: [], keepDecisions: new Set() })
+    if (check.ok) throw new Error('expected a rejection')
+    expect(check.hints.find((h) => h.startsWith(UNSTAGED_MENTION_HINT_PREFIX))).toBe(`${UNSTAGED_MENTION_HINT_PREFIX}: main.ts (added).`)
+  })
+
+  it('reuses the staged verdict while the index is unchanged, and recomputes once it changes', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    commitAll()
+    let analyses = 0
+    setDeadCodeAnalysisHookForTests(() => {
+      analyses += 1
+    })
+    const args = { projectRoot: tmpRoot, stagedPaths: ['a.ts'], keeps: [], keepDecisions: new Set<string>() }
+    expect((await checkStagedDeadCode(args)).ok).toBe(true)
+    expect((await checkStagedDeadCode(args)).ok).toBe(true)
+    expect(analyses).toBe(1)
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    git('add', 'a.ts')
+    expect((await checkStagedDeadCode(args)).ok).toBe(false)
+    expect(analyses).toBe(2)
+  })
+
+  it('does not reuse a staged verdict across two project roots of one repository', async () => {
+    writeFile('pkg/src/index.ts', 'export function api(): void {}\n')
+    writeFile('pkg/entry.ts', "import './src/index.js'\n")
+    commitAll()
+    const publicApi = ['src/index.ts']
+    const digest = publicApiDigest(publicApi)
+    if (digest === null) throw new Error('expected a digest')
+    const approvals = new Set([
+      publicApiApprovalKey(digest, 'pkg/src/index.ts', 'api', createHash('sha256').update('export function api(): void {}', 'utf8').digest('hex')),
+    ])
+    const args = { stagedPaths: ['pkg/src/index.ts'], publicApi, keeps: [], keepDecisions: new Set<string>(), publicApiApprovals: approvals }
+    expect((await checkStagedDeadCode({ ...args, projectRoot: tmpRoot })).ok).toBe(false)
+    expect((await checkStagedDeadCode({ ...args, projectRoot: join(tmpRoot, 'pkg') })).ok).toBe(true)
+  })
+
+  it('reads a file git was told to ignore, and that is gone from the disk, from the index', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function alsoUsed(): void {}\n')
+    writeFile('b.ts', "import { used, alsoUsed } from './a.js'\nexport const run = () => { used(); alsoUsed() }\n")
+    writeFile('main.ts', LIVE_PAIR.main)
+    writeFile('side.ts', "import './a.js'\n")
+    commitAll()
+    git('update-index', '--assume-unchanged', 'b.ts')
+    unlinkSync(join(tmpRoot, 'b.ts'))
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+
+  it('reads an edit git was told to ignore, so the REVIEW judges what is on disk', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    writeFile('main.ts', LIVE_PAIR.main)
+    commitAll()
+    git('update-index', '--assume-unchanged', 'b.ts')
+    writeFile('b.ts', "import { used, rotting } from './a.js'\nexport const run = () => { used(); rotting() }\n")
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+
+  it('reads a file renamed away in the working tree as gone', async () => {
+    const filler = Array.from({ length: 20 }, (_, i) => `export const k${i} = ${i}\n`).join('')
+    writeFile('a.ts', 'export function used(): void {}\nexport function onlyOld(): void {}\n')
+    writeFile('old.ts', `import { onlyOld } from './a.js'\nonlyOld()\n${filler}`)
+    writeFile('main.ts', "import { used } from './a.js'\nimport './old.js'\nused()\n")
+    commitAll()
+    rmSync(join(tmpRoot, 'old.ts'))
+    writeFile('new.ts', filler)
+    git('add', '-N', 'new.ts')
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    if (check.ok) throw new Error('expected onlyOld to be refused')
+    expect(check.pending.map((p) => p.name)).toEqual(['onlyOld'])
+  })
+
+  it('reads an unstaged edit in the REVIEW', async () => {
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    commitAll()
+    writeFile('b.ts', "import { used, rotting } from './a.js'\nexport const run = () => { used(); rotting() }\n")
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts', 'b.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+})
+
+describe('a tsconfig that extends a file of any name', () => {
+  function writeProject(): void {
+    writeFile('tsconfig.json', '{ "extends": "./configs/base.json" }\n')
+    writeFile('configs/base.json', '{ "compilerOptions": { "baseUrl": "..", "paths": { "@/*": ["src/*"] } } }\n')
+    writeFile('src/a.ts', 'export function used(): void {}\nexport function other(): void {}\n')
+    writeFile('src/b.ts', "import { used } from '@/a'\nexport const run = () => used()\n")
+    writeFile('src/main.ts', "import { run } from './b.js'\nrun()\n")
+    commitAll()
+  }
+
+  it('is read by the REVIEW', async () => {
+    writeProject()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['src/a.ts'], keeps: [] })
+    if (check.ok) throw new Error('expected other to be refused')
+    expect(check.pending.map((p) => p.name)).toEqual(['other'])
+  })
+
+  it('is read by the commit gate', async () => {
+    writeProject()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['src/a.ts'], keeps: [], keepDecisions: new Set() })
+    if (check.ok) throw new Error('expected other to be refused')
+    expect(check.reason).toContain('src/a.ts:other')
+  })
+})
+
+describe('a touched file too large to parse needs the developer', () => {
+  const bigFile = `export const pad = '${'x'.repeat(300)}'\n`
+  const bigCaller = "import { pad } from './big.js'\nconsole.log(pad)\n"
+
+  beforeEach(() => limitParseSizeForTests(200))
+  afterEach(() => limitParseSizeForTests(null))
+
+  it('refuses the REVIEW and names the file, until it is exempted', async () => {
+    writeFile('big.ts', bigFile)
+    writeFile('entry.ts', bigCaller)
+    commitAll()
+    const refused = await checkDeadCode({ projectRoot: tmpRoot, touched: ['big.ts'], keeps: [] })
+    if (refused.ok) throw new Error('expected a refusal')
+    expect(refused.reject_kind).toBe('dead_code_unreadable')
+    expect(refused.reason).toContain('too large')
+    expect(refused.reason).toContain('big.ts')
+    expect(refused.hints.join(' ')).toContain('exempt_files')
+    const exempted = await checkDeadCode({ projectRoot: tmpRoot, touched: ['big.ts'], keeps: [], exempt: ['big.ts'] })
+    expect(exempted.ok).toBe(true)
+  })
+
+  it('refuses the commit and names only that file', async () => {
+    writeFile('big.ts', bigFile)
+    writeFile('entry.ts', bigCaller)
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    commitAll()
+    const check = await checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: ['big.ts', 'a.ts'], keeps: [], keepDecisions: new Set() })
+    if (check.ok) throw new Error('expected a refusal')
+    expect(check.paths).toEqual(['big.ts'])
+    expect(check.reason).toContain('too large')
+    expect(check.reason).toContain('big.ts')
+  })
+
+  it('does not refuse for a large file nobody touched', async () => {
+    writeFile('huge.ts', `import { used } from './a.js'\nused()\nexport const pad = '${'y'.repeat(300)}'\n`)
+    writeFile('a.ts', LIVE_PAIR.used)
+    commitAll()
+    const check = await checkDeadCode({ projectRoot: tmpRoot, touched: ['a.ts'], keeps: [] })
+    expect(check.ok).toBe(true)
+  })
+})
+
+describe('edges the mutation review found', () => {
+  const TWO_DEAD = 'function one(): void {}\nfunction two(): void {}\nexport {}\n'
+  const staged = (paths: string[]) => checkStagedDeadCode({ projectRoot: tmpRoot, stagedPaths: paths, keeps: [], keepDecisions: new Set<string>() })
+  const review = (touched: string[], exempt?: string[]) =>
+    checkDeadCode({ projectRoot: tmpRoot, touched, keeps: [], ...(exempt ? { exempt } : {}) })
+
+  it('does not judge a touched file under a root dist/', async () => {
+    writeFile('dist/index.js', 'function helper() {}\nexport {}\n')
+    commitAll()
+    expect((await review(['dist/index.js'])).ok).toBe(true)
+  })
+
+  it('counts the dead symbols in the REVIEW reason', async () => {
+    writeFile('a.ts', TWO_DEAD)
+    commitAll()
+    const check = await review(['a.ts'])
+    expect(check.ok ? '' : check.reason).toContain('(2 referenced nowhere)')
+  })
+
+  it('names each refused staged path once', async () => {
+    writeFile('a.ts', TWO_DEAD)
+    commitAll()
+    const check = await staged(['a.ts'])
+    expect(check.ok ? null : check.paths).toEqual(['a.ts'])
+  })
+
+  it('names an exempt file in one hint only', async () => {
+    writeFile('run.sh', 'echo hi\n')
+    commitAll()
+    expect((await review(['run.sh'], ['run.sh'])).hints.filter((h) => h.includes('run.sh'))).toHaveLength(1)
+  })
+
+  it('does not count other-language build output as unread evidence', async () => {
+    writeFile('a.ts', 'export function orphan(): void {}\n')
+    writeFile('entry.ts', "import './a.js'\n")
+    writeFile('dist/tool.py', 'print(1)\n')
+    commitAll()
+    const check = await review(['a.ts'])
+    if (check.ok) throw new Error('expected a rejection')
+    expect(check.hints.filter((h) => h.startsWith(OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX))).toEqual([])
+  })
+
+  it('passes the scan hints through a staged rejection', async () => {
+    writeFile('a.ts', 'export function orphan(): void {}\n')
+    writeFile('entry.ts', "import './a.js'\n")
+    commitAll()
+    const check = await staged(['a.ts'])
+    if (check.ok) throw new Error('expected a rejection')
+    expect(check.hints.some((h) => h.startsWith(PUBLIC_API_HINT_PREFIX))).toBe(true)
+  })
+
+  it('keeps each cat-file batch at the configured count', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    commitAll()
+    limitBlobReadsForTests({ batchCount: 1, batchBytes: 1_000_000, maxBuffer: 150 })
+    try {
+      expect((await staged(['a.ts'])).ok).toBe(true)
+    } finally {
+      limitBlobReadsForTests(null)
+    }
+  })
+
+  it('reads a skip-worktree file that is also assume-unchanged from the index', async () => {
+    writeFile('a.ts', LIVE_PAIR.used)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    writeFile('main.ts', LIVE_PAIR.main)
+    writeFile('side.ts', "import './a.js'\n")
+    commitAll()
+    git('update-index', '--skip-worktree', 'b.ts')
+    git('update-index', '--assume-unchanged', 'b.ts')
+    unlinkSync(join(tmpRoot, 'b.ts'))
+    expect((await review(['a.ts'])).ok).toBe(true)
+  })
+
+  it('does not read an ignored file as evidence', async () => {
+    writeFile('.gitignore', 'scratch.ts\n')
+    writeFile('a.ts', LIVE_PAIR.withRotting)
+    writeFile('b.ts', LIVE_PAIR.caller)
+    commitAll()
+    writeFile('scratch.ts', "import { rotting } from './a.js'\nrotting()\n")
+    expect((await review(['a.ts'])).ok).toBe(false)
+  })
+
+  it('reads an extended tsconfig.base.json at the commit gate', async () => {
+    writeFile('tsconfig.json', '{ "extends": "./tsconfig.base.json" }')
+    writeFile('tsconfig.base.json', '{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }')
+    writeFile('src/lib/x.ts', 'export function viaAlias(): void {}\n')
+    writeFile('src/app.ts', "import { viaAlias } from '@/lib/x'\nviaAlias()\n")
+    commitAll()
+    const check = await staged(['src/lib/x.ts'])
+    expect(check.ok && check.unknown).toBe(0)
+  })
+})
+
+describe('a public_api exemption needs the developer approval at the commit too', () => {
+  function writeLibrary(): void {
+    writeFile('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    writeFile('src/b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    writeFile('src/main.ts', "import { run } from './b.js'\nrun()\n")
+    commitAll()
+  }
+
+  it('refuses a staged export nothing approved, and names it', async () => {
+    writeLibrary()
+    const check = await checkStagedDeadCode({
+      projectRoot: tmpRoot,
+      stagedPaths: ['src/a.ts'],
+      publicApi: ['src/a.ts'],
+      keeps: [],
+      keepDecisions: new Set(),
+      publicApiApprovals: new Set(),
+    })
+    if (check.ok) throw new Error('expected a refusal')
+    expect(check.reason).toContain('src/a.ts:exposed')
+  })
+
+  it('passes once the audit log holds the approval for that declaration and that list', async () => {
+    writeLibrary()
+    const publicApi = ['src/a.ts']
+    const digest = publicApiDigest(publicApi)
+    if (digest === null) throw new Error('expected a digest')
+    const declaration = 'export function exposed(): void {}'
+    const approvals = new Set([publicApiApprovalKey(digest, 'src/a.ts', 'exposed', createHash('sha256').update(declaration, 'utf8').digest('hex'))])
+    const check = await checkStagedDeadCode({
+      projectRoot: tmpRoot,
+      stagedPaths: ['src/a.ts'],
+      publicApi,
+      keeps: [],
+      keepDecisions: new Set(),
+      publicApiApprovals: approvals,
+    })
+    expect(check.ok).toBe(true)
+  })
+})
+
 describe('keep pruning', () => {
   it('knows an untracked file, so a keep granted on it survives the next REVIEW', () => {
     writeFile('a.ts', LIVE_PAIR.used)
@@ -617,14 +964,14 @@ describe('declarationSha256', () => {
   it('is stable across CRLF, so a checkout setting does not invalidate a keep', () => {
     const lf = 'export function a(): void {\n  return\n}'
     const crlf = 'export function a(): void {\r\n  return\r\n}'
-    const symbol = { path: 'a.ts', name: 'a', kind: 'value' as const, exported: true, defaultExport: false, start: 0, end: lf.length }
+    const symbol = { path: 'a.ts', name: 'a', kind: 'value' as const, exported: true, start: 0, end: lf.length }
     expect(declarationSha256(lf, symbol)).toBe(declarationSha256(crlf, { ...symbol, end: crlf.length }))
   })
 
   it('changes when the declaration body changes', () => {
     const a = 'export function x(): number { return 1 }'
     const b = 'export function x(): number { return 2 }'
-    const symbol = { path: 'a.ts', name: 'x', kind: 'value' as const, exported: true, defaultExport: false, start: 0, end: a.length }
+    const symbol = { path: 'a.ts', name: 'x', kind: 'value' as const, exported: true, start: 0, end: a.length }
     expect(declarationSha256(a, symbol)).not.toBe(declarationSha256(b, { ...symbol, end: b.length }))
   })
 })

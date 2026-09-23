@@ -384,13 +384,15 @@ export async function requestCommitHandler(
     entries: ReadonlyArray<{ path: string; unverified: boolean }>,
   ): Promise<StagedDeadCodeCheck> => {
     const paths = entries.map((entry) => entry.path)
+    const ceiling = deriveAuditCeiling(projectRoot, config ?? null, '')
     try {
       return await checkStagedDeadCode({
         projectRoot,
         stagedPaths: paths,
         publicApi: config?.public_api,
         keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
-        keepDecisions: deriveAuditCeiling(projectRoot, config ?? null, '').deadCodeKeepDecisions,
+        keepDecisions: ceiling.deadCodeKeepDecisions,
+        publicApiApprovals: ceiling.publicApiApprovals,
         exempt: entries.filter((entry) => entry.unverified).map((entry) => entry.path),
       })
     } catch (error) {

@@ -83,6 +83,24 @@ describe('the walk covers .mts and .cts (#101 Part A)', () => {
     expect(walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/utils/index.ts'] }).discovered.map((d) => d.file)).not.toContain('src/importer.ts')
   })
 
+  it('resolves "./utils/", "." and ".." to the directory index even beside a same-named file', () => {
+    writeFile('src/utils.ts', 'export const x = 1\n')
+    writeFile('src/utils/index.ts', 'export const y = 1\n')
+    writeFile('src/importer.ts', "import { y } from './utils/'\n")
+    writeFile('src/utils/inner.ts', "import { y } from '.'\n")
+    writeFile('src/utils/deep/leaf.ts', "import { y } from '..'\n")
+    const files = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/utils/index.ts'] }).discovered.map((d) => d.file)
+    expect(files).toEqual(expect.arrayContaining(['src/importer.ts', 'src/utils/inner.ts', 'src/utils/deep/leaf.ts']))
+  })
+
+  it('finds an importer whose import braces hold a comment with a quote in it', () => {
+    writeFile('src/seed.ts', 'export const used = 1\nexport const other = 2\n')
+    writeFile('src/importer.ts', "import {\n  used, // it's the one we need\n  other,\n} from './seed.js'\n")
+    writeFile('src/barrel.ts', "export {\n  used, // it's re-exported\n} from './seed.js'\n")
+    const files = walkReverseDeps({ projectRoot: tmpRoot, seedPaths: ['src/seed.ts'] }).discovered.map((d) => d.file)
+    expect(files).toEqual(expect.arrayContaining(['src/importer.ts', 'src/barrel.ts']))
+  })
+
   it('scans a .mts file for its own imports, not only as a target', () => {
     writeFile('src/seed.ts', 'export const x = 1\n')
     writeFile('src/mid.mts', "import { x } from './seed.js'\nexport const y = x\n")

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import {
   DEPENDENT_HINT_PREFIX,
+  DUAL_MODE_HINT_PREFIX,
   DYNAMIC_HINT_PREFIX,
   ENTRYPOINT_HINT_PREFIX,
   ESCAPED_HINT_PREFIX,
@@ -13,6 +14,7 @@ import {
   PUBLIC_API_HINT_PREFIX,
   PUBLIC_EXEMPTED_HINT_PREFIX,
   SCRIPT_HINT_PREFIX,
+  TYPE_CHECK_HINT_PREFIX,
   UNBOUND_HINT_PREFIX,
   UNPARSEABLE_TARGET_HINT_PREFIX,
   UNREADABLE_HINT_PREFIX,
@@ -20,6 +22,7 @@ import {
   corpusFrom,
   findDeadSymbols,
   languageOf,
+  limitParseSizeForTests,
   limitSymbolScanCacheForTests,
   symbolScanCacheSize,
   symbolScanMisses,
@@ -677,11 +680,98 @@ describe('findDeadSymbols — resolution the way the bundler does it', () => {
     expect(await deadNames(['mod.cts', 'b.ts', 'entry.ts'], ['mod.cts'])).toEqual([])
   })
 
-  it('resolves case-exactly, so a wrongly-cased import is not a use on any operating system', async () => {
-    writeFile('Widget.ts', 'export function widget(): void {}\n')
+  it('leaves unknown, on every operating system, what only a wrongly-cased import names', async () => {
+    writeFile('Widget.ts', 'export function widget(): void {}\nexport function unusedWidget(): void {}\n')
     writeFile('b.ts', "import { widget } from './widget.js'\nexport const go = () => widget()\n")
     writeFile('entry.ts', "import './Widget.js'\n")
-    expect(await deadNames(['Widget.ts', 'b.ts', 'entry.ts'], ['Widget.ts'])).toEqual(['widget'])
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['Widget.ts', 'b.ts', 'entry.ts'], targets: ['Widget.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['unusedWidget'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['widget'])
+  })
+
+  it('does the same beside a correctly-cased import of the same file', async () => {
+    writeFile('src/utils.ts', 'export function other(): void {}\nexport function helper(): void {}\n')
+    writeFile('src/a.ts', "import { other } from './utils'\nother()\n")
+    writeFile('src/main.ts', "import { helper } from './Utils'\nhelper()\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['src/utils.ts', 'src/a.ts', 'src/main.ts'], targets: ['src/utils.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['helper'])
+  })
+
+  it('leaves unknown what a wrongly-cased import of a package directory names', async () => {
+    writeFile('lib/package.json', '{ "main": "./entry.ts" }\n')
+    writeFile('lib/entry.ts', 'export function widget(): void {}\nexport function unusedWidget(): void {}\n')
+    writeFile('b.ts', "import { widget } from './Lib'\nexport const go = () => widget()\n")
+    writeFile('main.ts', "import './lib/entry.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['lib/entry.ts', 'b.ts', 'main.ts'],
+      configs: ['lib/package.json'],
+      targets: ['lib/entry.ts'],
+    })
+    expect(result.dead.map((s) => s.name)).toEqual(['unusedWidget'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['widget'])
+  })
+
+  it('covers every file a wrongly-cased import could mean', async () => {
+    writeFile('src/utils.spec.ts', "import './utils.js'\n")
+    writeFile('src/utils.ts', 'export function helper(): void {}\nexport function unusedHelper(): void {}\n')
+    writeFile('src/main.ts', "import { helper } from './UTILS'\nhelper()\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['src/utils.spec.ts', 'src/utils.ts', 'src/main.ts'],
+      targets: ['src/utils.ts'],
+    })
+    expect(result.dead.map((s) => s.name)).toEqual(['unusedHelper'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['helper'])
+  })
+
+  it('does not let an import of a directory that resolves nowhere blanket what is inside it', async () => {
+    writeFile('src/one.ts', 'export function oneDead(): void {}\n')
+    writeFile('src/two.ts', 'export function twoDead(): void {}\n')
+    writeFile('src/decoy.ts', "import * as z from './'\nexport const x = z\n")
+    writeFile('src/entry.ts', "import './one.js'\nimport './two.js'\nimport './decoy.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['src/one.ts', 'src/two.ts', 'src/decoy.ts', 'src/entry.ts'],
+      targets: ['src/one.ts', 'src/two.ts'],
+    })
+    expect(result.dead.map((s) => s.name).sort()).toEqual(['oneDead', 'twoDead'])
+  })
+
+  it('leaves judged a sibling whose path merely starts with the one a wrongly-cased import names', async () => {
+    writeFile('a.ts', 'export function widget(): void {}\n')
+    writeFile('a.tsx', 'export function widget(): void {}\n')
+    writeFile('b.ts', "import { widget } from './A'\nexport const go = () => widget()\n")
+    writeFile('entry.ts', "import './a.js'\nimport './a.tsx'\nimport './b.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['a.ts', 'a.tsx', 'b.ts', 'entry.ts'],
+      targets: ['a.tsx'],
+    })
+    expect(result.dead.map((s) => s.name)).toEqual(['widget'])
+  })
+
+  it('does not let a wrongly-cased directory import reach a file named after the directory', async () => {
+    writeFile('src.ts', 'export function besideTheDirectory(): void {}\n')
+    writeFile('src/one.ts', 'export function inside(): void {}\n')
+    writeFile('decoy.ts', "import * as z from './SRC/'\nexport const x = z\n")
+    writeFile('entry.ts', "import './src.js'\nimport './src/one.js'\nimport './decoy.js'\n")
+    const result = await findDeadSymbols({
+      projectRoot: tmpRoot,
+      corpus: ['src.ts', 'src/one.ts', 'decoy.ts', 'entry.ts'],
+      targets: ['src.ts', 'src/one.ts'],
+    })
+    expect(result.dead.map((s) => s.name).sort()).toEqual(['besideTheDirectory', 'inside'])
+  })
+
+  it('leaves unknown a wrongly-cased import of a style module written in TypeScript', async () => {
+    writeFile('styles.css.ts', 'export const container = 1\nexport const unusedStyle = 2\n')
+    writeFile('b.ts', "import { container } from './Styles.css'\nexport const go = () => container\n")
+    writeFile('main.ts', "import './styles.css'\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['styles.css.ts', 'b.ts', 'main.ts'], targets: ['styles.css.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['unusedStyle'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['container'])
   })
 })
 
@@ -753,6 +843,46 @@ describe('the parse cache — the commit gate runs this check twice', () => {
       writeFile('c.ts', 'export const c = 1\n')
       await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', 'c.ts'], targets: [] })
       expect(symbolScanCacheSize()).toBe(2)
+    } finally {
+      limitSymbolScanCacheForTests(null)
+      clearSymbolScanCache()
+    }
+  })
+
+  it('keeps what fits when a check reads more files than the cache holds, instead of re-parsing all of them', async () => {
+    clearSymbolScanCache()
+    limitSymbolScanCacheForTests(2)
+    try {
+      writeFile('a.ts', 'export const a = 1\n')
+      writeFile('b.ts', 'export const b = 1\n')
+      writeFile('c.ts', 'export const c = 1\n')
+      const input = { projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', 'c.ts'], targets: [] }
+      await findDeadSymbols(input)
+      for (let round = 0; round < 2; round++) {
+        const before = symbolScanMisses()
+        await findDeadSymbols(input)
+        expect(symbolScanMisses() - before).toBe(1)
+      }
+    } finally {
+      limitSymbolScanCacheForTests(null)
+      clearSymbolScanCache()
+    }
+  })
+
+  it('gives the place of a parse no check uses any more to a new one', async () => {
+    clearSymbolScanCache()
+    limitSymbolScanCacheForTests(2)
+    try {
+      writeFile('a.ts', 'export const a = 1\n')
+      writeFile('b.ts', 'export const b = 1\n')
+      const input = { projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts'], targets: [] }
+      await findDeadSymbols(input)
+      writeFile('a.ts', 'export const a = 2\n')
+      const before = symbolScanMisses()
+      await findDeadSymbols(input)
+      expect(symbolScanMisses() - before).toBe(1)
+      await findDeadSymbols(input)
+      expect(symbolScanMisses() - before).toBe(1)
     } finally {
       limitSymbolScanCacheForTests(null)
       clearSymbolScanCache()
@@ -838,6 +968,64 @@ describe('findDeadSymbols — a classic script shares its top level with every o
   })
 })
 
+describe('findDeadSymbols — a file too large to parse', () => {
+  it('is read only for its imports, and named when it is a target', async () => {
+    limitParseSizeForTests(200)
+    try {
+      writeFile('big.ts', `export function bigHelper(): void {}\nexport const pad = '${'x'.repeat(300)}'\n`)
+      writeFile('a.ts', 'export function used(): void {}\n')
+      writeFile('huge.ts', `import { used } from './a.js'\nused()\nexport const pad = '${'y'.repeat(300)}'\n`)
+      writeFile('entry.ts', "import './big.js'\nimport './a.js'\n")
+      const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['big.ts', 'a.ts', 'huge.ts', 'entry.ts'], targets: ['big.ts', 'a.ts'] })
+      expect(result.dead).toEqual([])
+      expect(result.unknown.map((s) => s.name)).toEqual(['used'])
+      expect(result.hints.find((h) => h.startsWith(UNPARSEABLE_TARGET_HINT_PREFIX))).toContain('big.ts')
+    } finally {
+      limitParseSizeForTests(null)
+    }
+  })
+})
+
+describe('findDeadSymbols — a file that also runs as a plain script (developer decision 2026-09-23)', () => {
+  it('keeps what it exports alive, judges the rest, and says a page could reach it', async () => {
+    writeFile('umd.js', "var root = typeof module !== 'undefined' ? module : null\nfunction rotting() {}\nmodule.exports = { root }\n")
+    writeFile('entry.ts', "import './umd.js'\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['umd.js', 'entry.ts'], targets: ['umd.js'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['rotting'])
+    expect(result.unknown).toEqual([])
+    expect(result.hints.find((h) => h.startsWith(DUAL_MODE_HINT_PREFIX))).toContain('umd.js')
+  })
+
+  it('says nothing about a script tag for a CommonJS file with no such guard', async () => {
+    writeFile('plain.js', 'var root = null\nfunction rotting() {}\nmodule.exports = { root }\n')
+    writeFile('entry.ts', "import './plain.js'\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['plain.js', 'entry.ts'], targets: ['plain.js'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['rotting'])
+    expect(result.hints.some((h) => h.startsWith(DUAL_MODE_HINT_PREFIX))).toBe(false)
+  })
+})
+
+describe('findDeadSymbols — the size cap this release ships', () => {
+  it('counts the bytes, so a file of multi-byte text over 2 MB is not parsed', async () => {
+    writeFile('big.ts', `export const note = '${'á'.repeat(1_100_000)}'\nexport function bigHelper(): void {}\n`)
+    writeFile('entry.ts', "import './big.js'\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['big.ts', 'entry.ts'], targets: ['big.ts'] })
+    expect(result.oversized).toEqual(['big.ts'])
+    expect(result.dead).toEqual([])
+  })
+})
+
+describe('findDeadSymbols — a type check written as a declaration (developer decision 2026-09-22)', () => {
+  it('leaves `const _name: Type = value` unknown with a hint, and still reports an unannotated alias', async () => {
+    writeFile('s.ts', 'export const schema = 1\n')
+    writeFile('a.ts', "import { schema } from './s.js'\ntype Tree = number\nconst _sameTree: Tree = schema\nconst _alias = schema\nexport {}\n")
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['s.ts', 'a.ts', importerOf('a.ts')], targets: ['a.ts'] })
+    expect(result.dead.map((s) => s.name)).toEqual(['_alias'])
+    expect(result.unknown.map((s) => s.name)).toEqual(['_sameTree'])
+    expect(result.hints.find((h) => h.startsWith(TYPE_CHECK_HINT_PREFIX))).toContain('a.ts:_sameTree')
+  })
+})
+
 describe('findDeadSymbols — a direct eval can reach any binding of its module', () => {
   it('leaves every symbol of that file unknown, and says why', async () => {
     writeFile('a.ts', "function helper(): void {}\neval('helper()')\nexport {}\n")
@@ -898,7 +1086,7 @@ describe('findDeadSymbols — public_api is read relative to the project root', 
       corpus: ['pkg/src/index.ts', 'pkg/entry.ts'],
       targets: ['pkg/src/index.ts'],
       publicApi: ['src/index.ts'],
-      publicApiRoot: join(tmpRoot, 'pkg'),
+      publicApiPrefix: 'pkg/',
     })
     expect(result.dead).toEqual([])
     expect(result.publicExempted.map((s) => s.name)).toEqual(['publicThing'])
@@ -912,7 +1100,7 @@ describe('findDeadSymbols — public_api is read relative to the project root', 
       corpus: ['pkg/src/index.ts', 'pkg/entry.ts'],
       targets: ['pkg/src/index.ts'],
       publicApi: ['pkg/src/index.ts'],
-      publicApiRoot: join(tmpRoot, 'pkg'),
+      publicApiPrefix: 'pkg/',
     })
     expect(result.dead).toEqual([])
   })
@@ -1011,10 +1199,20 @@ describe('findDeadSymbols — forms the first REVIEW left unpinned, end to end',
     expect(await deadNames(['impl.ts', 'mid.ts', 'index.ts', 'consumer.ts'], ['impl.ts'])).toEqual(['b'])
   })
 
-  it('does not treat a call through a parameter named require as an import', async () => {
+  it('treats a call through a parameter named require as a dynamic import, so its target is withheld', async () => {
     writeFile('a.ts', 'export function lonely(): void {}\n')
     writeFile('b.ts', "export function load(require: (s: string) => unknown): unknown { return require('./a.js') }\n")
-    expect(await deadNames(['a.ts', 'b.ts', importerOf('a.ts', 'b.ts')], ['a.ts'])).toEqual(['lonely'])
+    const result = await findDeadSymbols({ projectRoot: tmpRoot, corpus: ['a.ts', 'b.ts', importerOf('a.ts', 'b.ts')], targets: ['a.ts'] })
+    expect(result.dead).toEqual([])
+    expect(result.unknown.map((s) => s.name)).toEqual(['lonely'])
+  })
+
+  it('does not let a parameter named require with a computed target withhold the whole project', async () => {
+    writeFile('a.ts', 'export function used(): void {}\nexport function rotting(): void {}\n')
+    writeFile('b.ts', "import { used } from './a.js'\nexport const run = () => used()\n")
+    writeFile('loader.ts', 'export function load(require: (s: string) => unknown, name: string): unknown { return require(name) }\n')
+    writeFile('main.ts', "import { run } from './b.js'\nimport { load } from './loader.js'\nrun()\nload(() => 1, 'x')\n")
+    expect(await deadNames(['a.ts', 'b.ts', 'loader.ts', 'main.ts'], ['a.ts'])).toEqual(['rotting'])
   })
 
   it('reads a call written right after a declaration, with no separator, as a top-level use', async () => {
@@ -1039,6 +1237,5 @@ describe('findDeadSymbols — scope', () => {
       targets: ['target.ts'],
     })
     expect(result.dead.map((s) => s.name)).toEqual(['judged'])
-    expect(result.filesScanned).toBe(3)
   })
 })

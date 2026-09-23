@@ -9221,7 +9221,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join33 } = __require("path");
+    var { join: join34 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9264,7 +9264,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join33(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join34(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9667,7 +9667,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join33, isAbsolute: isAbsolute8, sep: sep2 } = __require("path");
+    var { join: join34, isAbsolute: isAbsolute8, sep: sep2 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9730,7 +9730,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join33(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9748,7 +9748,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join33(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9770,7 +9770,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join33(__dirname$1, "..", "file.js");
+          return join34(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10760,7 +10760,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join33 = ",";
+            let join34 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10774,7 +10774,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join33 = `,
+                join34 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10782,13 +10782,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join33;
+                res += join34;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join33}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10809,7 +10809,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join33 = `,
+              join34 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10823,13 +10823,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join33;
+                separator = join34;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join33;
+              separator = join34;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10870,7 +10870,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join33 = ",";
+            let join34 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10883,7 +10883,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join33 = `,
+                join34 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10891,13 +10891,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join33;
+                res += join34;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join33}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10910,7 +10910,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join33 = `,
+              join34 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10919,7 +10919,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join33;
+                separator = join34;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10977,20 +10977,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join34 = `,
+              const join35 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join34;
+                res2 += join35;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11006,16 +11006,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join33 = `,
+            const join34 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join33, maximumBreadth);
+              res += stringifyTypedArray(value, join34, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join33;
+              separator = join34;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11026,13 +11026,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join33;
+                separator = join34;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join33;
+              separator = join34;
             }
             if (separator !== "") {
               res = `
@@ -28099,8 +28099,12 @@ function resolveFreeBudgetLimits(config2) {
   };
 }
 var DEAD_CODE_KEPT_EVENT = "review.dead_code_kept";
+var PUBLIC_API_APPROVED_EVENT = "review.public_api_approved";
 function deadCodeKeepKey(path2, name2, declarationSha2562) {
   return `${path2}\0${name2}\0${declarationSha2562}`;
+}
+function publicApiApprovalKey(publicApiSha256, path2, name2, declarationSha2562) {
+  return `${publicApiSha256}\0${path2}\0${name2}\0${declarationSha2562}`;
 }
 function deriveAuditCeiling(projectRoot, config2, planSlug) {
   const failClosed = {
@@ -28110,7 +28114,8 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
     auditLocked: false,
     readable: false,
     unverifiedDecisions: /* @__PURE__ */ new Set(),
-    deadCodeKeepDecisions: /* @__PURE__ */ new Set()
+    deadCodeKeepDecisions: /* @__PURE__ */ new Set(),
+    publicApiApprovals: /* @__PURE__ */ new Set()
   };
   const auditPath = resolveAuditPath(projectRoot, config2?.audit);
   let raw;
@@ -28127,6 +28132,7 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
   let auditLocked = false;
   const unverifiedDecisions = /* @__PURE__ */ new Set();
   const deadCodeKeepDecisions = /* @__PURE__ */ new Set();
+  const publicApiApprovals = /* @__PURE__ */ new Set();
   for (const line2 of raw.split("\n")) {
     const clean = line2.replace(/\r/g, "").trim();
     if (!clean) continue;
@@ -28154,6 +28160,8 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
       unverifiedDecisions.add(decisionKey(entry.path, entry.blob));
     } else if (event === DEAD_CODE_KEPT_EVENT && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
       deadCodeKeepDecisions.add(deadCodeKeepKey(entry.path, entry.name, entry.declaration_sha256));
+    } else if (event === PUBLIC_API_APPROVED_EVENT && typeof entry.public_api_sha256 === "string" && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
+      publicApiApprovals.add(publicApiApprovalKey(entry.public_api_sha256, entry.path, entry.name, entry.declaration_sha256));
     }
   }
   return {
@@ -28163,7 +28171,8 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
     auditLocked,
     readable: true,
     unverifiedDecisions,
-    deadCodeKeepDecisions
+    deadCodeKeepDecisions,
+    publicApiApprovals
   };
 }
 function reserveFreeBudget(args2) {
@@ -28526,9 +28535,17 @@ function readSkipWorktreePaths(repo) {
   if (listed2 === null) return null;
   const paths = /* @__PURE__ */ new Set();
   for (const entry of listed2) {
-    if (entry.startsWith("S ") || entry.startsWith("s ")) paths.add(entry.slice(2));
+    const tag = entry.slice(0, 1);
+    if (tag === "S" || tag !== "" && tag === tag.toLowerCase() && tag !== tag.toUpperCase()) paths.add(entry.slice(2));
   }
   return paths;
+}
+function readWorktreeChangedPaths(repo) {
+  return nulList(safeGitBuffer(repo.toplevel, ["diff", "--name-only", "--no-renames", "-z"]));
+}
+function readIndexFingerprint(repo) {
+  const listed2 = safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]);
+  return listed2 === null ? null : createHash("sha256").update(listed2).digest("hex");
 }
 function readKnownPaths(repo) {
   const index = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-z", "--full-name"]));
@@ -40835,6 +40852,7 @@ var Parser2 = class {
 // src/lib/comment-sweep/tree-engine.ts
 var NAMESPACE_IMPORT = "*";
 var DEFAULT_IMPORT = "default";
+var JSX_PRAGMA_OWNER = "@jsx";
 var GRAMMAR_FILES = {
   javascript: "tree-sitter-javascript.wasm",
   typescript: "tree-sitter-typescript.wasm",
@@ -40949,6 +40967,8 @@ var GLOB_METHODS = /* @__PURE__ */ new Set(["glob", "globEager"]);
 var GLOB_META = /[*?[{(!]/;
 var JSX_PRAGMA = /@jsx(?:Frag)?\s+([A-Za-z_$][\w$]*)/g;
 var COMMONJS_NAMES = /* @__PURE__ */ new Set(["require", "module", "exports"]);
+var PLAIN_VALUES = /* @__PURE__ */ new Set(["identifier", "member_expression", "string", "number", "true", "false", "null", "undefined"]);
+var DUAL_MODE_GUARDS = /* @__PURE__ */ new Set(["module", "exports", "define"]);
 var SKIP = -1;
 var NO_NAMES = /* @__PURE__ */ new Set();
 function namedChildren(node) {
@@ -41204,8 +41224,8 @@ function topLevelDeclarations(root) {
           name: name3.text,
           kind: "value",
           exported,
-          defaultExport: false,
           effect: hasLoadTimeEffect(declarator.childForFieldName("value")),
+          typeCheck: name3.text.startsWith("_") && declarator.childForFieldName("type") !== null && PLAIN_VALUES.has(declarator.childForFieldName("value")?.type ?? ""),
           exposures: exported ? [name3.text] : [],
           start: statement.startIndex,
           end: statement.endIndex,
@@ -41225,8 +41245,8 @@ function topLevelDeclarations(root) {
       name: name2.text,
       kind,
       exported,
-      defaultExport,
       effect: decorated || runsAtLoad && hasLoadTimeEffect(node),
+      typeCheck: false,
       exposures: exported ? [defaultExport ? DEFAULT_IMPORT : name2.text] : [],
       start: statement.startIndex,
       end: statement.endIndex,
@@ -41271,7 +41291,6 @@ function applyLocalExports(declarations, localExports, imports, references) {
       for (const declaration of owned) {
         declaration.exported = true;
         if (!declaration.exposures.includes(entry.exposed)) declaration.exposures.push(entry.exposed);
-        if (entry.exposed === DEFAULT_IMPORT) declaration.defaultExport = true;
       }
       continue;
     }
@@ -41298,7 +41317,7 @@ function collectSymbols(root) {
   const localExports = [];
   const dynamicPrefixes = [];
   const pragmas = /* @__PURE__ */ new Set();
-  const flags2 = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false };
+  const flags2 = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false, dualMode: false };
   const scopes = [];
   const shadowsValue = (name2) => scopes.some((scope) => scope.values.has(name2));
   const shadowsType = (name2) => scopes.some((scope) => scope.types.has(name2));
@@ -41311,13 +41330,14 @@ function collectSymbols(root) {
     if (COMMONJS_NAMES.has(object3.text)) flags2.commonJs = true;
     memberUses.push({ object: object3.text, member: member.text, owner: ownerAt(owners, index) });
   };
-  const dynamicTarget = (argument) => {
+  const dynamicTarget = (argument, followComputed) => {
     if (!argument) return;
     const literal2 = staticText(argument);
     if (literal2 !== null) {
       if (literal2.length > 0) imports.push({ specifier: literal2, kind: "dynamic", names: [], starReexport: false, namespaceReexport: null });
       return;
     }
+    if (!followComputed) return;
     const prefix = leadingText(argument);
     if (prefix.length > 0) dynamicPrefixes.push(prefix);
     else flags2.unboundDynamic = true;
@@ -41344,8 +41364,8 @@ function collectSymbols(root) {
     const argument = args2?.type === "arguments" ? namedChildren(args2).find((child) => child.type !== "comment") ?? null : null;
     const requireInScope = !shadowsValue("require");
     if (fn.type === "identifier" && fn.text === "eval" && !shadowsValue("eval")) flags2.directEval = true;
-    if (fn.type === "import" || fn.type === "identifier" && fn.text === "require" && requireInScope) {
-      dynamicTarget(argument);
+    if (fn.type === "import" || fn.type === "identifier" && fn.text === "require") {
+      dynamicTarget(argument, fn.type === "import" || requireInScope);
       return;
     }
     if (fn.type !== "member_expression") return;
@@ -41353,6 +41373,11 @@ function collectSymbols(root) {
     const property = fn.childForFieldName("property")?.text ?? "";
     if (object3?.type === "meta_property" && object3.text === "import.meta" && GLOB_METHODS.has(property)) globTarget(argument);
     else if (object3?.type === "identifier" && object3.text === "require" && property === "context" && requireInScope) contextTarget(argument);
+  };
+  const recordTypeofGuard = (node) => {
+    if (node.childForFieldName("operator")?.type !== "typeof") return;
+    const argument = node.childForFieldName("argument");
+    if (argument?.type === "identifier" && DUAL_MODE_GUARDS.has(argument.text) && !shadowsValue(argument.text)) flags2.dualMode = true;
   };
   const recordImport = (node) => {
     const specifier = specifierOf(node);
@@ -41421,6 +41446,7 @@ function collectSymbols(root) {
     }
     if (type === "export_statement" && recordExport(node())) return SKIP;
     if (type === "call_expression") recordCall(node());
+    else if (type === "unary_expression") recordTypeofGuard(node());
     else if (type === "member_expression") memberUse(node().childForFieldName("object"), node().childForFieldName("property"), cursor2.startIndex);
     else if (type === "nested_type_identifier") memberUse(node().childForFieldName("module"), node().childForFieldName("name"), cursor2.startIndex);
     const field = cursor2.currentFieldName;
@@ -41482,7 +41508,7 @@ function collectSymbols(root) {
     cursor.delete();
   }
   applyLocalExports(declarations, localExports, imports, references);
-  if (flags2.hasJsx) for (const name2 of pragmas) references.push({ name: name2, owner: null });
+  if (flags2.hasJsx) for (const name2 of pragmas) references.push({ name: name2, owner: JSX_PRAGMA_OWNER });
   return {
     declarations,
     references,
@@ -41492,6 +41518,7 @@ function collectSymbols(root) {
     unboundDynamic: flags2.unboundDynamic,
     directEval: flags2.directEval,
     module: esm || flags2.commonJs,
+    dualMode: flags2.dualMode && !esm,
     hasJsx: flags2.hasJsx
   };
 }
@@ -42205,10 +42232,13 @@ var INDEX_RESOLUTIONS = [
 ];
 var IMPORT_PATTERNS = [
   /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
   /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g
+  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g
 ];
+var DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/;
 var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
 var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
 function relPosix(projectRoot, abs) {
@@ -42285,7 +42315,7 @@ function hasExactPath(projectRoot, candidate, entries) {
 function diskProbe(projectRoot, entries) {
   const stat = (abs) => {
     try {
-      return statSync(abs);
+      return statSync(abs, { throwIfNoEntry: false }) ?? null;
     } catch {
       return null;
     }
@@ -42310,8 +42340,9 @@ function resolveNodeNextSource(target, probe) {
 function resolveImport(projectRoot, importerAbs, spec, entries, probe = diskProbe(projectRoot, entries)) {
   if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
   const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
-  if (probe.isFile(target)) return target;
-  for (const ext of RESOLVE_EXTENSIONS) {
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec);
+  if (!directoryOnly && probe.isFile(target)) return target;
+  for (const ext of directoryOnly ? [] : RESOLVE_EXTENSIONS) {
     const candidate = target + ext;
     if (probe.exists(candidate)) return candidate;
   }
@@ -42505,22 +42536,53 @@ function coverageHints(result) {
 // src/lib/dead-code/module-resolution.ts
 init_esm_shims();
 var DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
-var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".mts",
-  ".cts",
-  ".vue",
-  ".svelte",
-  ".astro",
-  ".html",
-  ".htm",
-  ".mdx"
+var ASSET_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".styl",
+  ".pcss",
+  ".json",
+  ".jsonc",
+  ".json5",
+  ".md",
+  ".txt",
+  ".csv",
+  ".tsv",
+  ".xml",
+  ".yml",
+  ".yaml",
+  ".toml",
+  ".ini",
+  ".graphql",
+  ".gql",
+  ".glsl",
+  ".wgsl",
+  ".wasm",
+  ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".bmp",
+  ".ico",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".ogg",
+  ".webm",
+  ".pdf"
 ]);
+var RUNTIME_SUFFIX = /\.(?:js|jsx|mjs|cjs)$/;
+var PACKAGE_ENTRY_FIELDS = ["main", "module", "source", "types", "exports"];
 var CONFIG_NAMES = ["tsconfig.json", "jsconfig.json"];
 var MAX_EXTENDS_DEPTH = 16;
 var BUILTINS = new Set(builtinModules);
@@ -42582,13 +42644,27 @@ function packageNameOf(specifier) {
   return specifier.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0] ?? specifier;
 }
 function isBuiltin(specifier) {
-  return specifier.startsWith("node:") || BUILTINS.has(specifier) || BUILTINS.has(packageNameOf(specifier));
+  return BUILTINS.has(specifier) || BUILTINS.has(packageNameOf(specifier));
 }
 function isAsset(path2) {
-  if (!path2.startsWith(".") && !path2.startsWith("/") && packageNameOf(path2) === path2) return false;
   const segment = path2.slice(path2.lastIndexOf("/") + 1);
   const dot = segment.lastIndexOf(".");
-  return dot > 0 && !CODE_EXTENSIONS.has(segment.slice(dot).toLowerCase());
+  return dot > 0 && ASSET_EXTENSIONS.has(segment.slice(dot).toLowerCase());
+}
+function entryStrings(value, out2) {
+  if (typeof value === "string") {
+    out2.push(value);
+    return;
+  }
+  if (!isRecord(value)) return;
+  const root = value["."];
+  if (root !== void 0) {
+    entryStrings(root, out2);
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (!key.startsWith(".")) entryStrings(nested, out2);
+  }
 }
 function splitQuery(specifier) {
   const cut = specifier.search(/[?#]/);
@@ -42678,7 +42754,7 @@ function createModuleResolver(args2) {
     const config2 = json(rel);
     if (!isRecord(config2)) return null;
     const dirAbs = resolve(projectRoot, dirname(rel));
-    let settings = { baseUrl: null, paths: null, pathsDir: dirAbs, jsx: null, jsxFactories: [] };
+    let settings = { baseUrl: null, paths: null, pathsDir: dirAbs, jsx: null, jsxFactories: [], jsxImportSource: null };
     const parents = typeof config2.extends === "string" ? [config2.extends] : Array.isArray(config2.extends) ? config2.extends : [];
     for (const parent of parents) {
       const parentRel = typeof parent === "string" ? extendsTarget(rel, parent) : null;
@@ -42689,7 +42765,8 @@ function createModuleResolver(args2) {
         paths: inherited.paths ?? settings.paths,
         pathsDir: inherited.paths ? inherited.pathsDir : settings.pathsDir,
         jsx: inherited.jsx ?? settings.jsx,
-        jsxFactories: inherited.jsxFactories.length > 0 ? inherited.jsxFactories : settings.jsxFactories
+        jsxFactories: inherited.jsxFactories.length > 0 ? inherited.jsxFactories : settings.jsxFactories,
+        jsxImportSource: inherited.jsxImportSource ?? settings.jsxImportSource
       };
     }
     const options = config2.compilerOptions;
@@ -42705,15 +42782,19 @@ function createModuleResolver(args2) {
       if (typeof options.jsx === "string") settings.jsx = options.jsx;
       const factories = [rootName(options.jsxFactory), rootName(options.jsxFragmentFactory)].filter((n) => n !== null);
       if (factories.length > 0) settings.jsxFactories = factories;
+      if (typeof options.jsxImportSource === "string") settings.jsxImportSource = options.jsxImportSource;
     }
-    if (settings.paths === null && Array.isArray(config2.references)) {
+    if (Array.isArray(config2.references)) {
       for (const reference of config2.references) {
         const target = isRecord(reference) && typeof reference.path === "string" ? extendsTarget(rel, reference.path) : null;
         const referenced = target ? settingsOf(target, depth + 1) : null;
-        if (referenced?.paths) {
+        if (!referenced) continue;
+        if (settings.paths === null && referenced.paths) {
           settings = { ...settings, baseUrl: settings.baseUrl ?? referenced.baseUrl, paths: referenced.paths, pathsDir: referenced.pathsDir };
-          break;
         }
+        if (settings.jsx === null) settings.jsx = referenced.jsx;
+        if (settings.jsxFactories.length === 0) settings.jsxFactories = referenced.jsxFactories;
+        if (settings.jsxImportSource === null) settings.jsxImportSource = referenced.jsxImportSource;
       }
     }
     settingsByConfig.set(rel, settings);
@@ -42741,7 +42822,33 @@ function createModuleResolver(args2) {
     for (const seen of visited) settingsByDir.set(seen, found);
     return found;
   };
-  const filesAt = (fromRel, abs) => resolveImportCandidates(projectRoot, resolve(projectRoot, fromRel), abs, entries, probe).map(relOf);
+  const manifestIn = (dirRel) => dirRel === "" ? "package.json" : `${dirRel}/package.json`;
+  const filesAt = (fromRel, target) => {
+    const importerAbs = resolve(projectRoot, fromRel);
+    const found = resolveImportCandidates(projectRoot, importerAbs, target, entries, probe).map(relOf);
+    const abs = isAbsolute(target) ? resolve(target) : resolve(dirname(importerAbs), target);
+    const manifest = manifestIn(relOf(abs));
+    if (probe.isDirectory(abs) && configSet.has(manifest)) {
+      const pkg = json(manifest);
+      const declaredEntries = [];
+      if (isRecord(pkg)) for (const field of PACKAGE_ENTRY_FIELDS) entryStrings(pkg[field], declaredEntries);
+      for (const entry of declaredEntries) {
+        for (const file of resolveImportCandidates(projectRoot, importerAbs, resolve(abs, entry), entries, probe)) {
+          found.push(relOf(file));
+        }
+      }
+    }
+    return [...new Set(found)];
+  };
+  const rootsFor = (fromRel) => {
+    let dir = dirname(fromRel) === "." ? "" : toPosix(dirname(fromRel));
+    for (; ; ) {
+      if (configSet.has(manifestIn(dir))) return [.../* @__PURE__ */ new Set([resolve(projectRoot, dir), resolve(projectRoot)])];
+      if (dir === "") return [resolve(projectRoot)];
+      const slash = dir.lastIndexOf("/");
+      dir = slash < 0 ? "" : dir.slice(0, slash);
+    }
+  };
   const mapped = (settings, specifier) => {
     if (!settings.paths) return null;
     let best = null;
@@ -42758,18 +42865,44 @@ function createModuleResolver(args2) {
     const base = settings.baseUrl ?? settings.pathsDir;
     return best.targets.map((target) => resolve(base, target.replace("*", bestMatch)));
   };
+  const lowered = corpus.map((rel) => [rel.toLowerCase(), rel]);
+  const caseCorrected = (targetRel) => {
+    const runtime2 = RUNTIME_SUFFIX.exec(targetRel)?.[0] ?? "";
+    const stem = targetRel.slice(0, targetRel.length - runtime2.length);
+    const lower = stem.toLowerCase();
+    const corrected = /* @__PURE__ */ new Set();
+    for (const [low, real] of lowered) {
+      if (low === lower || low.startsWith(`${lower}.`) || low.startsWith(`${lower}/`)) corrected.add(real.slice(0, stem.length) + runtime2);
+    }
+    corrected.delete(targetRel);
+    return [...corrected];
+  };
+  const caseOnlyFiles = (fromRel, spec) => {
+    const targetRel = relOf(resolve(projectRoot, dirname(fromRel), spec));
+    if (!insideRepo(targetRel)) return [];
+    const suffix = DIRECTORY_SPECIFIER.test(spec) ? "/" : "";
+    const files = /* @__PURE__ */ new Set();
+    for (const corrected of caseCorrected(targetRel)) {
+      for (const file of filesAt(fromRel, resolve(projectRoot, corrected) + suffix)) files.add(file);
+    }
+    return [...files];
+  };
   const resolve8 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
-    if (isAsset(path2)) return { kind: "missing" };
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
-      return files.length > 0 ? { kind: "files", files, query } : { kind: "missing" };
+      if (files.length > 0) return { kind: "files", files, query };
+      const caseOnly = caseOnlyFiles(fromRel, path2);
+      return caseOnly.length === 0 ? { kind: "missing" } : { kind: "unknown", within: caseOnly };
     }
     if (path2.startsWith("/")) {
-      const files = filesAt(fromRel, resolve(projectRoot, `.${path2}`));
-      return files.length > 0 ? { kind: "files", files, query } : { kind: "unknown", within: null };
+      for (const root of rootsFor(fromRel)) {
+        const files = filesAt(fromRel, resolve(root, `.${path2}`));
+        if (files.length > 0) return { kind: "files", files, query };
+      }
+      return isAsset(path2) ? { kind: "missing" } : { kind: "unknown", within: null };
     }
-    if (isBuiltin(path2)) return { kind: "external" };
+    if (path2.startsWith("node:")) return { kind: "external" };
     const settings = settingsFor(fromRel);
     if (settings) {
       for (const abs of mapped(settings, path2) ?? []) {
@@ -42781,9 +42914,11 @@ function createModuleResolver(args2) {
         if (files.length > 0) return { kind: "files", files, query };
       }
     }
+    if (isBuiltin(path2)) return { kind: "external" };
+    if (isAsset(path2)) return { kind: "missing" };
     const name2 = packageNameOf(path2);
     const workspace = workspaces.get(name2);
-    if (workspace !== void 0) return { kind: "unknown", within: workspace };
+    if (workspace !== void 0) return { kind: "unknown", within: workspace === "" ? null : [workspace] };
     if (declared.has(name2)) return { kind: "external" };
     return { kind: "unknown", within: null };
   };
@@ -42794,10 +42929,16 @@ function createModuleResolver(args2) {
   };
   const prefixFiles = (fromRel, prefix) => {
     if (prefix.startsWith(".")) return underPrefix(resolve(projectRoot, dirname(fromRel), prefix));
-    if (prefix.startsWith("/")) return underPrefix(resolve(projectRoot, `.${prefix}`));
+    if (prefix.startsWith("/")) {
+      for (const root of rootsFor(fromRel)) {
+        const files = underPrefix(resolve(root, `.${prefix}`)) ?? [];
+        if (files.length > 0) return files;
+      }
+      return null;
+    }
     const settings = settingsFor(fromRel);
     if (settings?.paths) {
-      const files = [];
+      const files = /* @__PURE__ */ new Set();
       let matched = false;
       for (const mapping of settings.paths) {
         const head = mapping.pattern.slice(0, prefixLength(mapping.pattern));
@@ -42807,10 +42948,10 @@ function createModuleResolver(args2) {
         const base = settings.baseUrl ?? settings.pathsDir;
         for (const target of mapping.targets) {
           const star = target.indexOf("*");
-          files.push(...underPrefix(resolve(base, (star < 0 ? target : target.slice(0, star)) + rest)) ?? []);
+          for (const file of underPrefix(resolve(base, (star < 0 ? target : target.slice(0, star)) + rest)) ?? []) files.add(file);
         }
       }
-      if (matched) return [...new Set(files)];
+      if (matched) return [...files];
     }
     if (settings?.baseUrl) {
       const files = underPrefix(resolve(settings.baseUrl, prefix)) ?? [];
@@ -42819,7 +42960,7 @@ function createModuleResolver(args2) {
     const name2 = packageNameOf(prefix);
     const workspace = workspaces.get(name2);
     if (workspace !== void 0) return corpus.filter((path2) => path2.startsWith(workspace));
-    if (isBuiltin(prefix) || declared.has(name2)) return [];
+    if (prefix.startsWith("node:") || isBuiltin(prefix) || declared.has(name2)) return [];
     return null;
   };
   const jsxFactories = (fromRel) => {
@@ -42828,7 +42969,11 @@ function createModuleResolver(args2) {
     if (settings.jsxFactories.length > 0) return settings.jsxFactories;
     return settings.jsx === "react" ? ["React"] : [];
   };
-  return { resolve: resolve8, prefixFiles, jsxFactories };
+  const jsxRuntimes = (fromRel) => {
+    const source = settingsFor(fromRel)?.jsxImportSource;
+    return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
+  };
+  return { resolve: resolve8, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -42843,7 +42988,11 @@ var LANGUAGE_BY_SUFFIX = /* @__PURE__ */ new Map([
   [".jsx", "javascript"]
 ]);
 var MODULE_SUFFIXES = /* @__PURE__ */ new Set([".mjs", ".cjs", ".mts", ".cts"]);
-var FOREIGN_IMPORTER_SUFFIXES = /* @__PURE__ */ new Set([".vue", ".svelte", ".astro", ".html", ".htm", ".mdx"]);
+var FOREIGN_IMPORTER_SUFFIXES = /* @__PURE__ */ new Set([".vue", ".svelte", ".astro", ".html", ".htm", ".mdx", ".md"]);
+var MARKDOWN_SUFFIXES = /* @__PURE__ */ new Set([".md", ".mdx"]);
+var SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+var JSX_RUNTIME_NAMES = ["jsx", "jsxs", "jsxDEV", "Fragment"];
+var IMPLICIT_BINDING = "";
 var BUILD_OUTPUT_DIRS = ["dist", "build", "coverage"];
 var VENDORED_SEGMENTS = /* @__PURE__ */ new Set(["node_modules", ".git"]);
 var CONFIG_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|jsconfig[^/]*\.json)$/;
@@ -42851,6 +43000,11 @@ var COMPUTED_IMPORT = /\b(?:import|require)\s*\(\s*[^'"\s)]|import\.meta\.glob|r
 var CODE_FENCE = /^\s*(`{3,}|~{3,})/;
 var MDX_ESM_LINE = /^(?:import|export)\b/;
 var HINT_LIST_LIMIT = 10;
+function markdownCode(text2) {
+  const esm = text2.split("\n").filter((line2) => MDX_ESM_LINE.test(line2));
+  const scripts = [...text2.matchAll(SCRIPT_BLOCK)].map((match) => match[1] ?? "");
+  return [...esm, ...scripts].join("\n");
+}
 function withoutCodeFences(text2) {
   const kept = [];
   let open = null;
@@ -42925,30 +43079,39 @@ var ESCAPED_HINT_PREFIX = "Dead-code scan: a namespace import is used as a value
 var UNRESOLVED_HINT_PREFIX = "Dead-code scan: could not resolve";
 var UNBOUND_HINT_PREFIX = "Dead-code scan: an import with no fixed target";
 var SCRIPT_HINT_PREFIX = "Dead-code scan: classic script";
+var DUAL_MODE_HINT_PREFIX = "Dead-code scan: also runs as a plain script";
 var EVAL_HINT_PREFIX = "Dead-code scan: direct eval";
 var UNPARSEABLE_TARGET_HINT_PREFIX = "Dead-code scan: could not parse";
+var PRAGMA_HINT_PREFIX = "Dead-code scan: kept alive only by a JSX pragma";
+var TYPE_CHECK_HINT_PREFIX = "Dead-code scan: a type check, not a value";
 var KEY_SEPARATOR = "\0";
 function keyOf(path2, owner) {
   return `${path2}${KEY_SEPARATOR}${owner}`;
 }
 var SCAN_CACHE_MAX = 4e3;
+var PARSE_SIZE_LIMIT = 2 * 1024 * 1024;
+var parseSizeLimit = PARSE_SIZE_LIMIT;
 var scanCacheLimit = SCAN_CACHE_MAX;
+var scanGeneration = 0;
 var scanCache = /* @__PURE__ */ new Map();
+function parseSizeLimitText() {
+  return `${Math.round(parseSizeLimit / 1048576)} MB` ;
+}
 async function scanCached(language, source) {
   const key = `${language}${KEY_SEPARATOR}${createHash("sha256").update(source, "utf8").digest("hex")}`;
   const cached2 = scanCache.get(key);
   if (cached2) {
     scanCache.delete(key);
-    scanCache.set(key, cached2);
-    return cached2;
+    scanCache.set(key, { scan: cached2.scan, generation: scanGeneration });
+    return cached2.scan;
   }
   const scan = await scanSymbols(language, source);
   while (scanCache.size >= scanCacheLimit) {
-    const oldest = scanCache.keys().next().value;
-    if (oldest === void 0) break;
-    scanCache.delete(oldest);
+    const oldest = scanCache.entries().next().value;
+    if (oldest === void 0 || oldest[1].generation === scanGeneration) return scan;
+    scanCache.delete(oldest[0]);
   }
-  scanCache.set(key, scan);
+  scanCache.set(key, { scan, generation: scanGeneration });
   return scan;
 }
 function isUsed(symbols, local) {
@@ -42976,6 +43139,7 @@ function unresolvedNames(edge, symbols) {
   return names;
 }
 async function readCorpus(input) {
+  scanGeneration += 1;
   const read = input.read ?? workingTreeReader(input.projectRoot);
   const resolver = createModuleResolver({
     projectRoot: input.projectRoot,
@@ -42990,6 +43154,7 @@ async function readCorpus(input) {
     facts: /* @__PURE__ */ new Map(),
     unreadable: /* @__PURE__ */ new Set(),
     unparsed: /* @__PURE__ */ new Set(),
+    oversized: /* @__PURE__ */ new Set(),
     taintedTargets: /* @__PURE__ */ new Set(),
     dynamicTargets: /* @__PURE__ */ new Set(),
     importedFiles: /* @__PURE__ */ new Set(),
@@ -42998,10 +43163,10 @@ async function readCorpus(input) {
     blind: false
   };
   const readByPattern = (rel, source) => {
-    const mdx = suffixOf(rel) === ".mdx";
-    const text2 = mdx ? withoutCodeFences(source) : source;
-    const code = mdx ? text2.split("\n").filter((line2) => MDX_ESM_LINE.test(line2)).join("\n") : text2;
-    for (const specifier of extractImports(text2)) {
+    const markdown = MARKDOWN_SUFFIXES.has(suffixOf(rel));
+    const text2 = markdown ? withoutCodeFences(source) : source;
+    const code = markdown ? markdownCode(text2) : text2;
+    for (const specifier of extractImports(code)) {
       const resolution = resolver.resolve(rel, specifier);
       if (resolution.kind === "files") {
         for (const target of resolution.files) {
@@ -43023,7 +43188,9 @@ async function readCorpus(input) {
       continue;
     }
     const language = languageOf(rel);
-    const scan = language ? await scanCached(language, source.text) : null;
+    const oversized = language !== null && Buffer.byteLength(source.text, "utf8") > parseSizeLimit;
+    if (oversized) corpus.oversized.add(rel);
+    const scan = language && !oversized ? await scanCached(language, source.text) : null;
     if (!scan || !scan.ok) {
       corpus.unreadable.add(rel);
       if (language) corpus.unparsed.add(rel);
@@ -43059,9 +43226,30 @@ async function readCorpus(input) {
       }
     }
     if (symbols.unboundDynamic) corpus.unboundFiles.add(rel);
-    const factories = symbols.hasJsx ? resolver.jsxFactories(rel) : [];
-    const withFactories = factories.length > 0 ? { ...symbols, references: [...symbols.references, ...factories.map((name2) => ({ name: name2, owner: null }))] } : symbols;
-    corpus.facts.set(rel, { symbols: withFactories, edges, module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)) });
+    const implicit = [];
+    if (symbols.hasJsx) {
+      for (const name2 of resolver.jsxFactories(rel)) implicit.push({ name: name2, owner: null });
+      const runtimeNames = JSX_RUNTIME_NAMES.map((name2) => ({ imported: name2, local: `${IMPLICIT_BINDING}${name2}` }));
+      for (const specifier of resolver.jsxRuntimes(rel)) {
+        const resolution = resolver.resolve(rel, specifier);
+        if (resolution.kind === "files") {
+          for (const target of resolution.files) {
+            corpus.importedFiles.add(target);
+            edges.push({ target, kind: "import", names: runtimeNames, star: false, namespaceReexport: null });
+          }
+        } else if (resolution.kind === "unknown") {
+          corpus.unresolved.push({ from: rel, specifier, within: resolution.within, names: new Set(JSX_RUNTIME_NAMES) });
+        }
+      }
+      for (const { local } of runtimeNames) implicit.push({ name: local, owner: null });
+    }
+    const withImplicit = implicit.length > 0 ? { ...symbols, references: [...symbols.references, ...implicit] } : symbols;
+    corpus.facts.set(rel, {
+      symbols: withImplicit,
+      edges,
+      module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)),
+      dualMode: symbols.dualMode && !MODULE_SUFFIXES.has(suffixOf(rel))
+    });
   }
   return corpus;
 }
@@ -43144,22 +43332,23 @@ function citationsThrough(alias, importers) {
 function publicMatcher(input) {
   const globs = input.publicApi ?? [];
   if (globs.length === 0) return () => false;
-  const root = input.publicApiRoot;
-  return (file) => matchesAnyGlob(file, globs).matched || root !== void 0 && matchesAnyGlob(join(input.projectRoot, file), globs, root).matched;
+  const prefix = input.publicApiPrefix ?? "";
+  return (file) => matchesAnyGlob(file, globs).matched || prefix !== "" && file.startsWith(prefix) && matchesAnyGlob(file.slice(prefix.length), globs).matched;
 }
 function unresolvedMatches(corpus, aliases) {
   const hits2 = [];
   for (const use of corpus.unresolved) {
     const reaches = aliases.some(
-      (alias) => (use.within === null || alias.file.startsWith(use.within)) && (use.names === "all" || use.names.has(alias.name))
+      (alias) => (use.within === null || use.within.some((where) => where.endsWith("/") ? alias.file.startsWith(where) : alias.file === where)) && (use.names === "all" || use.names.has(alias.name))
     );
     if (reaches) hits2.push(`${use.specifier} (${use.from})`);
   }
   return hits2;
 }
-function uncertaintyOf(path2, facts, exported, corpus, aliases, escapedIn, nested) {
+function uncertaintyOf(path2, facts, exported, corpus, aliases, escapedIn, nested, typeCheck) {
   const aliasFiles = [...new Set(aliases.map((alias) => alias.file))];
   const reasons = [];
+  if (typeCheck) reasons.push(["typeCheck", [path2]]);
   if (!facts.module) reasons.push(["script", [path2]]);
   if (facts.symbols.directEval) reasons.push(["eval", [path2]]);
   if (exported) {
@@ -43197,6 +43386,7 @@ function candidatesOf(input, corpus) {
         existing.symbol.end = Math.max(existing.symbol.end, declaration.end);
         existing.symbol.exported = existing.symbol.exported || declaration.exported;
         existing.effect = existing.effect || declaration.effect;
+        existing.typeCheck = existing.typeCheck || declaration.typeCheck;
         for (const exposure of declaration.exposures) existing.exposures.add(exposure);
         continue;
       }
@@ -43210,10 +43400,11 @@ function candidatesOf(input, corpus) {
           end: declaration.end
         },
         exposures: new Set(declaration.exposures),
-        effect: declaration.effect
+        effect: declaration.effect,
+        typeCheck: declaration.typeCheck
       });
     }
-    for (const [owner, { symbol, exposures, effect }] of byOwner) {
+    for (const [owner, { symbol, exposures, effect, typeCheck }] of byOwner) {
       const citations = [];
       citeUses(citations, path2, facts.symbols, symbol.name);
       const { aliases, nested: nestedAlias } = aliasesOf(path2, [...exposures], reexports);
@@ -43226,7 +43417,7 @@ function candidatesOf(input, corpus) {
         escapedIn.push(...through.escapedIn);
       }
       const aliasFiles = [...new Set(aliases.map((alias) => alias.file))];
-      const { uncertain, because } = uncertaintyOf(path2, facts, exposures.size > 0, corpus, aliases, escapedIn, nested);
+      const { uncertain, because } = uncertaintyOf(path2, facts, exposures.size > 0, corpus, aliases, escapedIn, nested, typeCheck);
       candidates.push({
         symbol,
         key: keyOf(path2, owner),
@@ -43302,7 +43493,7 @@ async function findDeadSymbols(input) {
     unknown: unknown2,
     publicExempted,
     unreadable: [...corpus.unreadable],
-    filesScanned: corpus.facts.size,
+    oversized: input.targets.filter((path2) => corpus.oversized.has(path2)),
     hints: hintsFor(input, corpus, candidates, dead, unknown2, publicExempted)
   };
 }
@@ -43331,11 +43522,28 @@ function hintsFor(input, corpus, candidates, dead, unknown2, publicExempted) {
       `${UNREADABLE_HINT_PREFIX} on ${corpus.blind ? unknown2.length : tainted.length} symbol(s): a file the scan could not parse, and read only for its imports, may hold the only reference. Files: ${listed([...corpus.unreadable])}.`
     );
   }
+  const pragmaOnly = candidates.filter(
+    (c) => c.citations.length > 0 && c.citations.every((citation) => citation.owner === JSX_PRAGMA_OWNER && citation.file === c.symbol.path)
+  );
+  if (pragmaOnly.length > 0) {
+    hints.push(
+      `${PRAGMA_HINT_PREFIX}: ${listed(pragmaOnly.map((c) => `${c.symbol.path}:${c.symbol.name}`))}. A @jsx comment in the same file names it and nothing else uses it; if that file's JSX is not compiled with that factory, it is dead.`
+    );
+  }
+  const dualModeDead = dead.filter((symbol) => corpus.facts.get(symbol.path)?.dualMode === true);
+  if (dualModeDead.length > 0) {
+    hints.push(
+      `${DUAL_MODE_HINT_PREFIX}: ${listed([...new Set(dualModeDead.map((symbol) => symbol.path))])} check(s) for \`module\`, \`exports\` or \`define\` before exporting, so a page can also load them with a script tag. The ${dualModeDead.length} symbol(s) reported there are referenced nowhere in this repository; if a page calls them as globals, keep them through the developer.`
+    );
+  }
   const unparsedTargets = input.targets.filter((path2) => corpus.unparsed.has(path2));
   if (unparsedTargets.length > 0) {
-    hints.push(`${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)}, so dead code in them is not checked.`);
+    hints.push(
+      `${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)} \u2014 a syntax the grammar does not know, or over ${parseSizeLimitText()} \u2014 so dead code in them is not checked.`
+    );
   }
   const groups = [
+    ["typeCheck", TYPE_CHECK_HINT_PREFIX, (g) => `: ${listed(g.map((c) => `${c.symbol.path}:${c.symbol.name}`))} \u2014 a \`_name: Type = value\` declaration exists for the compiler to check a type; nothing reads it, so it is left unknown, never reported dead.`],
     ["script", SCRIPT_HINT_PREFIX, (g) => `: ${sourcesOf(g)} declare(s) no import or export, so their top-level names are shared with every other script and page. ${g.length} symbol(s) left unknown.`],
     ["eval", EVAL_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} can reach any binding of its file. ${g.length} symbol(s) left unknown.`],
     ["entrypoint", ENTRYPOINT_HINT_PREFIX, (g) => ` ${sourcesOf(g)}, so what it exports cannot be told apart from an entrypoint's. ${g.length} export(s) left unknown rather than reported dead. Declare the file in "public_api" if it is an entrypoint or a published surface.`],
@@ -43361,8 +43569,34 @@ function hintsFor(input, corpus, candidates, dead, unknown2, publicExempted) {
 // src/lib/dead-code/review-gate.ts
 var UNCOVERED_LANGUAGE_HINT_PREFIX = "Dead-code scan: not checked";
 var OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX = "Dead-code scan: references from other languages are not read";
+var UNSTAGED_MENTION_HINT_PREFIX = "Files not staged yet mention the refused symbol(s)";
 var DECLARATION_PREVIEW = 400;
 var NO_REFERENCES_TO_CODE = /* @__PURE__ */ new Set(["css", "sql", "scss", "sass", "less"]);
+var analysisHook = null;
+function publicApiDigest(globs) {
+  if (!globs || globs.length === 0) return null;
+  return createHash("sha256").update(JSON.stringify([...new Set(globs)].sort()), "utf8").digest("hex");
+}
+function unstagedMentions(projectRoot, stagedPaths, names) {
+  const repo = openSweepRepo(projectRoot);
+  if (!repo || names.length === 0) return [];
+  const staged = new Set(stagedPaths);
+  const pending = [.../* @__PURE__ */ new Set([...readWorktreeChangedPaths(repo) ?? [], ...readUntrackedPaths(repo) ?? []])];
+  const patterns = [...new Set(names)].map((name2) => ({ name: name2, re: new RegExp(`(^|[^\\w$])${name2.replace(/\$/g, "\\$")}(?![\\w$])`) }));
+  const mentions = [];
+  for (const path2 of pending) {
+    if (staged.has(path2) || corpusFrom([path2]).length === 0) continue;
+    let text2;
+    try {
+      text2 = readFileSync(join(repo.toplevel, path2), "utf8");
+    } catch {
+      continue;
+    }
+    const hits2 = patterns.filter((pattern) => pattern.re.test(text2)).map((pattern) => pattern.name);
+    if (hits2.length > 0) mentions.push(`${path2} (${hits2.join(", ")})`);
+  }
+  return mentions;
+}
 function declarationSha256(source, symbol) {
   const text2 = source.slice(symbol.start, symbol.end).replace(/\r\n/g, "\n");
   return createHash("sha256").update(text2, "utf8").digest("hex");
@@ -43483,12 +43717,18 @@ function indexReader(repo, paths, blobs) {
   return (rel) => {
     const oid = blobs.get(rel);
     if (oid === void 0) return { kind: "absent" };
+    if (!read.texts.has(oid) && !read.failed.has(oid)) {
+      const late2 = readBlobTexts(repo, [oid]);
+      if (!late2) return { kind: "error" };
+      for (const [id, text3] of late2.texts) read.texts.set(id, text3);
+      for (const id of late2.failed) read.failed.add(id);
+    }
     if (read.failed.has(oid)) return { kind: "error" };
     const text2 = read.texts.get(oid);
     return text2 === void 0 ? { kind: "absent" } : { kind: "text", text: normalizeLineEndings(text2) };
   };
 }
-function sparseAwareReader(repo, paths) {
+function worktreeReader(repo, paths) {
   const disk = workingTreeReader(repo.toplevel);
   const sparse = readSkipWorktreePaths(repo);
   if (!sparse) return null;
@@ -43530,7 +43770,7 @@ async function analyse(args2) {
     if (!corpus.includes(target)) corpus.push(target);
   }
   const configs = configFilesFrom(known);
-  const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : sparseAwareReader(repo, [...corpus, ...configs]);
+  const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : worktreeReader(repo, [...corpus, ...configs]);
   if (!base) return { ok: false, reason: "could not read the contents for the dead-code scan" };
   const bytes = memoised(base);
   const result = await findDeadSymbols({
@@ -43539,9 +43779,17 @@ async function analyse(args2) {
     targets,
     configs,
     ...args2.publicApi !== void 0 && { publicApi: args2.publicApi },
-    publicApiRoot: resolve(args2.projectRoot),
+    publicApiPrefix: repo.prefix,
     read: bytes.read
   });
+  if (result.oversized.length > 0) {
+    return {
+      ok: false,
+      reason: `too large for the dead-code scan to parse (over ${parseSizeLimitText()}): ${result.oversized.join(", ")}`,
+      hints: ["List each one in exempt_files of rsct_phase_review_complete with its reason \u2014 the developer confirms it in the dialog \u2014 or take it out of the change."],
+      paths: result.oversized
+    };
+  }
   const describe2 = (symbol, keepStale) => {
     const text2 = bytes.text(symbol.path);
     return {
@@ -43567,9 +43815,23 @@ async function analyse(args2) {
   analysis.publicExempted = result.publicExempted.map((symbol) => describe2(symbol, false));
   return analysis;
 }
+var stagedMemo = null;
+function stagedKey(args2) {
+  if (args2.source !== "index") return null;
+  const repo = openSweepRepo(args2.projectRoot);
+  const fingerprint = repo ? readIndexFingerprint(repo) : null;
+  if (!repo || !fingerprint) return null;
+  const inputs = JSON.stringify([repo.toplevel, repo.prefix, args2.paths, args2.publicApi ?? null, args2.keeps, [...args2.exempt].sort()]);
+  return createHash("sha256").update(fingerprint).update(inputs).digest("hex");
+}
 async function guardedAnalyse(args2) {
   try {
-    return await analyse(args2);
+    const key = stagedKey(args2);
+    if (key !== null && stagedMemo?.key === key) return stagedMemo.result;
+    analysisHook?.();
+    const result = await analyse(args2);
+    if (key !== null && result.ok) stagedMemo = { key, result };
+    return result;
   } catch (error2) {
     return { ok: false, reason: `the dead-code scan failed: ${error2 instanceof Error ? error2.message : String(error2)}` };
   }
@@ -43584,7 +43846,7 @@ async function checkDeadCode(args2) {
     source: "working_tree"
   });
   if (!analysis.ok) {
-    return { ok: false, reject_kind: "dead_code_unreadable", reason: analysis.reason, hints: [analysis.reason], pending: [] };
+    return { ok: false, reject_kind: "dead_code_unreadable", reason: analysis.reason, hints: [analysis.reason, ...analysis.hints ?? []], pending: [] };
   }
   const blocking = [...analysis.stale, ...analysis.pending];
   if (blocking.length === 0) {
@@ -43621,19 +43883,45 @@ async function checkStagedDeadCode(args2) {
     source: "index"
   });
   if (!analysis.ok) {
-    return { ok: false, reject_kind: "dead_code_staged", reason: analysis.reason, hints: [analysis.reason], paths: [...args2.stagedPaths] };
+    return {
+      ok: false,
+      reject_kind: "dead_code_staged",
+      reason: analysis.reason,
+      hints: [analysis.reason, ...analysis.hints ?? []],
+      paths: analysis.paths ?? [...args2.stagedPaths]
+    };
   }
+  const digest = publicApiDigest(args2.publicApi);
+  const approvals = args2.publicApiApprovals ?? /* @__PURE__ */ new Set();
+  const unapproved = analysis.publicExempted.filter(
+    (p) => digest === null || !approvals.has(publicApiApprovalKey(digest, p.path, p.name, p.declaration_sha256))
+  );
   const blocking = [...analysis.stale, ...analysis.pending];
-  if (blocking.length === 0) {
+  if (blocking.length === 0 && unapproved.length === 0) {
     return { ok: true, kept: analysis.kept.length, unknown: analysis.unknown, hints: analysis.hints };
   }
+  if (blocking.length === 0) {
+    const exempted = unapproved.map((p) => `${p.path}:${p.name}`);
+    return {
+      ok: false,
+      reject_kind: "dead_code_staged",
+      reason: `${exempted.length} staged export(s) nothing here uses are exempt through "public_api" without the developer's recorded approval: ${exempted.join(", ")}`,
+      hints: [
+        'Run rsct_phase_review_start / _complete over these paths: the REVIEW puts every "public_api" exemption to the developer and records their answer in the audit log.',
+        ...analysis.hints
+      ],
+      paths: [...new Set(unapproved.map((p) => p.path))]
+    };
+  }
   const named = blocking.map((p) => `${p.path}:${p.name}`);
+  const mentions = unstagedMentions(args2.projectRoot, args2.stagedPaths, blocking.map((p) => p.name));
   return {
     ok: false,
     reject_kind: "dead_code_staged",
-    reason: analysis.stale.length > 0 ? `${named.length} staged symbol(s) are dead, ${analysis.stale.length} of them kept about different declaration bytes: ${named.join(", ")}` : `${named.length} staged symbol(s) are referenced nowhere: ${named.join(", ")}`,
+    reason: analysis.stale.length > 0 ? `${named.length} staged symbol(s) are dead, ${analysis.stale.length} of them kept about different declaration bytes: ${named.join(", ")}` : `${named.length} staged symbol(s) are referenced nowhere in what is staged: ${named.join(", ")}`,
     hints: [
-      "A completed REVIEW either removes them or records the developer keeping them, through the developer-only dialog. Run rsct_phase_review_start / _complete over these paths.",
+      "If a caller exists but is not staged, stage it in this same commit. Otherwise a completed REVIEW either removes them or records the developer keeping them, through the developer-only dialog: run rsct_phase_review_start / _complete over these paths.",
+      ...mentions.length > 0 ? [`${UNSTAGED_MENTION_HINT_PREFIX}: ${mentions.slice(0, 10).join(", ")}${mentions.length > 10 ? ` and ${mentions.length - 10} more` : ""}.`] : [],
       ...analysis.hints
     ],
     paths: [...new Set(blocking.map((p) => p.path))]
@@ -44510,13 +44798,15 @@ async function requestCommitHandler(rawInput, internal = {}) {
   };
   const runDeadCodeCheck = async (entries) => {
     const paths = entries.map((entry) => entry.path);
+    const ceiling = deriveAuditCeiling(projectRoot, config2 ?? null, "");
     try {
       return await checkStagedDeadCode({
         projectRoot,
         stagedPaths: paths,
         publicApi: config2?.public_api,
         keeps: readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps),
-        keepDecisions: deriveAuditCeiling(projectRoot, config2 ?? null, "").deadCodeKeepDecisions,
+        keepDecisions: ceiling.deadCodeKeepDecisions,
+        publicApiApprovals: ceiling.publicApiApprovals,
         exempt: entries.filter((entry) => entry.unverified).map((entry) => entry.path)
       });
     } catch (error2) {
@@ -50587,7 +50877,8 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       extra: { paths: withComments.map((f) => f.path) }
     });
   }
-  const keepDecisions = deriveAuditCeiling(projectRoot, config2, "").deadCodeKeepDecisions;
+  const ceiling = deriveAuditCeiling(projectRoot, config2, "");
+  const keepDecisions = ceiling.deadCodeKeepDecisions;
   const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions);
   const grantedKeeps = sweepInput.data.dead_code_keeps ?? [];
   const deadCheck = await checkDeadCode({
@@ -50626,10 +50917,12 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   const grantedNotes = new Map(grantedKeeps.map((k) => [deadCodeKeepKey(k.path, k.name, k.declaration_sha256), k.note]));
   const newlyKept = deadCheck.kept.map((k) => ({ ...k, key: deadCodeKeepKey(k.path, k.name, k.declaration_sha256) })).filter((k) => grantedNotes.has(k.key) && !storedKeepKeys.has(k.key)).map((k) => ({ path: k.path, name: k.name, declaration_sha256: k.declaration_sha256, note: grantedNotes.get(k.key) ?? "" }));
   const publicExempted = deadCheck.public_exempted;
+  const publicApiSha = publicApiDigest(config2?.public_api);
+  const publicApiPending = publicApiSha === null ? publicExempted : publicExempted.filter((p) => !ceiling.publicApiApprovals.has(publicApiApprovalKey(publicApiSha, p.path, p.name, p.declaration_sha256)));
   const removedFiles = sweep.files.filter((f) => f.removed.length > 0);
   const unverified = sweep.files.filter((f) => f.kind === "unverified");
   const commentForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0;
-  const deadCodeForce = newlyKept.length > 0 || publicExempted.length > 0;
+  const deadCodeForce = newlyKept.length > 0 || publicApiPending.length > 0;
   const mustForce = commentForce || deadCodeForce;
   const report = mustForce ? writeReport(projectRoot, input.spec_ref, commentForce ? sweep.files : [], dispositions, { kept: newlyKept, exempted: publicExempted }) : null;
   summary.report_path = report?.path ?? null;
@@ -50694,10 +50987,10 @@ Yes = allow these versions. No = reject this REVIEW.`
       listLines(newlyKept.map((k) => `${k.path}:${k.name} \u2014 ${k.note.slice(0, 100)}`), 10)
     );
   }
-  if (publicExempted.length > 0) {
+  if (publicApiPending.length > 0) {
     detailParts.push(
-      `Exports nothing here uses, exempted by "public_api": ${publicExempted.length}.`,
-      listLines(publicExempted.map((p) => `${p.path}:${p.name}`), 10)
+      `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
+      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10)
     );
   }
   if (commentForce) {
@@ -50801,6 +51094,26 @@ Yes = allow these versions. No = reject this REVIEW.`
       config2?.audit
     );
     if (!w.ok) auditOk = false;
+  }
+  if (publicApiSha !== null) {
+    for (const exempted of publicApiPending) {
+      const w = appendAudit(
+        projectRoot,
+        {
+          event: PUBLIC_API_APPROVED_EVENT,
+          tool: "rsct_phase_review_complete",
+          spec_ref: input.spec_ref,
+          public_api: config2?.public_api,
+          public_api_sha256: publicApiSha,
+          path: exempted.path,
+          name: exempted.name,
+          declaration_sha256: exempted.declaration_sha256,
+          channel
+        },
+        config2?.audit
+      );
+      if (!w.ok) auditOk = false;
+    }
   }
   output.hints.push(...deadCheck.hints);
   if (!auditOk) {

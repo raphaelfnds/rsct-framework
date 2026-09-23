@@ -2,18 +2,19 @@ import { builtinModules } from 'node:module'
 import { dirname, isAbsolute, normalize, relative, resolve as resolvePath } from 'node:path'
 
 import { toPosix } from '../phase-scope.js'
-import { resolveImportCandidates, type ResolveProbe } from '../reverse-dep-walk.js'
+import { DIRECTORY_SPECIFIER, resolveImportCandidates, type ResolveProbe } from '../reverse-dep-walk.js'
 
 export type Resolution =
   | { kind: 'files'; files: string[]; query: boolean }
   | { kind: 'external' }
   | { kind: 'missing' }
-  | { kind: 'unknown'; within: string | null }
+  | { kind: 'unknown'; within: readonly string[] | null }
 
 export interface ModuleResolver {
   resolve(fromRel: string, specifier: string): Resolution
   prefixFiles(fromRel: string, prefix: string): string[] | null
   jsxFactories(fromRel: string): string[]
+  jsxRuntimes(fromRel: string): string[]
 }
 
 interface PathMapping {
@@ -27,25 +28,57 @@ interface CompilerSettings {
   pathsDir: string
   jsx: string | null
   jsxFactories: string[]
+  jsxImportSource: string | null
 }
 
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
-const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.mts',
-  '.cts',
-  '.vue',
-  '.svelte',
-  '.astro',
-  '.html',
-  '.htm',
-  '.mdx',
+const ASSET_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.css',
+  '.scss',
+  '.sass',
+  '.less',
+  '.styl',
+  '.pcss',
+  '.json',
+  '.jsonc',
+  '.json5',
+  '.md',
+  '.txt',
+  '.csv',
+  '.tsv',
+  '.xml',
+  '.yml',
+  '.yaml',
+  '.toml',
+  '.ini',
+  '.graphql',
+  '.gql',
+  '.glsl',
+  '.wgsl',
+  '.wasm',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.bmp',
+  '.ico',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.mp3',
+  '.mp4',
+  '.wav',
+  '.ogg',
+  '.webm',
+  '.pdf',
 ])
+const RUNTIME_SUFFIX = /\.(?:js|jsx|mjs|cjs)$/
+const PACKAGE_ENTRY_FIELDS = ['main', 'module', 'source', 'types', 'exports']
 const CONFIG_NAMES = ['tsconfig.json', 'jsconfig.json']
 const MAX_EXTENDS_DEPTH = 16
 const BUILTINS: ReadonlySet<string> = new Set(builtinModules)
@@ -112,14 +145,29 @@ function packageNameOf(specifier: string): string {
 }
 
 function isBuiltin(specifier: string): boolean {
-  return specifier.startsWith('node:') || BUILTINS.has(specifier) || BUILTINS.has(packageNameOf(specifier))
+  return BUILTINS.has(specifier) || BUILTINS.has(packageNameOf(specifier))
 }
 
 function isAsset(path: string): boolean {
-  if (!path.startsWith('.') && !path.startsWith('/') && packageNameOf(path) === path) return false
   const segment = path.slice(path.lastIndexOf('/') + 1)
   const dot = segment.lastIndexOf('.')
-  return dot > 0 && !CODE_EXTENSIONS.has(segment.slice(dot).toLowerCase())
+  return dot > 0 && ASSET_EXTENSIONS.has(segment.slice(dot).toLowerCase())
+}
+
+function entryStrings(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    out.push(value)
+    return
+  }
+  if (!isRecord(value)) return
+  const root = value['.']
+  if (root !== undefined) {
+    entryStrings(root, out)
+    return
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (!key.startsWith('.')) entryStrings(nested, out)
+  }
 }
 
 function splitQuery(specifier: string): { path: string; query: boolean } {
@@ -225,7 +273,7 @@ export function createModuleResolver(args: {
     const config = json(rel)
     if (!isRecord(config)) return null
     const dirAbs = resolvePath(projectRoot, dirname(rel))
-    let settings: CompilerSettings = { baseUrl: null, paths: null, pathsDir: dirAbs, jsx: null, jsxFactories: [] }
+    let settings: CompilerSettings = { baseUrl: null, paths: null, pathsDir: dirAbs, jsx: null, jsxFactories: [], jsxImportSource: null }
     const parents = typeof config.extends === 'string' ? [config.extends] : Array.isArray(config.extends) ? config.extends : []
     for (const parent of parents) {
       const parentRel = typeof parent === 'string' ? extendsTarget(rel, parent) : null
@@ -237,6 +285,7 @@ export function createModuleResolver(args: {
         pathsDir: inherited.paths ? inherited.pathsDir : settings.pathsDir,
         jsx: inherited.jsx ?? settings.jsx,
         jsxFactories: inherited.jsxFactories.length > 0 ? inherited.jsxFactories : settings.jsxFactories,
+        jsxImportSource: inherited.jsxImportSource ?? settings.jsxImportSource,
       }
     }
     const options = config.compilerOptions
@@ -252,15 +301,19 @@ export function createModuleResolver(args: {
       if (typeof options.jsx === 'string') settings.jsx = options.jsx
       const factories = [rootName(options.jsxFactory), rootName(options.jsxFragmentFactory)].filter((n): n is string => n !== null)
       if (factories.length > 0) settings.jsxFactories = factories
+      if (typeof options.jsxImportSource === 'string') settings.jsxImportSource = options.jsxImportSource
     }
-    if (settings.paths === null && Array.isArray(config.references)) {
+    if (Array.isArray(config.references)) {
       for (const reference of config.references) {
         const target = isRecord(reference) && typeof reference.path === 'string' ? extendsTarget(rel, reference.path) : null
         const referenced = target ? settingsOf(target, depth + 1) : null
-        if (referenced?.paths) {
+        if (!referenced) continue
+        if (settings.paths === null && referenced.paths) {
           settings = { ...settings, baseUrl: settings.baseUrl ?? referenced.baseUrl, paths: referenced.paths, pathsDir: referenced.pathsDir }
-          break
         }
+        if (settings.jsx === null) settings.jsx = referenced.jsx
+        if (settings.jsxFactories.length === 0) settings.jsxFactories = referenced.jsxFactories
+        if (settings.jsxImportSource === null) settings.jsxImportSource = referenced.jsxImportSource
       }
     }
     settingsByConfig.set(rel, settings)
@@ -290,8 +343,35 @@ export function createModuleResolver(args: {
     return found
   }
 
-  const filesAt = (fromRel: string, abs: string): string[] =>
-    resolveImportCandidates(projectRoot, resolvePath(projectRoot, fromRel), abs, entries, probe).map(relOf)
+  const manifestIn = (dirRel: string): string => (dirRel === '' ? 'package.json' : `${dirRel}/package.json`)
+
+  const filesAt = (fromRel: string, target: string): string[] => {
+    const importerAbs = resolvePath(projectRoot, fromRel)
+    const found = resolveImportCandidates(projectRoot, importerAbs, target, entries, probe).map(relOf)
+    const abs = isAbsolute(target) ? resolvePath(target) : resolvePath(dirname(importerAbs), target)
+    const manifest = manifestIn(relOf(abs))
+    if (probe.isDirectory(abs) && configSet.has(manifest)) {
+      const pkg = json(manifest)
+      const declaredEntries: string[] = []
+      if (isRecord(pkg)) for (const field of PACKAGE_ENTRY_FIELDS) entryStrings(pkg[field], declaredEntries)
+      for (const entry of declaredEntries) {
+        for (const file of resolveImportCandidates(projectRoot, importerAbs, resolvePath(abs, entry), entries, probe)) {
+          found.push(relOf(file))
+        }
+      }
+    }
+    return [...new Set(found)]
+  }
+
+  const rootsFor = (fromRel: string): string[] => {
+    let dir = dirname(fromRel) === '.' ? '' : toPosix(dirname(fromRel))
+    for (;;) {
+      if (configSet.has(manifestIn(dir))) return [...new Set([resolvePath(projectRoot, dir), resolvePath(projectRoot)])]
+      if (dir === '') return [resolvePath(projectRoot)]
+      const slash = dir.lastIndexOf('/')
+      dir = slash < 0 ? '' : dir.slice(0, slash)
+    }
+  }
 
   const mapped = (settings: CompilerSettings, specifier: string): string[] | null => {
     if (!settings.paths) return null
@@ -310,18 +390,47 @@ export function createModuleResolver(args: {
     return best.targets.map((target) => resolvePath(base, target.replace('*', bestMatch)))
   }
 
+  const lowered = corpus.map((rel) => [rel.toLowerCase(), rel] as const)
+
+  const caseCorrected = (targetRel: string): string[] => {
+    const runtime = RUNTIME_SUFFIX.exec(targetRel)?.[0] ?? ''
+    const stem = targetRel.slice(0, targetRel.length - runtime.length)
+    const lower = stem.toLowerCase()
+    const corrected = new Set<string>()
+    for (const [low, real] of lowered) {
+      if (low === lower || low.startsWith(`${lower}.`) || low.startsWith(`${lower}/`)) corrected.add(real.slice(0, stem.length) + runtime)
+    }
+    corrected.delete(targetRel)
+    return [...corrected]
+  }
+
+  const caseOnlyFiles = (fromRel: string, spec: string): string[] => {
+    const targetRel = relOf(resolvePath(projectRoot, dirname(fromRel), spec))
+    if (!insideRepo(targetRel)) return []
+    const suffix = DIRECTORY_SPECIFIER.test(spec) ? '/' : ''
+    const files = new Set<string>()
+    for (const corrected of caseCorrected(targetRel)) {
+      for (const file of filesAt(fromRel, resolvePath(projectRoot, corrected) + suffix)) files.add(file)
+    }
+    return [...files]
+  }
+
   const resolve = (fromRel: string, specifier: string): Resolution => {
     const { path, query } = splitQuery(specifier)
-    if (isAsset(path)) return { kind: 'missing' }
     if (path.startsWith('.')) {
       const files = filesAt(fromRel, path)
-      return files.length > 0 ? { kind: 'files', files, query } : { kind: 'missing' }
+      if (files.length > 0) return { kind: 'files', files, query }
+      const caseOnly = caseOnlyFiles(fromRel, path)
+      return caseOnly.length === 0 ? { kind: 'missing' } : { kind: 'unknown', within: caseOnly }
     }
     if (path.startsWith('/')) {
-      const files = filesAt(fromRel, resolvePath(projectRoot, `.${path}`))
-      return files.length > 0 ? { kind: 'files', files, query } : { kind: 'unknown', within: null }
+      for (const root of rootsFor(fromRel)) {
+        const files = filesAt(fromRel, resolvePath(root, `.${path}`))
+        if (files.length > 0) return { kind: 'files', files, query }
+      }
+      return isAsset(path) ? { kind: 'missing' } : { kind: 'unknown', within: null }
     }
-    if (isBuiltin(path)) return { kind: 'external' }
+    if (path.startsWith('node:')) return { kind: 'external' }
     const settings = settingsFor(fromRel)
     if (settings) {
       for (const abs of mapped(settings, path) ?? []) {
@@ -333,9 +442,11 @@ export function createModuleResolver(args: {
         if (files.length > 0) return { kind: 'files', files, query }
       }
     }
+    if (isBuiltin(path)) return { kind: 'external' }
+    if (isAsset(path)) return { kind: 'missing' }
     const name = packageNameOf(path)
     const workspace = workspaces.get(name)
-    if (workspace !== undefined) return { kind: 'unknown', within: workspace }
+    if (workspace !== undefined) return { kind: 'unknown', within: workspace === '' ? null : [workspace] }
     if (declared.has(name)) return { kind: 'external' }
     return { kind: 'unknown', within: null }
   }
@@ -348,10 +459,16 @@ export function createModuleResolver(args: {
 
   const prefixFiles = (fromRel: string, prefix: string): string[] | null => {
     if (prefix.startsWith('.')) return underPrefix(resolvePath(projectRoot, dirname(fromRel), prefix))
-    if (prefix.startsWith('/')) return underPrefix(resolvePath(projectRoot, `.${prefix}`))
+    if (prefix.startsWith('/')) {
+      for (const root of rootsFor(fromRel)) {
+        const files = underPrefix(resolvePath(root, `.${prefix}`)) ?? []
+        if (files.length > 0) return files
+      }
+      return null
+    }
     const settings = settingsFor(fromRel)
     if (settings?.paths) {
-      const files: string[] = []
+      const files = new Set<string>()
       let matched = false
       for (const mapping of settings.paths) {
         const head = mapping.pattern.slice(0, prefixLength(mapping.pattern))
@@ -361,10 +478,10 @@ export function createModuleResolver(args: {
         const base = settings.baseUrl ?? settings.pathsDir
         for (const target of mapping.targets) {
           const star = target.indexOf('*')
-          files.push(...(underPrefix(resolvePath(base, (star < 0 ? target : target.slice(0, star)) + rest)) ?? []))
+          for (const file of underPrefix(resolvePath(base, (star < 0 ? target : target.slice(0, star)) + rest)) ?? []) files.add(file)
         }
       }
-      if (matched) return [...new Set(files)]
+      if (matched) return [...files]
     }
     if (settings?.baseUrl) {
       const files = underPrefix(resolvePath(settings.baseUrl, prefix)) ?? []
@@ -373,7 +490,7 @@ export function createModuleResolver(args: {
     const name = packageNameOf(prefix)
     const workspace = workspaces.get(name)
     if (workspace !== undefined) return corpus.filter((path) => path.startsWith(workspace))
-    if (isBuiltin(prefix) || declared.has(name)) return []
+    if (prefix.startsWith('node:') || isBuiltin(prefix) || declared.has(name)) return []
     return null
   }
 
@@ -384,5 +501,10 @@ export function createModuleResolver(args: {
     return settings.jsx === 'react' ? ['React'] : []
   }
 
-  return { resolve, prefixFiles, jsxFactories }
+  const jsxRuntimes = (fromRel: string): string[] => {
+    const source = settingsFor(fromRel)?.jsxImportSource
+    return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : []
+  }
+
+  return { resolve, prefixFiles, jsxFactories, jsxRuntimes }
 }

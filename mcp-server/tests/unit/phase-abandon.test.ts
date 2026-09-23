@@ -108,7 +108,6 @@ describe('rsct_phase_abandon — §C-gated path', () => {
     )) as PhaseAbandonOutput
     expect(r.status).toBe('rejected')
     expect(r.reject_kind).toBe('dialog_no')
-    // Phase still present
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>

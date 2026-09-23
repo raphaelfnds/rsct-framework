@@ -107,10 +107,17 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   re-checks a file a pre-commit hook rewrote; if that check cannot run, every
   rewrite lands as drift. What the scan cannot settle — a file no resolved
   import reaches (an entrypoint), an importer it cannot parse, a namespace used
-  as a value, an import it cannot resolve (by the names that import uses), a
+  as a value, an import it cannot resolve or that matches a file only in another
+  letter case (by the names that import uses), a
   computed `import()`/`require()`/`import.meta.glob`, a classic script's
   top-level names, a file that calls `eval` — is left unknown and named in
-  `hints`, never reported dead and never passed silently. Build output
+  `hints`, never reported dead and never passed silently. A file that checks for
+  `module`, `exports` or `define` before exporting is judged like any other, with
+  a hint saying a page could still load it with a script tag and reach what was
+  reported. A touched file over
+  2 MB is not parsed: the REVIEW and the commit refuse it, named, until the
+  developer lets it through `exempt_files`. A commit refusal also names the
+  files not staged yet that mention a refused symbol. Build output
   (`dist/`, `build/`, `coverage/` directly under a package root), vendored
   code, files the developer allowed without a mechanical check, and touched
   files in other languages are reported as not checked. Types are not judged.
@@ -992,7 +999,7 @@ Bounds:
 | `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
 | `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | `sql_dialect` | enum of `postgresql`, `mysql`, `none`; optional | an unknown dialect would make the REVIEW comment sweep read SQL with the wrong comment syntax; rejecting loudly beats sweeping wrongly |
-| `public_api` | array of non-empty path globs, relative to the project root (the directory holding `.rsct.json`) or to the repository root; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; an exemption forces the REVIEW dialog, and every export it exempts is written to the report that dialog names, so a broad glob is visible rather than silent |
+| `public_api` | array of non-empty path globs, relative to the project root (the directory holding `.rsct.json`) or to the repository root; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; each exempted export is put to the developer once — the REVIEW dialog is forced until the audit log holds their yes for that declaration and that list (`review.public_api_approved`), so a new export, a changed declaration or a changed list asks again, and `rsct_request_commit` refuses a staged export the exemption covers while that yes is missing — and every export it exempts is written to the report that dialog names, so a broad glob is visible rather than silent |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 
 If you legitimately need to operate outside a bound (e.g. very-long-running

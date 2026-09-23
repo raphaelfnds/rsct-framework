@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { matchesAnyGlob } from '../phase-scope.js'
 import { extractImports } from '../reverse-dep-walk.js'
 import {
+  JSX_PRAGMA_OWNER,
   NAMESPACE_IMPORT,
   ownerKeyOf,
   scanSymbols,
@@ -13,6 +14,7 @@ import {
   type TreeImportEdge,
   type TreeImportName,
   type TreeLanguage,
+  type TreeReference,
   type TreeSymbolScan,
   type TreeSymbols,
 } from '../comment-sweep/tree-engine.js'
@@ -30,7 +32,11 @@ const LANGUAGE_BY_SUFFIX: ReadonlyMap<string, TreeLanguage> = new Map([
 ])
 
 const MODULE_SUFFIXES: ReadonlySet<string> = new Set(['.mjs', '.cjs', '.mts', '.cts'])
-const FOREIGN_IMPORTER_SUFFIXES: ReadonlySet<string> = new Set(['.vue', '.svelte', '.astro', '.html', '.htm', '.mdx'])
+const FOREIGN_IMPORTER_SUFFIXES: ReadonlySet<string> = new Set(['.vue', '.svelte', '.astro', '.html', '.htm', '.mdx', '.md'])
+const MARKDOWN_SUFFIXES: ReadonlySet<string> = new Set(['.md', '.mdx'])
+const SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/gi
+const JSX_RUNTIME_NAMES: readonly string[] = ['jsx', 'jsxs', 'jsxDEV', 'Fragment']
+const IMPLICIT_BINDING = '\u0001'
 const BUILD_OUTPUT_DIRS: readonly string[] = ['dist', 'build', 'coverage']
 const VENDORED_SEGMENTS: ReadonlySet<string> = new Set(['node_modules', '.git'])
 const CONFIG_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|jsconfig[^/]*\.json)$/
@@ -38,6 +44,12 @@ const COMPUTED_IMPORT = /\b(?:import|require)\s*\(\s*[^'"\s)]|import\.meta\.glob
 const CODE_FENCE = /^\s*(`{3,}|~{3,})/
 const MDX_ESM_LINE = /^(?:import|export)\b/
 const HINT_LIST_LIMIT = 10
+
+function markdownCode(text: string): string {
+  const esm = text.split('\n').filter((line) => MDX_ESM_LINE.test(line))
+  const scripts = [...text.matchAll(SCRIPT_BLOCK)].map((match) => match[1] ?? '')
+  return [...esm, ...scripts].join('\n')
+}
 
 function withoutCodeFences(text: string): string {
   const kept: string[] = []
@@ -122,7 +134,7 @@ export interface DeadCodeInput {
   targets: readonly string[]
   configs?: readonly string[]
   publicApi?: readonly string[]
-  publicApiRoot?: string
+  publicApiPrefix?: string
   includeTypes?: boolean
   read?: SourceReader
 }
@@ -144,7 +156,7 @@ export interface DeadCodeResult {
   unknown: DeadSymbol[]
   publicExempted: DeadSymbol[]
   unreadable: string[]
-  filesScanned: number
+  oversized: string[]
   hints: string[]
 }
 
@@ -159,8 +171,11 @@ export const ESCAPED_HINT_PREFIX = 'Dead-code scan: a namespace import is used a
 export const UNRESOLVED_HINT_PREFIX = 'Dead-code scan: could not resolve'
 export const UNBOUND_HINT_PREFIX = 'Dead-code scan: an import with no fixed target'
 export const SCRIPT_HINT_PREFIX = 'Dead-code scan: classic script'
+export const DUAL_MODE_HINT_PREFIX = 'Dead-code scan: also runs as a plain script'
 export const EVAL_HINT_PREFIX = 'Dead-code scan: direct eval'
 export const UNPARSEABLE_TARGET_HINT_PREFIX = 'Dead-code scan: could not parse'
+export const PRAGMA_HINT_PREFIX = 'Dead-code scan: kept alive only by a JSX pragma'
+export const TYPE_CHECK_HINT_PREFIX = 'Dead-code scan: a type check, not a value'
 
 const KEY_SEPARATOR = '\u0000'
 
@@ -169,9 +184,12 @@ function keyOf(path: string, owner: string): string {
 }
 
 const SCAN_CACHE_MAX = 4000
+const PARSE_SIZE_LIMIT = 2 * 1024 * 1024
+let parseSizeLimit = PARSE_SIZE_LIMIT
 let scanCacheLimit = SCAN_CACHE_MAX
 let scanMisses = 0
-const scanCache = new Map<string, TreeSymbolScan>()
+let scanGeneration = 0
+const scanCache = new Map<string, { scan: TreeSymbolScan; generation: number }>()
 
 export function clearSymbolScanCache(): void {
   scanCache.clear()
@@ -185,6 +203,14 @@ export function symbolScanMisses(): number {
   return scanMisses
 }
 
+export function limitParseSizeForTests(limit: number | null): void {
+  parseSizeLimit = limit ?? PARSE_SIZE_LIMIT
+}
+
+export function parseSizeLimitText(): string {
+  return parseSizeLimit >= 1048576 ? `${Math.round(parseSizeLimit / 1048576)} MB` : `${parseSizeLimit} bytes`
+}
+
 export function limitSymbolScanCacheForTests(limit: number | null): void {
   scanCacheLimit = limit ?? SCAN_CACHE_MAX
 }
@@ -194,17 +220,17 @@ async function scanCached(language: TreeLanguage, source: string): Promise<TreeS
   const cached = scanCache.get(key)
   if (cached) {
     scanCache.delete(key)
-    scanCache.set(key, cached)
-    return cached
+    scanCache.set(key, { scan: cached.scan, generation: scanGeneration })
+    return cached.scan
   }
   scanMisses += 1
   const scan = await scanSymbols(language, source)
   while (scanCache.size >= scanCacheLimit) {
-    const oldest = scanCache.keys().next().value
-    if (oldest === undefined) break
-    scanCache.delete(oldest)
+    const oldest = scanCache.entries().next().value
+    if (oldest === undefined || oldest[1].generation === scanGeneration) return scan
+    scanCache.delete(oldest[0])
   }
-  scanCache.set(key, scan)
+  scanCache.set(key, { scan, generation: scanGeneration })
   return scan
 }
 
@@ -220,12 +246,13 @@ interface FileFacts {
   symbols: TreeSymbols
   edges: Edge[]
   module: boolean
+  dualMode: boolean
 }
 
 interface Unresolved {
   from: string
   specifier: string
-  within: string | null
+  within: readonly string[] | null
   names: ReadonlySet<string> | 'all'
 }
 
@@ -233,6 +260,7 @@ interface Corpus {
   facts: Map<string, FileFacts>
   unreadable: Set<string>
   unparsed: Set<string>
+  oversized: Set<string>
   taintedTargets: Set<string>
   dynamicTargets: Set<string>
   importedFiles: Set<string>
@@ -269,6 +297,7 @@ function unresolvedNames(edge: TreeImportEdge, symbols: TreeSymbols): ReadonlySe
 }
 
 async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
+  scanGeneration += 1
   const read = input.read ?? workingTreeReader(input.projectRoot)
   const resolver: ModuleResolver = createModuleResolver({
     projectRoot: input.projectRoot,
@@ -284,6 +313,7 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
     facts: new Map(),
     unreadable: new Set(),
     unparsed: new Set(),
+    oversized: new Set(),
     taintedTargets: new Set(),
     dynamicTargets: new Set(),
     importedFiles: new Set(),
@@ -293,10 +323,10 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
   }
 
   const readByPattern = (rel: string, source: string): void => {
-    const mdx = suffixOf(rel) === '.mdx'
-    const text = mdx ? withoutCodeFences(source) : source
-    const code = mdx ? text.split('\n').filter((line) => MDX_ESM_LINE.test(line)).join('\n') : text
-    for (const specifier of extractImports(text)) {
+    const markdown = MARKDOWN_SUFFIXES.has(suffixOf(rel))
+    const text = markdown ? withoutCodeFences(source) : source
+    const code = markdown ? markdownCode(text) : text
+    for (const specifier of extractImports(code)) {
       const resolution = resolver.resolve(rel, specifier)
       if (resolution.kind === 'files') {
         for (const target of resolution.files) {
@@ -319,7 +349,9 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
       continue
     }
     const language = languageOf(rel)
-    const scan = language ? await scanCached(language, source.text) : null
+    const oversized = language !== null && Buffer.byteLength(source.text, 'utf8') > parseSizeLimit
+    if (oversized) corpus.oversized.add(rel)
+    const scan = language && !oversized ? await scanCached(language, source.text) : null
     if (!scan || !scan.ok) {
       corpus.unreadable.add(rel)
       if (language) corpus.unparsed.add(rel)
@@ -355,10 +387,30 @@ async function readCorpus(input: DeadCodeInput): Promise<Corpus> {
       }
     }
     if (symbols.unboundDynamic) corpus.unboundFiles.add(rel)
-    const factories = symbols.hasJsx ? resolver.jsxFactories(rel) : []
-    const withFactories: TreeSymbols =
-      factories.length > 0 ? { ...symbols, references: [...symbols.references, ...factories.map((name) => ({ name, owner: null }))] } : symbols
-    corpus.facts.set(rel, { symbols: withFactories, edges, module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)) })
+    const implicit: TreeReference[] = []
+    if (symbols.hasJsx) {
+      for (const name of resolver.jsxFactories(rel)) implicit.push({ name, owner: null })
+      const runtimeNames = JSX_RUNTIME_NAMES.map((name) => ({ imported: name, local: `${IMPLICIT_BINDING}${name}` }))
+      for (const specifier of resolver.jsxRuntimes(rel)) {
+        const resolution = resolver.resolve(rel, specifier)
+        if (resolution.kind === 'files') {
+          for (const target of resolution.files) {
+            corpus.importedFiles.add(target)
+            edges.push({ target, kind: 'import', names: runtimeNames, star: false, namespaceReexport: null })
+          }
+        } else if (resolution.kind === 'unknown') {
+          corpus.unresolved.push({ from: rel, specifier, within: resolution.within, names: new Set(JSX_RUNTIME_NAMES) })
+        }
+      }
+      for (const { local } of runtimeNames) implicit.push({ name: local, owner: null })
+    }
+    const withImplicit: TreeSymbols = implicit.length > 0 ? { ...symbols, references: [...symbols.references, ...implicit] } : symbols
+    corpus.facts.set(rel, {
+      symbols: withImplicit,
+      edges,
+      module: symbols.module || MODULE_SUFFIXES.has(suffixOf(rel)),
+      dualMode: symbols.dualMode && !MODULE_SUFFIXES.has(suffixOf(rel)),
+    })
   }
   return corpus
 }
@@ -472,7 +524,17 @@ function citationsThrough(alias: Alias, importers: Map<string, Importer[]>): Thr
   return through
 }
 
-type Uncertainty = 'script' | 'eval' | 'entrypoint' | 'tainted' | 'dynamic' | 'unresolved' | 'escaped' | 'nested' | 'unbound'
+type Uncertainty =
+  | 'typeCheck'
+  | 'script'
+  | 'eval'
+  | 'entrypoint'
+  | 'tainted'
+  | 'dynamic'
+  | 'unresolved'
+  | 'escaped'
+  | 'nested'
+  | 'unbound'
 
 interface Candidate {
   symbol: DeadSymbol
@@ -488,16 +550,18 @@ interface Candidate {
 function publicMatcher(input: DeadCodeInput): (file: string) => boolean {
   const globs = input.publicApi ?? []
   if (globs.length === 0) return () => false
-  const root = input.publicApiRoot
+  const prefix = input.publicApiPrefix ?? ''
   return (file) =>
-    matchesAnyGlob(file, globs).matched || (root !== undefined && matchesAnyGlob(join(input.projectRoot, file), globs, root).matched)
+    matchesAnyGlob(file, globs).matched || (prefix !== '' && file.startsWith(prefix) && matchesAnyGlob(file.slice(prefix.length), globs).matched)
 }
 
 function unresolvedMatches(corpus: Corpus, aliases: readonly Alias[]): string[] {
   const hits: string[] = []
   for (const use of corpus.unresolved) {
     const reaches = aliases.some(
-      (alias) => (use.within === null || alias.file.startsWith(use.within)) && (use.names === 'all' || use.names.has(alias.name)),
+      (alias) =>
+        (use.within === null || use.within.some((where) => (where.endsWith('/') ? alias.file.startsWith(where) : alias.file === where))) &&
+        (use.names === 'all' || use.names.has(alias.name)),
     )
     if (reaches) hits.push(`${use.specifier} (${use.from})`)
   }
@@ -512,9 +576,11 @@ function uncertaintyOf(
   aliases: readonly Alias[],
   escapedIn: readonly string[],
   nested: boolean,
+  typeCheck: boolean,
 ): { uncertain: Uncertainty | null; because: string[] } {
   const aliasFiles = [...new Set(aliases.map((alias) => alias.file))]
   const reasons: Array<[Uncertainty, readonly string[]]> = []
+  if (typeCheck) reasons.push(['typeCheck', [path]])
   if (!facts.module) reasons.push(['script', [path]])
   if (facts.symbols.directEval) reasons.push(['eval', [path]])
   if (exported) {
@@ -544,7 +610,7 @@ function candidatesOf(input: DeadCodeInput, corpus: Corpus): Candidate[] {
   for (const path of input.targets) {
     const facts = corpus.facts.get(path)
     if (!facts) continue
-    const byOwner = new Map<string, { symbol: DeadSymbol; exposures: Set<string>; effect: boolean }>()
+    const byOwner = new Map<string, { symbol: DeadSymbol; exposures: Set<string>; effect: boolean; typeCheck: boolean }>()
     for (const declaration of facts.symbols.declarations) {
       if (!includeTypes && declaration.kind === 'type') continue
       const owner = ownerKeyOf(declaration.kind, declaration.name)
@@ -554,6 +620,7 @@ function candidatesOf(input: DeadCodeInput, corpus: Corpus): Candidate[] {
         existing.symbol.end = Math.max(existing.symbol.end, declaration.end)
         existing.symbol.exported = existing.symbol.exported || declaration.exported
         existing.effect = existing.effect || declaration.effect
+        existing.typeCheck = existing.typeCheck || declaration.typeCheck
         for (const exposure of declaration.exposures) existing.exposures.add(exposure)
         continue
       }
@@ -568,10 +635,11 @@ function candidatesOf(input: DeadCodeInput, corpus: Corpus): Candidate[] {
         },
         exposures: new Set(declaration.exposures),
         effect: declaration.effect,
+        typeCheck: declaration.typeCheck,
       })
     }
 
-    for (const [owner, { symbol, exposures, effect }] of byOwner) {
+    for (const [owner, { symbol, exposures, effect, typeCheck }] of byOwner) {
       const citations: Citation[] = []
       citeUses(citations, path, facts.symbols, symbol.name)
       const { aliases, nested: nestedAlias } = aliasesOf(path, [...exposures], reexports)
@@ -584,7 +652,7 @@ function candidatesOf(input: DeadCodeInput, corpus: Corpus): Candidate[] {
         escapedIn.push(...through.escapedIn)
       }
       const aliasFiles = [...new Set(aliases.map((alias) => alias.file))]
-      const { uncertain, because } = uncertaintyOf(path, facts, exposures.size > 0, corpus, aliases, escapedIn, nested)
+      const { uncertain, because } = uncertaintyOf(path, facts, exposures.size > 0, corpus, aliases, escapedIn, nested, typeCheck)
       candidates.push({
         symbol,
         key: keyOf(path, owner),
@@ -666,7 +734,7 @@ export async function findDeadSymbols(input: DeadCodeInput): Promise<DeadCodeRes
     unknown,
     publicExempted,
     unreadable: [...corpus.unreadable],
-    filesScanned: corpus.facts.size,
+    oversized: input.targets.filter((path) => corpus.oversized.has(path)),
     hints: hintsFor(input, corpus, candidates, dead, unknown, publicExempted),
   }
 }
@@ -710,11 +778,33 @@ function hintsFor(
         `${listed([...corpus.unreadable])}.`,
     )
   }
+  const pragmaOnly = candidates.filter(
+    (c) => c.citations.length > 0 && c.citations.every((citation) => citation.owner === JSX_PRAGMA_OWNER && citation.file === c.symbol.path),
+  )
+  if (pragmaOnly.length > 0) {
+    hints.push(
+      `${PRAGMA_HINT_PREFIX}: ${listed(pragmaOnly.map((c) => `${c.symbol.path}:${c.symbol.name}`))}. A @jsx comment in ` +
+        `the same file names it and nothing else uses it; if that file's JSX is not compiled with that factory, it is dead.`,
+    )
+  }
+  const dualModeDead = dead.filter((symbol) => corpus.facts.get(symbol.path)?.dualMode === true)
+  if (dualModeDead.length > 0) {
+    hints.push(
+      `${DUAL_MODE_HINT_PREFIX}: ${listed([...new Set(dualModeDead.map((symbol) => symbol.path))])} check(s) for ` +
+        `\`module\`, \`exports\` or \`define\` before exporting, so a page can also load them with a script tag. The ` +
+        `${dualModeDead.length} symbol(s) reported there are referenced nowhere in this repository; if a page calls ` +
+        `them as globals, keep them through the developer.`,
+    )
+  }
   const unparsedTargets = input.targets.filter((path) => corpus.unparsed.has(path))
   if (unparsedTargets.length > 0) {
-    hints.push(`${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)}, so dead code in them is not checked.`)
+    hints.push(
+      `${UNPARSEABLE_TARGET_HINT_PREFIX} ${listed(unparsedTargets)} — a syntax the grammar does not know, or over ` +
+        `${parseSizeLimitText()} — so dead code in them is not checked.`,
+    )
   }
   const groups: Array<[Uncertainty, string, (group: readonly Candidate[]) => string]> = [
+    ['typeCheck', TYPE_CHECK_HINT_PREFIX, (g) => `: ${listed(g.map((c) => `${c.symbol.path}:${c.symbol.name}`))} — a \`_name: Type = value\` declaration exists for the compiler to check a type; nothing reads it, so it is left unknown, never reported dead.`],
     ['script', SCRIPT_HINT_PREFIX, (g) => `: ${sourcesOf(g)} declare(s) no import or export, so their top-level names are shared with every other script and page. ${g.length} symbol(s) left unknown.`],
     ['eval', EVAL_HINT_PREFIX, (g) => ` in ${sourcesOf(g)} can reach any binding of its file. ${g.length} symbol(s) left unknown.`],
     ['entrypoint', ENTRYPOINT_HINT_PREFIX, (g) => ` ${sourcesOf(g)}, so what it exports cannot be told apart from an entrypoint's. ${g.length} export(s) left unknown rather than reported dead. Declare the file in "public_api" if it is an entrypoint or a published surface.`],

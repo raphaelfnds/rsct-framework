@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -314,9 +315,19 @@ export function readSkipWorktreePaths(repo: SweepRepo): Set<string> | null {
   if (listed === null) return null
   const paths = new Set<string>()
   for (const entry of listed) {
-    if (entry.startsWith('S ') || entry.startsWith('s ')) paths.add(entry.slice(2))
+    const tag = entry.slice(0, 1)
+    if (tag === 'S' || (tag !== '' && tag === tag.toLowerCase() && tag !== tag.toUpperCase())) paths.add(entry.slice(2))
   }
   return paths
+}
+
+export function readWorktreeChangedPaths(repo: SweepRepo): string[] | null {
+  return nulList(safeGitBuffer(repo.toplevel, ['diff', '--name-only', '--no-renames', '-z']))
+}
+
+export function readIndexFingerprint(repo: SweepRepo): string | null {
+  const listed = safeGitBuffer(repo.toplevel, ['ls-files', '-s', '-z', '--full-name'])
+  return listed === null ? null : createHash('sha256').update(listed).digest('hex')
 }
 
 export function readKnownPaths(repo: SweepRepo): Set<string> | null {

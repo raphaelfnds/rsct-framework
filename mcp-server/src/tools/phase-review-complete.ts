@@ -56,11 +56,12 @@ import {
   checkDeadCode,
   keepPrunePaths,
   mergeDeadCodeKeeps,
+  publicApiDigest,
   readDeadCodeKeeps,
   type DeadCodeRejectKind,
   type PendingDeadSymbol,
 } from '../lib/dead-code/review-gate.js'
-import { DEAD_CODE_KEPT_EVENT, deadCodeKeepKey, deriveAuditCeiling } from '../lib/free-commit.js'
+import { DEAD_CODE_KEPT_EVENT, PUBLIC_API_APPROVED_EVENT, deadCodeKeepKey, deriveAuditCeiling, publicApiApprovalKey } from '../lib/free-commit.js'
 import { validateDevApproval } from '../lib/dev-approval.js'
 import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 
@@ -501,7 +502,8 @@ export async function phaseReviewCompleteHandler(
     })
   }
 
-  const keepDecisions = deriveAuditCeiling(projectRoot, config, '').deadCodeKeepDecisions
+  const ceiling = deriveAuditCeiling(projectRoot, config, '')
+  const keepDecisions = ceiling.deadCodeKeepDecisions
   const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions)
   const grantedKeeps = sweepInput.data.dead_code_keeps ?? []
   const deadCheck = await checkDeadCode({
@@ -545,11 +547,16 @@ export async function phaseReviewCompleteHandler(
     .filter((k) => grantedNotes.has(k.key) && !storedKeepKeys.has(k.key))
     .map((k) => ({ path: k.path, name: k.name, declaration_sha256: k.declaration_sha256, note: grantedNotes.get(k.key) ?? '' }))
   const publicExempted = deadCheck.public_exempted
+  const publicApiSha = publicApiDigest(config?.public_api)
+  const publicApiPending =
+    publicApiSha === null
+      ? publicExempted
+      : publicExempted.filter((p) => !ceiling.publicApiApprovals.has(publicApiApprovalKey(publicApiSha, p.path, p.name, p.declaration_sha256)))
 
   const removedFiles = sweep.files.filter((f) => f.removed.length > 0)
   const unverified = sweep.files.filter((f) => f.kind === 'unverified')
   const commentForce = summary.removed_count > 0 || unverified.length > 0 || summary.allowlist_changes.length > 0
-  const deadCodeForce = newlyKept.length > 0 || publicExempted.length > 0
+  const deadCodeForce = newlyKept.length > 0 || publicApiPending.length > 0
   const mustForce = commentForce || deadCodeForce
   const report = mustForce
     ? writeReport(projectRoot, input.spec_ref, commentForce ? sweep.files : [], dispositions, { kept: newlyKept, exempted: publicExempted })
@@ -621,10 +628,10 @@ export async function phaseReviewCompleteHandler(
       listLines(newlyKept.map((k) => `${k.path}:${k.name} — ${k.note.slice(0, 100)}`), 10),
     )
   }
-  if (publicExempted.length > 0) {
+  if (publicApiPending.length > 0) {
     detailParts.push(
-      `Exports nothing here uses, exempted by "public_api": ${publicExempted.length}.`,
-      listLines(publicExempted.map((p) => `${p.path}:${p.name}`), 10),
+      `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
+      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10),
     )
   }
   if (commentForce) {
@@ -734,6 +741,26 @@ export async function phaseReviewCompleteHandler(
       config?.audit,
     )
     if (!w.ok) auditOk = false
+  }
+  if (publicApiSha !== null) {
+    for (const exempted of publicApiPending) {
+      const w = appendAudit(
+        projectRoot,
+        {
+          event: PUBLIC_API_APPROVED_EVENT,
+          tool: 'rsct_phase_review_complete',
+          spec_ref: input.spec_ref,
+          public_api: config?.public_api,
+          public_api_sha256: publicApiSha,
+          path: exempted.path,
+          name: exempted.name,
+          declaration_sha256: exempted.declaration_sha256,
+          channel,
+        },
+        config?.audit,
+      )
+      if (!w.ok) auditOk = false
+    }
   }
   output.hints.push(...deadCheck.hints)
 

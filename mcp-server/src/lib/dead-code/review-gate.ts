@@ -1,17 +1,20 @@
 import { createHash } from 'node:crypto'
-import { resolve as resolvePath } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { classifyPath } from '../comment-sweep/language.js'
 import {
   openSweepRepo,
   readBlobTexts,
   readIndexEntries,
+  readIndexFingerprint,
   readKnownPaths,
   readSkipWorktreePaths,
   readUntrackedPaths,
+  readWorktreeChangedPaths,
   type SweepRepo,
 } from '../comment-sweep/git-reads.js'
-import { deadCodeKeepKey } from '../free-commit.js'
+import { deadCodeKeepKey, publicApiApprovalKey } from '../free-commit.js'
 import type { DeadCodeKeepRecord } from '../phase-scope.js'
 import {
   configFilesFrom,
@@ -21,6 +24,7 @@ import {
   languageOf,
   normalizeLineEndings,
   packageRootsOf,
+  parseSizeLimitText,
   workingTreeReader,
   type DeadSymbol,
   type SourceRead,
@@ -68,6 +72,7 @@ export type StagedDeadCodeCheck =
 
 export const UNCOVERED_LANGUAGE_HINT_PREFIX = 'Dead-code scan: not checked'
 export const OTHER_LANGUAGE_EVIDENCE_HINT_PREFIX = 'Dead-code scan: references from other languages are not read'
+export const UNSTAGED_MENTION_HINT_PREFIX = 'Files not staged yet mention the refused symbol(s)'
 
 const DECLARATION_PREVIEW = 400
 const NO_REFERENCES_TO_CODE: ReadonlySet<string> = new Set(['css', 'sql', 'scss', 'sass', 'less'])
@@ -76,6 +81,32 @@ let analysisHook: (() => void) | null = null
 
 export function setDeadCodeAnalysisHookForTests(hook: (() => void) | null): void {
   analysisHook = hook
+}
+
+export function publicApiDigest(globs: readonly string[] | undefined): string | null {
+  if (!globs || globs.length === 0) return null
+  return createHash('sha256').update(JSON.stringify([...new Set(globs)].sort()), 'utf8').digest('hex')
+}
+
+function unstagedMentions(projectRoot: string, stagedPaths: readonly string[], names: readonly string[]): string[] {
+  const repo = openSweepRepo(projectRoot)
+  if (!repo || names.length === 0) return []
+  const staged = new Set(stagedPaths)
+  const pending = [...new Set([...(readWorktreeChangedPaths(repo) ?? []), ...(readUntrackedPaths(repo) ?? [])])]
+  const patterns = [...new Set(names)].map((name) => ({ name, re: new RegExp(`(^|[^\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`) }))
+  const mentions: string[] = []
+  for (const path of pending) {
+    if (staged.has(path) || corpusFrom([path]).length === 0) continue
+    let text: string
+    try {
+      text = readFileSync(join(repo.toplevel, path), 'utf8')
+    } catch {
+      continue
+    }
+    const hits = patterns.filter((pattern) => pattern.re.test(text)).map((pattern) => pattern.name)
+    if (hits.length > 0) mentions.push(`${path} (${hits.join(', ')})`)
+  }
+  return mentions
 }
 
 export function declarationSha256(source: string, symbol: DeadSymbol): string {
@@ -210,7 +241,7 @@ interface Analysis {
   hints: string[]
 }
 
-type AnalysisResult = Analysis | { ok: false; reason: string }
+type AnalysisResult = Analysis | { ok: false; reason: string; hints?: string[]; paths?: string[] }
 
 function memoised(reader: SourceReader): { read: SourceReader; text: (rel: string) => string } {
   const cache = new Map<string, SourceRead>()
@@ -235,13 +266,19 @@ function indexReader(repo: SweepRepo, paths: readonly string[], blobs: ReadonlyM
   return (rel) => {
     const oid = blobs.get(rel)
     if (oid === undefined) return { kind: 'absent' }
+    if (!read.texts.has(oid) && !read.failed.has(oid)) {
+      const late = readBlobTexts(repo, [oid])
+      if (!late) return { kind: 'error' }
+      for (const [id, text] of late.texts) read.texts.set(id, text)
+      for (const id of late.failed) read.failed.add(id)
+    }
     if (read.failed.has(oid)) return { kind: 'error' }
     const text = read.texts.get(oid)
     return text === undefined ? { kind: 'absent' } : { kind: 'text', text: normalizeLineEndings(text) }
   }
 }
 
-function sparseAwareReader(repo: SweepRepo, paths: readonly string[]): SourceReader | null {
+function worktreeReader(repo: SweepRepo, paths: readonly string[]): SourceReader | null {
   const disk = workingTreeReader(repo.toplevel)
   const sparse = readSkipWorktreePaths(repo)
   if (!sparse) return null
@@ -256,15 +293,16 @@ function sparseAwareReader(repo: SweepRepo, paths: readonly string[]): SourceRea
   }
 }
 
-async function analyse(args: {
+interface AnalyseArgs {
   projectRoot: string
   paths: readonly string[]
   publicApi?: readonly string[] | undefined
   keeps: readonly DeadCodeKeep[]
   exempt: ReadonlySet<string>
   source: 'working_tree' | 'index'
-}): Promise<AnalysisResult> {
-  analysisHook?.()
+}
+
+async function analyse(args: AnalyseArgs): Promise<AnalysisResult> {
   const empty: Analysis = { ok: true, pending: [], stale: [], kept: [], publicExempted: [], unknown: 0, hints: [] }
   const repo = openSweepRepo(args.projectRoot)
   const candidates = args.paths.filter((path) => languageOf(path) !== null && !args.exempt.has(path))
@@ -295,7 +333,7 @@ async function analyse(args: {
   }
   const configs = configFilesFrom(known)
 
-  const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : sparseAwareReader(repo, [...corpus, ...configs])
+  const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : worktreeReader(repo, [...corpus, ...configs])
   if (!base) return { ok: false, reason: 'could not read the contents for the dead-code scan' }
   const bytes = memoised(base)
 
@@ -305,9 +343,17 @@ async function analyse(args: {
     targets,
     configs,
     ...(args.publicApi !== undefined && { publicApi: args.publicApi }),
-    publicApiRoot: resolvePath(args.projectRoot),
+    publicApiPrefix: repo.prefix,
     read: bytes.read,
   })
+  if (result.oversized.length > 0) {
+    return {
+      ok: false,
+      reason: `too large for the dead-code scan to parse (over ${parseSizeLimitText()}): ${result.oversized.join(', ')}`,
+      hints: ['List each one in exempt_files of rsct_phase_review_complete with its reason — the developer confirms it in the dialog — or take it out of the change.'],
+      paths: result.oversized,
+    }
+  }
 
   const describe = (symbol: DeadSymbol, keepStale: boolean): PendingDeadSymbol => {
     const text = bytes.text(symbol.path)
@@ -336,9 +382,25 @@ async function analyse(args: {
   return analysis
 }
 
-async function guardedAnalyse(args: Parameters<typeof analyse>[0]): Promise<AnalysisResult> {
+let stagedMemo: { key: string; result: Analysis } | null = null
+
+function stagedKey(args: AnalyseArgs): string | null {
+  if (args.source !== 'index') return null
+  const repo = openSweepRepo(args.projectRoot)
+  const fingerprint = repo ? readIndexFingerprint(repo) : null
+  if (!repo || !fingerprint) return null
+  const inputs = JSON.stringify([repo.toplevel, repo.prefix, args.paths, args.publicApi ?? null, args.keeps, [...args.exempt].sort()])
+  return createHash('sha256').update(fingerprint).update(inputs).digest('hex')
+}
+
+async function guardedAnalyse(args: AnalyseArgs): Promise<AnalysisResult> {
   try {
-    return await analyse(args)
+    const key = stagedKey(args)
+    if (key !== null && stagedMemo?.key === key) return stagedMemo.result
+    analysisHook?.()
+    const result = await analyse(args)
+    if (key !== null && result.ok) stagedMemo = { key, result }
+    return result
   } catch (error) {
     return { ok: false, reason: `the dead-code scan failed: ${error instanceof Error ? error.message : String(error)}` }
   }
@@ -360,7 +422,7 @@ export async function checkDeadCode(args: {
     source: 'working_tree',
   })
   if (!analysis.ok) {
-    return { ok: false, reject_kind: 'dead_code_unreadable', reason: analysis.reason, hints: [analysis.reason], pending: [] }
+    return { ok: false, reject_kind: 'dead_code_unreadable', reason: analysis.reason, hints: [analysis.reason, ...(analysis.hints ?? [])], pending: [] }
   }
   const blocking = [...analysis.stale, ...analysis.pending]
   if (blocking.length === 0) {
@@ -394,6 +456,7 @@ export async function checkStagedDeadCode(args: {
   publicApi?: readonly string[] | undefined
   keeps: readonly DeadCodeKeep[]
   keepDecisions: ReadonlySet<string>
+  publicApiApprovals?: ReadonlySet<string>
   exempt?: readonly string[]
 }): Promise<StagedDeadCodeCheck> {
   const analysis = await guardedAnalyse({
@@ -405,22 +468,50 @@ export async function checkStagedDeadCode(args: {
     source: 'index',
   })
   if (!analysis.ok) {
-    return { ok: false, reject_kind: 'dead_code_staged', reason: analysis.reason, hints: [analysis.reason], paths: [...args.stagedPaths] }
+    return {
+      ok: false,
+      reject_kind: 'dead_code_staged',
+      reason: analysis.reason,
+      hints: [analysis.reason, ...(analysis.hints ?? [])],
+      paths: analysis.paths ?? [...args.stagedPaths],
+    }
   }
+  const digest = publicApiDigest(args.publicApi)
+  const approvals = args.publicApiApprovals ?? new Set<string>()
+  const unapproved = analysis.publicExempted.filter(
+    (p) => digest === null || !approvals.has(publicApiApprovalKey(digest, p.path, p.name, p.declaration_sha256)),
+  )
   const blocking = [...analysis.stale, ...analysis.pending]
-  if (blocking.length === 0) {
+  if (blocking.length === 0 && unapproved.length === 0) {
     return { ok: true, kept: analysis.kept.length, unknown: analysis.unknown, hints: analysis.hints }
   }
+  if (blocking.length === 0) {
+    const exempted = unapproved.map((p) => `${p.path}:${p.name}`)
+    return {
+      ok: false,
+      reject_kind: 'dead_code_staged',
+      reason: `${exempted.length} staged export(s) nothing here uses are exempt through "public_api" without the developer's recorded approval: ${exempted.join(', ')}`,
+      hints: [
+        'Run rsct_phase_review_start / _complete over these paths: the REVIEW puts every "public_api" exemption to the developer and records their answer in the audit log.',
+        ...analysis.hints,
+      ],
+      paths: [...new Set(unapproved.map((p) => p.path))],
+    }
+  }
   const named = blocking.map((p) => `${p.path}:${p.name}`)
+  const mentions = unstagedMentions(args.projectRoot, args.stagedPaths, blocking.map((p) => p.name))
   return {
     ok: false,
     reject_kind: 'dead_code_staged',
     reason:
       analysis.stale.length > 0
         ? `${named.length} staged symbol(s) are dead, ${analysis.stale.length} of them kept about different declaration bytes: ${named.join(', ')}`
-        : `${named.length} staged symbol(s) are referenced nowhere: ${named.join(', ')}`,
+        : `${named.length} staged symbol(s) are referenced nowhere in what is staged: ${named.join(', ')}`,
     hints: [
-      'A completed REVIEW either removes them or records the developer keeping them, through the developer-only dialog. Run rsct_phase_review_start / _complete over these paths.',
+      'If a caller exists but is not staged, stage it in this same commit. Otherwise a completed REVIEW either removes them or records the developer keeping them, through the developer-only dialog: run rsct_phase_review_start / _complete over these paths.',
+      ...(mentions.length > 0
+        ? [`${UNSTAGED_MENTION_HINT_PREFIX}: ${mentions.slice(0, 10).join(', ')}${mentions.length > 10 ? ` and ${mentions.length - 10} more` : ''}.`]
+        : []),
       ...analysis.hints,
     ],
     paths: [...new Set(blocking.map((p) => p.path))],

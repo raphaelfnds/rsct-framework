@@ -52,10 +52,14 @@ const INDEX_RESOLUTIONS: readonly string[] = [
 
 const IMPORT_PATTERNS: readonly RegExp[] = [
   /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
   /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
 ]
+
+export const DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/
 
 export interface ReverseDepInput {
   projectRoot: string
@@ -79,7 +83,7 @@ export interface ReverseDepStats {
   unresolved_js_specifiers: number
 }
 
-export type WalkCoverage = | 'analyzed' | 'partial' | 'uncovered' | 'not-run'
+export type WalkCoverage = 'analyzed' | 'partial' | 'uncovered' | 'not-run'
 
 export interface ReverseDepResult {
   declared: string[]
@@ -193,7 +197,7 @@ export interface ResolveProbe {
 function diskProbe(projectRoot: string, entries: Map<string, Set<string>>): ResolveProbe {
   const stat = (abs: string): ReturnType<typeof statSync> | null => {
     try {
-      return statSync(abs)
+      return statSync(abs, { throwIfNoEntry: false }) ?? null
     } catch {
       return null
     }
@@ -226,10 +230,11 @@ export function resolveImport(
 ): string | null {
   if (!spec.startsWith('.') && !isAbsolute(spec)) return null
   const target = isAbsolute(spec) ? spec : resolvePath(dirname(importerAbs), spec)
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec)
 
-  if (probe.isFile(target)) return target
+  if (!directoryOnly && probe.isFile(target)) return target
 
-  for (const ext of RESOLVE_EXTENSIONS) {
+  for (const ext of directoryOnly ? [] : RESOLVE_EXTENSIONS) {
     const candidate = target + ext
     if (probe.exists(candidate)) return candidate
   }
@@ -302,7 +307,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     )
     return notRun()
   }
-  
+
   let rootIsDirectory = false
   try {
     rootIsDirectory = statSync(projectRoot).isDirectory()

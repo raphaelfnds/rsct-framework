@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_IMPORT,
+  JSX_PRAGMA_OWNER,
   NAMESPACE_IMPORT,
   ownerKeyOf,
   scanSymbols,
@@ -37,14 +38,14 @@ describe('scanSymbols — declarations', () => {
   it('marks a default export as such, and a named export as not', async () => {
     const scan = await symbols('export default function first(): void {}\nexport function second(): void {}\n')
     const byName = new Map(scan.declarations.map((d) => [d.name, d]))
-    expect(byName.get('first')?.defaultExport).toBe(true)
+    expect(byName.get('first')?.exposures).toEqual(['default'])
     expect(byName.get('first')?.exported).toBe(true)
-    expect(byName.get('second')?.defaultExport).toBe(false)
+    expect(byName.get('second')?.exposures).toEqual(['second'])
   })
 
   it('does not mark a plain local declaration as a default export', async () => {
     const scan = await symbols('function local(): void {}\n')
-    expect(scan.declarations.find((d) => d.name === 'local')?.defaultExport).toBe(false)
+    expect(scan.declarations.find((d) => d.name === 'local')?.exposures).toEqual([])
   })
 
   it('separates type declarations from value declarations', async () => {
@@ -281,7 +282,6 @@ describe('scanSymbols — exports declared away from the declaration', () => {
   it('marks a declaration exported as default by `export default name`', async () => {
     const scan = await symbols('function a(): void {}\nexport default a\n')
     const a = scan.declarations.find((d) => d.name === 'a')
-    expect(a?.defaultExport).toBe(true)
     expect(a?.exposures).toEqual(['default'])
     expect(named(scan, 'a')).toBe(0)
   })
@@ -459,6 +459,25 @@ describe('scanSymbols — code that runs when the module loads', () => {
   }
 })
 
+describe('scanSymbols — a type check written as a declaration', () => {
+  const cases: Array<[string, string, boolean]> = [
+    ['const _sameTree: Tree = schema', '_sameTree', true],
+    ['const _ok: Expect<true> = true', '_ok', true],
+    ['const _member: Tree = ns.value', '_member', true],
+    ['const sameTree: Tree = schema', 'sameTree', false],
+    ['const _untyped = schema', '_untyped', false],
+    ['const _made: Tree = build()', '_made', false],
+    ['const _object: Tree = { a: 1 }', '_object', false],
+    ['function _fn(): void {}', '_fn', false],
+  ]
+  for (const [source, name, typeCheck] of cases) {
+    it(`${typeCheck ? 'marks' : 'does not mark'} \`${source}\``, async () => {
+      const scan = await symbols(`${source}\n`)
+      expect(scan.declarations.find((d) => d.name === name)?.typeCheck).toBe(typeCheck)
+    })
+  }
+})
+
 describe('scanSymbols — `import m = require()`', () => {
   it('records it as a namespace import of the module', async () => {
     const scan = await symbols("import m = require('./a')\nexport const v = m.x\n")
@@ -510,11 +529,44 @@ describe('scanSymbols — a dynamic import whose target is computed', () => {
     expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
   })
 
-  it('does not treat a call through a parameter named require as an import', async () => {
+  it('records a call through a parameter named require as a dynamic import, as AMD factories receive it', async () => {
     const scan = await symbols("export function load(require: (s: string) => unknown): unknown { return require('./a.js') }\n")
-    expect(scan.imports).toEqual([])
-    expect(scan.dynamicPrefixes).toEqual([])
+    expect(scan.imports.map((e) => [e.specifier, e.kind])).toEqual([['./a.js', 'dynamic']])
+    expect(scan.module).toBe(true)
+  })
+
+  it('does not let a parameter named require called with a computed target blind the file', async () => {
+    const scan = await symbols('export function load(require: (s: string) => unknown, name: string): unknown { return require(name) }\n')
     expect(scan.unboundDynamic).toBe(false)
+    expect(scan.imports).toEqual([])
+  })
+
+  it('still blinds the file when the real require is called with a computed target', async () => {
+    const scan = await symbols('module.exports = (name) => require(name)\n', 'javascript')
+    expect(scan.unboundDynamic).toBe(true)
+  })
+
+  it('does not read a parameter named require as a CommonJS marker', async () => {
+    const scan = await symbols("function load(require: (s: string) => unknown): unknown { return require('./a.js') }\n")
+    expect(scan.module).toBe(false)
+  })
+
+  it('does not read another operator on exports as a dual-mode guard', async () => {
+    expect((await symbols('exports.a = 1\nif (!exports) throw new Error("no exports")\n')).module).toBe(true)
+  })
+
+  it('marks a file that checks typeof module or typeof exports as one that also runs as a script', async () => {
+    const guarded = await symbols('function f() {}\nif (typeof module !== "undefined") module.exports = f\n')
+    expect([guarded.module, guarded.dualMode]).toEqual([true, true])
+    const other = await symbols('function f() {}\nif (typeof exports === "object") exports.f = f\n')
+    expect([other.module, other.dualMode]).toEqual([true, true])
+    const plain = await symbols('function f() {}\nmodule.exports = f\n')
+    expect([plain.module, plain.dualMode]).toEqual([true, false])
+  })
+
+  it('records the JSX pragma apart from ordinary references, so the resolver can tell them apart', async () => {
+    const scan = await symbols('/* @jsx h */\nfunction h(): void {}\nexport const v = <div />\n', 'tsx')
+    expect(scan.references).toEqual(expect.arrayContaining([{ name: 'h', owner: JSX_PRAGMA_OWNER }]))
   })
 })
 
@@ -551,7 +603,12 @@ describe('scanSymbols — a JSX factory named by a pragma', () => {
   it('counts the factory as used when the file holds JSX', async () => {
     const scan = await symbols("/** @jsx h */\n/** @jsxFrag Fragment */\nimport { h, Fragment } from './jsx.js'\nexport const v = <div />\n", 'tsx')
     expect(scan.hasJsx).toBe(true)
-    expect(scan.references).toEqual(expect.arrayContaining([{ name: 'h', owner: null }, { name: 'Fragment', owner: null }]))
+    expect(scan.references).toEqual(
+      expect.arrayContaining([
+        { name: 'h', owner: JSX_PRAGMA_OWNER },
+        { name: 'Fragment', owner: JSX_PRAGMA_OWNER },
+      ]),
+    )
   })
 
   it('does not count it when the file holds no JSX', async () => {

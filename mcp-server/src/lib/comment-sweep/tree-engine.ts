@@ -25,8 +25,8 @@ export interface TreeDeclaration {
   name: string
   kind: DeclarationKind
   exported: boolean
-  defaultExport: boolean
   effect: boolean
+  typeCheck: boolean
   exposures: string[]
   start: number
   end: number
@@ -69,6 +69,7 @@ export interface TreeSymbols {
   unboundDynamic: boolean
   directEval: boolean
   module: boolean
+  dualMode: boolean
   hasJsx: boolean
 }
 
@@ -78,6 +79,7 @@ export type TreeSymbolScan =
 
 export const NAMESPACE_IMPORT = '*'
 export const DEFAULT_IMPORT = 'default'
+export const JSX_PRAGMA_OWNER = '@jsx'
 
 const GRAMMAR_FILES: Readonly<Record<TreeLanguage, string>> = {
   javascript: 'tree-sitter-javascript.wasm',
@@ -208,6 +210,8 @@ const GLOB_METHODS = new Set(['glob', 'globEager'])
 const GLOB_META = /[*?[{(!]/
 const JSX_PRAGMA = /@jsx(?:Frag)?\s+([A-Za-z_$][\w$]*)/g
 const COMMONJS_NAMES = new Set(['require', 'module', 'exports'])
+const PLAIN_VALUES = new Set(['identifier', 'member_expression', 'string', 'number', 'true', 'false', 'null', 'undefined'])
+const DUAL_MODE_GUARDS = new Set(['module', 'exports', 'define'])
 const SKIP = -1
 
 interface Scope {
@@ -496,8 +500,11 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
           name: name.text,
           kind: 'value',
           exported,
-          defaultExport: false,
           effect: hasLoadTimeEffect(declarator.childForFieldName('value')),
+          typeCheck:
+            name.text.startsWith('_') &&
+            declarator.childForFieldName('type') !== null &&
+            PLAIN_VALUES.has(declarator.childForFieldName('value')?.type ?? ''),
           exposures: exported ? [name.text] : [],
           start: statement.startIndex,
           end: statement.endIndex,
@@ -517,8 +524,8 @@ function topLevelDeclarations(root: Node): { declarations: TreeDeclaration[]; na
       name: name.text,
       kind,
       exported,
-      defaultExport,
       effect: decorated || (runsAtLoad && hasLoadTimeEffect(node)),
+      typeCheck: false,
       exposures: exported ? [defaultExport ? DEFAULT_IMPORT : name.text] : [],
       start: statement.startIndex,
       end: statement.endIndex,
@@ -575,7 +582,6 @@ function applyLocalExports(
       for (const declaration of owned) {
         declaration.exported = true
         if (!declaration.exposures.includes(entry.exposed)) declaration.exposures.push(entry.exposed)
-        if (entry.exposed === DEFAULT_IMPORT) declaration.defaultExport = true
       }
       continue
     }
@@ -603,7 +609,7 @@ function collectSymbols(root: Node): TreeSymbols {
   const localExports: LocalExport[] = []
   const dynamicPrefixes: string[] = []
   const pragmas = new Set<string>()
-  const flags = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false }
+  const flags = { unboundDynamic: false, directEval: false, commonJs: false, hasJsx: false, dualMode: false }
   const scopes: Scope[] = []
   const shadowsValue = (name: string): boolean => scopes.some((scope) => scope.values.has(name))
   const shadowsType = (name: string): boolean => scopes.some((scope) => scope.types.has(name))
@@ -619,13 +625,14 @@ function collectSymbols(root: Node): TreeSymbols {
     memberUses.push({ object: object.text, member: member.text, owner: ownerAt(owners, index) })
   }
 
-  const dynamicTarget = (argument: Node | null): void => {
+  const dynamicTarget = (argument: Node | null, followComputed: boolean): void => {
     if (!argument) return
     const literal = staticText(argument)
     if (literal !== null) {
       if (literal.length > 0) imports.push({ specifier: literal, kind: 'dynamic', names: [], starReexport: false, namespaceReexport: null })
       return
     }
+    if (!followComputed) return
     const prefix = leadingText(argument)
     if (prefix.length > 0) dynamicPrefixes.push(prefix)
     else flags.unboundDynamic = true
@@ -655,8 +662,8 @@ function collectSymbols(root: Node): TreeSymbols {
     const argument = args?.type === 'arguments' ? (namedChildren(args).find((child) => child.type !== 'comment') ?? null) : null
     const requireInScope = !shadowsValue('require')
     if (fn.type === 'identifier' && fn.text === 'eval' && !shadowsValue('eval')) flags.directEval = true
-    if (fn.type === 'import' || (fn.type === 'identifier' && fn.text === 'require' && requireInScope)) {
-      dynamicTarget(argument)
+    if (fn.type === 'import' || (fn.type === 'identifier' && fn.text === 'require')) {
+      dynamicTarget(argument, fn.type === 'import' || requireInScope)
       return
     }
     if (fn.type !== 'member_expression') return
@@ -664,6 +671,12 @@ function collectSymbols(root: Node): TreeSymbols {
     const property = fn.childForFieldName('property')?.text ?? ''
     if (object?.type === 'meta_property' && object.text === 'import.meta' && GLOB_METHODS.has(property)) globTarget(argument)
     else if (object?.type === 'identifier' && object.text === 'require' && property === 'context' && requireInScope) contextTarget(argument)
+  }
+
+  const recordTypeofGuard = (node: Node): void => {
+    if (node.childForFieldName('operator')?.type !== 'typeof') return
+    const argument = node.childForFieldName('argument')
+    if (argument?.type === 'identifier' && DUAL_MODE_GUARDS.has(argument.text) && !shadowsValue(argument.text)) flags.dualMode = true
   }
 
   const recordImport = (node: Node): void => {
@@ -733,6 +746,7 @@ function collectSymbols(root: Node): TreeSymbols {
     }
     if (type === 'export_statement' && recordExport(node())) return SKIP
     if (type === 'call_expression') recordCall(node())
+    else if (type === 'unary_expression') recordTypeofGuard(node())
     else if (type === 'member_expression') memberUse(node().childForFieldName('object'), node().childForFieldName('property'), cursor.startIndex)
     else if (type === 'nested_type_identifier') memberUse(node().childForFieldName('module'), node().childForFieldName('name'), cursor.startIndex)
 
@@ -798,7 +812,7 @@ function collectSymbols(root: Node): TreeSymbols {
   }
 
   applyLocalExports(declarations, localExports, imports, references)
-  if (flags.hasJsx) for (const name of pragmas) references.push({ name, owner: null })
+  if (flags.hasJsx) for (const name of pragmas) references.push({ name, owner: JSX_PRAGMA_OWNER })
 
   return {
     declarations,
@@ -809,6 +823,7 @@ function collectSymbols(root: Node): TreeSymbols {
     unboundDynamic: flags.unboundDynamic,
     directEval: flags.directEval,
     module: esm || flags.commonJs,
+    dualMode: flags.dualMode && !esm,
     hasJsx: flags.hasJsx,
   }
 }

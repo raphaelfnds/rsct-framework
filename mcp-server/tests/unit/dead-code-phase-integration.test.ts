@@ -522,6 +522,58 @@ describe('the wiring of keeps through the REVIEW', () => {
   })
 })
 
+describe('a public_api the developer approved is not asked again', () => {
+  function configWith(publicApi: string[]): void {
+    write(
+      '.rsct.json',
+      JSON.stringify({
+        rsct_version: '1.0.0',
+        app: { name: 'a', org: 'o' },
+        public_api: publicApi,
+        approval_modes: { trust_allowed_for: ['rsct_phase_review_complete'] },
+      }),
+    )
+  }
+
+  it('asks once, then lets a trusted REVIEW pass, and asks again once the list changes', async () => {
+    configWith(['src/a.ts'])
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    expect((await completeReview({}, prompts('yes'))).status).toBe('completed')
+    const again = await completeReview({}, prompts('no-channel'))
+    expect(again.status).toBe('completed')
+    expect(again.channel).toBe('trust')
+    configWith(['src/a.ts', 'src/b.ts'])
+    const changed = await completeReview({}, prompts('no-channel'))
+    expect(changed.reject_kind).toBe('force_dialog_no_channel')
+  })
+
+  it('asks again for an export that joins the list, and for one whose declaration changes', async () => {
+    configWith(['src/a.ts'])
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    expect((await completeReview({}, prompts('yes'))).status).toBe('completed')
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\nexport function exposedTwo(): void {}\n')
+    const added = await completeReview({}, prompts('no-channel'))
+    expect(added.reject_kind).toBe('force_dialog_no_channel')
+    expect((await completeReview({}, prompts('yes'))).status).toBe('completed')
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): number { return 1 }\nexport function exposedTwo(): void {}\n')
+    const rewritten = await completeReview({}, prompts('no-channel'))
+    expect(rewritten.reject_kind).toBe('force_dialog_no_channel')
+  })
+
+  it('records one approval line per export, naming the list it was given for', async () => {
+    configWith(['src/a.ts'])
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    expect((await completeReview({}, prompts('yes'))).status).toBe('completed')
+    const approvals = auditEvents().filter((e) => e.event === 'review.public_api_approved')
+    expect(approvals.map((e) => e.name)).toEqual(['exposed'])
+    expect(approvals[0]?.public_api).toEqual(['src/a.ts'])
+    expect(approvals[0]?.public_api_sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
 describe('a vendored file the developer exempts is not judged for dead code', () => {
   it('completes the REVIEW and commits it', async () => {
     writeLivePair()
@@ -530,6 +582,91 @@ describe('a vendored file the developer exempts is not judged for dead code', ()
     const out = await completeReview({ exempt_files: [{ path: 'vendor/lib.js', reason: 'vendored' }] })
     expect(out.status).toBe('completed')
     git(root, 'add', '-A')
+    expect((await commit()).status).toBe('committed')
+  })
+})
+
+describe('what the tools hand back about dead code', () => {
+  const ROTTING = 'export function used(): void {}\nexport function rotting(): void {}\n'
+
+  async function stagedDeadAfterForgedLedger(): Promise<RequestCommitOutput> {
+    writeLivePair()
+    expect((await completeReview()).status).toBe('completed')
+    write('src/a.ts', ROTTING)
+    git(root, 'add', '-A')
+    forgeLedgerFor('src/a.ts')
+    return commit()
+  }
+
+  it('hands the removal instruction back with a dead-code rejection', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    expect((await completeReview()).hints.some((h) => h.startsWith('Remove each one'))).toBe(true)
+  })
+
+  it('writes every export public_api exempted into the report', async () => {
+    write('.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' }, public_api: ['src/a.ts'] }))
+    writeLivePair()
+    write('src/a.ts', 'export function used(): void {}\nexport function exposed(): void {}\n')
+    const reportPath = (await completeReview()).comment_sweep?.report_path ?? ''
+    expect(readFileSync(join(root, reportPath), 'utf8')).toContain('src/a.ts:exposed')
+  })
+
+  it('writes no file sections into a report forced only by a keep', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    const reportPath = (await keepRotting()).comment_sweep?.report_path ?? ''
+    expect(readFileSync(join(root, reportPath), 'utf8')).not.toMatch(/^## src\//m)
+  })
+
+  it('records the developer reason in the keep audit line', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    await keepRotting()
+    expect(auditEvents().find((e) => e.event === 'review.dead_code_kept')?.note).toBe('kept: guards the schema')
+  })
+
+  it('refuses a keep with an empty reason', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    const pending = (await completeReview()).pending_dead_code?.[0]
+    const out = await completeReview({
+      dead_code_keeps: [{ path: pending?.path, name: pending?.name, declaration_sha256: pending?.declaration_sha256, note: '' }],
+    })
+    expect(out.reject_kind).toBe('sweep_input_invalid')
+  })
+
+  it('refuses a keep whose sha is not a sha256', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    const out = await completeReview({ dead_code_keeps: [{ path: 'src/a.ts', name: 'rotting', declaration_sha256: 'abc', note: 'n' }] })
+    expect(out.reject_kind).toBe('sweep_input_invalid')
+  })
+
+  it('counts the dead symbols in the rejection audit line', async () => {
+    writeLivePair()
+    write('src/a.ts', ROTTING)
+    await completeReview()
+    expect(auditEvents().filter((e) => e.reject_kind === 'dead_code_remaining').at(-1)?.dead_symbols).toBe(1)
+  })
+
+  it('hands the REVIEW instruction back with a staged rejection', async () => {
+    const out = await stagedDeadAfterForgedLedger()
+    expect(out.hints.some((h) => h.includes('rsct_phase_review_start'))).toBe(true)
+  })
+
+  it('names the refused paths in the rejection audit line', async () => {
+    await stagedDeadAfterForgedLedger()
+    expect(auditEvents().filter((e) => e.reject_kind === 'dead_code_staged').at(-1)?.paths).toEqual(['src/a.ts'])
+  })
+
+  it('does not judge a hook rewrite of a file the developer exempted', async () => {
+    writeLivePair()
+    write('vendor/lib.js', 'export function unusedVendored() {}\n')
+    write('src/main.ts', "import { run } from './b.js'\nimport '../vendor/lib.js'\nrun()\n")
+    expect((await completeReview({ exempt_files: [{ path: 'vendor/lib.js', reason: 'vendored' }] })).status).toBe('completed')
+    git(root, 'add', '-A')
+    installHook('printf "export function unusedVendored() {}\\n\\n" > vendor/lib.js\ngit add vendor/lib.js\n')
     expect((await commit()).status).toBe('committed')
   })
 })
@@ -545,10 +682,10 @@ describe('the commit fails closed when the check after the commit cannot run', (
     let calls = 0
     setDeadCodeAnalysisHookForTests(() => {
       calls += 1
-      if (calls >= 3) throw new RangeError('boom after the commit')
+      if (calls >= 2) throw new RangeError('boom after the commit')
     })
     const out = await commit()
-    expect(calls).toBe(3)
+    expect(calls).toBe(2)
     expect(out.status).toBe('committed_with_drift')
     expect(out.anti_replay_persisted).toBe(true)
     expect((readState().review_drift as { paths: string[] } | undefined)?.paths).toContain('src/a.ts')
