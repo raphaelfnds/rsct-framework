@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
@@ -206,6 +207,52 @@ function safeGit(cwd: string, args: string[]): string | null {
 export const safeGitRead = safeGit
 
 const GIT_READ_TIMEOUT_MS = 30_000
+const CAPTURED_FAILURES_MAX = 5
+const CAPTURED_MESSAGE_MAX = 200
+const CAPTURED_ARGS_SHOWN = 4
+
+export interface GitReadFailure {
+  args: string[]
+  cwd: string
+  said: string
+}
+
+const failuresOfThisCall = new AsyncLocalStorage<GitReadFailure[]>()
+
+export function withGitFailures<T>(run: () => T): T {
+  return failuresOfThisCall.run([], run)
+}
+
+export function capturedGitFailures(): GitReadFailure[] {
+  return [...(failuresOfThisCall.getStore() ?? [])]
+}
+
+export function gitFailureDetail(base: string): string {
+  const said = capturedGitFailures()
+    .map((failure) => {
+      const command = failure.args.length > CAPTURED_ARGS_SHOWN ? `${failure.args.slice(0, CAPTURED_ARGS_SHOWN).join(' ')} …` : failure.args.join(' ')
+      return `git ${command} (in ${failure.cwd}) said: "${failure.said}"`
+    })
+    .join('; ')
+  return said.length > 0 ? `${base}: ${said}` : base
+}
+
+function firstLine(text: string): string {
+  const line = (text.split('\n').find((part) => part.trim().length > 0)?.trim() ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/"/g, "'")
+  return line.length > CAPTURED_MESSAGE_MAX ? `${line.slice(0, CAPTURED_MESSAGE_MAX)}…` : line
+}
+
+function recordGitFailure(cwd: string, args: readonly string[], error: unknown): void {
+  const failures = failuresOfThisCall.getStore()
+  if (!failures) return
+  const thrown = error as { status?: number | null; code?: string; signal?: string; stderr?: Buffer | string; message?: string }
+  const said = firstLine(String(thrown.stderr ?? '')) || (thrown.code ? `git was stopped (${thrown.code})` : '')
+  if (said.length === 0) return
+  failures.push({ args: [...args], cwd, said })
+  if (failures.length > CAPTURED_FAILURES_MAX) failures.shift()
+}
 
 function safeGitRaw(cwd: string, args: string[]): string | null {
   try {
@@ -233,11 +280,12 @@ export function safeGitBuffer(
       cwd,
       input: input ?? '',
       ...(env !== undefined && { env: { ...process.env, ...env } }),
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer,
       timeout: GIT_READ_TIMEOUT_MS,
     })
-  } catch {
+  } catch (error) {
+    recordGitFailure(cwd, args, error)
     return null
   }
 }
