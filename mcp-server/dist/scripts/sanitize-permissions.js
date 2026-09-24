@@ -2,6 +2,7 @@
 import { createRequire } from 'module';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, realpathSync } from 'fs';
 import { resolve, isAbsolute, join, dirname, basename } from 'path';
+import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -38,6 +39,7 @@ function safeGit(cwd, args) {
 }
 var safeGitRead = safeGit;
 var GIT_READ_TIMEOUT_MS = 3e4;
+new AsyncLocalStorage();
 function safeGitRaw(cwd, args) {
   try {
     return execFileSync("git", args, {

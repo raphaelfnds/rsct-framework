@@ -15,6 +15,7 @@ import {
   type SweepRepo,
 } from '../comment-sweep/git-reads.js'
 import { deadCodeKeepKey, publicApiApprovalKey } from '../free-commit.js'
+import { gitFailureDetail, withGitFailures } from '../git.js'
 import type { DeadCodeKeepRecord } from '../phase-scope.js'
 import {
   configFilesFrom,
@@ -303,6 +304,10 @@ interface AnalyseArgs {
 }
 
 async function analyse(args: AnalyseArgs): Promise<AnalysisResult> {
+  return withGitFailures(() => analyseReadingGit(args))
+}
+
+async function analyseReadingGit(args: AnalyseArgs): Promise<AnalysisResult> {
   const empty: Analysis = { ok: true, pending: [], stale: [], kept: [], publicExempted: [], unknown: 0, hints: [] }
   const repo = openSweepRepo(args.projectRoot)
   const candidates = args.paths.filter((path) => languageOf(path) !== null && !args.exempt.has(path))
@@ -312,14 +317,14 @@ async function analyse(args: AnalyseArgs): Promise<AnalysisResult> {
   }
 
   const index = args.source === 'index' ? readIndexEntries(repo) : null
-  if (args.source === 'index' && !index) return { ok: false, reason: 'could not list the staged files for the dead-code scan' }
+  if (args.source === 'index' && !index) return { ok: false, reason: gitFailureDetail('could not list the staged files for the dead-code scan') }
   let known: string[]
   if (index) {
     known = [...index.paths]
   } else {
     const tracked = readKnownPaths(repo)
     const untracked = readUntrackedPaths(repo)
-    if (!tracked || !untracked) return { ok: false, reason: 'could not list the repository files for the dead-code scan' }
+    if (!tracked || !untracked) return { ok: false, reason: gitFailureDetail('could not list the repository files for the dead-code scan') }
     known = [...new Set([...tracked, ...untracked])]
   }
   const roots = packageRootsOf(known)
@@ -334,7 +339,7 @@ async function analyse(args: AnalyseArgs): Promise<AnalysisResult> {
   const configs = configFilesFrom(known)
 
   const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : worktreeReader(repo, [...corpus, ...configs])
-  if (!base) return { ok: false, reason: 'could not read the contents for the dead-code scan' }
+  if (!base) return { ok: false, reason: gitFailureDetail('could not read the contents for the dead-code scan') }
   const bytes = memoised(base)
 
   const result = await findDeadSymbols({
