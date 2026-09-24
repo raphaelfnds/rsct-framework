@@ -26,6 +26,7 @@ import {
   type SweepComment,
   type UnverifiedReason,
 } from './index.js'
+import { gitFailureDetail, withGitFailures } from '../git.js'
 import { isShippedScriptCopy } from '../version-drift.js'
 
 export type ExemptReason = 'generated' | 'vendored'
@@ -133,10 +134,14 @@ function lstatExists(repo: SweepRepo, path: string): boolean {
 }
 
 export async function computeWorkingSweep(projectRoot: string, options: SweepOptions): Promise<WorkingSweep> {
+  return withGitFailures(() => sweepTheWorkingTree(projectRoot, options))
+}
+
+async function sweepTheWorkingTree(projectRoot: string, options: SweepOptions): Promise<WorkingSweep> {
   const repo = openSweepRepo(projectRoot)
   if (!repo) return { ok: false, reason: 'not_git_repo', detail: 'project_root is not inside a git work tree' }
   const touched = readTouchedPaths(repo)
-  if (!touched) return { ok: false, reason: 'git_read_failed', detail: 'could not list the touched paths' }
+  if (!touched) return { ok: false, reason: 'git_read_failed', detail: gitFailureDetail('could not list the touched paths') }
   const byPath = new Map(touched.map((t) => [t.path, t]))
   const known = readKnownPaths(repo)
   for (const extra of options.extraPaths ?? []) {
@@ -147,7 +152,7 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
 
   const present = [...byPath.values()].filter((t) => t.status !== 'deleted').map((t) => t.path)
   const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null))
-  if (!blobs) return { ok: false, reason: 'git_read_failed', detail: 'could not hash the touched files' }
+  if (!blobs) return { ok: false, reason: 'git_read_failed', detail: gitFailureDetail('could not hash the touched files') }
 
   const files: SweepFile[] = []
   for (const { path, status, symlink } of [...byPath.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
@@ -176,7 +181,7 @@ export async function computeWorkingSweep(projectRoot: string, options: SweepOpt
     if (bytes === null) continue
     if (symlink && looksLikeLinkTarget(Buffer.from(bytes))) continue
     const blob = blobs.get(path)
-    if (!blob) return { ok: false, reason: 'git_read_failed', detail: `could not hash ${path}` }
+    if (!blob) return { ok: false, reason: 'git_read_failed', detail: gitFailureDetail(`could not hash ${path}`) }
     const scan = await scanWithFilter(repo, path, bytes, options)
     if (scan.kind === 'not_code') continue
     if (isShippedScript(repo, path, bytes, scan, options)) continue

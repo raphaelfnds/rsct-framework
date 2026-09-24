@@ -4,6 +4,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync, cop
 import { fileURLToPath } from 'url';
 import { resolve, isAbsolute, join, dirname, basename } from 'path';
 import { cwd } from 'process';
+import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 
@@ -4084,6 +4085,7 @@ function safeGit(cwd2, args) {
 }
 var safeGitRead = safeGit;
 var GIT_READ_TIMEOUT_MS = 3e4;
+new AsyncLocalStorage();
 function safeGitRaw(cwd2, args) {
   try {
     return execFileSync("git", args, {

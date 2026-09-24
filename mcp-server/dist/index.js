@@ -4,6 +4,7 @@ import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posi
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, realpathSync } from 'fs';
+import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 import { homedir, tmpdir } from 'os';
@@ -23031,6 +23032,36 @@ function safeGit(cwd2, args2) {
 }
 var safeGitRead = safeGit;
 var GIT_READ_TIMEOUT_MS = 3e4;
+var CAPTURED_FAILURES_MAX = 5;
+var CAPTURED_MESSAGE_MAX = 200;
+var CAPTURED_ARGS_SHOWN = 4;
+var failuresOfThisCall = new AsyncLocalStorage();
+function withGitFailures(run2) {
+  return failuresOfThisCall.run([], run2);
+}
+function capturedGitFailures() {
+  return [...failuresOfThisCall.getStore() ?? []];
+}
+function gitFailureDetail(base) {
+  const said = capturedGitFailures().map((failure) => {
+    const command = failure.args.length > CAPTURED_ARGS_SHOWN ? `${failure.args.slice(0, CAPTURED_ARGS_SHOWN).join(" ")} \u2026` : failure.args.join(" ");
+    return `git ${command} (in ${failure.cwd}) said: "${failure.said}"`;
+  }).join("; ");
+  return said.length > 0 ? `${base}: ${said}` : base;
+}
+function firstLine(text2) {
+  const line2 = (text2.split("\n").find((part) => part.trim().length > 0)?.trim() ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/"/g, "'");
+  return line2.length > CAPTURED_MESSAGE_MAX ? `${line2.slice(0, CAPTURED_MESSAGE_MAX)}\u2026` : line2;
+}
+function recordGitFailure(cwd2, args2, error2) {
+  const failures = failuresOfThisCall.getStore();
+  if (!failures) return;
+  const thrown = error2;
+  const said = firstLine(String(thrown.stderr ?? "")) || (thrown.code ? `git was stopped (${thrown.code})` : "");
+  if (said.length === 0) return;
+  failures.push({ args: [...args2], cwd: cwd2, said });
+  if (failures.length > CAPTURED_FAILURES_MAX) failures.shift();
+}
 function safeGitRaw(cwd2, args2) {
   try {
     return execFileSync("git", args2, {
@@ -23050,11 +23081,12 @@ function safeGitBuffer(cwd2, args2, input, env, maxBuffer = 64 * 1024 * 1024) {
       cwd: cwd2,
       input: input ?? "",
       ...env !== void 0 && { env: { ...process.env, ...env } },
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
       maxBuffer,
       timeout: GIT_READ_TIMEOUT_MS
     });
-  } catch {
+  } catch (error2) {
+    recordGitFailure(cwd2, args2, error2);
     return null;
   }
 }
@@ -36731,8 +36763,8 @@ function extensionOf(path2) {
   const dot = base.lastIndexOf(".");
   return dot <= 0 ? "" : base.slice(dot);
 }
-function shebangBucket(firstLine) {
-  const line2 = firstLine.replace(/^﻿/, "").replace(/\r$/, "");
+function shebangBucket(firstLine2) {
+  const line2 = firstLine2.replace(/^﻿/, "").replace(/\r$/, "");
   if (!line2.startsWith("#!")) return null;
   const parts2 = line2.slice(2).trim().split(/\s+/);
   let interpreter = posix.basename(parts2[0] ?? "");
@@ -36745,7 +36777,7 @@ function shebangBucket(firstLine) {
   }
   return { bucket: "unsupported", language: interpreter || "unknown" };
 }
-function classifyPath(path2, firstLine) {
+function classifyPath(path2, firstLine2) {
   const base = posix.basename(path2.replace(/\\/g, "/")).toLowerCase();
   if (NOT_CODE_BASENAMES.has(base)) return { bucket: "not_code" };
   const ext = extensionOf(path2);
@@ -36753,8 +36785,8 @@ function classifyPath(path2, firstLine) {
   if (supported) return { bucket: "supported", language: supported };
   if (UNSUPPORTED_EXTENSIONS.has(ext)) return { bucket: "unsupported", language: ext.slice(1) };
   if (NOT_CODE_EXTENSIONS.has(ext)) return { bucket: "not_code" };
-  if (ext === "" && firstLine !== null) {
-    const fromShebang = shebangBucket(firstLine);
+  if (ext === "" && firstLine2 !== null) {
+    const fromShebang = shebangBucket(firstLine2);
     if (fromShebang) return fromShebang;
   }
   return { bucket: "unknown" };
@@ -41805,10 +41837,13 @@ function lstatExists(repo, path2) {
   }
 }
 async function computeWorkingSweep(projectRoot, options) {
+  return withGitFailures(() => sweepTheWorkingTree(projectRoot, options));
+}
+async function sweepTheWorkingTree(projectRoot, options) {
   const repo = openSweepRepo(projectRoot);
   if (!repo) return { ok: false, reason: "not_git_repo", detail: "project_root is not inside a git work tree" };
   const touched = readTouchedPaths(repo);
-  if (!touched) return { ok: false, reason: "git_read_failed", detail: "could not list the touched paths" };
+  if (!touched) return { ok: false, reason: "git_read_failed", detail: gitFailureDetail("could not list the touched paths") };
   const byPath = new Map(touched.map((t) => [t.path, t]));
   const known = readKnownPaths(repo);
   for (const extra of options.extraPaths ?? []) {
@@ -41818,7 +41853,7 @@ async function computeWorkingSweep(projectRoot, options) {
   }
   const present = [...byPath.values()].filter((t) => t.status !== "deleted").map((t) => t.path);
   const blobs = readWorkingBlobIds(repo, present.filter((p) => readWorkingBytes(repo, p) !== null));
-  if (!blobs) return { ok: false, reason: "git_read_failed", detail: "could not hash the touched files" };
+  if (!blobs) return { ok: false, reason: "git_read_failed", detail: gitFailureDetail("could not hash the touched files") };
   const files = [];
   for (const { path: path2, status, symlink } of [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
     const head = readHeadContent(repo, path2);
@@ -41844,7 +41879,7 @@ async function computeWorkingSweep(projectRoot, options) {
     if (bytes === null) continue;
     if (symlink && looksLikeLinkTarget(Buffer.from(bytes))) continue;
     const blob = blobs.get(path2);
-    if (!blob) return { ok: false, reason: "git_read_failed", detail: `could not hash ${path2}` };
+    if (!blob) return { ok: false, reason: "git_read_failed", detail: gitFailureDetail(`could not hash ${path2}`) };
     const scan = await scanWithFilter(repo, path2, bytes, options);
     if (scan.kind === "not_code") continue;
     if (isShippedScript(repo, path2, bytes, scan, options)) continue;
@@ -43743,6 +43778,9 @@ function worktreeReader(repo, paths) {
   };
 }
 async function analyse(args2) {
+  return withGitFailures(() => analyseReadingGit(args2));
+}
+async function analyseReadingGit(args2) {
   const empty = { ok: true, pending: [], stale: [], kept: [], publicExempted: [], unknown: 0, hints: [] };
   const repo = openSweepRepo(args2.projectRoot);
   const candidates = args2.paths.filter((path2) => languageOf(path2) !== null && !args2.exempt.has(path2));
@@ -43751,14 +43789,14 @@ async function analyse(args2) {
     return candidates.length === 0 ? { ...empty, hints: hints2 } : { ...empty, hints: [...hints2, "Dead-code scan skipped: not inside a git repository."] };
   }
   const index = args2.source === "index" ? readIndexEntries(repo) : null;
-  if (args2.source === "index" && !index) return { ok: false, reason: "could not list the staged files for the dead-code scan" };
+  if (args2.source === "index" && !index) return { ok: false, reason: gitFailureDetail("could not list the staged files for the dead-code scan") };
   let known;
   if (index) {
     known = [...index.paths];
   } else {
     const tracked = readKnownPaths(repo);
     const untracked = readUntrackedPaths(repo);
-    if (!tracked || !untracked) return { ok: false, reason: "could not list the repository files for the dead-code scan" };
+    if (!tracked || !untracked) return { ok: false, reason: gitFailureDetail("could not list the repository files for the dead-code scan") };
     known = [.../* @__PURE__ */ new Set([...tracked, ...untracked])];
   }
   const roots = packageRootsOf(known);
@@ -43771,7 +43809,7 @@ async function analyse(args2) {
   }
   const configs = configFilesFrom(known);
   const base = index ? indexReader(repo, [...corpus, ...configs], index.blobs) : worktreeReader(repo, [...corpus, ...configs]);
-  if (!base) return { ok: false, reason: "could not read the contents for the dead-code scan" };
+  if (!base) return { ok: false, reason: gitFailureDetail("could not read the contents for the dead-code scan") };
   const bytes = memoised(base);
   const result = await findDeadSymbols({
     projectRoot: repo.toplevel,

@@ -12,6 +12,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A refusal now says what git said (#104).** When a git read fails, the comment sweep and the
+  dead-code gate hand back git's own message — `detected dubious ownership in repository at
+  '//wsl.localhost/…'`, `index file smaller than expected`, `not a git repository` — instead of the
+  fixed phrase `could not list the touched paths`. MEASURED: a repository living in the WSL
+  filesystem, with the server on Windows, failed every read on git's ownership guard and the REVIEW
+  could only say it had not managed to list; the message names the cause and the one
+  `git config --global --add safe.directory …` line that fixes it. The message is quoted, cut at
+  200 characters and shown with a shortened command, so it cannot pose as the framework speaking;
+  a read that fails silently is not recorded, at most five are kept, and the record belongs to the
+  call that made it, so two checks running at once never take each other's errors.
+
 ## [2.12.0] - 2026-09-23
 
 ### Added

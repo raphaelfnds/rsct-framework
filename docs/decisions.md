@@ -769,6 +769,19 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### `lib/git.ts`
 
+- **A failed git read keeps what git said, for the call that made it** (#104, 2.12.1). The store is
+  an `AsyncLocalStorage` opened by `computeWorkingSweep` and by the dead-code `analyse`, so two
+  tool calls in one process never read each other's failures and nothing survives the call —
+  MEASURED (Rv #104 lens 1): with one module-global store, a concurrent check wiped the message and
+  a refusal named another repository's path. What reaches the refusal is filtered: a read that
+  failed without writing anything is not recorded (`rev-parse -q --verify <sha>:<new file>` fails by
+  design for every added file and would otherwise spend the five slots), the newest five are kept,
+  git's first line is cut at 200 characters and quoted, and the command is shown with at most four
+  arguments — a `git config` value an agent controls is echoed by git verbatim, and unquoted it
+  reads as framework voice (MEASURED, Rv #104 lens 2).
+- Piping stderr instead of ignoring it makes it count against `maxBuffer` (64 MB): a read whose
+  stderr passes that budget now fails where it used to succeed. Direction: stricter, a refusal, and
+  it needs tens of megabytes of stderr.
 - **`isSafeRevisionToken`** is an injection guard, not a validity check. Rules: no leading
   `-`, no control characters (a NUL makes `execFileSync` throw; a newline would split the
   JSONL audit record that echoes the rejected revision). Measured: an option-shaped token
