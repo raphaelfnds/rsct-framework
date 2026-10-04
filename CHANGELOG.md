@@ -52,6 +52,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   what it does — it links the global command to the working tree.
 - **WSL is named as a fourth environment** in `CLAUDE.md` and `CONTRIBUTING.md`, with the measured
   differences. The installer still refuses to run inside WSL; that case is #110.
+- **`SECURITY.md` says where the companion comes from.** It is not distributed through npm; a
+  package named `rsct-mcp` on the registry is not this project's.
 
 ## [2.12.2] - 2026-10-04
 
