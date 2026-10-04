@@ -1202,6 +1202,93 @@ those files. Keyed by module and symbol; restatements of what the code says were
   does not persist between phases, so the value is re-declared) and the UPDATE splice — and
   an existing invalid value is repaired in place, because it rejects the whole config.
 
+### `scripts/install.sh` (migrated in the #74 REVIEW)
+
+- **WSL guard.** `/proc/sys/kernel/osrelease` matching `microsoft|wsl` covers WSL1 and WSL2 (the
+  test pins one string of each). A WSL shell would install into `/home/<user>/.rsct/`, which a
+  Claude Code running on Windows never reads. The Claude-Code-inside-WSL case is #110.
+- **`read_or_default`.** `read -r` returns non-zero at EOF and `set -e` turns that into an abort, on
+  purpose. An unconditional EOF fallback was measured in the #73 REVIEW: `bash scripts/install.sh
+  </dev/null` without `RSCT_ASSUME_YES` ran a FULL install, because `Proceed? [y/N]` displays N and
+  passes a coded default of `y`. The fallback is opt-in through a fourth argument, and only the
+  removal-consent prompt passes it (default `n`). `read` assigns a partial last line, so only an
+  EMPTY reply falls back. The stderr line exists because the abort used to be silent.
+- **Host config path (`HOST_CFG`, #73).** `claude mcp add/remove` is a Node program: it honours
+  `CLAUDE_CONFIG_DIR`, else `os.homedir()` — `USERPROFILE` on Windows, not bash's `$HOME`. The script
+  resolves the same file through node and falls back to `$HOME/.claude.json` only when node is
+  absent. While it read `$HOME` and the CLI wrote elsewhere, detection missed a live user-scope entry
+  and recorded `project` over it.
+- **Every `node -e` body is single-quoted.** In a double-quoted body bash collapses `\\` (`\\b`
+  becomes a backspace) and `$`/backticks go live; that is POSIX double-quote semantics, the same on
+  Linux and macOS, and `bash -n` does not flag it. A backslash is built with
+  `String.fromCharCode(92)`.
+- **Scope marker (#71).** The menu default is derived from `~/.rsct/mcp-scope`; while it was the
+  literal `1`, Enter or any unattended run rewrote a recorded `project` to `user`. The read is an
+  `if`, not `[ -f … ] && VAR=…`: under `set -e` an `&&` chain as the LAST statement of a function or
+  script body aborts (measured; as the last statement of an `if` block it does not). `tr -d '\r'`
+  covers a hand-edited CRLF file, `head -1` bounds a corrupt one.
+- **`MCP_SCOPE_KNOWN`, not `MCP_SCOPE_RECORDED`, gates "press Enter to keep it".** KNOWN is set only
+  on an exact match; a marker with a stray space, another case or a BOM is non-empty but unmapped.
+  `skip` is legacy: readable, displayed as resolving to `[1]`, never acted on by an unattended run —
+  the README once told every teammate of a project-scope team to pick `[3]`, and a silent user-scope
+  registration there masks the `.mcp.json` they share.
+- **Empty reply at the menu** is resolved at the call site: inside `read_or_default` it would flip
+  `Proceed? [y/N]` to proceed-on-Enter.
+- **A `3` keypress** is normalised to `[1]` with a notice that is NOT gated on a recorded scope: on a
+  fresh machine the gated one prints nothing.
+- **Version markers (#44).** `~/.rsct/VERSION` (protocol, from `/VERSION`) and `~/.rsct/VERSION-CODE`
+  (from `version.ts`). The code read is anchored on `^export const RSCT_MCP_VERSION` AND uses
+  `sed -n …p`; either alone still yields the version, reverting both reproduces #44 (a docstring line
+  went into the marker and the drift report read "same" forever). `sed` is last in the pipeline so a
+  no-match exits 0 under `set -e`. A marker holding non-version text reads back as `unreadable` —
+  distinct from the incoming axis's `unknown` and from the empty "no marker", which must keep reading
+  as a fresh install. Markers are read through `tr -d '\r'`: `~/.rsct` can be copied between machines,
+  and on Linux/macOS `2.6.1\r` differs from `2.6.1` on every run; Git Bash strips a trailing CR in
+  command substitution, so a Windows run cannot see it.
+- **`RUNTIME_DIRS`** is the list of what ships to `~/.rsct`; the WARN for a source-root directory in
+  neither list keeps a new directory from being skipped in silence. The two retired command stubs
+  (`rsct-init-universe`, `rsct-canonical-source`) are deleted on every install.
+- **Project scope takes effect or is not recorded (#73).** A user-scope entry wins a name collision:
+  the project entry's process is never spawned, approved or not. `SCOPE_EFFECTIVE` starts empty,
+  every arm assigns it, the marker is written last from it; `unattended` has its own arm (the one
+  legitimate no-write) and an empty value prints an INTERNAL error. An unattended run never removes a
+  user-scope entry and never rewrites the marker.
+- **The CLI's exit code is diagnostic only.** After `claude mcp add` / `remove` the host config is
+  re-read unconditionally: exit codes differ across the Windows wrappers (the PowerShell `.ps1`
+  returns 1 on "not found", the Git Bash stub returned 0), and a CLI that acted and then exited
+  non-zero must be believed by the probe. Detection parses the top-level `mcpServers.rsct`:
+  `claude mcp list` in a pipe includes project-scope entries, `claude mcp get` is exit-code-unreliable.
+- **`claude … </dev/null`** keeps the CLI from eating the answer to a later prompt. No prompt follows
+  the removal today, so no test can pin it; it turns load-bearing when a third question is added.
+- **Pending-projects report.** A project resolves rsct at project scope only when its `.mcp.json`
+  registers it AND `.claude/settings.local.json` approves it; both kinds are listed, because the
+  removal breaks the registered-but-unapproved ones.
+- The epilogue's effective-scope line reads `HOST_CFG`, so it cannot disagree with the CLI.
+- **Companion step (#74).** On a global npm folder that needs elevated rights (measured on Linux,
+  npm 10.9.2, a read-only prefix): the first `npm install -g .` fails with `EACCES`, which is the one
+  place a `sudo` command is printed; once the link exists, a later run exits 0 without it, so updates
+  need no `sudo`; `npm uninstall -g` of a package that is not installed exits 0 there too. The
+  identity check can prove "this is the copy" and nothing else — behind a version manager's shim it
+  says "could not be confirmed", never "is not".
+
+### `scripts/uninstall-framework.sh` (migrated in the #74 REVIEW)
+
+- The companion is asked about separately because a developer may keep the server for projects wired
+  through `.mcp.json` after removing the framework files; `--skip-mcp` asks nothing and touches
+  neither the global install, its files, nor a user-scope registration — and the plan line says
+  "left untouched" rather than "will ask separately".
+- User-scope detection parses `~/.claude.json`: `claude mcp list` in a pipe includes the project-scope
+  entries of any `.mcp.json` in the cwd ancestry, and would offer a removal the user-scope command
+  cannot perform. It reads `$HOME`, not `CLAUDE_CONFIG_DIR` — the gap recorded on #82.
+- The removed-command list keeps the two retired names so old stubs are cleaned.
+- `set +f` precedes the wipe loop: with `noglob` inherited from the environment the loop ran over the
+  literal patterns, removed nothing and still printed "Removed" (measured).
+- No line prints an `rm -rf` to paste. Every "later" path says to run the uninstaller again, which
+  finds the folder with no command on PATH and finishes the job; an unquoted `rm -rf $HOME/…` hint,
+  pasted with a space in the user name, was measured deleting another folder.
+- `claude mcp remove … </dev/null`, as in the installer: without it a run with stdin left open hung
+  on the test stub, which drains stdin.
+
 ### Tests and build
 
 - `tsup.config.ts`: runtime deps are bundled (`noExternal`) so `dist/index.js` runs with no
@@ -1239,6 +1326,65 @@ those files. Keyed by module and symbol; restatements of what the code says were
   fixture must carry `phase`: `completePhaseGeneric` deletes `phase` in the same write that arms the
   flag, and the abandon early-returns without writing when `phase` is absent. State is read from
   disk, never through `phase_state_override`.
+
+### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
+
+- **The sandbox is structural.** `runScript` pins HOME, USERPROFILE, CLAUDE_CONFIG_DIR and npm's
+  prefix by default and refuses to reach the companion branch without a stub dir and pins that hold
+  the sandbox prefix `rsct-install-`. Under #71 the worst reachable call was an additive
+  `claude mcp add`; under #73 it is `claude mcp remove rsct --scope user`, which de-registers rsct in
+  every project on the machine. The guard tests `!env.RSCT_SKIP_MCP`, not `=== undefined`: `''` is how
+  a contributor writes "clear it", and bash's `[ -n ]` reads it as cleared too. The pin check accepts
+  ANY sandbox, because the `CLAUDE_CONFIG_DIR` case points at a second one on purpose.
+- `USERPROFILE` is pinned because `os.homedir()` reads it on Windows, not HOME (measured).
+  `RSCT_SKIP_MCP: undefined` clears the variable — Node drops undefined values; omitting the key
+  would inherit a contributor's exported one. `tsc` does not cover this file (`tsconfig` excludes
+  `tests/`).
+- `read -r` on a closed stdin returns non-zero and `set -e` kills the script at the first prompt, so
+  an interactive case needs a real pipe (`input`).
+- **The kill timeout is the only bound.** `execFileSync` blocks the vitest worker, so vitest's own
+  per-test timeout can never fire. 45 s against runs that take 1–3 s; the real-npm case passes 240 s,
+  because on a machine at 100% CPU one real-npm installer run was measured at 78 s. A kill reaches
+  only the top bash: its subshell and a real npm carry on, inside the sandbox.
+- **Stubs.** `npm` identifies itself and its cwd so a case can prove the stub won `command -v` and
+  where it ran. `claude` performs the real edit on `$CLAUDE_CONFIG_DIR/.claude.json`, because the
+  installer re-reads the host config after every add/remove — an inert stub sends every case down
+  the "did not land" arm. Its knobs: `STUB_CLAUDE_FAIL` (non-zero, no action), `STUB_CLAUDE_LIE`
+  (exit 0, no action — kills "drop the re-verify"), `STUB_CLAUDE_ACT_THEN_FAIL` (acts, then exits
+  non-zero — a probe gated on the exit code falsifies success but never failure). Every call is
+  appended to `stub-claude.log`, since the installer redirects the CLI's stdout. It drains stdin so a
+  missing `</dev/null` at a call site eats the next answer, and takes `rc=$?` first: a POSIX `if`
+  whose condition is false and has no else completes with status 0. `rsct-mcp` is stubbed too (#74):
+  without it a case resolved, and one mutation away would have started, the machine's own install.
+  That stub logs how many bytes it read from stdin, which is what pins `</dev/null` on the start.
+- `node` is NOT stubbed: an `exit 0` stub prints no version, so `MCP_INSTALLABLE=no` and the menu
+  never runs. The `claude` stub must stay even though CI has no Claude CLI — without it the CI cells
+  take "claude CLI not on PATH" while a dev machine takes the registering arm.
+- **Pre-flight.** bash resolves PATH with `access(X_OK)` and skips an entry that fails it; on a
+  `noexec` TMPDIR the stub is skipped and bash walks on to the real binary. Resolution is checked
+  before the dir is handed to `runScript`.
+- **`expectMenuRan` is a positive proof.** The marker is written only inside the menu, so any
+  short-circuit before it leaves a seeded value untouched and a marker assertion passes with the fix
+  reverted. `Choice [1/2] (default: N)` proves reachability and the recorded→default mapping at once.
+  The AC 1 case does not call it, so restoring `[3]` reddens there on its own.
+- **Honest coverage.** A trailing CR is stripped by MSYS in command substitution, so on Git Bash the
+  CRLF-marker case passes with or without `tr -d '\r'` (measured); it bites only on the Linux and
+  macOS cells. An interior CR survives `$( )` everywhere, which is why the scope fixture is
+  `pro\rject`. The unattended-arm case asserts WHICH ARM RAN: a seed that already reads `project`
+  let `SCOPE_EFFECTIVE="project"` and a deleted assignment both survive.
+- **Identity fixture (#74).** A stub dir holding `rsct-mcp` plus `node_modules/rsct-mcp` → a link to
+  the sandbox's `~/.rsct/mcp-server`, made with `symlinkSync(…, 'junction')` before the copy exists;
+  it satisfies the Windows form of the identity check on all three OSes. The POSIX form needs a
+  symlinked command and is skipped on win32. `FOREIGN_COMMAND` is the machine's own `rsct-mcp`: two
+  cases run only where there is none, and the real-npm case expects "still on PATH" where there is.
+- **Real-npm case (#74).** One case drives a real npm: prefix, cache, user and global config in the
+  sandbox, offline, and `install-links=true` so that only the explicit flag produces the link. It
+  asks `npm root -g` first and refuses to run unless the answer is inside the sandbox — the check
+  that found the upper-case variables (see "Measured facts").
+- **Architectural boundary case.** The scan is parameterised on the directory and run against a
+  seeded tree as well: a scanner only ever pointed at the tree it must find nothing in cannot be
+  shown to find anything. The extension filter is applied to `rel`, which is backslash-joined on
+  Windows.
 
 ---
 
