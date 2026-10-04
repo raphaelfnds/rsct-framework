@@ -72,8 +72,11 @@ The companion server's tool-by-tool reference is in
 
 ## Installation
 
-One-time, per machine. Installs runtime files to `~/.rsct/` and registers
-Claude Code slash commands at `~/.claude/commands/rsct-*.md`.
+One-time, per machine. Installs runtime files to `~/.rsct/`, registers
+Claude Code slash commands at `~/.claude/commands/rsct-*.md`, and — unless you
+skip it — copies the `rsct-mcp` companion into `~/.rsct/mcp-server` and links the
+global `rsct-mcp` command to that copy. What runs is the copy, never the clone: to
+update, `git pull` and run the installer again.
 
 > ⚠️ **On Windows: open Git Bash, not PowerShell, and not WSL.**
 >
@@ -121,7 +124,8 @@ RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
 
 - `RSCT_ASSUME_YES=1` (or `--yes` / `-y`) — answer every prompt with its default.
 - `RSCT_SKIP_MCP=1` (or `--skip-mcp`) — skip the rsct-mcp companion entirely
-  (no global `npm install -g`, no `claude mcp add`). Omit it and the companion is
+  (no copy into `~/.rsct/mcp-server`, no global `npm install -g`, no
+  `claude mcp add`; a companion already installed is left as it is). Omit it and the companion is
   always **installed** globally without prompting; whether it is also
   **registered** depends on `~/.rsct/mcp-scope` (#71):
 
@@ -140,7 +144,8 @@ RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
   a provisioning script, delete the marker first: `rm -f ~/.rsct/mcp-scope`.
 
 The same flags work for `uninstall-framework.sh` (`--skip-mcp` there leaves the
-global companion and any user-scope registration untouched).
+global companion, its files in `~/.rsct/mcp-server` and any user-scope
+registration untouched).
 
 ### Registering rsct-mcp with Claude Code
 
@@ -321,8 +326,9 @@ from a project):
 ```bash
 bash scripts/uninstall-framework.sh
 ```
-(That script also offers to remove the global `rsct-mcp` install and
-walks you through the per-project `claude mcp remove rsct` step.)
+(That script also offers to remove the global `rsct-mcp` install — keep it and
+its files stay in `~/.rsct/mcp-server` — and walks you through the per-project
+`claude mcp remove rsct` step.)
 
 ### Windows line endings (the `LF will be replaced by CRLF` warning)
 
@@ -475,7 +481,8 @@ step doesn't behave as described, that's a bug worth filing.
    framework added to *this project* (markers + SHA256 detect any
    developer edits and protect them). Then
    `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
-   the framework from your machine (slash commands + `~/.rsct/`).
+   the framework from your machine (slash commands + `~/.rsct/`; the companion
+   in `~/.rsct/mcp-server` goes too unless you choose to keep it).
 
 You can also invoke the prompts directly without installing — see
 [Invoking the prompts directly](#invoking-the-prompts-directly-without-install)
@@ -505,8 +512,8 @@ no separate backup files needed.
 rsct-framework/                    # dev/source — version controlled in git
 ├── README.md
 ├── scripts/
-│   ├── install.sh                 # copy framework to ~/.rsct/ + register slash commands
-│   └── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level)
+│   ├── install.sh                 # copy framework + companion to ~/.rsct/, register slash commands
+│   └── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level); asks about the companion
 ├── prompts/
 │   ├── 01-setup.md                # main: setup or update project
 │   ├── 02-canonical-source.md     # internal engine (link project), invoked by 06-universe.md
@@ -567,6 +574,11 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ├── update-check.json              # release-check cache: consent, declined releases,
 │                                  #   last check. Machine-global; NOT removed by
 │                                  #   /rsct-uninstall (it records your choices)
+├── mcp-server/                    # the rsct-mcp companion: package.json plus what its
+│                                  #   `files` field lists (dist/, grammars/, …). The global
+│                                  #   `rsct-mcp` command is an npm link to THIS folder, so
+│                                  #   the clone is not what runs. Kept by the uninstaller
+│                                  #   for as long as you keep the companion
 ├── prompts/                       # copy of prompts/ from source
 ├── rules/                         # copy of rules/ from source
 ├── doc-templates/                 # copy of doc-templates/ from source
@@ -581,7 +593,9 @@ After running `scripts/install.sh`, the runtime layout on the machine is:
 ```
 
 The source and the installed copy are decoupled — you edit the source, run
-`install.sh` to push the changes to the active install.
+`install.sh` to push the changes to the active install. That holds for the
+companion too: a `git pull` or a branch switch in the clone does not change the
+`rsct-mcp` your projects run until the installer runs again.
 
 ## RSCT → Development phases mapping
 
@@ -746,6 +760,12 @@ quiet for good.
   field-level reference (this README does not restate it).
 
 ## Trying rsct-mcp locally
+
+For contributors. This **links** the global `rsct-mcp` command to your clone
+(npm links a folder install), so the branch you have checked out becomes the
+server of every project on the machine. `bash scripts/install.sh` does the
+opposite — it installs a copy — and running it again is how you go back. See
+[CONTRIBUTING.md](CONTRIBUTING.md#running-your-working-tree-as-the-machines-rsct-mcp).
 
 ```bash
 cd mcp-server

@@ -51,6 +51,16 @@ separate module for that reason.
 
 ## Scope notes
 
+### `rsct-mcp` is not distributed through npm
+
+The companion is installed by `scripts/install.sh` from a clone of this repository:
+it runs from a copy in `~/.rsct/mcp-server`, and the global `rsct-mcp` command is an
+npm *link* to that copy. This project publishes nothing to the npm registry. A package
+named `rsct-mcp` found there is not ours — do not install it, and please report it
+privately as above. A linked install is not replaced by a registry package of the same
+name on `npm update -g` (measured on npm 10.9.2 and 11.1.0; see `docs/decisions.md`,
+AD-007).
+
 ### `esbuild` advisories in the build toolchain
 
 `npm audit` may report advisories on **`esbuild`**, which reaches a developer
@@ -58,7 +68,7 @@ machine only as a **transitive dev-dependency** of the build/test toolchain
 (`tsup`, `vitest`). It is **not a runtime dependency** and is **not part of the
 shipped artifact**:
 
-- The published `rsct-mcp` runs from the prebuilt `dist/`, which does not load
+- The shipped `rsct-mcp` runs from the prebuilt `dist/`, which does not load
   `esbuild`.
 - End-user installs use the prebuilt `dist/` and never install the build
   toolchain (see `CHANGELOG.md`, CAP-57), so `npm audit` is clean for them.
