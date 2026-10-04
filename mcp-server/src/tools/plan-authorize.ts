@@ -24,6 +24,7 @@ import {
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
@@ -96,7 +97,6 @@ export interface PlanAuthorizeOutput {
   covers: string[]
   audit_path: string | null
   audit_error: string | null
-  /** True if the emitting dev_approval was recorded to approvals-seen (anti-reuse). */
   anti_replay_persisted: boolean | null
   anti_replay_error: string | null
   hints: string[]
@@ -113,7 +113,7 @@ export interface PlanAuthorizeInternal {
 export const planAuthorizeTool: Tool = {
   name: 'rsct_plan_authorize',
   description:
-    "T3 §C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full §C gate — schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY — push/merge keep per-action §C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited.",
+    "T3 §C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full §C gate — schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY — push/merge keep per-action §C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status=\"state_write_failed\"): no token is minted, the approval is not consumed and the file is left untouched.",
   inputSchema: {
     type: 'object',
     required: ['dev_approval'],
@@ -201,8 +201,6 @@ export async function planAuthorizeHandler(
     }
   }
 
-  // Pre-conditions (post-gate so the approval gates everything; approval is
-  // NOT consumed on a pre-condition failure — dev can fix and retry).
   const reject = (
     reject_kind: PlanAuthorizeRejectKind,
     reason: string,
@@ -268,11 +266,6 @@ export async function planAuthorizeHandler(
     input.max_actions,
     config?.approval_modes?.plan_token_max_actions,
   )
-  // plan-lifecycle-v2 (Bloco 1.4): sliding-window re-arm width + absolute cap.
-  // The token re-arms `expires_at` on each successful commit (so an actively
-  // worked plan never expires mid-flight) but can never live past the cap. The
-  // dev's explicit `ttl_minutes` IS the sliding window width (respected, not
-  // ignored); config slide / the built-in default only apply when it's absent.
   const slideMinutes = resolveSlideMinutes(
     input.ttl_minutes,
     config?.approval_modes?.plan_token_ttl_slide_minutes,
@@ -299,14 +292,16 @@ export async function planAuthorizeHandler(
   const existing = readPhaseState(projectRoot)
   const baseState: PhaseState = existing.state ?? {}
   const newState: PhaseState = { ...baseState, plan_authorization: token }
-  const writeResult = writePhaseState(projectRoot, newState)
+  const writeResult = refuseUnreadableState(projectRoot, existing) ?? writePhaseState(projectRoot, newState)
 
   if (!writeResult.ok) {
-    // Persist failed → do NOT consume the approval (FV4) so the dev can retry.
+    const unreadable = writeResult.reason === 'unreadable_state'
     const reason =
       writeResult.reason === 'locked'
         ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? 'unknown'}) — wait and retry`
-        : `phase-state.json write failed: ${writeResult.error}`
+        : unreadable
+          ? writeResult.error
+          : `phase-state.json write failed: ${writeResult.error}`
     const audit = appendAudit(
       projectRoot,
       {
@@ -333,11 +328,15 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config?.audit), `⚠ token NOT minted — ${reason}. dev_approval NOT consumed; retry.`],
+      hints: [
+        ...anchorHints(projectRoot, config?.audit),
+        unreadable
+          ? `⚠ token NOT minted — ${reason} dev_approval NOT consumed.`
+          : `⚠ token NOT minted — ${reason}. dev_approval NOT consumed; retry.`,
+      ],
     }
   }
 
-  // FV4: token persisted → now consume the emitting approval (anti-reuse).
   const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
   const audit = appendAudit(
     projectRoot,

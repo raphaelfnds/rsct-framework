@@ -4,6 +4,7 @@ import { resolveProjectRoot } from '../lib/project-root.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import {
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   type PhaseState,
 } from '../lib/phase-scope.js'
@@ -45,7 +46,7 @@ export interface PlanRevokeInternal {
 export const planRevokeTool: Tool = {
   name: 'rsct_plan_revoke',
   description:
-    'T3: revoke the active plan-scoped batch token (minted by rsct_plan_authorize). NOT §C-gated — revoking only TIGHTENS security, so no dev_approval is needed. After revoke, rsct_request_commit again requires a per-action dev_approval. The token also auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion, and rsct_phase_abandon clears it too. No-op (status="no_token") when no token is present.',
+    'T3: revoke the active plan-scoped batch token (minted by rsct_plan_authorize). NOT §C-gated — revoking only TIGHTENS security, so no dev_approval is needed. After revoke, rsct_request_commit again requires a per-action dev_approval. The token also auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion, and rsct_phase_abandon clears it too. No-op (status="no_token") when no token is present. An unreadable .rsct/phase-state.json is refused (status="state_write_failed"): nothing is revoked and the file is left untouched.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -74,6 +75,25 @@ export async function planRevokeHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
 
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal && !refusal.ok && refusal.reason === 'unreadable_state') {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'plan_revoke.state_write_failed',
+        tool: 'rsct_plan_revoke',
+        reason: refusal.error,
+        plan_slug: null,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'state_write_failed',
+      revoked_plan_slug: null,
+      ...auditFields(audit),
+      hints: [`⚠ ${refusal.error} No token was revoked.`],
+    }
+  }
   const token = readToken(existing.state)
   if (!token) {
     return {

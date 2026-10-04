@@ -76,6 +76,7 @@ import {
 import {
   evaluateBootstrapMarker,
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   type BootstrapMarker,
   type FreeCommitBudget,
@@ -205,7 +206,7 @@ export interface RequestCommitInternal {
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -338,7 +339,12 @@ export async function requestCommitHandler(
   }
 
   const runSweepCheck = async (): Promise<StagedSweepCheck> => {
-    const sweepState = readPhaseState(projectRoot).state
+    const read = readPhaseState(projectRoot)
+    const refusal = refuseUnreadableState(projectRoot, read)
+    if (refusal && !refusal.ok && refusal.reason === 'unreadable_state') {
+      return { ok: false, reject_kind: 'review_unreadable', reason: `${refusal.error} No commit was made.`, paths: [] }
+    }
+    const sweepState = read.state
     return checkStagedSweep({
       projectRoot,
       options: { sqlDialect: config?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
