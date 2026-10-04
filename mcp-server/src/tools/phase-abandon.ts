@@ -220,9 +220,6 @@ export async function phaseAbandonHandler(
     }
   }
 
-  // #53: an ALLOWLIST copy, not the `{}` full replace this used to be. The rule
-  // (and why it must never be re-written as a wipe-list) lives with
-  // PHASE_STATE_PRESERVED_ON_ABANDON in lib/phase-scope.
   const newState: PhaseState = preserveAcrossAbandon(state)
   const preservedKeys = PHASE_STATE_PRESERVED_ON_ABANDON.filter(
     (key) => newState[key] !== undefined,
@@ -243,10 +240,6 @@ export async function phaseAbandonHandler(
       reason: input.reason,
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
-      // #53: what actually survived on disk, so a forensic reader can tell a
-      // preserved session marker from a key the allowlist stopped carrying.
-      // Empty on a failed write: nothing was replaced, so nothing was preserved
-      // BY this call — the whole prior state is still there.
       preserved_keys: writeResult.ok ? preservedKeys : [],
     },
     config?.audit,
@@ -258,9 +251,6 @@ export async function phaseAbandonHandler(
     hints.push(
       `Phase '${phase}' abandoned${specSlug ? ` for spec '${specSlug}'` : ''}. Phase and spec state cleared${preservedKeys.length > 0 ? `; session markers preserved (${preservedKeys.join(', ')})` : ''}. Next: call rsct_classify_task or rsct_phase_<phase>_start to restart.`,
     )
-    // #53: the flag survives the abandon on purpose — say so at the call site,
-    // rather than letting the dev discover it at the next blocked edit.
-    // Truthiness via readContextStale, matching the guard's own predicate.
     if (readContextStale(newState) !== null) {
       hints.push(
         `ℹ The re-bootstrap flag (context_stale, set when the previous plan closed) was already set and is PRESERVED across this abandon — rsct_check_edit_scope keeps reporting 'stale_context' and managed edits stay blocked until rsct_load_context actually re-reads plan, decisions and knowledge. Abandoning a phase is not a re-load.`,

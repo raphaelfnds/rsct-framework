@@ -97,7 +97,6 @@ export interface PlanAuthorizeOutput {
   covers: string[]
   audit_path: string | null
   audit_error: string | null
-  /** True if the emitting dev_approval was recorded to approvals-seen (anti-reuse). */
   anti_replay_persisted: boolean | null
   anti_replay_error: string | null
   hints: string[]
@@ -202,8 +201,6 @@ export async function planAuthorizeHandler(
     }
   }
 
-  // Pre-conditions (post-gate so the approval gates everything; approval is
-  // NOT consumed on a pre-condition failure — dev can fix and retry).
   const reject = (
     reject_kind: PlanAuthorizeRejectKind,
     reason: string,
@@ -269,11 +266,6 @@ export async function planAuthorizeHandler(
     input.max_actions,
     config?.approval_modes?.plan_token_max_actions,
   )
-  // plan-lifecycle-v2 (Bloco 1.4): sliding-window re-arm width + absolute cap.
-  // The token re-arms `expires_at` on each successful commit (so an actively
-  // worked plan never expires mid-flight) but can never live past the cap. The
-  // dev's explicit `ttl_minutes` IS the sliding window width (respected, not
-  // ignored); config slide / the built-in default only apply when it's absent.
   const slideMinutes = resolveSlideMinutes(
     input.ttl_minutes,
     config?.approval_modes?.plan_token_ttl_slide_minutes,
@@ -303,7 +295,6 @@ export async function planAuthorizeHandler(
   const writeResult = refuseUnreadableState(projectRoot, existing) ?? writePhaseState(projectRoot, newState)
 
   if (!writeResult.ok) {
-    // Persist failed → do NOT consume the approval (FV4) so the dev can retry.
     const unreadable = writeResult.reason === 'unreadable_state'
     const reason =
       writeResult.reason === 'locked'
@@ -346,7 +337,6 @@ export async function planAuthorizeHandler(
     }
   }
 
-  // FV4: token persisted → now consume the emitting approval (anti-reuse).
   const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
   const audit = appendAudit(
     projectRoot,

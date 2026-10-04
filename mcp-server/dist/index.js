@@ -51499,10 +51499,6 @@ This discards the phase without advancing the RSCT cycle.`
       reason: input.reason,
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
-      // #53: what actually survived on disk, so a forensic reader can tell a
-      // preserved session marker from a key the allowlist stopped carrying.
-      // Empty on a failed write: nothing was replaced, so nothing was preserved
-      // BY this call — the whole prior state is still there.
       preserved_keys: writeResult.ok ? preservedKeys : []
     },
     config2?.audit
@@ -52979,10 +52975,7 @@ function explainEligibility(eligible, reasons) {
     const commits = faults.includes("phase_state_corrupt") ? "rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted." : "Commits still work; they go through the per-action \xA7C path.";
     return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. ${commits}`;
   }
-  if (reasons.includes("audit_history_absent")) {
-    return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
-  }
-  return "Free commits are closed; commits go through the per-action \xA7C path instead. This withholds a convenience, it does not block any work.";
+  return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
 }
 var auditTool = {
   name: "rsct_audit",

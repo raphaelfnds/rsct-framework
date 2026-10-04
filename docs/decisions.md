@@ -1042,6 +1042,66 @@ those files. Keyed by module and symbol; restatements of what the code says were
   audit log, the positive evidence the free lane requires; both writes are best-effort.
 - The PH-3 worktree nudge stays conditional because classify runs before the plan exists.
 
+### `tools/plan-authorize.ts` (migrated in the #101 REVIEW)
+
+- The pre-conditions (no branch, protected branch, no active plan) are checked AFTER the gate, so
+  the approval gates everything; a pre-condition failure does not consume the approval, and the
+  developer fixes and retries with the same payload.
+- FV4: the emitting approval is consumed only once the token is persisted. A failed persist leaves
+  it unconsumed.
+- Sliding window (plan-lifecycle-v2, block 1.4): the token re-arms `expires_at` on each successful
+  commit, so an actively worked plan never expires mid-flight, and never lives past the absolute
+  cap. An explicit `ttl_minutes` IS the sliding width; the configured slide and the built-in default
+  apply only when it is absent.
+
+### `tools/phase-abandon.ts` (migrated in the #101 REVIEW)
+
+- `preserved_keys` on the `phase_abandon.complete` audit line is what actually survived on disk, so
+  a reader can tell a preserved session marker from a key the allowlist stopped carrying. It is
+  empty on a failed write: nothing was replaced, so nothing was preserved BY that call.
+- A set `context_stale` survives the abandon on purpose, and the hint says so at the call site
+  instead of leaving the developer to find out at the next blocked edit. It reads the flag through
+  `readContextStale`; the edit guard tests `state?.context_stale` for truthiness, and the two agree
+  for a set, an absent and a `null` flag.
+
+### `tools/audit.ts` (migrated in the #101 REVIEW)
+
+- **`rsct_audit` deliberately bypasses `evaluateInstallAdvisory`** (#55) and must stay that way.
+  That helper APPENDS an `install.drift_detected` entry when the severity is `security`, to record
+  that a mutation was ATTEMPTED under degraded enforcement. `rsct_audit` attempts no mutation;
+  routing it through the advisory would write false attempt records into the append-only log the
+  anti-rollback ceiling is re-derived from. `getInstallDriftNotice` itself only reads.
+- Honest scope of that guarantee, MEASURED by running the real handler (#55): it keeps the tool from
+  writing a FALSE `install.drift_detected` entry; it does not make the handler write-free.
+  `resolveProjectRoot` appends a config-violation entry when `.rsct.json` is present but rejected,
+  creating the log if absent. `rsct_status` and `rsct_load_context` do the same on the same input —
+  the behaviour is the shared resolver's (#80). The tool description and the returned coverage
+  boundary say so rather than claiming "no writes".
+- The coverage boundary ships in the OUTPUT, not only in the docs: "is this project's process
+  healthy?" is a completeness claim the tool cannot make, and a clean report is not a clean project.
+- `explainEligibility` answers a corrupt or torn signal FIRST, so a real fault is never described in
+  the same breath as a fresh install; `audit_history_absent` alone is not a fault. Dropped and NOT
+  migrated: the doc comment that said `evaluateMcpHealth` answers "does this project qualify for the
+  dialog-free lane?" and that a project with `audit.enabled: false` reports it forever. #80 measured
+  both as wrong — health is one of several conditions in front of the lane, and `audit.enabled:
+  false` is unreachable (the schema is `z.literal(true)`).
+- Install drift is reported ONLY in the structured field, never pushed into `hints[]` (decision of
+  2026-08-21, shared by #53/#54/#55): one advisory surface, one dedup rule per overlapping pair.
+  `rsct_status` owns the install-drift hint; repeating it would show the same line twice.
+- Open-phase age: the V phase keeps its `started_at` inside the verification block, every other
+  phase at the top level. Reading only the top-level field would leave V — the phase most likely to
+  sit open for days — as the one phase whose age cannot be reported. Both fields are optional and
+  the absent case is reachable (a stranded `verification` label), so a missing timestamp reports
+  `null`, never a fabricated age.
+- `rsct_installed: false` collapses three states: no `.rsct.json`, an unreadable one, and one
+  present but REJECTED as malformed or out of bounds. The report tells them apart with a plain
+  `existsSync`, because the rejected case is the one the bounds check exists to catch — a config
+  edited to disable enforcement.
+- Report only: no line may recommend a state-mutating remedy; an open-phase age does not point at
+  `rsct_phase_abandon`. The reason written at the time — an abandon replaced the whole state with
+  `{}` — stopped being true with the #53 allowlist; the rule stays, because a report must not route
+  the reader into a mutation.
+
 ### `prompts/01-setup.md`
 
 - The `.rsct/reports/` backfill (#62) follows the #73 clause: whole-file exact-line guard,
