@@ -62,7 +62,14 @@ read_or_default() {
 }
 
 RSCT_HOME="$HOME/.rsct"
+MCP_HOME="$RSCT_HOME/mcp-server"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+
+mcp_command_is_copy() {
+  [ -n "$1" ] || return 1
+  if [ "$1" -ef "$MCP_HOME/dist/index.js" ]; then return 0; fi
+  [ "$(dirname "$1")/node_modules/rsct-mcp/dist/index.js" -ef "$MCP_HOME/dist/index.js" ]
+}
 
 # --- Detect what is present ---
 PRESENT_RSCT_HOME=""
@@ -81,6 +88,15 @@ RSCT_MCP_BIN=""
 if command -v rsct-mcp >/dev/null 2>&1; then
   RSCT_MCP_BIN=$(command -v rsct-mcp)
   PRESENT_RSCT_MCP="yes"
+fi
+PRESENT_MCP_COPY=""
+if [ -d "$MCP_HOME" ]; then
+  PRESENT_MCP_COPY="yes"
+fi
+if [ -n "$PRESENT_RSCT_MCP" ]; then
+  MCP_WHERE="global rsct-mcp at $RSCT_MCP_BIN"
+else
+  MCP_WHERE="rsct-mcp files at $MCP_HOME (no rsct-mcp command on PATH)"
 fi
 
 if [ -z "$PRESENT_RSCT_HOME" ] && [ ${#PRESENT_COMMANDS[@]} -eq 0 ] && [ -z "$PRESENT_RSCT_MCP" ]; then
@@ -119,17 +135,20 @@ if [ -n "$PRESENT_RSCT_HOME" ]; then
     VERSION_TAG="(no version metadata)"
   fi
   echo "Will remove: $RSCT_HOME  ${VERSION_TAG}"
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    echo "             except $MCP_HOME — the rsct-mcp companion's files"
+  fi
 fi
 for cmd in "${PRESENT_COMMANDS[@]}"; do
   echo "Will remove: $CLAUDE_COMMANDS_DIR/$cmd.md"
 done
-if [ -n "$PRESENT_RSCT_MCP" ]; then
+if [ -n "$PRESENT_RSCT_MCP" ] || [ -n "$PRESENT_MCP_COPY" ]; then
   # Mirror the actual companion-removal gate below ([ -z "$SKIP_MCP" ]): under
   # --skip-mcp the script never asks, so don't claim it "will ask separately".
   if [ -z "$SKIP_MCP" ]; then
-    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+    echo "Detected:    $MCP_WHERE (will ask separately)"
   else
-    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (left untouched; --skip-mcp set)"
+    echo "Detected:    $MCP_WHERE (left untouched; --skip-mcp set)"
   fi
 fi
 echo ""
@@ -147,8 +166,22 @@ esac
 
 # --- Execute framework removal ---
 if [ -n "$PRESENT_RSCT_HOME" ]; then
-  rm -rf "$RSCT_HOME"
-  echo "Removed: $RSCT_HOME"
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    set +f
+    for entry in "$RSCT_HOME"/* "$RSCT_HOME"/.[!.]* "$RSCT_HOME"/..?*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      [ "$entry" = "$MCP_HOME" ] && continue
+      rm -rf "$entry"
+    done
+    if [ -z "$SKIP_MCP" ]; then
+      echo "Removed: the framework files in $RSCT_HOME (mcp-server/ is decided in the companion step)"
+    else
+      echo "Removed: the framework files in $RSCT_HOME (mcp-server/ left untouched; --skip-mcp set)"
+    fi
+  else
+    rm -rf "$RSCT_HOME"
+    echo "Removed: $RSCT_HOME"
+  fi
 fi
 for cmd in "${PRESENT_COMMANDS[@]}"; do
   rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
@@ -159,33 +192,73 @@ done
 # Asked separately because some devs may want to keep the MCP server
 # (e.g., for projects that already wire it via `.mcp.json`) even after
 # removing the framework files. Symmetric to install.sh's mcp prompt.
-if [ -n "$PRESENT_RSCT_MCP" ] && [ -z "$SKIP_MCP" ]; then
+if { [ -n "$PRESENT_RSCT_MCP" ] || [ -n "$PRESENT_MCP_COPY" ]; } && [ -z "$SKIP_MCP" ]; then
   echo ""
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp"
   echo "────────────────────────────────────────────────────────"
-  echo "Detected global install at: $RSCT_MCP_BIN"
+  if [ -n "$PRESENT_RSCT_MCP" ]; then
+    echo "Detected global install at: $RSCT_MCP_BIN"
+  fi
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    echo "Companion files: $MCP_HOME"
+  fi
   echo "Projects with rsct registered in .mcp.json will stop seeing"
   echo "the rsct__* tools after this is removed."
   echo ""
   read_or_default mcp_confirm "Also remove the global rsct-mcp install? [Y/n] " "y"
   case "$mcp_confirm" in
     n|N|no|NO)
-      echo "Kept: $RSCT_MCP_BIN"
-      echo "To remove later: npm uninstall -g rsct-mcp"
+      if [ -n "$PRESENT_RSCT_MCP" ]; then
+        echo "Kept: $RSCT_MCP_BIN"
+      fi
+      if [ -n "$PRESENT_MCP_COPY" ]; then
+        echo "Kept: $MCP_HOME"
+        echo "To remove both later, run this uninstaller again."
+      else
+        echo "To remove later: npm uninstall -g rsct-mcp"
+      fi
       ;;
     *)
       if command -v npm >/dev/null 2>&1; then
         if npm uninstall -g rsct-mcp; then
-          echo "Removed global rsct-mcp."
+          MCP_LEFT=$(command -v rsct-mcp 2>/dev/null || true)
+          if mcp_command_is_copy "$MCP_LEFT"; then
+            echo "⚠ npm reported success, but the rsct-mcp on PATH still runs from"
+            echo "  $MCP_HOME: $MCP_LEFT"
+            echo "  It belongs to another npm prefix. The folder was left in place."
+          else
+            if [ -n "$PRESENT_MCP_COPY" ]; then
+              if rm -rf "${RSCT_HOME:?}/mcp-server"; then
+                rmdir "$RSCT_HOME" 2>/dev/null || true
+                echo "Removed: $MCP_HOME"
+              else
+                echo "⚠ Could not remove $MCP_HOME (in use?)."
+                echo "  Run this uninstaller again once nothing is using it."
+              fi
+            fi
+            if [ -n "$MCP_LEFT" ]; then
+              echo "⚠ npm reported success, but an rsct-mcp is still on PATH: $MCP_LEFT"
+              echo "  It was not recognised as the copy this framework installed. If it is a"
+              echo "  leftover, remove it by hand."
+            else
+              echo "Removed global rsct-mcp."
+            fi
+          fi
         else
           echo "⚠ npm uninstall -g rsct-mcp failed."
           echo "  Common cause on Linux: needs sudo for global npm dir."
           echo "  Retry: sudo npm uninstall -g rsct-mcp"
+          if [ -n "$PRESENT_MCP_COPY" ]; then
+            echo "  $MCP_HOME was left in place. After the retry, run this uninstaller again."
+          fi
         fi
       else
         echo "⚠ npm not on PATH — cannot run 'npm uninstall -g rsct-mcp'."
         echo "  Remove manually with whichever tool installed it (npm, pnpm, yarn)."
+        if [ -n "$PRESENT_MCP_COPY" ]; then
+          echo "  $MCP_HOME was left in place. Afterwards, run this uninstaller again."
+        fi
       fi
       ;;
   esac
@@ -232,7 +305,7 @@ if [ "$USER_SCOPE_HAS_RSCT" = "yes" ] && [ -z "$SKIP_MCP" ]; then
       echo "To remove later: claude mcp remove rsct --scope user"
       ;;
     *)
-      if claude mcp remove rsct --scope user >/dev/null 2>&1; then
+      if claude mcp remove rsct --scope user </dev/null >/dev/null 2>&1; then
         echo "✓ Unregistered rsct from Claude Code (user scope)."
       else
         echo "⚠ 'claude mcp remove rsct --scope user' failed."

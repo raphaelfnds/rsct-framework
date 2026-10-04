@@ -12,6 +12,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The companion no longer runs from the clone (#74).** `scripts/install.sh` ran
+  `npm install -g .` inside `mcp-server/` and printed "✓ rsct-mcp installed globally". npm LINKS a
+  folder install (measured from 6.14 to 11.1; only 9.0.0–9.4.1 copy), so the global command was the
+  clone: the branch checked out there was the enforcement binary of every project on the machine,
+  and moving the clone broke it everywhere. MEASURED with
+  the clone inside WSL and the installer run from Git Bash: npm left a link to
+  `C:\wsl.localhost\…`, which does not exist, and the installer still printed "✓". The installer
+  now copies `package.json` plus what its `files` field lists into `~/.rsct/mcp-server` and links
+  the global command to that copy. It then proves, by file identity, that the `rsct-mcp` on PATH is
+  that copy, starts it once, and prints what it verified: it runs from the copy; it is the copy but
+  did not start; or the command on PATH could not be confirmed as the copy — named, and never run.
+  An update builds
+  the new copy beside the old one and swaps it in: if the copy step fails, the companion that was
+  running is untouched; if npm fails after the swap, the message says whether the command on PATH
+  already runs from the new copy.
+  **What changes for you:** after `git pull` the running server changes only when the installer
+  runs again — the step that already updates prompts and rules. A machine installed before this
+  release is switched over by its next installer run.
+- **`uninstall-framework.sh` follows the copy (#74).** Keeping the companion keeps
+  `~/.rsct/mcp-server`; removing it deletes the copy right after `npm uninstall -g rsct-mcp`. Once
+  npm reports success the script resolves `rsct-mcp` again and says what is true: removed; still
+  running from the copy, which is then kept (it belongs to another npm prefix); or another
+  `rsct-mcp` still on PATH, named. A folder it cannot delete is a warning, not an abort that would
+  leave the user-scope registration behind, and every "do it later" line says to run the uninstaller
+  again — it prints no `rm -rf` to paste.
+
+  Two limits, both repaired by running the installer again: an uninstaller older than this release,
+  run against this layout, deletes `~/.rsct` first and leaves the command's shims behind on
+  Windows; and deleting `~/.rsct` by hand leaves the global command pointing at nothing.
+
+### Changed
+
+- **The docs point at the installer, not at `npm install -g .` (#74).** `docs/troubleshooting.md`
+  and `mcp-server/README.md` no longer send a user to install the companion from inside the clone.
+  `README.md` keeps that command for contributors, `CONTRIBUTING.md` now documents it, and both say
+  what it does — it links the global command to the working tree.
+- **WSL is named as a fourth environment** in `CLAUDE.md` and `CONTRIBUTING.md`, with the measured
+  differences. The installer still refuses to run inside WSL; that case is #110.
+
 ## [2.12.2] - 2026-10-04
 
 ### Fixed

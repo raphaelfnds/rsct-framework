@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, chmodSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, chmodSync, readFileSync, readdirSync, statSync, symlinkSync, lstatSync, copyFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, delimiter } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
@@ -46,14 +46,25 @@ interface RunOpts {
   path?: string
   /** When set, stdin is a PIPE carrying this text instead of /dev/null. */
   input?: string
+  timeoutMs?: number
 }
+
+type Env = Record<string, string | undefined>
+
+function overlayEnv(base: Env, overrides: Env): Env {
+  const replaced = new Set(Object.keys(overrides).map((key) => key.toLowerCase()))
+  const kept = Object.entries(base).filter(([key]) => !replaced.has(key.toLowerCase()))
+  return { ...Object.fromEntries(kept), ...overrides }
+}
+
+const inheritedPath = () =>
+  Object.entries(process.env).find(([key]) => key.toLowerCase() === 'path')?.[1] ?? ''
 
 /** Run a script non-interactively with HOME pointed at the sandbox. */
 function runScript(script: string, home: string, opts: RunOpts = {}): { ok: boolean; out: string } {
   // forward slashes so Git Bash treats a Windows temp path cleanly
   const sandbox = home.replace(/\\/g, '/')
-  const env: Record<string, string | undefined> = {
-    ...process.env,
+  const env = overlayEnv(process.env, {
     HOME: sandbox,
     // #73: sandboxed BY DEFAULT, not per-case. These three used to live only in
     // the #71 block's opt-in `mcpEnv`, so any case that cleared RSCT_SKIP_MCP
@@ -72,7 +83,8 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
     RSCT_ASSUME_YES: '1',
     RSCT_SKIP_MCP: '1',
     ...opts.env,
-  }
+    ...(opts.path ? { PATH: `${opts.path}${delimiter}${inheritedPath()}` } : {}),
+  })
   // #73: reaching the MCP branch REQUIRES stubs. Without this guard a future
   // case that clears RSCT_SKIP_MCP and forgets `path:` runs a real
   // `npm install -g .` from this worktree (repointing the machine-global
@@ -103,7 +115,6 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
       }
     }
   }
-  if (opts.path) env.PATH = `${opts.path}${delimiter}${process.env.PATH ?? ''}`
   try {
     const out = execFileSync(bashBin(), [script], {
       env,
@@ -119,7 +130,7 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
       // per-test timeout can never fire. This is the only bound that exists.
       // 45s against runs that normally take 1-3s: high enough that CPU
       // contention cannot trip it, low enough to surface inside the 60s cases.
-      timeout: 45_000,
+      timeout: opts.timeoutMs ?? 45_000,
       killSignal: 'SIGKILL',
     })
     return { ok: true, out }
@@ -227,31 +238,60 @@ const STUB_CLAUDE = [
   '',
 ].join('\n')
 
-function newStubBin(): string {
+const STUB_NPM = [
+  '#!/bin/sh',
+  'echo "STUB-NPM $* (cwd=$PWD)"',
+  'if [ -n "$STUB_NPM_FAIL" ]; then exit 1; fi',
+  'exit 0',
+  '',
+].join('\n')
+
+const STUB_RSCT_MCP = [
+  '#!/bin/sh',
+  'echo "STUB-RSCT-MCP stdin=$(cat | wc -c | tr -d " ")" >> "$(dirname "$0")/rsct-mcp.log"',
+  'if [ -n "$STUB_RSCT_MCP_FAIL" ]; then exit 1; fi',
+  'exit 0',
+  '',
+].join('\n')
+const STARTED_ONCE_WITH_NO_INPUT = 'STUB-RSCT-MCP stdin=0'
+
+const STUB_REASON: Record<string, string> = {
+  npm: 'A real `npm install -g .` would repoint the machine-global rsct-mcp.',
+  claude: 'A real `claude mcp remove rsct --scope user` would de-register rsct on this machine.',
+  'rsct-mcp': 'The scripts would resolve, and could start, the rsct-mcp installed on this machine.',
+}
+
+function newStubBin(opts: { realNpm?: boolean; withoutCommand?: boolean } = {}): string {
   const dir = newSandbox()
-  writeFileSync(join(dir, 'npm'), '#!/bin/sh\necho "STUB-NPM $*"\nexit 0\n')
-  chmodSync(join(dir, 'npm'), 0o755)
-  writeFileSync(join(dir, 'claude'), STUB_CLAUDE)
-  chmodSync(join(dir, 'claude'), 0o755)
+  const stubs: Record<string, string> = opts.realNpm
+    ? { claude: STUB_CLAUDE }
+    : { npm: STUB_NPM, claude: STUB_CLAUDE, ...(opts.withoutCommand ? {} : { 'rsct-mcp': STUB_RSCT_MCP }) }
+  for (const [bin, body] of Object.entries(stubs)) {
+    writeFileSync(join(dir, bin), body)
+    chmodSync(join(dir, bin), 0o755)
+  }
 
   // PRE-FLIGHT BOTH. Until #73 only `npm` was checked, while the docstring
   // claimed the dir was verified — and `claude` is now the dangerous one.
-  for (const bin of ['npm', 'claude']) {
+  for (const bin of Object.keys(stubs)) {
     const resolved = execFileSync(bashBin(), ['-c', `command -v ${bin}`], {
-      env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH ?? ''}` },
+      env: overlayEnv(process.env, { PATH: `${dir}${delimiter}${inheritedPath()}` }),
       encoding: 'utf8',
     }).trim()
     if (!resolved.includes('rsct-install-')) {
       throw new Error(
         `stub ${bin} did not win PATH resolution (got "${resolved}") — refusing to run. ` +
-          (bin === 'npm'
-            ? 'A real `npm install -g .` would repoint the machine-global rsct-mcp.'
-            : 'A real `claude mcp remove rsct --scope user` would de-register rsct on this machine.') +
+          STUB_REASON[bin] +
           ' Most likely cause: TMPDIR mounted noexec.',
       )
     }
   }
   return dir
+}
+
+const stubMcpLog = (stub: string) => {
+  const p = join(stub, 'rsct-mcp.log')
+  return existsSync(p) ? readFileSync(p, 'utf8') : ''
 }
 
 /** #73 — seed the sandbox host config. `raw` is written verbatim so a case can
@@ -1015,6 +1055,466 @@ describe.skipIf(!BASH)('install.sh makes the MCP scope choice EFFECTIVE (#73)', 
     expect(hostConfig(cfgDir).mcpServers?.rsct).toBeUndefined()
     expect(readScope(home)).toBe('project')
   }, 60_000)
+})
+
+const mcpHome = (home: string) => join(rsctHome(home), 'mcp-server')
+
+function linkCommandToCopy(stub: string, home: string): void {
+  mkdirSync(join(stub, 'node_modules'), { recursive: true })
+  symlinkSync(mcpHome(home), join(stub, 'node_modules', 'rsct-mcp'), 'junction')
+}
+
+interface SourceTree {
+  install: string
+  pkg: string
+  dist: string
+}
+
+function writeTreePackage(tree: SourceTree, files: string[]): void {
+  writeFileSync(
+    tree.pkg,
+    JSON.stringify({ name: 'rsct-mcp', version: '9.9.9', bin: { 'rsct-mcp': './dist/index.js' }, files }, null, 2),
+  )
+}
+
+function newSourceTree(files: string[], marker: string): SourceTree {
+  const root = newSandbox()
+  mkdirSync(join(root, 'scripts'))
+  copyFileSync(INSTALL, join(root, 'scripts', 'install.sh'))
+  writeFileSync(join(root, 'VERSION'), '9.9.9\n')
+  for (const d of RUNTIME_DIRS) {
+    mkdirSync(join(root, d))
+    writeFileSync(join(root, d, 'placeholder.md'), 'x\n')
+  }
+  writeFileSync(join(root, 'prompts', '01-setup.md'), 'x\n')
+  mkdirSync(join(root, 'mcp-server', 'dist'), { recursive: true })
+  const tree: SourceTree = {
+    install: join(root, 'scripts', 'install.sh'),
+    pkg: join(root, 'mcp-server', 'package.json'),
+    dist: join(root, 'mcp-server', 'dist', 'index.js'),
+  }
+  writeFileSync(tree.dist, `${marker}\n`)
+  writeTreePackage(tree, files)
+  return tree
+}
+
+function seedCompanion(home: string): void {
+  mkdirSync(join(mcpHome(home), 'dist'), { recursive: true })
+  writeFileSync(join(mcpHome(home), 'dist', 'index.js'), 'SEEDED\n')
+  writeFileSync(join(mcpHome(home), 'package.json'), '{}\n')
+}
+
+function seedFramework(home: string): void {
+  mkdirSync(join(rsctHome(home), 'prompts'), { recursive: true })
+  writeFileSync(join(rsctHome(home), 'prompts', '01-setup.md'), 'x\n')
+  writeFileSync(join(rsctHome(home), 'VERSION'), '9.9.9\n')
+  writeFileSync(join(rsctHome(home), '.hidden'), 'x\n')
+  writeFileSync(join(rsctHome(home), '..odd'), 'x\n')
+}
+
+function present(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const FOREIGN_COMMAND = BASH
+  ? execFileSync(bashBin(), ['-c', 'command -v rsct-mcp || true'], { env: process.env, encoding: 'utf8' }).trim()
+  : ''
+
+describe.skipIf(!BASH)('install.sh runs the companion from a copy it owns (#74)', () => {
+  const mcpYes = { RSCT_SKIP_MCP: undefined as string | undefined }
+  const copiedDist = (home: string) => readFileSync(join(mcpHome(home), 'dist', 'index.js'), 'utf8')
+
+  it('copies package.json plus the files entries, and runs npm from that copy', () => {
+    const home = newSandbox()
+    mkdirSync(mcpHome(home), { recursive: true })
+    writeFileSync(join(mcpHome(home), 'STALE.txt'), 'stale\n')
+    mkdirSync(`${mcpHome(home)}.new`)
+    writeFileSync(join(`${mcpHome(home)}.new`, 'STALE.txt'), 'left by an interrupted run\n')
+    writeFileSync(`${mcpHome(home)}.old`, 'a leftover that is not a folder\n')
+    const r = runScript(INSTALL, home, { env: mcpYes, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/STUB-NPM install -g \. --install-links=false \(cwd=[^)]*\.rsct\/mcp-server\)/)
+    expect(r.out, r.out).toMatch(/bash "[^"]*scripts\/uninstall-framework\.sh"/)
+    const shipped = JSON.parse(readFileSync(join(ROOT, 'mcp-server', 'package.json'), 'utf8')).files as string[]
+    expect(readdirSync(mcpHome(home)).sort()).toEqual(['package.json', ...shipped].sort())
+    expect(readdirSync(rsctHome(home)).filter((entry) => entry.startsWith('mcp-server'))).toEqual(['mcp-server'])
+  }, 60_000)
+
+  it('reports the command as installed only after it proved to be the copy and started', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: mcpYes, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/✓ rsct-mcp installed\. The command runs from \S*\.rsct\/mcp-server/)
+    expect(stubMcpLog(stub).trim(), 'the command must be started exactly once').toBe(STARTED_ONCE_WITH_NO_INPUT)
+    expectMenuRan(r.out, '1')
+  }, 60_000)
+
+  it('starts the command without handing it the answers still waiting on stdin', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, {
+      env: { ...mcpYes, RSCT_ASSUME_YES: undefined },
+      path: stub,
+      input: 'y\n\n2\n',
+    })
+    expect(r.ok, r.out).toBe(true)
+    expect(stubMcpLog(stub).trim(), 'the menu answer must not reach the command').toBe(STARTED_ONCE_WITH_NO_INPUT)
+    expect(r.out, r.out).toMatch(/Project scope selected/)
+  }, 60_000)
+
+  it('says the command did not start when it is the copy and exits non-zero', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: { ...mcpYes, STUB_RSCT_MCP_FAIL: '1' }, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/installed at \S*\.rsct\/mcp-server but did not start/)
+    expect(r.out).not.toMatch(/✓ rsct-mcp installed/)
+    expect(stubMcpLog(stub).trim()).toBe(STARTED_ONCE_WITH_NO_INPUT)
+    expectMenuRan(r.out, '1')
+  }, 60_000)
+
+  it('names a command that is not the copy, and never starts it', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: mcpYes, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/could not be confirmed to run from that copy:\s+\S*rsct-mcp/)
+    expect(r.out).not.toMatch(/✓ rsct-mcp installed/)
+    expect(stubMcpLog(stub), 'a command that is not the copy must not be started').toBe('')
+    expectMenuRan(r.out, '1')
+  }, 60_000)
+
+  it.skipIf(FOREIGN_COMMAND !== '')('carries on, and says so, when no rsct-mcp is on PATH at all', () => {
+    const tree = newSourceTree(['dist'], 'V1')
+    const linked = runScript(tree.install, newSandbox(), { env: mcpYes, path: newStubBin({ withoutCommand: true }) })
+    expect(linked.ok, linked.out).toBe(true)
+    expect(linked.out, linked.out).toMatch(/could not be confirmed to run from that copy:\s+not found/)
+    expectMenuRan(linked.out, '1')
+    expect(linked.out, linked.out).toMatch(/MANUAL STEPS STILL REQUIRED/)
+
+    const failed = runScript(tree.install, newSandbox(), {
+      env: { ...mcpYes, STUB_NPM_FAIL: '1' },
+      path: newStubBin({ withoutCommand: true }),
+    })
+    expect(failed.ok, failed.out).toBe(true)
+    expect(failed.out, failed.out).toMatch(/could not be confirmed to run from it: not found/)
+    expect(failed.out, failed.out).toMatch(/MANUAL STEPS STILL REQUIRED/)
+  }, 90_000)
+
+  it.skipIf(process.platform === 'win32')('recognises a command that is a symlink into the copy', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    rmSync(join(stub, 'rsct-mcp'))
+    symlinkSync(join(mcpHome(home), 'dist', 'index.js'), join(stub, 'rsct-mcp'))
+    const r = runScript(INSTALL, home, { env: mcpYes, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/✓ rsct-mcp installed\. The command runs from/)
+  }, 60_000)
+
+  it('replaces a copy folder that is a link, and leaves the folder it pointed at alone', () => {
+    const home = newSandbox()
+    const other = newSandbox()
+    writeFileSync(join(other, 'KEEP.txt'), 'keep\n')
+    mkdirSync(rsctHome(home), { recursive: true })
+    symlinkSync(other, mcpHome(home), 'junction')
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: mcpYes, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(existsSync(join(other, 'KEEP.txt')), 'the folder the link pointed at must keep its files').toBe(true)
+    expect(lstatSync(mcpHome(home)).isSymbolicLink()).toBe(false)
+    expect(copiedDist(home)).toBe('V1\n')
+  }, 60_000)
+
+  it('replaces a copy folder that is a link to nothing', () => {
+    const home = newSandbox()
+    mkdirSync(rsctHome(home), { recursive: true })
+    symlinkSync(join(newSandbox(), 'gone'), mcpHome(home), 'junction')
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: mcpYes, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out).not.toMatch(/rsct-mcp install failed/)
+    expect(lstatSync(mcpHome(home)).isSymbolicLink()).toBe(false)
+    expect(copiedDist(home)).toBe('V1\n')
+  }, 60_000)
+
+  it('keeps the previous copy when an update fails before the swap', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const tree = newSourceTree(['dist'], 'VERSION-ONE')
+    const first = runScript(tree.install, home, { env: mcpYes, path: stub })
+    expect(first.out, first.out).toMatch(/✓ rsct-mcp installed/)
+    writeFileSync(tree.dist, 'VERSION-TWO\n')
+    writeTreePackage(tree, ['no-such-entry', 'dist'])
+    const second = runScript(tree.install, home, { env: mcpYes, path: stub })
+    expect(second.ok, second.out).toBe(true)
+    expect(second.out, second.out).toMatch(/rsct-mcp install failed/)
+    expect(second.out, second.out).toMatch(/Nothing was replaced: the 'rsct-mcp' on your PATH still runs from the copy/)
+    expect(copiedDist(home), 'the copy that was running must still be there').toBe('VERSION-ONE\n')
+  }, 90_000)
+
+  it('refuses a copy without dist/index.js before npm is reached', () => {
+    const home = newSandbox()
+    const tree = newSourceTree([], 'V1')
+    const r = runScript(tree.install, home, { env: mcpYes, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/rsct-mcp install failed/)
+    expect(r.out, r.out).toMatch(/No copy of this version was put in \S*\.rsct\/mcp-server/)
+    expect(r.out).not.toMatch(/Nothing was replaced/)
+    expect(r.out).not.toMatch(/STUB-NPM install -g/)
+    expect(present(mcpHome(home))).toBe(false)
+  }, 60_000)
+
+  it('tells a fresh machine the copy is in place and quotes the command that links it', () => {
+    const home = newSandbox()
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: { ...mcpYes, STUB_NPM_FAIL: '1' }, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/rsct-mcp install failed/)
+    expect(r.out, r.out).toMatch(/is this version, but the 'rsct-mcp'/)
+    expect(r.out, r.out).toMatch(/could not be confirmed to run from it: \S*rsct-mcp/)
+    expect(r.out).not.toMatch(/Common causes/)
+    expect(r.out, r.out).toMatch(/cd "[^"]*\.rsct\/mcp-server" && sudo npm install -g \. --install-links=false/)
+    expect(r.out).not.toMatch(/Choice \[1\/2\]/)
+    expect(copiedDist(home)).toBe('V1\n')
+  }, 60_000)
+
+  it('tells an updated machine the command already runs from the new copy when npm fails', () => {
+    const home = newSandbox()
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const tree = newSourceTree(['dist'], 'V1')
+    const r = runScript(tree.install, home, { env: { ...mcpYes, STUB_NPM_FAIL: '1' }, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/rsct-mcp install failed/)
+    expect(r.out, r.out).toMatch(/is this version, and the 'rsct-mcp'/)
+    expect(r.out, r.out).toMatch(/so the companion is in place/)
+    expect(r.out).not.toMatch(/sudo npm install/)
+    expect(r.out).not.toMatch(/Common causes/)
+    expect(stubMcpLog(stub), 'a failed install must not start the command').toBe('')
+  }, 60_000)
+
+  it('with a real npm: install, update and uninstall leave the machine as stated', () => {
+    const home = newSandbox()
+    const sandbox = home.replace(/\\/g, '/')
+    const prefix = join(home, 'npm-global')
+    const path = [newStubBin({ realNpm: true }), join(prefix, 'bin'), prefix].join(delimiter)
+    const timeoutMs = 240_000
+    const env = {
+      RSCT_SKIP_MCP: undefined as string | undefined,
+      npm_config_cache: `${sandbox}/npm-cache`,
+      npm_config_userconfig: `${sandbox}/npmrc`,
+      npm_config_globalconfig: `${sandbox}/npmrc-global`,
+      npm_config_install_links: 'true',
+      npm_config_offline: 'true',
+      npm_config_update_notifier: 'false',
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+    }
+    expect(existsSync(join(ROOT, 'mcp-server', 'dist', 'index.js')), 'no prebuilt dist: a real npm would build in the clone').toBe(true)
+    const globalRoot = execFileSync(bashBin(), ['-c', 'npm root -g'], {
+      env: overlayEnv(process.env, { ...env, npm_config_prefix: `${sandbox}/npm-global` }),
+      encoding: 'utf8',
+      timeout: timeoutMs,
+    }).trim()
+    expect(globalRoot, 'a real npm must be confined to the sandbox prefix').toContain('rsct-install-')
+    const entry = join(globalRoot, 'rsct-mcp')
+    const copy = () => realpathSync.native(mcpHome(home))
+
+    const first = runScript(INSTALL, home, { env, path, timeoutMs })
+    expect(first.ok, first.out).toBe(true)
+    expect(first.out, first.out).toMatch(/✓ rsct-mcp installed\. The command runs from/)
+    expect(lstatSync(entry).isSymbolicLink(), 'npm must link the global entry, not copy it').toBe(true)
+    expect(realpathSync.native(entry)).toBe(copy())
+
+    writeFileSync(join(mcpHome(home), 'STALE.txt'), 'stale\n')
+    const second = runScript(INSTALL, home, { env, path, timeoutMs })
+    expect(second.ok, second.out).toBe(true)
+    expect(second.out, second.out).toMatch(/✓ rsct-mcp installed\. The command runs from/)
+    expect(existsSync(join(mcpHome(home), 'STALE.txt'))).toBe(false)
+    expect(realpathSync.native(entry)).toBe(copy())
+
+    const removed = runScript(UNINSTALL, home, { env, path, timeoutMs })
+    expect(removed.ok, removed.out).toBe(true)
+    expect(present(rsctHome(home)), '~/.rsct should be gone').toBe(false)
+    expect(present(entry), 'the global entry should be gone').toBe(false)
+    for (const command of [join(prefix, 'rsct-mcp'), join(prefix, 'rsct-mcp.cmd'), join(prefix, 'bin', 'rsct-mcp')]) {
+      expect(present(command), `${command} should be gone`).toBe(false)
+    }
+    expect(removed.out, removed.out).toMatch(
+      FOREIGN_COMMAND ? /an rsct-mcp is still on PATH: / : /Removed global rsct-mcp\./,
+    )
+  }, 900_000)
+})
+
+describe.skipIf(!BASH)('uninstall-framework.sh treats the copy as part of the companion (#74)', () => {
+  const reach = { RSCT_SKIP_MCP: undefined as string | undefined }
+  const asked = { ...reach, RSCT_ASSUME_YES: undefined as string | undefined }
+  const copyIntact = (home: string) => existsSync(join(mcpHome(home), 'dist', 'index.js'))
+
+  it('keeping the companion keeps its folder and removes every other entry', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const r = runScript(UNINSTALL, home, { env: asked, path: newStubBin(), input: 'y\nn\n' })
+    expect(r.ok, r.out).toBe(true)
+    expect(readdirSync(rsctHome(home))).toEqual(['mcp-server'])
+    expect(copyIntact(home)).toBe(true)
+    expect(r.out, r.out).toMatch(/except \S*\.rsct\/mcp-server — the rsct-mcp companion's files/)
+    expect(r.out, r.out).toMatch(/Kept: \S*\.rsct\/mcp-server/)
+    expect(r.out, r.out).toMatch(/To remove both later, run this uninstaller again/)
+    expect(r.out).not.toMatch(/STUB-NPM uninstall/)
+  }, 60_000)
+
+  it('removes the framework files even when globbing is switched off in the environment', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const r = runScript(UNINSTALL, home, { env: { SHELLOPTS: 'noglob' }, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(readdirSync(rsctHome(home))).toEqual(['mcp-server'])
+  }, 60_000)
+
+  it.skipIf(FOREIGN_COMMAND !== '')('asks about a copy that no command on PATH points at', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const r = runScript(UNINSTALL, home, { env: reach, path: newStubBin({ withoutCommand: true }) })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/rsct-mcp files at \S*\.rsct\/mcp-server \(no rsct-mcp command on PATH\)/)
+    expect(r.out, r.out).toMatch(/STUB-NPM uninstall -g rsct-mcp/)
+    expect(present(rsctHome(home)), '~/.rsct should be gone').toBe(false)
+    expect(r.out, r.out).toMatch(/Removed global rsct-mcp\./)
+  }, 60_000)
+
+  it('removing the companion removes the copy and names a command that is still on PATH', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const stub = newStubBin()
+    const r = runScript(UNINSTALL, home, { env: reach, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/STUB-NPM uninstall -g rsct-mcp/)
+    expect(present(rsctHome(home)), '~/.rsct should be gone').toBe(false)
+    expect(r.out, r.out).toMatch(/Removed: \S*\.rsct\/mcp-server/)
+    expect(r.out, r.out).toMatch(/an rsct-mcp is still on PATH: \S*rsct-mcp/)
+    expect(r.out).not.toMatch(/Removed global rsct-mcp\./)
+    expect(stubMcpLog(stub), 'the uninstaller must never start the command').toBe('')
+  }, 60_000)
+
+  it('--skip-mcp leaves the copy where it is', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const r = runScript(UNINSTALL, home, { path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(readdirSync(rsctHome(home))).toEqual(['mcp-server'])
+    expect(copyIntact(home)).toBe(true)
+    expect(r.out, r.out).toMatch(/mcp-server\/ left untouched; --skip-mcp set/)
+    expect(r.out).not.toMatch(/STUB-NPM/)
+  }, 60_000)
+
+  it('a failing npm uninstall keeps the copy and says to run the uninstaller again', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const r = runScript(UNINSTALL, home, { env: { ...reach, STUB_NPM_FAIL: '1' }, path: newStubBin() })
+    expect(r.ok, r.out).toBe(true)
+    expect(copyIntact(home)).toBe(true)
+    expect(r.out, r.out).toMatch(/npm uninstall -g rsct-mcp failed/)
+    expect(r.out, r.out).toMatch(/\.rsct\/mcp-server was left in place\. After the retry, run this uninstaller again/)
+    expect(r.out).not.toMatch(/Removed: \S*\.rsct\/mcp-server/)
+  }, 60_000)
+
+  it('keeps the copy when the command on PATH still runs from it after npm reported success', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedCompanion(home)
+    const stub = newStubBin()
+    linkCommandToCopy(stub, home)
+    const r = runScript(UNINSTALL, home, { env: reach, path: stub })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/STUB-NPM uninstall -g rsct-mcp/)
+    expect(r.out, r.out).toMatch(/the rsct-mcp on PATH still runs from/)
+    expect(copyIntact(home)).toBe(true)
+    expect(r.out).not.toMatch(/Removed global rsct-mcp\./)
+  }, 60_000)
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a copy that cannot be removed is a warning, and the script still finishes',
+    () => {
+      const home = newSandbox()
+      seedCompanion(home)
+      chmodSync(rsctHome(home), 0o555)
+      try {
+        const r = runScript(UNINSTALL, home, { env: reach, path: newStubBin() })
+        expect(r.ok, r.out).toBe(true)
+        expect(r.out, r.out).toMatch(/Could not remove \S*\.rsct\/mcp-server/)
+        expect(r.out, r.out).toMatch(/Run this uninstaller again once nothing is using it/)
+        expect(r.out).not.toMatch(/Removed: \S*\.rsct\/mcp-server/)
+        expect(r.out, r.out).toMatch(/Done\. RSCT framework removed/)
+      } finally {
+        if (existsSync(rsctHome(home))) chmodSync(rsctHome(home), 0o755)
+      }
+    },
+    60_000,
+  )
+})
+
+describe('the companion is installed by the installer, not from the clone (#74)', () => {
+  const cloneInstall = (page: string) =>
+    readFileSync(join(ROOT, page), 'utf8')
+      .split('\n')
+      .map((line, index) => `${page}:${index + 1} ${line.trim()}`)
+      .filter((line) => /npm install -g \./.test(line))
+
+  it('package.json files are plain names that exist, as the copy step needs', () => {
+    const shipped = JSON.parse(readFileSync(join(ROOT, 'mcp-server', 'package.json'), 'utf8')).files as string[]
+    expect(shipped.length).toBeGreaterThan(0)
+    for (const entry of shipped) {
+      expect(entry, `"${entry}" is copied with cp -R and must be a plain name`).toMatch(/^[A-Za-z0-9._-]+$/)
+      expect(existsSync(join(ROOT, 'mcp-server', entry)), `${entry} must exist in mcp-server/`).toBe(true)
+    }
+  })
+
+  it('the package installs nothing and builds nothing when npm links it', () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'mcp-server', 'package.json'), 'utf8')) as Record<
+      string,
+      Record<string, string> | undefined
+    >
+    for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+      expect(pkg[field], `${field}: the copy has no node_modules`).toBeUndefined()
+    }
+    for (const script of ['prepare', 'preinstall', 'install', 'postinstall']) {
+      expect(pkg.scripts?.[script], `"${script}" would have to run in the copy, which has no src/ and no toolchain`).toBeUndefined()
+    }
+  })
+
+  it('no user page sends the reader to npm install -g . inside the clone', () => {
+    for (const page of ['docs/getting-started.md', 'docs/troubleshooting.md', 'mcp-server/README.md']) {
+      expect(cloneInstall(page), `${page} must point at scripts/install.sh instead`).toEqual([])
+    }
+    expect(cloneInstall('README.md'), 'only the contributor flow in README.md keeps the command').toHaveLength(1)
+  })
+
+  it('every npm install -g . the installer runs or prints carries --install-links=false', () => {
+    const lines = cloneInstall('scripts/install.sh')
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) expect(line, line).toMatch(/--install-links=false/)
+  })
 })
 
 describe('architectural boundary — rsct-mcp does not know the host config (#73)', () => {

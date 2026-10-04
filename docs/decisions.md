@@ -735,6 +735,59 @@ on a case-insensitive disk and not on a case-sensitive one (MEASURED for `'../..
 0 unresolved on NTFS, 1 on ext4), the divergence ADR-016 forbids, outside the root. The
 different-drive arm (`isAbsolute(rel)`) has no portable fixture and stays uncovered.
 
+### ADR-021 — The companion runs from a copy the installer owns, and the global command is a link to it (#74)
+**Status**: active
+**Tags**: install, npm, cross-os
+**Context**: `scripts/install.sh` ran `npm install -g .` inside the clone's `mcp-server/` and printed
+"✓ rsct-mcp installed globally". npm LINKS a folder spec (every version measured from 6.14.18 to
+11.1.0 except 9.0.0–9.4.1 — see "Measured facts"), so the global command was the clone: the branch
+checked out there was the enforcement binary of every project on the machine,
+moving or cleaning the clone broke it everywhere, and nothing on screen said so. With the clone on a
+network path (`//wsl.localhost/…`) npm for Windows left a link to `C:\wsl.localhost\…`, which does
+not exist, and exited 0.
+**Decision**: the installer copies `package.json` plus the entries of its `files` field into
+`~/.rsct/mcp-server` and runs `npm install -g . --install-links=false` from that copy. The global
+entry stays a link — to a folder the installer owns. The flag is explicit because a user config, or
+npm 9.0.0–9.4.1, would copy into npm's tree instead (AD-007).
+The copy is replaced by a swap: built in `mcp-server.new`, checked for `dist/index.js`, the live
+folder renamed to `mcp-server.old`, the new one renamed in, and the old one renamed back if that
+fails. MEASURED on a first prototype that wiped and then copied: a `files` entry that did not exist,
+a failing npm, or on Windows a native process sitting in the folder left a companion that had been
+working broken.
+Nothing is claimed without a check. `mcp_command_is_copy` proves by FILE IDENTITY that the
+`rsct-mcp` on PATH is the copy: `[ cmd -ef copy/dist/index.js ]` (POSIX — the command is a symlink
+chain ending there) or `[ <dir of cmd>/node_modules/rsct-mcp/dist/index.js -ef … ]` (Windows — the
+command is a shim beside npm's `node_modules`). A name that resolves proves nothing: inside WSL it
+is the Windows shim, and in the test suite it was the developer's own install. Only a command
+proven to be the copy is started, with `</dev/null`; the server exits 0 on EOF and writes nothing
+(measured in an empty cwd and HOME). Success prints one of three outcomes: it is the copy and
+starts; it is the copy and did not start; the command on PATH could not be confirmed as the copy —
+named, never run. The check proves "is the copy" and nothing else: behind a version manager's shim
+the command may well be the copy, so the message never says it is not.
+Failure prints only what two checks establish: whether the copy is this version (`cmp -s` of the
+clone's and the copy's `dist/index.js`) and whether the command on PATH runs from it. It names no
+cause it did not observe.
+The uninstaller keeps `~/.rsct/mcp-server` while the companion is kept (answer "n", `--skip-mcp`,
+npm missing or failing). On removal `npm uninstall -g rsct-mcp` runs FIRST — npm reads `bin` through
+the link to remove the command — and `rsct-mcp` is then resolved again: still the copy (another npm
+prefix) and the folder stays; otherwise the folder goes, and anything still on PATH is named instead
+of "Removed".
+**Consequences**: `git pull` no longer changes the running server; running the installer again
+does. A contributor who wants the command to follow a working tree links it on purpose and passes
+`--skip-mcp` afterwards (`CONTRIBUTING.md`). The package has no `dependencies` and no `prepare` or
+install script, so linking it downloads nothing and builds nothing — a test pins both, because the
+copy holds neither `node_modules` nor `src/`. `~/.rsct/VERSION-CODE` still records the incoming code
+version when the companion step is declined or skipped; the copy then stays at the previous version.
+A declined step says the installed server was left as it is; `--skip-mcp` says "framework files
+only". Limits, each repaired by running the
+installer again: an uninstaller older than this change deletes `~/.rsct` first, which on Windows
+leaves the three shims behind and, with the companion kept, a link to a deleted folder; `~/.rsct`
+deleted by hand leaves npm's link (Linux, invisible to the uninstaller) or the shims (Windows, named
+by it). `files` entries must be plain existing names, because they are copied with `cp -R` — a test
+pins it. The scripts are bash, not sh: measured with dash, the previous installer already died at
+`${BASH_SOURCE[0]}` and the previous uninstaller did not parse. macOS and a `sudo` prefix were not
+measured locally; one test drives a real npm on the CI matrix.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -781,6 +834,19 @@ in a comment or a string (`walk` occurs 113 times, `'walk through'` among them),
 through an alias or a re-export. MEASURED by mutation: an injected dead `walk` escaped, and a dead
 callee hid behind its dead caller. ADR-018 resolves references instead.
 
+### AD-007 — Do not copy the companion into npm's global tree
+`npm install -g . --install-links=true`, and `npm pack` + `npm install -g <tgz>`, both leave a real
+folder under npm's global `node_modules`. MEASURED on npm 10.9.2 (Linux) and 11.1.0 (Windows), in
+isolated prefixes: npm then resolves that package BY NAME against the registry. `npm update -g`
+exits 1 with `E404 rsct-mcp` and updates none of the machine's other globals; with a link it exits 0
+and they update. A copied local package whose name exists on the registry is REPLACED by the
+registry's on `npm update -g`, even as a downgrade (local 99.0.0 → registry 3.0.1, local files
+gone); a link is never replaced. The companion is not distributed through npm, so a registry package
+carrying its name would not be this project's — and the server that enforces the gates must never be
+replaceable that way. A temporary staging folder adds a second failure:
+an npm that ignores the flag (6.14.18, 7.24.2, 8.7.0) links to the stage, which is then deleted.
+ADR-021 keeps the link and moves its target.
+
 ---
 
 ## Measured facts worth not re-deriving
@@ -826,6 +892,31 @@ callee hid behind its dead caller. ADR-018 resolves references instead.
   to users only if the package is on that list; everything else is build- or test-time.
   Counting a package's name in the bundle text does not work — "nanoid" appears 13 times as
   a zod validator name.
+- **What `npm install -g .` does depends on the npm version, and the default flipped twice** (#74).
+  Link on 6.14.18, 8.7.0, 9.6.4, 10.0.0, 10.9.2 and 11.1.0; COPY on 9.0.0 and 9.4.1, where
+  `install-links` defaulted to `true`. With `--install-links=false` all eight link, without a
+  warning on the versions that predate the flag. Node 20.0.0 ships npm 9.6.4, so the copying
+  versions are below `engines`.
+- **`rm -rf <link>/` with a trailing slash empties the link's target** (#74). Measured on Git Bash
+  with a junction and on Linux with a symlink: the link survives and the target's files are gone.
+  Without the slash only the link is removed, and removing a folder that contains a link leaves the
+  target alone. No `rm -rf` or `mv` in the scripts may end in a slash.
+- **npm for Windows cannot install from a network path** (#74). With the current directory on
+  `//wsl.localhost/…`, `npm install -g .` exits 0 and leaves a link to `C:\wsl.localhost\…`; the
+  `--install-links=true` form gives `ENOENT`; the UNC path as the spec, and `npm pack`, give
+  `ERR_INVALID_URL`. `cp -R` to a local folder first works, which is what the installer's copy does.
+- **Inside WSL the Windows PATH comes along** (#74, #110). In a plain login shell `rsct-mcp`,
+  `claude` and `npm` resolved to the Windows shims under `/mnt/c/…` with nothing installed on the
+  Linux side, and `node` was not found.
+- **On Windows the npm shim picks its own version from the global prefix** (#74). With
+  `npm_config_prefix` pointing at an empty folder, `npm --version` printed the 10.9.2 bundled with
+  Node; without it, the 11.1.0 installed in the real prefix. A run that pins the prefix is a run on
+  the bundled npm, whatever `npm --version` says outside it.
+- **Inside a vitest worker on Windows, npm's own variables arrive in UPPER case** (#74). Started by
+  `npm test` or `npx`, the worker's `process.env` holds `NPM_CONFIG_PREFIX`. An override spelled
+  `npm_config_prefix` is then a second key, and the child process received the inherited one: the
+  installer tests' sandbox pin had never constrained a real npm. A pre-flight `npm root -g` caught
+  it before anything was installed; `overlayEnv` now drops every spelling of a key before setting it.
 
 ---
 

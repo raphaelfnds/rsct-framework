@@ -30,14 +30,19 @@ The companion server isn't registered or connected.
    Use `--scope project` inside the project instead, or let `/rsct-setup` do it.
    Then **restart**.
 4. Confirm the binary is on PATH: `which rsct-mcp` (macOS/Linux/Git Bash) or
-   `where rsct-mcp` (Windows). If it prints nothing, re-run the installer (or
-   `cd mcp-server && npm install -g .`).
+   `where rsct-mcp` (Windows). If it prints nothing, re-run the installer
+   (`bash scripts/install.sh`, answer **Y** to the companion). It says whether the
+   `rsct-mcp` on PATH is the copy it placed in `~/.rsct/mcp-server` and whether it
+   started.
 5. Confirm it boots: `rsct-mcp < /dev/null` (Git Bash/macOS/Linux) or
    `cmd /c "rsct-mcp < NUL"` (PowerShell) should print a one-line ready log on
    stderr and exit cleanly.
 
-If the tools were there before and vanished, the global binary may be pointing at
-a clone without its dependencies built — re-install/re-link the global `rsct-mcp`.
+If the tools were there before and vanished, the global `rsct-mcp` command may
+still be linked to a clone that has since moved or switched branch (how the
+companion was installed before it got its own folder), or `~/.rsct/mcp-server` may
+have been removed by hand. Re-run the installer: it puts a fresh copy there and
+links the command to it.
 
 ## "This project was set up with RSCT vX; the installed rsct-mcp is vY"
 
@@ -80,7 +85,7 @@ If it survives that:
   `edit-scope-guard.js` and a small `package.json`. If they are missing,
   `/rsct-setup` could not find the `rsct-mcp` package to copy them from — it
   looks in `npm root -g`, so a server registered by absolute path or via `npx`
-  will not be found. Install it globally (`cd mcp-server && npm install -g .`)
+  will not be found. Install it with the installer (`bash scripts/install.sh`)
   and re-run.
 - If the message is about registration, `.claude/settings.json` should hold a
   `hooks.SessionStart` entry whose command contains

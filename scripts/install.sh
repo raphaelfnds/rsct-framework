@@ -109,7 +109,14 @@ read_or_default() {
 
 # --- Compute target paths ---
 RSCT_HOME="$HOME/.rsct"
+MCP_HOME="$RSCT_HOME/mcp-server"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+
+mcp_command_is_copy() {
+  [ -n "$1" ] || return 1
+  if [ "$1" -ef "$MCP_HOME/dist/index.js" ]; then return 0; fi
+  [ "$(dirname "$1")/node_modules/rsct-mcp/dist/index.js" -ef "$MCP_HOME/dist/index.js" ]
+}
 
 # --- Resolve the Claude Code host config the way the CLI itself does (#73) ---
 # `claude mcp add/remove` is a Node program: it reads CLAUDE_CONFIG_DIR when
@@ -457,37 +464,59 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
       read_or_default mcp_confirm "Install rsct-mcp now? [Y/n] " "y"
       case "$mcp_confirm" in
         n|N|no|NO)
-          echo "Skipped. To install later:"
-          echo "  cd $SOURCE_DIR/mcp-server && npm install -g ."
-          echo "  (prebuilt; prepend 'npm install && npm run build &&' only when building from source)"
-          echo "  Then in a project: claude mcp add rsct rsct-mcp --scope project"
+          echo "Skipped. Any rsct-mcp already on this machine was left as it is."
+          echo "  To install or update it later, run this installer again and answer Y."
           ;;
         *)
           echo ""
           echo "Installing rsct-mcp ($MCP_NODE_DESC)..."
-          # Run in a sub-shell so a failure here doesn't bring down the
-          # framework install (which is already on disk and successful).
-          #
-          # CAP-57: prebuilt-aware install. When the shipped `dist/` is present
-          # (the normal case for a release clone) install ONLY the runtime deps
-          # globally — no full `npm install`, so the build toolchain (tsup/esbuild)
-          # never lands on the user machine and `npm audit` stays clean. The
-          # source-build fallback (no dist/) reproduces the old flow verbatim for
-          # dev checkouts. `npm install -g .` honors package.json "files":["dist"],
-          # so the prebuilt artifact is packed regardless of .gitignore, and there
-          # is no `prepare` script, so the global install never triggers a build.
           if (
             cd "$SOURCE_DIR/mcp-server" || exit 1
-            if [ -f dist/index.js ]; then
-              echo "  Using prebuilt dist/ — installing runtime deps only (no build toolchain)."
-              npm install -g .
-            else
+            if [ ! -f dist/index.js ]; then
               echo "  No prebuilt dist/ found — building from source (installs full toolchain)."
-              npm install && npm run build && npm install -g .
+              npm install && npm run build || exit 1
             fi
+            rm -rf "$MCP_HOME.new" "$MCP_HOME.old" || exit 1
+            mkdir -p "$MCP_HOME.new" || exit 1
+            while IFS= read -r entry; do
+              [ -n "$entry" ] || continue
+              cp -R "$entry" "$MCP_HOME.new"/ || exit 1
+            done < <(node -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));["package.json"].concat(p.files||[]).forEach(function(f){console.log(f)})' | tr -d '\r')
+            [ -f "$MCP_HOME.new/dist/index.js" ] || exit 1
+            if [ -e "$MCP_HOME" ] || [ -L "$MCP_HOME" ]; then
+              mv "$MCP_HOME" "$MCP_HOME.old" || exit 1
+            fi
+            if ! mv "$MCP_HOME.new" "$MCP_HOME"; then
+              if [ -e "$MCP_HOME.old" ] || [ -L "$MCP_HOME.old" ]; then
+                mv "$MCP_HOME.old" "$MCP_HOME"
+              fi
+              exit 1
+            fi
+            rm -rf "$MCP_HOME.old" || true
+            cd "$MCP_HOME" || exit 1
+            npm install -g . --install-links=false
           ); then
             echo ""
-            echo "✓ rsct-mcp installed globally."
+            MCP_CMD=$(command -v rsct-mcp 2>/dev/null || true)
+            if mcp_command_is_copy "$MCP_CMD"; then
+              if "$MCP_CMD" </dev/null >/dev/null 2>&1; then
+                echo "✓ rsct-mcp installed. The command runs from $MCP_HOME —"
+                echo "  a copy of this version, not this clone. Switching branches, moving or"
+                echo "  deleting the clone does not change it. To update: git pull, then run this"
+                echo "  installer again. Keep the clone (or clone again) to uninstall."
+              else
+                echo "⚠ rsct-mcp was installed at $MCP_HOME but did not start."
+                echo "  Claude Code will not get the rsct__* tools until it does."
+                echo "  Try it by hand: rsct-mcp </dev/null   (see docs/troubleshooting.md)"
+              fi
+            else
+              echo "⚠ rsct-mcp was copied to $MCP_HOME and npm linked it, but the"
+              echo "  'rsct-mcp' on your PATH could not be confirmed to run from that copy:"
+              echo "    ${MCP_CMD:-not found}"
+              echo "  Claude Code starts whatever 'rsct-mcp' resolves to. If that is a version"
+              echo "  manager's shim, try it by hand: rsct-mcp </dev/null. Otherwise put npm's global"
+              echo "  bin directory ahead of it on PATH and run this installer again."
+            fi
 
             # --- Ask the dev where to register the MCP server ---
             # #73: BINARY choice. Until now the menu offered three options and
@@ -879,22 +908,38 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             echo ""
             echo "⚠ rsct-mcp install failed."
             echo "  Framework is OK and installed at $RSCT_HOME."
-            echo "  Common causes:"
-            echo "    - Linux: global npm install needs sudo or a user-level prefix (nvm, n)."
-            echo "    - Slow network: the npm install timed out."
-            echo "    - Missing prebuilt dist/ AND no build toolchain available."
-            echo "  Retry (prebuilt):"
-            echo "    cd $SOURCE_DIR/mcp-server && npm install -g ."
-            echo "  Or build from source:"
-            echo "    cd $SOURCE_DIR/mcp-server && npm install && npm run build && npm install -g ."
+            MCP_CMD=$(command -v rsct-mcp 2>/dev/null || true)
+            if cmp -s "$SOURCE_DIR/mcp-server/dist/index.js" "$MCP_HOME/dist/index.js" 2>/dev/null; then
+              if mcp_command_is_copy "$MCP_CMD"; then
+                echo "  The copy in $MCP_HOME is this version, and the 'rsct-mcp'"
+                echo "  on your PATH runs from it, so the companion is in place. Run this"
+                echo "  installer again to reach the scope menu."
+              else
+                echo "  The copy in $MCP_HOME is this version, but the 'rsct-mcp'"
+                echo "  on your PATH could not be confirmed to run from it: ${MCP_CMD:-not found}"
+                echo "  On Linux a global npm install may need sudo or a user-level prefix (nvm, n)."
+                echo "  With sudo, then run this installer again:"
+                echo "    cd \"$MCP_HOME\" && sudo npm install -g . --install-links=false"
+              fi
+            else
+              if mcp_command_is_copy "$MCP_CMD"; then
+                echo "  Nothing was replaced: the 'rsct-mcp' on your PATH still runs from the copy"
+                echo "  that was already in $MCP_HOME."
+              else
+                echo "  No copy of this version was put in $MCP_HOME."
+              fi
+              echo "  Common causes:"
+              echo "    - $MCP_HOME is in use by another program."
+              echo "    - Missing prebuilt dist/ AND no build toolchain available."
+              echo "  Fix the cause and run this installer again."
+            fi
           fi
           ;;
       esac
       ;;
     no)
       echo "Skipping rsct-mcp install — $MCP_NODE_DESC"
-      echo "Install Node 20+ (and npm), then run from $SOURCE_DIR/mcp-server:"
-      echo "  npm install -g .   (prebuilt; or 'npm install && npm run build && npm install -g .' to build from source)"
+      echo "Install Node 20+ (and npm), then run this installer again."
       ;;
   esac
   echo ""
@@ -938,4 +983,4 @@ fi
 echo ""
 echo "To uninstall the framework from this machine (different from"
 echo "uninstalling RSCT from a project), run:"
-echo "  bash $SOURCE_DIR/scripts/uninstall-framework.sh"
+echo "  bash \"$SOURCE_DIR/scripts/uninstall-framework.sh\""
