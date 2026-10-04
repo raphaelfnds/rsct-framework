@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.12.3] - 2026-10-04
+
 ### Fixed
 
 - **The companion no longer runs from the clone (#74).** `scripts/install.sh` ran
