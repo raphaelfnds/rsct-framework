@@ -21,6 +21,7 @@ import {
   preserveAcrossAbandon,
   readContextStale,
   readPhaseState,
+  refuseUnreadableState,
   writePhaseState,
   PHASE_STATE_PRESERVED_ON_ABANDON,
   type PhaseState,
@@ -80,7 +81,7 @@ export interface PhaseAbandonInternal {
 export const phaseAbandonTool: Tool = {
   name: 'rsct_phase_abandon',
   description:
-    '§C-gated abandon — discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared, along with every plan- or spec-scoped token, budget and recorded decision; session markers (the §0 bootstrap timestamp, and the re-bootstrap flag if set) are PRESERVED — an abandon is not a re-load, so a set re-bootstrap flag keeps blocking managed edits until rsct_load_context runs. NOT for ending a phase cleanly — use rsct_phase_<phase>_complete for that.',
+    '§C-gated abandon — discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared, along with every plan- or spec-scoped token, budget and recorded decision; session markers (the §0 bootstrap timestamp, and the re-bootstrap flag if set) are PRESERVED — an abandon is not a re-load, so a set re-bootstrap flag keeps blocking managed edits until rsct_load_context runs. NOT for ending a phase cleanly — use rsct_phase_<phase>_complete for that. An unreadable .rsct/phase-state.json is refused before any dialog (status="state_write_failed"): nothing is abandoned and the file is left untouched.',
   inputSchema: {
     type: 'object',
     required: ['reason', 'dev_approval'],
@@ -115,6 +116,36 @@ export async function phaseAbandonHandler(
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
   const existing = readPhaseState(projectRoot)
+  const refusal = refuseUnreadableState(projectRoot, existing)
+  if (refusal && !refusal.ok && refusal.reason === 'unreadable_state') {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'phase_abandon.rejected',
+        tool: 'rsct_phase_abandon',
+        reject_kind: 'state_unreadable',
+        reason: refusal.error,
+        provided_reason: input.reason,
+      },
+      config?.audit,
+    )
+    const fields = auditFields(audit)
+    return {
+      status: 'state_write_failed',
+      channel: null,
+      reject_kind: null,
+      reason: refusal.error,
+      fabrication_signals: [],
+      abandoned_phase: null,
+      abandoned_spec_slug: null,
+      abandoned_verification_block_present: false,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`⚠ ${refusal.error} Nothing was abandoned.`],
+    }
+  }
   if (!existing.exists || !existing.state?.phase) {
     return {
       status: 'no_active_phase',

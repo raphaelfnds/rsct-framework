@@ -83,6 +83,10 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   A pre-commit hook that slips unreviewed code into the commit returns
   `committed_with_drift` and blocks further commits (`review_drift`) until a
   REVIEW covers those paths; a hook that only reformats is re-stamped.
+- That ledger and the drift record live in `.rsct/phase-state.json`. When the
+  file cannot be read, `rsct_request_commit` rejects **every** commit —
+  docs-only included — with `review_unreadable`, at both check points, until the
+  file is repaired or deleted. An empty or absent file is not unreadable.
 - **Dead code (JavaScript/TypeScript, 2.12.0).** In the same REVIEW, a symbol
   declared in a touched file that nothing in the project references — its own
   file included — rejects `dead_code_remaining`; `pending_dead_code` lists each
@@ -848,7 +852,9 @@ approval per commit. **Commit only** — push/merge keep per-action §C. Require
 active `plan_`/`spec_` at the project root and a **non-protected** branch. The
 token never bypasses INV-5/INV-6 (no overrides on the token path). The emitting
 approval is consumed (cannot re-mint). Auto-revokes on branch switch, plan
-completion/deletion, expiry, or exhaustion.
+completion/deletion, expiry, or exhaustion. An unreadable `phase-state.json` is
+refused (`status: 'state_write_failed'`): no token is minted, the approval is
+not consumed and the file is left untouched.
 
 - Input: `project_root?`, `dev_approval`, `ttl_minutes?` (5–480, default 120), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
 - Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `protected_branch` / `no_branch`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
@@ -857,7 +863,9 @@ completion/deletion, expiry, or exhaustion.
 
 Revokes the active plan token. **NOT §C-gated** — revoking only tightens
 security. After revoke, `rsct_request_commit` again requires a per-action
-`dev_approval`. No-op (`status: 'no_token'`) when none is active.
+`dev_approval`. No-op (`status: 'no_token'`) when none is active. An unreadable
+`phase-state.json` is refused (`status: 'state_write_failed'`, audited): nothing
+is revoked and the file is left untouched.
 
 - Input: `project_root?`, `reason?`
 - Output: `status: 'revoked' | 'no_token' | 'state_write_failed'`, `revoked_plan_slug`, `audit_path`, `audit_error`, `hints`.

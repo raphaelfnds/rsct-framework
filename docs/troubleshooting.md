@@ -136,6 +136,35 @@ If your project genuinely wants longer messages, set a number in `.rsct.json`:
 Note the value is a **number**, not a string — `"30"` in quotes is rejected by
 the config schema.
 
+## ".rsct/phase-state.json could not be read … nothing was overwritten"
+
+The file that holds the active phase, the REVIEW ledger, the plan token and the
+commit locks is not valid JSON — a hand edit, a merge-conflict marker, a
+truncated copy. RSCT refuses to replace it, and says so instead of answering as
+if the file were empty:
+
+- `rsct_request_commit` rejects **every** commit, docs-only included
+  (`review_unreadable`), before asking you to approve anything;
+- `rsct_plan_authorize` mints no token and does not spend the approval;
+- `rsct_plan_revoke`, `rsct_phase_abandon`, the `rsct_phase_*_start` tools and
+  the tier record of `rsct_classify_task` stop the same way. One exception:
+  `rsct_phase_code_start` runs its own gates first and answers with what they
+  find missing — a classify verdict, a plan, a completed verification — without
+  naming the file; the tool that answer points to names it.
+
+Nothing was committed and the state file was not touched (each refusal adds a
+line to `.rsct/audit.log`). Two ways out:
+
+1. **Repair the JSON.** Everything the file recorded comes back.
+2. **Delete the file.** RSCT starts from a clean state — and that drops what the
+   file recorded: the REVIEW ledger (staged code needs a REVIEW again), an active
+   plan token, the tier recorded by `rsct_classify_task`, and a `review_drift`
+   lock if one was armed. Before deleting, look at `.rsct/audit.log`: a recent
+   `review.commit_drift` line names code that landed without a review, and that
+   lock will not come back on its own — run a REVIEW over those paths.
+
+An empty file is not corruption; RSCT writes over it.
+
 ## ".claude/settings.json has changed since this session started"
 
 Not your doing, and RSCT is not blocking anything — it is telling you about a

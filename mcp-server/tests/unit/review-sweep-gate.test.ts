@@ -675,3 +675,69 @@ describe('rsct_phase_review_complete — a lock held by another session stops th
     expect(readJson('.rsct/phase-state.json').review).toBeUndefined()
   })
 })
+
+describe('rsct_request_commit — an unreadable phase-state stops every commit (#101)', () => {
+  const CORRUPT = '{ "spec_slug": "feat-sweep", "review_drift": {'
+  const statePath = (): string => join(root, '.rsct', 'phase-state.json')
+  const head = (): string => git(root, 'rev-parse', 'HEAD').trim()
+
+  function corruptState(): void {
+    mkdirSync(join(root, '.rsct'), { recursive: true })
+    writeFileSync(statePath(), CORRUPT)
+  }
+
+  function stageDocs(): void {
+    write('NOTES.md', 'docs only\n')
+    git(root, 'add', 'NOTES.md')
+  }
+
+  it('corrupting the state does not carry a docs commit past an armed drift lock', async () => {
+    write('src/a.ts', 'export const a = 1\n')
+    expect((await completeReview()).status).toBe('completed')
+    git(root, 'add', 'src/a.ts')
+    installHook('printf "export const a = 1 // hook\\n" > src/a.ts\ngit add src/a.ts\n')
+    expect((await commit()).status).toBe('committed_with_drift')
+    git(root, 'config', 'core.hooksPath', '.no-hooks')
+    stageDocs()
+    expect((await commit()).reject_kind).toBe('review_drift')
+
+    corruptState()
+    const before = head()
+    const out = await commit()
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('review_unreadable')
+    expect(head()).toBe(before)
+  })
+
+  it('a state corrupted while the approval dialog is open stops the commit at the second check', async () => {
+    stageDocs()
+    const before = head()
+    const out = await requestCommitHandler(
+      { project_root: root, message: 'docs: notes', dev_approval: approval('commit:feat/sweep:sweep') },
+      {
+        promptFn: async () => {
+          corruptState()
+          return { response: 'yes', channel: 'windows' }
+        },
+      },
+    )
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('review_unreadable')
+    expect(head()).toBe(before)
+    const rejected = auditEvents().filter((e) => e.event === 'request_commit.rejected')
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]?.stage).toBe('before_commit')
+  })
+
+  it('a hook that slips code in cannot make the commit replace the unreadable file', async () => {
+    corruptState()
+    stageDocs()
+    installHook('mkdir -p src\nprintf "export const gen = 1 // hook\\n" > src/gen.ts\ngit add src/gen.ts\n')
+    const before = head()
+    const out = await commit()
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('review_unreadable')
+    expect(head()).toBe(before)
+    expect(readFileSync(statePath(), 'utf8')).toBe(CORRUPT)
+  })
+})

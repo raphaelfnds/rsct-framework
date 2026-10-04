@@ -111,7 +111,10 @@ function explainEligibility(eligible: boolean, reasons: string[]): string {
   // described in the same breath as a fresh install, so it is answered FIRST.
   const faults = reasons.filter((r) => r !== 'audit_history_absent')
   if (faults.length > 0) {
-    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. Commits still work; they go through the per-action §C path.`
+    const commits = faults.includes('phase_state_corrupt')
+      ? 'rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted.'
+      : 'Commits still work; they go through the per-action §C path.'
+    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. ${commits}`
   }
   if (reasons.includes('audit_history_absent')) {
     return 'Free commits are closed because this project has no audit history yet — expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action §C path instead.'
