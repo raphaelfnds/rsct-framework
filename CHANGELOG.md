@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-10-04
+
 ### Fixed
 
 - **Four tools no longer answer over an unreadable `phase-state.json` (#101).** MEASURED on a file
