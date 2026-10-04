@@ -33,6 +33,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   on an import that leaves the project root are now pinned, each by a test proven with the mutation
   that used to survive.
 
+### Security
+
+- **`fast-uri` 3.1.7 → 3.1.8** — GHSA-hrr3-gc8f-f4qj (moderate): inconsistent host case
+  normalization via percent-encoded octets. This package is **bundled** into the tracked `dist/`,
+  so the lockfile change alone would have left the old code in the shipped artifact. The bundle is
+  rebuilt, and the rebuild is confined to `require_fast_uri`: 2 hunks, no other module touched.
+  GitHub listed no alert for it yet; `npm audit` did.
+- **`ip-address` 10.4.0 → 10.7.2** (#107) — the one open Dependabot alert (moderate). Not bundled,
+  so it never shipped.
+
+`npm audit` reports **0 vulnerabilities**.
+
 ## [2.12.1] - 2026-09-24
 
 ### Fixed
