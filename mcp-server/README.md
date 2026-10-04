@@ -190,16 +190,32 @@ cross-platform (Windows / macOS / Linux)**
 
 ---
 
-## Install (local, from source)
+## Install
 
 Requirements: Node 20+, npm 10+.
+
+From the repository root, run the installer:
+
+```bash
+bash scripts/install.sh
+```
+
+It copies the prebuilt package (`package.json` plus what its `files` field lists)
+into `~/.rsct/mcp-server`, links the global `rsct-mcp` command to that copy, and
+then checks that the `rsct-mcp` on PATH is that copy and starts. The clone is not
+what runs: switching branches, moving or deleting it changes nothing until the
+installer runs again.
+
+Changed `src/`? Build first, then run the installer:
 
 ```bash
 cd mcp-server
 npm install
 npm run build
-npm install -g .   # registers `rsct-mcp` binary on PATH
 ```
+
+To run a working tree as the machine's `rsct-mcp` on purpose — a link to the
+clone — see [CONTRIBUTING.md](../CONTRIBUTING.md#running-your-working-tree-as-the-machines-rsct-mcp).
 
 Verify the binary boots cleanly:
 
@@ -208,7 +224,7 @@ Verify the binary boots cleanly:
 node dist/index.js < /dev/null
 # Windows PowerShell (PowerShell does not accept `<` as stdin redirect):
 #   cmd /c "node dist\index.js < NUL"
-# OR via the global binary (after npm install -g .):
+# OR via the global binary (after the installer ran):
 #   rsct-mcp  # then Ctrl+C after the ready log appears
 ```
 
@@ -1161,7 +1177,7 @@ build toolchain) and are mode `100755` — a new bundle needs
 ## M2 validation guide
 
 Dev-owned checklist required to clear M2 and start M3. Runs after the
-companion install (`npm run build && npm install -g .`) and after
+companion install (`bash scripts/install.sh`) and after
 `/rsct-setup` re-runs to install the SessionStart hook in the project.
 
 > Use the rsct-framework repo itself OR a copy of the M1 validation test

@@ -24,13 +24,14 @@ indevidamente autorizações concedidas para tarefas anteriores
 (comportamentos como "já tive OK para commit há 5 minutos, vou commitar
 de novo agora", ou "vou pular o plano porque é só um ajuste pequeno").
 
-## Portabilidade cross-OS (Windows / Linux / macOS)
+## Portabilidade cross-OS (Windows / Linux / macOS / WSL)
 
 **Toda alteração no projeto — prompts bash, scripts, código do
 `rsct-mcp`, templates — deve funcionar sem regressão nos três
 sistemas operacionais alvo: Windows (Git Bash / MSYS2), Linux
 (qualquer distro com GNU coreutils) e macOS (BSD coreutils, sem
-GNU pré-instalado).**
+GNU pré-instalado). O WSL é o quarto ambiente — ver a subseção
+"WSL" abaixo.**
 
 Não é aceitável "funciona no meu Windows" como prova de pronto. As
 diferenças que historicamente quebraram o projeto:
@@ -63,12 +64,35 @@ comando "funciona" mas devolve resultado vazio.
 4. **Para `\b` em `node -e`**, sempre `String.fromCharCode(92)` para
    construir backslashes em vez de literal `"\\"` (MED-16 / CAP-20).
 5. **Antes do ship**, mentalmente (ou via smoke test em sandbox)
-   verifique cada um dos três OS — especialmente os patterns que
-   acabaram de mudar.
+   verifique cada um dos três OS e as combinações de WSL —
+   especialmente os patterns que acabaram de mudar.
 
 Histórico de quebras cross-OS que motivaram esta regra:
 CAP-10/16 (CRLF), CAP-17 (sed delimiter BSD), CAP-18 (BRE `\|`),
 CAP-20 (escape level em `node -e`), CAP-21 (BRE `\|` Phase 1.8).
+
+### WSL (Windows Subsystem for Linux)
+
+Há três combinações, e toda medição deve dizer qual delas foi feita:
+
+1. tudo dentro do WSL (clone e scripts no disco do Linux);
+2. dentro do WSL com o clone no disco do Windows (`/mnt/c/...`);
+3. no Windows (Git Bash) com o clone dentro do WSL (`//wsl.localhost/...`).
+
+**Hoje o instalador só alcança a 3.** `scripts/install.sh` e
+`scripts/uninstall-framework.sh` se recusam a rodar dentro do WSL — trava
+proposital, porque o Claude Code do Windows não lê `/home/<user>/.rsct/`.
+O caso do Claude Code que roda dentro do WSL é a issue #110. Medir um
+trecho dentro do WSL não prova que o produto funciona lá: rode o script
+inteiro antes de afirmar.
+
+Diferenças medidas (#74, 2026-10-04):
+
+| Fato medido | O que fazer |
+|---|---|
+| O npm do Windows não instala a partir de pasta de rede: com o diretório atual em `//wsl.localhost/...`, `npm install -g .` cria um link para `C:\wsl.localhost\...` (inexistente) e sai com código 0 | copiar para o disco local antes de instalar |
+| Dentro do WSL o PATH do Windows vem junto: `command -v rsct-mcp`, `claude` e `npm` respondem com os atalhos do Windows em `/mnt/c/...`, mesmo sem nada instalado no Linux | provar por identidade de arquivo (`[ a -ef b ]`) antes de confiar ou executar; nunca só pelo nome |
+| O WSL enxerga o `\r` de um arquivo do disco do Windows: `awk '{ print length($0) }'` sobre `abc\r\n` dá 4 no WSL e 3 no Git Bash | vale o anti-pattern #4 (normalizar com `tr -d '\r'`) |
 
 ## Acréscimo ao ciclo original — fase V (Verification)
 

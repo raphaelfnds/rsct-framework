@@ -37,6 +37,24 @@ npm test           # vitest (full suite)
 
 Requires **Node 20+**.
 
+### Running your working tree as the machine's `rsct-mcp`
+
+`scripts/install.sh` installs the companion as a **copy** in `~/.rsct/mcp-server` and
+links the global `rsct-mcp` command to that copy, so switching branches here does not
+change what your other projects run. When you do want every project on the machine to
+run your working tree, link it on purpose:
+
+```bash
+cd mcp-server
+npm run build
+npm install -g .   # npm 10+ LINKS a folder install: the command now follows this clone
+```
+
+From then on the branch you have checked out is the enforcement binary of every managed
+project on the machine, so keep the clone on a branch you trust. Pass `--skip-mcp` when
+you re-run the installer — without it the installer replaces the link with a fresh copy,
+which is also how you go back.
+
 ### Adding a tool: `src/catalog.ts` is what decides it exists
 
 A new tool module under `mcp-server/src/tools/` reaches the server **only** by being
@@ -100,7 +118,9 @@ literal `bash` before any of that logic runs.
 
 Every change to bash prompts, scripts, `rsct-mcp` code, or templates **must work
 without regression on Windows (Git Bash / MSYS2), Linux (GNU coreutils), and
-macOS (BSD coreutils)**. "Works on my Windows" is not proof of done.
+macOS (BSD coreutils)**. "Works on my Windows" is not proof of done. WSL is a
+fourth environment with its own measured differences — see the WSL subsection of
+[CLAUDE.md](CLAUDE.md); today the installer refuses to run inside it (#110).
 
 The most dangerous bugs here are **silent** — e.g. BSD `grep` on macOS treats a
 GNU-only `\|` alternation as a literal and returns empty with no error. The

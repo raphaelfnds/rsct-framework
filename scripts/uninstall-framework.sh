@@ -1,24 +1,7 @@
 #!/usr/bin/env bash
-# scripts/uninstall-framework.sh
-# Removes the RSCT framework from this machine.
-#
-# This is DIFFERENT from /rsct-uninstall (prompts/03-uninstall.md), which
-# removes RSCT from a project. This script removes the framework runtime
-# (~/.rsct/), its Claude Code slash commands, and (optionally) the global
-# rsct-mcp companion install from your machine.
-#
-# Projects already configured by RSCT are NOT affected by this script —
-# they keep their CLAUDE.md, .rsct.json, documentation/, and memory entries.
-# To remove RSCT from a project, run /rsct-uninstall (or its full path)
-# inside that project BEFORE running this script.
 
 set -e
 
-# --- Reject WSL on Windows ---
-# Symmetric to install.sh — if the dev is running this from WSL on a Windows
-# machine, the script would scrub ~/.rsct/ at /home/<user>/.rsct/ but the
-# actual install lives at C:/Users/<user>/.rsct/. The dev would think the
-# uninstall succeeded while the real artefacts stay on disk.
 if [ -f /proc/sys/kernel/osrelease ] && \
    grep -qiE "microsoft|wsl" /proc/sys/kernel/osrelease 2>/dev/null; then
   echo "════════════════════════════════════════════════════════"
@@ -34,11 +17,6 @@ if [ -f /proc/sys/kernel/osrelease ] && \
   exit 1
 fi
 
-# --- Non-interactive mode (CI / provisioning / smoke tests) ---
-# Symmetric with install.sh. RSCT_ASSUME_YES=1 (or -y / --yes) answers every
-# prompt with its documented default. RSCT_SKIP_MCP=1 (or --skip-mcp) leaves the
-# global rsct-mcp install and any Claude Code user-scope registration untouched
-# (removes framework files only — no `npm uninstall -g` / `claude mcp remove`).
 ASSUME_YES="${RSCT_ASSUME_YES:-}"
 SKIP_MCP="${RSCT_SKIP_MCP:-}"
 for arg in "$@"; do
@@ -48,7 +26,6 @@ for arg in "$@"; do
   esac
 done
 
-# read_or_default <varname> <prompt> <default>
 read_or_default() {
   __rod_var="$1"; __rod_prompt="$2"; __rod_def="$3"
   if [ -n "$ASSUME_YES" ]; then
@@ -62,25 +39,36 @@ read_or_default() {
 }
 
 RSCT_HOME="$HOME/.rsct"
+MCP_HOME="$RSCT_HOME/mcp-server"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 
-# --- Detect what is present ---
+mcp_command_is_copy() {
+  [ -n "$1" ] || return 1
+  if [ "$1" -ef "$MCP_HOME/dist/index.js" ]; then return 0; fi
+  [ "$(dirname "$1")/node_modules/rsct-mcp/dist/index.js" -ef "$MCP_HOME/dist/index.js" ]
+}
+
 PRESENT_RSCT_HOME=""
 PRESENT_COMMANDS=()
 [ -d "$RSCT_HOME" ] && PRESENT_RSCT_HOME="yes"
-# plan-lifecycle-v2 Trilha 4: rsct-universe is the unified command; rsct-init-
-# universe / rsct-canonical-source are the removed legacy commands (kept in this
-# list so a machine that still has the old stubs gets them cleaned on uninstall).
 for cmd in rsct-setup rsct-universe rsct-init-universe rsct-canonical-source rsct-uninstall rsct-clean-code; do
   [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ] && PRESENT_COMMANDS+=("$cmd")
 done
 
-# Detect global rsct-mcp install (companion).
 PRESENT_RSCT_MCP=""
 RSCT_MCP_BIN=""
 if command -v rsct-mcp >/dev/null 2>&1; then
   RSCT_MCP_BIN=$(command -v rsct-mcp)
   PRESENT_RSCT_MCP="yes"
+fi
+PRESENT_MCP_COPY=""
+if [ -d "$MCP_HOME" ]; then
+  PRESENT_MCP_COPY="yes"
+fi
+if [ -n "$PRESENT_RSCT_MCP" ]; then
+  MCP_WHERE="global rsct-mcp at $RSCT_MCP_BIN"
+else
+  MCP_WHERE="rsct-mcp files at $MCP_HOME (no rsct-mcp command on PATH)"
 fi
 
 if [ -z "$PRESENT_RSCT_HOME" ] && [ ${#PRESENT_COMMANDS[@]} -eq 0 ] && [ -z "$PRESENT_RSCT_MCP" ]; then
@@ -88,11 +76,6 @@ if [ -z "$PRESENT_RSCT_HOME" ] && [ ${#PRESENT_COMMANDS[@]} -eq 0 ] && [ -z "$PR
   exit 0
 fi
 
-# --- Show plan ---
-# Symmetric with install.sh: report both the protocol (prompts/rules
-# release, from ~/.rsct/VERSION) and code (~/.rsct/VERSION-CODE) versions so
-# the dev sees exactly what is being removed. Both are RELEASE versions
-# (aligned from v1.0.0 on); neither is the `v=1.0.0` marker schema id.
 EXISTING_VERSION=""
 if [ -f "$RSCT_HOME/VERSION" ]; then
   EXISTING_VERSION=$(cat "$RSCT_HOME/VERSION" 2>/dev/null | head -1)
@@ -106,10 +89,6 @@ echo "════════════════════════�
 echo "RSCT Framework — Uninstall from machine"
 echo "════════════════════════════════════════════════════════"
 if [ -n "$PRESENT_RSCT_HOME" ]; then
-  # Build a compact version tag for the "Will remove" line. Possible shapes:
-  #   (protocol=1.0.0, code=0.7.0) — both files present (post-v0.7.0 install)
-  #   (v1.0.0)                     — only legacy VERSION file (pre-v0.7.0)
-  #   (no version metadata)        — directory exists but no version markers
   VERSION_TAG=""
   if [ -n "$EXISTING_VERSION" ] && [ -n "$EXISTING_CODE_VERSION" ]; then
     VERSION_TAG="(protocol=${EXISTING_VERSION}, code=${EXISTING_CODE_VERSION})"
@@ -119,17 +98,18 @@ if [ -n "$PRESENT_RSCT_HOME" ]; then
     VERSION_TAG="(no version metadata)"
   fi
   echo "Will remove: $RSCT_HOME  ${VERSION_TAG}"
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    echo "             except $MCP_HOME — the rsct-mcp companion's files"
+  fi
 fi
 for cmd in "${PRESENT_COMMANDS[@]}"; do
   echo "Will remove: $CLAUDE_COMMANDS_DIR/$cmd.md"
 done
-if [ -n "$PRESENT_RSCT_MCP" ]; then
-  # Mirror the actual companion-removal gate below ([ -z "$SKIP_MCP" ]): under
-  # --skip-mcp the script never asks, so don't claim it "will ask separately".
+if [ -n "$PRESENT_RSCT_MCP" ] || [ -n "$PRESENT_MCP_COPY" ]; then
   if [ -z "$SKIP_MCP" ]; then
-    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (will ask separately)"
+    echo "Detected:    $MCP_WHERE (will ask separately)"
   else
-    echo "Detected:    global rsct-mcp at $RSCT_MCP_BIN (left untouched; --skip-mcp set)"
+    echo "Detected:    $MCP_WHERE (left untouched; --skip-mcp set)"
   fi
 fi
 echo ""
@@ -145,63 +125,101 @@ case "$confirm" in
   *) echo "Cancelled."; exit 0 ;;
 esac
 
-# --- Execute framework removal ---
 if [ -n "$PRESENT_RSCT_HOME" ]; then
-  rm -rf "$RSCT_HOME"
-  echo "Removed: $RSCT_HOME"
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    set +f
+    for entry in "$RSCT_HOME"/* "$RSCT_HOME"/.[!.]* "$RSCT_HOME"/..?*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      [ "$entry" = "$MCP_HOME" ] && continue
+      rm -rf "$entry"
+    done
+    if [ -z "$SKIP_MCP" ]; then
+      echo "Removed: the framework files in $RSCT_HOME (mcp-server/ is decided in the companion step)"
+    else
+      echo "Removed: the framework files in $RSCT_HOME (mcp-server/ left untouched; --skip-mcp set)"
+    fi
+  else
+    rm -rf "$RSCT_HOME"
+    echo "Removed: $RSCT_HOME"
+  fi
 fi
 for cmd in "${PRESENT_COMMANDS[@]}"; do
   rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
   echo "Removed: $CLAUDE_COMMANDS_DIR/$cmd.md"
 done
 
-# --- Optional: uninstall global rsct-mcp ---
-# Asked separately because some devs may want to keep the MCP server
-# (e.g., for projects that already wire it via `.mcp.json`) even after
-# removing the framework files. Symmetric to install.sh's mcp prompt.
-if [ -n "$PRESENT_RSCT_MCP" ] && [ -z "$SKIP_MCP" ]; then
+if { [ -n "$PRESENT_RSCT_MCP" ] || [ -n "$PRESENT_MCP_COPY" ]; } && [ -z "$SKIP_MCP" ]; then
   echo ""
   echo "────────────────────────────────────────────────────────"
   echo "Companion: rsct-mcp"
   echo "────────────────────────────────────────────────────────"
-  echo "Detected global install at: $RSCT_MCP_BIN"
+  if [ -n "$PRESENT_RSCT_MCP" ]; then
+    echo "Detected global install at: $RSCT_MCP_BIN"
+  fi
+  if [ -n "$PRESENT_MCP_COPY" ]; then
+    echo "Companion files: $MCP_HOME"
+  fi
   echo "Projects with rsct registered in .mcp.json will stop seeing"
   echo "the rsct__* tools after this is removed."
   echo ""
   read_or_default mcp_confirm "Also remove the global rsct-mcp install? [Y/n] " "y"
   case "$mcp_confirm" in
     n|N|no|NO)
-      echo "Kept: $RSCT_MCP_BIN"
-      echo "To remove later: npm uninstall -g rsct-mcp"
+      if [ -n "$PRESENT_RSCT_MCP" ]; then
+        echo "Kept: $RSCT_MCP_BIN"
+      fi
+      if [ -n "$PRESENT_MCP_COPY" ]; then
+        echo "Kept: $MCP_HOME"
+        echo "To remove both later, run this uninstaller again."
+      else
+        echo "To remove later: npm uninstall -g rsct-mcp"
+      fi
       ;;
     *)
       if command -v npm >/dev/null 2>&1; then
         if npm uninstall -g rsct-mcp; then
-          echo "Removed global rsct-mcp."
+          MCP_LEFT=$(command -v rsct-mcp 2>/dev/null || true)
+          if mcp_command_is_copy "$MCP_LEFT"; then
+            echo "⚠ npm reported success, but the rsct-mcp on PATH still runs from"
+            echo "  $MCP_HOME: $MCP_LEFT"
+            echo "  It belongs to another npm prefix. The folder was left in place."
+          else
+            if [ -n "$PRESENT_MCP_COPY" ]; then
+              if rm -rf "${RSCT_HOME:?}/mcp-server"; then
+                rmdir "$RSCT_HOME" 2>/dev/null || true
+                echo "Removed: $MCP_HOME"
+              else
+                echo "⚠ Could not remove $MCP_HOME (in use?)."
+                echo "  Run this uninstaller again once nothing is using it."
+              fi
+            fi
+            if [ -n "$MCP_LEFT" ]; then
+              echo "⚠ npm reported success, but an rsct-mcp is still on PATH: $MCP_LEFT"
+              echo "  It was not recognised as the copy this framework installed. If it is a"
+              echo "  leftover, remove it by hand."
+            else
+              echo "Removed global rsct-mcp."
+            fi
+          fi
         else
           echo "⚠ npm uninstall -g rsct-mcp failed."
           echo "  Common cause on Linux: needs sudo for global npm dir."
           echo "  Retry: sudo npm uninstall -g rsct-mcp"
+          if [ -n "$PRESENT_MCP_COPY" ]; then
+            echo "  $MCP_HOME was left in place. After the retry, run this uninstaller again."
+          fi
         fi
       else
         echo "⚠ npm not on PATH — cannot run 'npm uninstall -g rsct-mcp'."
         echo "  Remove manually with whichever tool installed it (npm, pnpm, yarn)."
+        if [ -n "$PRESENT_MCP_COPY" ]; then
+          echo "  $MCP_HOME was left in place. Afterwards, run this uninstaller again."
+        fi
       fi
       ;;
   esac
 fi
 
-# --- Detect Claude Code MCP registration (user scope) and offer removal ---
-# Symmetric to install.sh's auto-register flow: if rsct was registered at
-# user scope (one-time per machine), offer to unregister with one command.
-# Project-scope registrations live inside each project's .mcp.json and are
-# documented under MANUAL STEPS below (cannot enumerate every project).
-#
-# Detection parses ~/.claude.json directly because `claude mcp list` in
-# non-TTY (pipe) mode includes project-scope .mcp.json entries — if the
-# dev has a project .mcp.json with rsct anywhere in cwd ancestry, the grep
-# would false-positive and the script would offer to remove something it
-# can't actually remove (user-scope unregister doesn't touch project files).
 USER_SCOPE_HAS_RSCT="no"
 if command -v claude >/dev/null 2>&1 && \
    [ -f "$HOME/.claude.json" ] && \
@@ -232,7 +250,7 @@ if [ "$USER_SCOPE_HAS_RSCT" = "yes" ] && [ -z "$SKIP_MCP" ]; then
       echo "To remove later: claude mcp remove rsct --scope user"
       ;;
     *)
-      if claude mcp remove rsct --scope user >/dev/null 2>&1; then
+      if claude mcp remove rsct --scope user </dev/null >/dev/null 2>&1; then
         echo "✓ Unregistered rsct from Claude Code (user scope)."
       else
         echo "⚠ 'claude mcp remove rsct --scope user' failed."

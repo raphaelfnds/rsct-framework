@@ -26,7 +26,10 @@ bash scripts/install.sh
 ```
 
 The installer copies the runtime to `~/.rsct/`, registers the four `rsct-*`
-slash commands, and asks where to register the `rsct-mcp` companion. The choice
+slash commands, copies the `rsct-mcp` companion into `~/.rsct/mcp-server` and
+links the global `rsct-mcp` command to that copy. The clone is needed again only
+to update (`git pull`, then run the installer again) or to uninstall. It then
+asks where to register the companion. The choice
 is binary: **[1]** solo developer (user scope, the simplest) or **[2]** team
 (project scope, a committable `.mcp.json`). Pick **[2]** if your repo shares a
 `.mcp.json` — a user-scope entry masks project scope on the whole machine. For
@@ -121,7 +124,8 @@ misbehaves, that's a bug worth filing.
    triggers a reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
-   the framework from the machine.
+   the framework from the machine. It asks about the companion separately: keep
+   it and `~/.rsct/mcp-server` stays.
 
 ## What RSCT does to a task
 
