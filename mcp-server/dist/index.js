@@ -44671,7 +44671,7 @@ var requestCommitInputSchema = external_exports.object({
 }).strict();
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file are unaffected. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
   inputSchema: {
     type: "object",
     properties: {
@@ -44792,7 +44792,12 @@ async function requestCommitHandler(rawInput, internal = {}) {
     };
   }
   const runSweepCheck = async () => {
-    const sweepState = readPhaseState(projectRoot).state;
+    const read = readPhaseState(projectRoot);
+    const refusal = refuseUnreadableState(projectRoot, read);
+    if (refusal && !refusal.ok && refusal.reason === "unreadable_state") {
+      return { ok: false, reject_kind: "review_unreadable", reason: `${refusal.error} No commit was made.`, paths: [] };
+    }
+    const sweepState = read.state;
     return checkStagedSweep({
       projectRoot,
       options: { sqlDialect: config2?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
@@ -46739,7 +46744,7 @@ var planAuthorizeInputSchema = external_exports.object({
 }).strict();
 var planAuthorizeTool = {
   name: "rsct_plan_authorize",
-  description: "T3 \xA7C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full \xA7C gate \u2014 schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY \u2014 push/merge keep per-action \xA7C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited.",
+  description: 'T3 \xA7C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full \xA7C gate \u2014 schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY \u2014 push/merge keep per-action \xA7C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status="state_write_failed"): no token is minted, the approval is not consumed and the file is left untouched.',
   inputSchema: {
     type: "object",
     required: ["dev_approval"],
@@ -46903,9 +46908,10 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
   const existing = readPhaseState(projectRoot);
   const baseState = existing.state ?? {};
   const newState = { ...baseState, plan_authorization: token };
-  const writeResult = writePhaseState(projectRoot, newState);
+  const writeResult = refuseUnreadableState(projectRoot, existing) ?? writePhaseState(projectRoot, newState);
   if (!writeResult.ok) {
-    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
+    const unreadable = writeResult.reason === "unreadable_state";
+    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : unreadable ? writeResult.error : `phase-state.json write failed: ${writeResult.error}`;
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -46932,7 +46938,10 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config2?.audit), `\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`]
+      hints: [
+        ...anchorHints(projectRoot, config2?.audit),
+        unreadable ? `\u26A0 token NOT minted \u2014 ${reason} dev_approval NOT consumed.` : `\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`
+      ]
     };
   }
   const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
@@ -46990,7 +46999,7 @@ var planRevokeInputSchema = external_exports.object({
 }).strict();
 var planRevokeTool = {
   name: "rsct_plan_revoke",
-  description: 'T3: revoke the active plan-scoped batch token (minted by rsct_plan_authorize). NOT \xA7C-gated \u2014 revoking only TIGHTENS security, so no dev_approval is needed. After revoke, rsct_request_commit again requires a per-action dev_approval. The token also auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion, and rsct_phase_abandon clears it too. No-op (status="no_token") when no token is present.',
+  description: 'T3: revoke the active plan-scoped batch token (minted by rsct_plan_authorize). NOT \xA7C-gated \u2014 revoking only TIGHTENS security, so no dev_approval is needed. After revoke, rsct_request_commit again requires a per-action dev_approval. The token also auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion, and rsct_phase_abandon clears it too. No-op (status="no_token") when no token is present. An unreadable .rsct/phase-state.json is refused (status="state_write_failed"): nothing is revoked and the file is left untouched.',
   inputSchema: {
     type: "object",
     properties: {
@@ -47014,6 +47023,25 @@ async function planRevokeHandler(rawInput, internal = {}) {
   const now = internal.now ?? /* @__PURE__ */ new Date();
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal && !refusal.ok && refusal.reason === "unreadable_state") {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_revoke.state_write_failed",
+        tool: "rsct_plan_revoke",
+        reason: refusal.error,
+        plan_slug: null
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      revoked_plan_slug: null,
+      ...auditFields(audit2),
+      hints: [`\u26A0 ${refusal.error} No token was revoked.`]
+    };
+  }
   const token = readToken(existing.state);
   if (!token) {
     return {
@@ -51319,7 +51347,7 @@ var phaseAbandonInputSchema = external_exports.object({
 }).strict();
 var phaseAbandonTool = {
   name: "rsct_phase_abandon",
-  description: '\xA7C-gated abandon \u2014 discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared, along with every plan- or spec-scoped token, budget and recorded decision; session markers (the \xA70 bootstrap timestamp, and the re-bootstrap flag if set) are PRESERVED \u2014 an abandon is not a re-load, so a set re-bootstrap flag keeps blocking managed edits until rsct_load_context runs. NOT for ending a phase cleanly \u2014 use rsct_phase_<phase>_complete for that.',
+  description: '\xA7C-gated abandon \u2014 discards the active phase (and any verification sub-block) WITHOUT advancing the RSCT cycle. Use when a phase was started against the wrong spec_ref, the task pivoted, or the spec was rejected after research. Requires dev_approval with action_scope starting with "phase_abandon:" and a reason (min 10 chars). The reason lands in the audit log so future readers know why work was discarded. Spec_slug is also cleared, along with every plan- or spec-scoped token, budget and recorded decision; session markers (the \xA70 bootstrap timestamp, and the re-bootstrap flag if set) are PRESERVED \u2014 an abandon is not a re-load, so a set re-bootstrap flag keeps blocking managed edits until rsct_load_context runs. NOT for ending a phase cleanly \u2014 use rsct_phase_<phase>_complete for that. An unreadable .rsct/phase-state.json is refused before any dialog (status="state_write_failed"): nothing is abandoned and the file is left untouched.',
   inputSchema: {
     type: "object",
     required: ["reason", "dev_approval"],
@@ -51348,6 +51376,36 @@ async function phaseAbandonHandler(rawInput, internal = {}) {
   const appendAudit = internal.auditWriter ?? appendAuditEntry;
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
   const existing = readPhaseState(projectRoot);
+  const refusal = refuseUnreadableState(projectRoot, existing);
+  if (refusal && !refusal.ok && refusal.reason === "unreadable_state") {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: "phase_abandon.rejected",
+        tool: "rsct_phase_abandon",
+        reject_kind: "state_unreadable",
+        reason: refusal.error,
+        provided_reason: input.reason
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "state_write_failed",
+      channel: null,
+      reject_kind: null,
+      reason: refusal.error,
+      fabrication_signals: [],
+      abandoned_phase: null,
+      abandoned_spec_slug: null,
+      abandoned_verification_block_present: false,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`\u26A0 ${refusal.error} Nothing was abandoned.`]
+    };
+  }
   if (!existing.exists || !existing.state?.phase) {
     return {
       status: "no_active_phase",
@@ -51441,10 +51499,6 @@ This discards the phase without advancing the RSCT cycle.`
       reason: input.reason,
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
-      // #53: what actually survived on disk, so a forensic reader can tell a
-      // preserved session marker from a key the allowlist stopped carrying.
-      // Empty on a failed write: nothing was replaced, so nothing was preserved
-      // BY this call — the whole prior state is still there.
       preserved_keys: writeResult.ok ? preservedKeys : []
     },
     config2?.audit
@@ -52918,12 +52972,10 @@ function explainEligibility(eligible, reasons) {
   }
   const faults = reasons.filter((r) => r !== "audit_history_absent");
   if (faults.length > 0) {
-    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. Commits still work; they go through the per-action \xA7C path.`;
+    const commits = faults.includes("phase_state_corrupt") ? "rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted." : "Commits still work; they go through the per-action \xA7C path.";
+    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. ${commits}`;
   }
-  if (reasons.includes("audit_history_absent")) {
-    return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
-  }
-  return "Free commits are closed; commits go through the per-action \xA7C path instead. This withholds a convenience, it does not block any work.";
+  return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
 }
 var auditTool = {
   name: "rsct_audit",

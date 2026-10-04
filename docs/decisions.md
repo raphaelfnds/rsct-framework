@@ -403,7 +403,7 @@ U+2029 outright. Both ends fail closed.
 scope glob relied on the wide match now sees `out_of_scope` — the stricter direction.
 
 ### ADR-016 — The walk resolves NodeNext specifiers, case-exactly, as a last resort (#77, 2.11.2)
-**Status**: active
+**Status**: active — the `.mjs`/`.cjs` gap named in the Decision was closed in 2.12.0 (#101 Part A, which added `.mts`/`.cts` and the mapping); candidates outside the project root are ADR-020
 **Tags**: v-phase, blast-radius, cross-os
 **Context**: under `"module": "NodeNext"` TypeScript source imports `'./x.js'` for a file stored as
 `x.ts`. The walk probed `target + ext` only, so the specifier resolved to nothing. MEASURED on this
@@ -428,7 +428,7 @@ hint) and failed on a case-sensitive filesystem (importer missing, hint fired) �
 this ADR forbids, one level up.
 
 ### ADR-017 — A phase-state writer refuses an unreadable file, and the tier ratchet survives an abandon (#77, 2.11.2)
-**Status**: active
+**Status**: active — the four tools named below as "still unguarded" now refuse a file that is unreadable when the call starts (ADR-019, #101)
 **Tags**: phase-state, gates
 **Context**: `readPhaseState` reports `{exists:true, state:null, parse_error}` on a corrupt file
 (`phase-scope.ts:317-324`), and four writers started from `{}` regardless, replacing whatever the
@@ -667,6 +667,73 @@ alive; so does anything a JSX pragma names.
 a commit outside `rsct_request_commit` is not checked (#91); dead code in an untouched file; every
 language other than JavaScript/TypeScript is uncovered — and said so in a hint, including when an
 export is reported dead in a repository that holds files in other languages.
+
+### ADR-019 — Authorize, revoke, abandon and commit refuse an unreadable phase-state, and no commit is made on one (#101)
+**Status**: active
+**Tags**: phase-state, gates, commit-gate
+**Context**: ADR-017 named four tools as still unguarded. MEASURED before this change, by driving
+the real handlers on a file cut mid-object: only two of the four wrote. `rsct_plan_authorize`
+replaced the file with `{ plan_authorization }`; `rsct_request_commit` replaced it with
+`{ review_drift }` when a pre-commit hook slipped code into a docs-only commit. `rsct_plan_revoke`
+and `rsct_phase_abandon` wrote nothing and answered `no_token` and `no_active_phase` ("the state is
+already clean"). And one consequence nobody had listed: `rsct_request_commit` read `review_drift`
+from a `null` state, so a docs-only commit with a `dev_approval` LANDED past an armed drift lock
+(control, same repository, readable file: rejected, `review_drift`).
+**Decision**: each of the four refuses a file that is unreadable when the call starts, leaves it
+byte-identical and says so, reusing `refuseUnreadableState`. Authorize refuses through its
+`state_write_failed` branch, the approval unconsumed. Revoke and abandon answer
+`state_write_failed` — abandon before any dialog — and each writes an audit line, because every
+other `state_write_failed` answer does and a refused revoke leaves a token sitting in the file.
+The commit gate's sweep check returns `review_unreadable` at both of its check points, so no commit
+is made, docs-only included, until the file is repaired or deleted. `review_unreadable` was reused
+instead of a new kind: it already means the REVIEW gate could not read what it needs, nothing
+branches on it, and the ledger and the drift lock are what the file holds. `rsct_audit` stops
+saying "Commits still work" when the fault is `phase_state_corrupt`. An absent, empty or
+whitespace-only file stays what ADR-017 says it is: not corruption.
+**Consequences**: stricter — a commit that used to land on a corrupt state is refused. Before any
+new test existed, a full-suite run with the guards applied gave the same totals as the run without
+them (2538 passed, 2 skipped), so no existing test relied on the old answers. The two new audit
+lines are written by calls that pass no gate, like the refused starts of ADR-017; they give the
+audit-history signal of #80 nothing those did not already give it.
+**Left as they are, named rather than implied**: (1) DELETING the file still drops the drift lock
+and the tier ratchet, and the refusal text itself recommends deleting — that is #89; this change
+closes the silent route, not that one. (2) The post-commit writes of `rsct_request_commit` are
+unguarded. They can only meet an unreadable file that was corrupted after the second check, and
+MEASURED with a hook that corrupts it mid-commit the sweep write replaces it with
+`{ review_sweep }` (hook that only reformats) or `{ review_drift }` (hook that slips code in): the
+drift lock survives, `last_classify`, `context_stale` and every other key are reset, and the
+response does not say so. Refusing that write would leave a landed drift unrecorded, so the trade
+between the two gates was not made inside a fix. The reserve and refund writes start from the state
+read before authorization, so they put a good copy back; the token re-arm re-reads the file
+(ADR-011) and falls back to that state only when the re-read gives nothing. (3)
+`rsct_phase_abandon`'s own write follows its dialog: a file corrupted while the dialog is open is
+replaced by the abandon result. (4) `rsct_plan_authorize` still shows its approval dialog before it
+refuses — its pre-conditions run after the gate by design; the approval is not consumed. (5) Tools
+that only READ still answer "nothing there" about a file they could not read: `rsct_phase_status`
+("present but no active phase field"), the `_complete` tools (`no_active_phase`,
+`no_active_verification` — measured, they write nothing), the open-phase block of `rsct_audit`, the
+active-phase block of `rsct_load_context` (which prints the parse warning elsewhere), and
+`rsct_phase_code_start`, whose gates read the same `null` state and answer
+`classify_evidence_absent` or `plan_tracking` without naming the file (measured at all four tiers);
+the call each of those answers points to refuses and names it.
+
+### ADR-020 — An import candidate outside the project root is matched on its file name only (#101)
+**Status**: active
+**Tags**: v-phase, blast-radius, cross-os
+**Context**: ADR-016 made the NodeNext case check walk every segment from the project root.
+`hasExactPath` hands a candidate OUTSIDE the root to `hasExactEntry` instead, and that branch had no
+test: a `throw` planted in it fired in none of the walk test files.
+**Decision**: the branch stays, and is pinned. The per-segment walk cannot be used outside the
+root — it would compare the root's own ancestors with whatever spelling the caller passed for the
+root. MEASURED on win32 with the branch deleted: a project root passed in another letter case stops
+resolving `'../../outside/x.js'` (0 → 1 unresolved), while the exact-case and the wrong-file-name
+cases answer the same with and without it. So three tests pin it, and the one that sees the branch
+deleted runs only where a respelled path exists (a case-insensitive disk); it is reported as
+skipped elsewhere.
+**Consequences**: known and left to #54 — an outside DIRECTORY spelled in the wrong case resolves
+on a case-insensitive disk and not on a case-sensitive one (MEASURED for `'../../Outside/x.js'`:
+0 unresolved on NTFS, 1 on ext4), the divergence ADR-016 forbids, outside the root. The
+different-drive arm (`isAbsolute(rel)`) has no portable fixture and stays uncovered.
 
 ---
 
@@ -974,6 +1041,66 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - The verdict is persisted with a `tier_max` ratchet and emitted as `classify.verdict` to the
   audit log, the positive evidence the free lane requires; both writes are best-effort.
 - The PH-3 worktree nudge stays conditional because classify runs before the plan exists.
+
+### `tools/plan-authorize.ts` (migrated in the #101 REVIEW)
+
+- The pre-conditions (no branch, protected branch, no active plan) are checked AFTER the gate, so
+  the approval gates everything; a pre-condition failure does not consume the approval, and the
+  developer fixes and retries with the same payload.
+- FV4: the emitting approval is consumed only once the token is persisted. A failed persist leaves
+  it unconsumed.
+- Sliding window (plan-lifecycle-v2, block 1.4): the token re-arms `expires_at` on each successful
+  commit, so an actively worked plan never expires mid-flight, and never lives past the absolute
+  cap. An explicit `ttl_minutes` IS the sliding width; the configured slide and the built-in default
+  apply only when it is absent.
+
+### `tools/phase-abandon.ts` (migrated in the #101 REVIEW)
+
+- `preserved_keys` on the `phase_abandon.complete` audit line is what actually survived on disk, so
+  a reader can tell a preserved session marker from a key the allowlist stopped carrying. It is
+  empty on a failed write: nothing was replaced, so nothing was preserved BY that call.
+- A set `context_stale` survives the abandon on purpose, and the hint says so at the call site
+  instead of leaving the developer to find out at the next blocked edit. It reads the flag through
+  `readContextStale`; the edit guard tests `state?.context_stale` for truthiness, and the two agree
+  for a set, an absent and a `null` flag.
+
+### `tools/audit.ts` (migrated in the #101 REVIEW)
+
+- **`rsct_audit` deliberately bypasses `evaluateInstallAdvisory`** (#55) and must stay that way.
+  That helper APPENDS an `install.drift_detected` entry when the severity is `security`, to record
+  that a mutation was ATTEMPTED under degraded enforcement. `rsct_audit` attempts no mutation;
+  routing it through the advisory would write false attempt records into the append-only log the
+  anti-rollback ceiling is re-derived from. `getInstallDriftNotice` itself only reads.
+- Honest scope of that guarantee, MEASURED by running the real handler (#55): it keeps the tool from
+  writing a FALSE `install.drift_detected` entry; it does not make the handler write-free.
+  `resolveProjectRoot` appends a config-violation entry when `.rsct.json` is present but rejected,
+  creating the log if absent. `rsct_status` and `rsct_load_context` do the same on the same input —
+  the behaviour is the shared resolver's (#80). The tool description and the returned coverage
+  boundary say so rather than claiming "no writes".
+- The coverage boundary ships in the OUTPUT, not only in the docs: "is this project's process
+  healthy?" is a completeness claim the tool cannot make, and a clean report is not a clean project.
+- `explainEligibility` answers a corrupt or torn signal FIRST, so a real fault is never described in
+  the same breath as a fresh install; `audit_history_absent` alone is not a fault. Dropped and NOT
+  migrated: the doc comment that said `evaluateMcpHealth` answers "does this project qualify for the
+  dialog-free lane?" and that a project with `audit.enabled: false` reports it forever. #80 measured
+  both as wrong — health is one of several conditions in front of the lane, and `audit.enabled:
+  false` is unreachable (the schema is `z.literal(true)`).
+- Install drift is reported ONLY in the structured field, never pushed into `hints[]` (decision of
+  2026-08-21, shared by #53/#54/#55): one advisory surface, one dedup rule per overlapping pair.
+  `rsct_status` owns the install-drift hint; repeating it would show the same line twice.
+- Open-phase age: the V phase keeps its `started_at` inside the verification block, every other
+  phase at the top level. Reading only the top-level field would leave V — the phase most likely to
+  sit open for days — as the one phase whose age cannot be reported. Both fields are optional and
+  the absent case is reachable (a stranded `verification` label), so a missing timestamp reports
+  `null`, never a fabricated age.
+- `rsct_installed: false` collapses three states: no `.rsct.json`, an unreadable one, and one
+  present but REJECTED as malformed or out of bounds. The report tells them apart with a plain
+  `existsSync`, because the rejected case is the one the bounds check exists to catch — a config
+  edited to disable enforcement.
+- Report only: no line may recommend a state-mutating remedy; an open-phase age does not point at
+  `rsct_phase_abandon`. The reason written at the time — an abandon replaced the whole state with
+  `{}` — stopped being true with the #53 allowlist; the rule stays, because a report must not route
+  the reader into a mutation.
 
 ### `prompts/01-setup.md`
 

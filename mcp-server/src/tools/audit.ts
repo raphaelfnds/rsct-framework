@@ -7,28 +7,6 @@ import { readPhaseState } from '../lib/phase-scope.js'
 import { listPlans, type PlanSummary } from '../lib/plan.js'
 import { evaluateMcpHealth } from '../lib/health.js'
 import { RSCT_MCP_VERSION } from '../lib/version.js'
-// #55 — DELIBERATE BYPASS of the centralised `evaluateInstallAdvisory`
-// (`lib/install-advisory.ts:23-25`), and it must stay that way. That helper
-// APPENDS an `install.drift_detected` audit entry at evaluation time when the
-// severity is `security` (`install-advisory.ts:68-84`), because the entry is
-// meant to record that a MUTATION WAS ATTEMPTED under a degraded enforcement
-// surface. `rsct_audit` attempts no mutation. Routing it through the advisory
-// path would write false attempt records into `.rsct/audit.log` — the same
-// append-only log `lib/free-commit.ts:112-128` re-derives the anti-rollback
-// ceiling from. Corrupting a security limit to preserve a call-graph convention
-// is the wrong trade. `getInstallDriftNotice` itself is pure: `readScriptEvidence`
-// (`version-drift.ts:338-383`) does readdirSync/readFileSync only.
-// Do NOT "fix" this back into the advisory path.
-//
-// Honest scope of that guarantee, measured: this keeps the tool from writing a
-// FALSE `install.drift_detected` entry. It does NOT make the handler write-free.
-// `resolveProjectRoot` below reaches `emitConfigViolation` (`project-root.ts:383`,
-// `:391`) → `appendAuditEntry(..., { enabled: true })` (`:420`) when `.rsct.json`
-// is present but rejected, creating `.rsct/audit.log` if absent and ignoring
-// `audit.enabled: false`. Verified by running the real handler: `rsct_status` and
-// `rsct_load_context` do exactly the same on the same input, so the behaviour is
-// the shared resolver's, not this tool's — but the description and the returned
-// coverage boundary state it rather than claiming "no writes".
 import {
   getInstallDriftNotice,
   type AffectedComponent,
@@ -44,11 +22,6 @@ export const auditInputSchema = z
   })
   .strict()
 
-/**
- * What this report cannot see. Shipped in the OUTPUT, not only in the docs:
- * "is this project's process healthy?" is a completeness claim this tool cannot
- * make, and a clean report is not a clean project.
- */
 const COVERAGE_BOUNDARY: string[] = [
   'Settings drift (.claude/settings.json ownership) is NOT checked here — it needs two git reads to assemble, and this tool spawns no processes. It already reaches you at the commit gate (rsct_request_commit).',
   'Findings are pruned when a phase closes, so a finding raised and answered in a past phase leaves no trace this report can query.',
@@ -60,16 +33,13 @@ const COVERAGE_BOUNDARY: string[] = [
 
 export interface AuditOpenPhase {
   phase: string
-  /** Null when the state carries no timestamp — see the age note below. */
   started_at: string | null
-  /** Whole days the phase has been open; null when `started_at` is null. */
   age_days: number | null
 }
 
 export interface AuditInstallDrift {
   severity: DriftSeverity
   affected_components: AffectedComponent[]
-  /** `getInstallDriftNotice`'s prose line, or null when there is no drift. */
   message: string | null
 }
 
@@ -94,29 +64,18 @@ export interface AuditOutput {
 
 const DAY_MS = 86_400_000
 
-/**
- * Translate `evaluateMcpHealth`'s fail-CLOSED verdict into what it actually
- * means. That helper answers "does this project qualify for the dialog-free
- * free-commit lane?", NOT "is this project healthy" — `audit_history_absent`
- * makes a brand-new, correctly-installed project report `healthy: false`, and a
- * project with `audit.enabled: false` reports it forever, by design
- * (`lib/health.ts:38-46`). Reporting that as ill health would be a false alarm
- * on every fresh install.
- */
 function explainEligibility(eligible: boolean, reasons: string[]): string {
   if (eligible) {
     return 'The dialog-free free-commit lane is available for this project. Every commit still goes through rsct_request_commit.'
   }
-  // Order matters: a corrupt/torn signal is a real fault and must not be
-  // described in the same breath as a fresh install, so it is answered FIRST.
   const faults = reasons.filter((r) => r !== 'audit_history_absent')
   if (faults.length > 0) {
-    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. Commits still work; they go through the per-action §C path.`
+    const commits = faults.includes('phase_state_corrupt')
+      ? 'rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted.'
+      : 'Commits still work; they go through the per-action §C path.'
+    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. ${commits}`
   }
-  if (reasons.includes('audit_history_absent')) {
-    return 'Free commits are closed because this project has no audit history yet — expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action §C path instead.'
-  }
-  return 'Free commits are closed; commits go through the per-action §C path instead. This withholds a convenience, it does not block any work.'
+  return 'Free commits are closed because this project has no audit history yet — expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action §C path instead.'
 }
 
 export const auditTool: Tool = {
@@ -145,11 +104,6 @@ export async function auditHandler(
 
   const hints: string[] = []
 
-  // Install drift. Reported ONLY in the structured field below — never pushed
-  // into `hints[]`. Decision of 2026-08-21 (#53/#54/#55 shared blocker): there is
-  // one advisory surface, `hints[]`, and one dedup rule per overlapping pair.
-  // `rsct_status` owns the install-drift HINT; repeating it here would show the
-  // dev the same line twice from two tools.
   let install_drift: AuditInstallDrift | null = null
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice({
@@ -177,18 +131,6 @@ export async function auditHandler(
     }
   }
 
-  // Open-phase age. The timestamp lives in two different places depending on the
-  // phase: `phase-verification-start.ts:316-321` writes `phase: 'verification'`
-  // but puts its `started_at` inside the VERIFICATION BLOCK, never on PhaseState,
-  // while every other phase goes through `startPhaseGeneric` (`phase-machine.ts:203`),
-  // which sets the top-level field. Reading only the top-level one would leave the
-  // V phase — the one most likely to sit open for days — as the single phase whose
-  // age cannot be reported.
-  //
-  // Both fields are optional in the type and the absent case is reachable (a
-  // stranded `verification` label from a downgraded binary: see
-  // `isStaleVerificationLabel`, `phase-machine.ts:149-151`), so a missing
-  // timestamp reports null rather than a fabricated age.
   const state = readPhaseState(resolution.root).state
   let open_phase: AuditOpenPhase | null = null
   if (state?.phase) {
@@ -208,12 +150,6 @@ export async function auditHandler(
 
   const plans = listPlans(resolution.root, { now })
 
-  // `rsct_installed: false` collapses THREE different states: no .rsct.json, an
-  // unreadable one, and one that is present but REJECTED as malformed or
-  // out-of-bounds (`project-root.ts:370/376/386/398`). Asserting "no .rsct.json"
-  // for all three fabricates a cause — and the third state is the one that
-  // matters most, because the HIGH-4 bounds check exists precisely to catch a
-  // config edited to disable enforcement. Distinguished with a plain existsSync.
   if (!resolution.rsct_installed) {
     hints.push(
       existsSync(join(resolution.root, '.rsct.json'))
@@ -222,9 +158,6 @@ export async function auditHandler(
     )
   }
 
-  // Report only. No line here may recommend a state-mutating remedy: pointing an
-  // open-phase age at rsct_phase_abandon would route a report into
-  // `phase-abandon.ts:188`, which replaces the whole state object with {}.
   if (open_phase && open_phase.age_days !== null && open_phase.age_days >= 7) {
     hints.push(
       `Phase '${open_phase.phase}' has been open for ${open_phase.age_days} days. Worth a look — this is an observation, not an instruction, and closing or discarding a phase is the dev's decision.`,

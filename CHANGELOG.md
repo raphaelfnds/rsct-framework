@@ -12,6 +12,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Four tools no longer answer over an unreadable `phase-state.json` (#101).** MEASURED on a file
+  cut mid-object: `rsct_plan_authorize` replaced it with its token; `rsct_request_commit` committed
+  a docs-only change straight past an armed `review_drift` lock, and replaced the file when a
+  pre-commit hook slipped code in; `rsct_plan_revoke` and `rsct_phase_abandon` wrote nothing but
+  answered "no token" and "the state is already clean". Each now refuses, leaves the file
+  byte-identical and says it could not be read. No token is minted and the approval is not spent.
+  Revoke and abandon answer `state_write_failed` — abandon before any dialog — and log it. **Every
+  commit is rejected (`review_unreadable`), docs-only included, until the file is repaired or
+  deleted**, checked before the approval dialog and again right before `git commit`. An empty or
+  absent file is not corruption and behaves as before. `rsct_audit` no longer says commits still
+  work in that state. Not changed: deleting the file still resets what it recorded, the drift lock
+  included (#89); see `docs/troubleshooting.md` before deleting.
+- **Three guards that worked but had no test (#101).** The `recorded` field of the `classify.verdict`
+  audit line, `reject_kind: 'state_unreadable'` on a refused phase start, and the letter-case check
+  on an import that leaves the project root are now pinned, each by a test proven with the mutation
+  that used to survive.
+
 ## [2.12.1] - 2026-09-24
 
 ### Fixed

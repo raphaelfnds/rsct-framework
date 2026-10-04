@@ -1,9 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { DEFAULT_LANG_GLOBS, coverageHints, seedIsCoverable, walkReverseDeps } from '../../src/lib/reverse-dep-walk.js'
+
+const swapCase = (text: string): string =>
+  [...text].map((char) => (char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase())).join('')
+
+function respelledSiblingExists(): boolean {
+  const probe = mkdtempSync(join(tmpdir(), 'rsct-case-'))
+  try {
+    return existsSync(join(dirname(probe), swapCase(basename(probe))))
+  } finally {
+    rmSync(probe, { recursive: true, force: true })
+  }
+}
+
+const CASE_INSENSITIVE_DISK = respelledSiblingExists()
 
 let tmpRoot: string
 
@@ -109,5 +123,32 @@ describe('the walk covers .mts and .cts (#101 Part A)', () => {
     const files = out.discovered.map((d) => d.file)
     expect(files).toContain('src/mid.mts')
     expect(files).toContain('src/top.ts')
+  })
+})
+
+describe('an import that leaves the project root is matched case-exactly on its file name (#101 Part C)', () => {
+  function projectImporting(specifier: string): string {
+    writeFile('outside/x.ts', 'export const x = 1\n')
+    writeFile('proj/src/seed.ts', 'export const s = 1\n')
+    writeFile('proj/src/importer.ts', `import { x } from '${specifier}'\nexport const a = x\n`)
+    return join(tmpRoot, 'proj')
+  }
+
+  const unresolved = (projectRoot: string): number =>
+    walkReverseDeps({ projectRoot, seedPaths: ['src/seed.ts'] }).stats.unresolved_js_specifiers
+
+  it('resolves ../../outside/x.js to the x.ts stored outside the root', () => {
+    expect(unresolved(projectImporting('../../outside/x.js'))).toBe(0)
+  })
+
+  it('does not resolve it when the file name differs in letter case', () => {
+    expect(unresolved(projectImporting('../../outside/X.js'))).toBe(1)
+  })
+
+  it.skipIf(!CASE_INSENSITIVE_DISK)('still resolves it when the root is passed in another letter case', () => {
+    projectImporting('../../outside/x.js')
+    const respelled = join(dirname(tmpRoot), swapCase(basename(tmpRoot)), 'proj')
+    expect(existsSync(respelled)).toBe(true)
+    expect(unresolved(respelled)).toBe(0)
   })
 })
