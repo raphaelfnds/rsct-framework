@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, realpathSync } from 'fs';
-import { resolve, isAbsolute, join, dirname, basename } from 'path';
+import { isAbsolute, resolve, join, dirname, basename } from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 
 createRequire(import.meta.url);
@@ -187,6 +186,21 @@ function isInside(base, candidate) {
   const target = process.platform === "win32" ? c.toLowerCase() : c;
   return target.startsWith(prefix);
 }
+function resolveProjectRootFromArgs(options) {
+  const { argv, env, cwd } = options;
+  const idx = argv.indexOf("--project-root");
+  if (idx !== -1) {
+    const value = argv[idx + 1];
+    if (value && value.length > 0) {
+      return isAbsolute(value) ? value : resolve(cwd, value);
+    }
+  }
+  const fromEnv = env.CLAUDE_PROJECT_DIR;
+  if (fromEnv && fromEnv.length > 0) {
+    return fromEnv;
+  }
+  return cwd;
+}
 function hashSettingsContent(text) {
   return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
 }
@@ -203,7 +217,7 @@ function hashSettingsFile(projectRoot) {
   return text === null ? null : hashSettingsContent(text);
 }
 
-// src/scripts/sanitize-permissions.ts
+// src/lib/sanitize-permissions.ts
 var GIT_GLOBAL_OPT = [
   `-[cC]\\s+(?:"[^"]*"|'[^']*'|[^\\s)]+)`,
   // -C <path>, -c key=value
@@ -432,21 +446,6 @@ function defaultAuditWriter(projectRoot, entry, now) {
   } catch {
   }
 }
-function resolveProjectRootFromArgs(options) {
-  const { argv, env, cwd } = options;
-  const idx = argv.indexOf("--project-root");
-  if (idx !== -1) {
-    const value = argv[idx + 1];
-    if (value && value.length > 0) {
-      return isAbsolute(value) ? value : resolve(cwd, value);
-    }
-  }
-  const fromEnv = env.CLAUDE_PROJECT_DIR;
-  if (fromEnv && fromEnv.length > 0) {
-    return fromEnv;
-  }
-  return cwd;
-}
 function main(options) {
   const projectRoot = resolveProjectRootFromArgs({
     argv: options.argv,
@@ -479,24 +478,15 @@ function main(options) {
   }
   return 0;
 }
-function isCliEntry() {
-  if (!process.argv[1]) return false;
-  try {
-    return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-  } catch {
-    return false;
-  }
-}
-if (isCliEntry()) {
-  const exitCode = main({
+
+// src/scripts/sanitize-permissions.ts
+process.exit(
+  main({
     argv: process.argv.slice(2),
     env: process.env,
     cwd: process.cwd(),
     stderr: (msg) => process.stderr.write(msg + "\n")
-  });
-  process.exit(exitCode);
-}
-
-export { containsMachinePath, isAbsoluteEntry, isPoisonPill, main, resolveProjectRootFromArgs, sanitize };
+  })
+);
 //# sourceMappingURL=sanitize-permissions.js.map
 //# sourceMappingURL=sanitize-permissions.js.map

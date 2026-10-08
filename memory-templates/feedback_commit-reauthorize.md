@@ -37,8 +37,10 @@ dialog + audit log entry per call):
   included, carries only code a completed REVIEW stamped: a staged code file
   that no REVIEW covers, or that still has a comment, is rejected before any
   dialog (`review_missing` / `comments_present`). The lane is SUSPENDED while
-  RSCT enforcement is not running — an enforcement script absent or with no hook
-  wired to it — and the next commit falls back to a per-action `dev_approval`)
+  RSCT enforcement is not running — an enforcement script absent, with no hook
+  wired to it, or an edit guard from a build that cannot block — and the next
+  commit falls back to a per-action `dev_approval`, unless a batch token is
+  still valid)
 - `mcp__rsct__rsct_request_push` for pushes
 - `mcp__rsct__rsct_request_merge` for merges
 - `mcp__rsct__rsct_request_rebase` for rebases / `--squash` merges

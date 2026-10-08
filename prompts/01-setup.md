@@ -86,6 +86,13 @@ The contract is strict and the framework's correctness depends on it:
    CHECKPOINT line included (rule 5). This is still literal execution
    (rule 1); only the transport changes.
 
+   If writing that file is refused with `stale_context`, the project's
+   edit guard is running and its last plan was closed without the
+   context being reloaded — the guard refuses every path until then.
+   Call `mcp__rsct__rsct_load_context` (pass `project_root`), then write
+   the file again. If that tool is not available, STOP and tell the
+   dev; do not route the write through the terminal.
+
 If a code block in this prompt looks like it has a bug, **stop and
 ask** — do not "fix it" by reimplementing. A real bug in a canonical
 block is a framework bug and needs to be fixed at the prompt source,
@@ -3707,7 +3714,7 @@ Hook entry shape registered in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js\""
           }
         ]
       }
@@ -3716,14 +3723,17 @@ Hook entry shape registered in `.claude/settings.json`:
 }
 ```
 
-The script also reads `--project-root`, `$CLAUDE_PROJECT_DIR`, and
-finally falls back to `cwd` — so Windows path-mangling of
-`${CLAUDE_PROJECT_DIR}` in the command string does not break the
-hook.
+The path is quoted: unquoted, a project path that contains a space is
+split by the shell, node exits 1 and the hook never runs (#114). The
+script also reads `--project-root`, `$CLAUDE_PROJECT_DIR`, and finally
+falls back to `cwd`.
 
 Idempotency check: scan existing `hooks.SessionStart[]` for any
 command containing the substring `.rsct/scripts/sanitize-permissions.js`.
-If present → no-op. If absent → append.
+If absent → append. If present → no-op, with one exception: the exact
+unquoted command that setups before #114 wrote is rewritten with the
+path quoted. Any other command carrying the substring is the
+developer's and is left alone.
 
 ```bash
 echo "  CHECKPOINT: Phase 4.V.c executing canonical structured-merge SessionStart hook install"
@@ -3745,8 +3755,10 @@ if [ -n "$SANITIZER_SRC" ]; then
   node -e '
     const fs = require("fs");
     const target = process.argv[1];
-    const HOOK_CMD = "node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js";
     const MARKER = ".rsct/scripts/sanitize-permissions.js";
+    const QUOTE = String.fromCharCode(34);
+    const LEGACY_CMD = "node ${CLAUDE_PROJECT_DIR}/" + MARKER;
+    const HOOK_CMD = "node " + QUOTE + "${CLAUDE_PROJECT_DIR}/" + MARKER + QUOTE;
     let settings = {};
     if (fs.existsSync(target)) {
       try {
@@ -3767,12 +3779,23 @@ if [ -n "$SANITIZER_SRC" ]; then
     }
     settings.hooks = settings.hooks || {};
     settings.hooks.SessionStart = settings.hooks.SessionStart || [];
-    const already = settings.hooks.SessionStart.some(group =>
-      Array.isArray(group && group.hooks) && group.hooks.some(h =>
-        h && typeof h.command === "string" && h.command.indexOf(MARKER) !== -1
-      )
-    );
-    if (already) {
+    let already = false;
+    let requoted = 0;
+    settings.hooks.SessionStart.forEach(group => {
+      if (!group || !Array.isArray(group.hooks)) return;
+      group.hooks.forEach(h => {
+        if (!h || typeof h.command !== "string" || h.command.indexOf(MARKER) === -1) return;
+        already = true;
+        if (h.command === LEGACY_CMD) {
+          h.command = HOOK_CMD;
+          requoted += 1;
+        }
+      });
+    });
+    if (requoted > 0) {
+      fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
+      console.log("Rewrote the RSCT SessionStart sanitizer hook command with the path quoted in " + target);
+    } else if (already) {
       console.log("RSCT SessionStart sanitizer hook already present — no change.");
     } else {
       settings.hooks.SessionStart.push({
@@ -3835,8 +3858,10 @@ if [ -n "$SANITIZER_SRC" ]; then
     node -e '
       const fs = require("fs");
       const target = process.argv[1];
-      const HOOK_CMD = "node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js";
       const MARKER = ".rsct/scripts/edit-scope-guard.js";
+      const QUOTE = String.fromCharCode(34);
+      const LEGACY_CMD = "node ${CLAUDE_PROJECT_DIR}/" + MARKER;
+      const HOOK_CMD = "node " + QUOTE + "${CLAUDE_PROJECT_DIR}/" + MARKER + QUOTE;
       const MATCHER = "^(Edit|Write|MultiEdit|NotebookEdit)$";
       let settings = {};
       if (fs.existsSync(target)) {
@@ -3852,12 +3877,23 @@ if [ -n "$SANITIZER_SRC" ]; then
       }
       settings.hooks = settings.hooks || {};
       settings.hooks.PreToolUse = settings.hooks.PreToolUse || [];
-      const already = settings.hooks.PreToolUse.some(group =>
-        Array.isArray(group && group.hooks) && group.hooks.some(h =>
-          h && typeof h.command === "string" && h.command.indexOf(MARKER) !== -1
-        )
-      );
-      if (already) {
+      let already = false;
+      let requoted = 0;
+      settings.hooks.PreToolUse.forEach(group => {
+        if (!group || !Array.isArray(group.hooks)) return;
+        group.hooks.forEach(h => {
+          if (!h || typeof h.command !== "string" || h.command.indexOf(MARKER) === -1) return;
+          already = true;
+          if (h.command === LEGACY_CMD) {
+            h.command = HOOK_CMD;
+            requoted += 1;
+          }
+        });
+      });
+      if (requoted > 0) {
+        fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
+        console.log("Rewrote the RSCT PreToolUse edit-scope guard hook command with the path quoted in " + target);
+      } else if (already) {
         console.log("RSCT PreToolUse edit-scope guard hook already present — no change.");
       } else {
         settings.hooks.PreToolUse.push({
@@ -3874,7 +3910,14 @@ fi
 
 Re-running `/rsct-setup` refreshes the copied guard and is idempotent on
 the hook entry (keyed off the `.rsct/scripts/edit-scope-guard.js`
-substring). Devs should NOT hand-edit `.rsct/scripts/`.
+substring), with the same one exception as 4.V.c: the exact unquoted
+command that setups before #114 wrote is rewritten with the path quoted.
+Devs should NOT hand-edit `.rsct/scripts/`.
+
+**On the first run after #114 the guard goes live here.** A hook that was
+already registered runs the file this step just wrote, with no restart, so a
+later `Write` in this run can be refused with `stale_context` — rule 6 says
+what to do. On any later run the guard was live from the first step.
 
 **4.V.c2 — Register project-scope MCP (committable `.mcp.json`) (CAP-48)**
 
@@ -4106,8 +4149,9 @@ session boot.
    - `documentation/` files (each with RSCT-GENERATED header)
    - memory entries (each with RSCT-GENERATED header)
 3. **Stamp the §0 bootstrap marker** (C2, field-report) — when `rsct-mcp` is
-   installed, call `mcp__rsct__rsct_status` **once now**. `/rsct-setup` itself
-   never calls `rsct_status`/`rsct_load_context`, so `.rsct/phase-state.json`
+   installed, call `mcp__rsct__rsct_status` **once now**. `/rsct-setup` does
+   not call `rsct_status`/`rsct_load_context` on its normal path (the one
+   exception is the `stale_context` case of rule 6), so `.rsct/phase-state.json`
    is created without a `bootstrap_at` stamp — and the very first
    `rsct_request_commit` / `_push` / `_merge` after setup then warns "bootstrap
    not detected" even though setup just ran. One `rsct_status` call stamps the

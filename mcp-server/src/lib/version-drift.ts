@@ -132,7 +132,10 @@ const STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/
 
 export type DriftSeverity = 'normal' | 'security'
 
-export type ScriptState = 'current' | 'stale' | 'absent' | 'unreadable'
+export type ScriptState = 'current' | 'stale' | 'inert' | 'absent' | 'unreadable'
+
+const INERT_GUARD_NAME = 'edit-scope-guard.js'
+const INERT_GUARD_LINE = 'if (isCliEntry()) {'
 
 /**
  * A three-state answer, not `boolean | null`: `null` would have to carry both
@@ -438,6 +441,10 @@ export function readScriptEvidence(
     }
 
     const stamp_version = stampOf(installed)
+    if (name === INERT_GUARD_NAME && installed.split('\n').includes(INERT_GUARD_LINE)) {
+      evidence.push({ name, state: 'inert', security_relevant, stamp_version, registration })
+      continue
+    }
     const shipped = shippedDir === null ? null : readNormalized(join(shippedDir, name))
     if (shipped === null) {
       // No reference to compare against — no evidence, so no verdict.
@@ -469,6 +476,12 @@ export function readScriptEvidence(
  */
 function describeNotRunning(c: AffectedComponent): string {
   if (c.state === 'absent') return `${c.name} is not installed`
+  if (c.state === 'inert') {
+    return (
+      `${c.name} is installed, but it is a build that cannot block an edit ` +
+      `(every rsct-mcp from 2.2.0 to 2.12.3 shipped it that way)`
+    )
+  }
   const event = ENFORCEMENT_SCRIPTS.get(c.name)?.event
   // Derived from the reader's own list rather than retyped: the sentence names
   // the files that were searched, so it must not be able to name a different set
@@ -495,7 +508,7 @@ function describeStale(c: AffectedComponent): string {
  * absence of evidence, and this tier only carries claims that were observed.
  */
 function isNotRunning(e: ScriptEvidence): boolean {
-  if (e.state === 'absent') return true
+  if (e.state === 'absent' || e.state === 'inert') return true
   if (e.state === 'current' || e.state === 'stale') return e.registration === 'unregistered'
   return false
 }

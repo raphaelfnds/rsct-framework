@@ -788,6 +788,123 @@ pins it. The scripts are bash, not sh: measured with dash, the previous installe
 `${BASH_SOURCE[0]}` and the previous uninstaller did not parse. macOS and a `sudo` prefix were not
 measured locally; one test drives a real npm on the CI matrix.
 
+### ADR-022 — The hook programs are launchers, and the edit-scope guard judges resolved paths (#114)
+**Status**: active
+**Tags**: hooks, edit-scope, setup, install-drift, cross-os
+**Context**: from 2.2.0 to 2.12.3 the installed `edit-scope-guard.js` never refused an edit. Three
+causes, each MEASURED. (1) `src/scripts/edit-scope-guard.ts` imported one helper from
+`src/scripts/sanitize-permissions.ts`; tsup (`splitting: false`) inlined that whole module, entry
+block included, ahead of the guard's code, and inside the bundle `import.meta.url` is the guard's
+own file — so the sanitizer's "am I the entry?" check was true, it ran and called `process.exit`.
+(2) The registered command `node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js` is split by the
+shell when the project path has a space; node exits 1, which the client does not treat as a refusal.
+(3) A guard that did run would have been wrong: the matcher strips the project root by string
+prefix, so a project typed in another letter case or reached through a link had its own files
+refused; `src/../README.md` passed a `src/**` list; every path outside the project was refused,
+the client's memory folder included; and `progress_<slug>.md` sat outside the declared list in 316
+of 421 recorded code phases.
+**Decision**:
+- **Launchers.** `src/scripts/*.ts` only read their input, call one function from `src/lib/` and
+  `process.exit` with its code. They export nothing and nothing imports them, pinned by
+  `tests/unit/script-entries.test.ts` on the source and on the compiled files (one module banner
+  each, no `process.argv[1]`, no `export` line). There is no "am I the entry?" check left (AD-008).
+- **Quoted command.** Setup writes `node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js"` and
+  rewrites only the exact unquoted command older setups wrote. Any other command carrying the
+  marker is the developer's and is left alone.
+- **One judgement, resolved paths.** `judgeEditScope` serves the hook and `rsct_check_edit_scope`.
+  Order: stale context → no list → line terminator → network-style path on a different host →
+  outside the project → plan-tracking file → the declared globs. Root and file go through `canonicalPath`
+  (`..`, links, letter case, a tail that does not exist yet) before any comparison. A relative path
+  is taken from the directory the client reports (`payload.cwd`) by the hook and from the project
+  root by the tool. The hook judges `file_path` and `notebook_path` when both are present and
+  refuses if either is refused.
+- **The list is matched against the path below the project root, and nothing else.** MEASURED in
+  REVIEW: the shared matcher also tries the absolute path, so with the project under a folder named
+  `src` a list of `**/src/**` put every file in scope. An entry written as an absolute path
+  therefore never matches (2 of 6,131 recorded entries were written that way).
+- **Plan-tracking files** (`plan_*.md`, `progress_*.md`, `spec_*.md` at the project root) are
+  `in_scope` while a list is active. Decided by the developer; less strict than the written rule.
+- **Outside the project is not governed** (`unknown`, the edit goes through). Decided by the
+  developer; less strict than the written rule, equal to what happened in the field. A path is
+  INSIDE when it resolves under the project root, or when one of its parent folders is the
+  project root under another spelling: a path that reads as outside is walked up folder by
+  folder, and a folder with the file identity of the root makes it inside, judged by the list.
+  MEASURED in REVIEW inside WSL with the project on the Windows disk: `realpath` leaves
+  `/mnt/c/USERS/…` as typed, both spellings report one `dev:ino`, and the first used to pass as
+  outside. Whatever is not shown to be inside is outside; a `stat` that fails, or an `ino` of 0,
+  is no identity. An identity that collides by accident can only turn an allowed outside path
+  into a judged one, never the reverse. On Windows the identity is the file number alone, and
+  only between folders on the same drive root: MEASURED, `dev` from a path `stat` is 0 for a
+  plain local folder and the volume serial for a junction to that very folder, and every NTFS
+  drive root carries the same file number. A network-style path (`\\…`) on a different HOST than
+  the project is refused, before the disk is asked about it, and again after resolution for a link
+  or a mapped drive that lands on one. A different SHARE of the same host is not refused: MEASURED
+  with the built hook, `path.win32.relative('\\host\shareA\p', '\\host\shareB\x')` is a relative
+  `..\..\shareB\x`, so it reads as outside and is allowed — see the named limit below. On Windows
+  a Git-Bash drive path (`/c/…`) is read as `C:\…`, which is what the client does with it before
+  it writes.
+- **An inert copy is enforcement not running.** `readScriptEvidence` reports `inert` for a file
+  named `edit-scope-guard.js` whose normalised text has a line equal to `if (isCliEntry()) {`,
+  checked before the shipped-copy comparison and whatever the registration. `isNotRunning` is true
+  for it, so the security tier applies: notice, dialog line, one audit line per commit, push,
+  merge or `rsct_load_context` call, dialog-free lane withheld. The commit dialog had never
+  carried that line — only push and merge read it, while the rules said the dialog a suspended
+  lane falls back to shows the warning; it carries it now.
+- **The sanitizer runs at session start only.** It ran on every edit only through the defect.
+  Decided by the developer; less strict on two points (a grant, or a machine path, that appears in
+  the middle of a session waits for the next session start).
+**Rejected**: keeping the entry check and comparing real paths (it can go silent again — AD-008);
+`splitting: true` (changes the set of shipped files, which setup copies one by one); refusing
+everything outside the project (refuses the client's memory folder and temp files in every phase
+that declares a list); using file identity for a network path on another root as well (MEASURED
+through `\\localhost\C$`: same `ino`, different `dev`, 400–520 ms per `stat` against 0.2–1 ms
+locally — it is refused instead); supporting an absolute list entry by stripping the root from it
+(two entries in the field; a second place where a spelling would have to be compared).
+**Consequences**: every project installed before this change shows the security notice until
+`/rsct-setup` runs again. A teammate on an older `rsct-mcp` who re-runs setup puts the inert copy
+back. A hook that was already registered starts refusing the moment setup replaces the file.
+Named limits:
+- a phase with no `scope_globs` leaves nothing to enforce, and a `_start` replaces the list with
+  no dialog; the terminal, PowerShell and MCP writers are not watched (#91);
+- a rejected `.rsct.json` makes the project unmanaged, which switches the guard off — and each
+  edit there now writes one `rsct_json.*` audit line, since the guard reads the config every time;
+- plan-tracking files are read back by gates as evidence and stay agent-writable;
+- **the stale flag outlives the server.** The guard is a standalone file and only
+  `rsct_load_context` clears `context_stale`: where `rsct-mcp` is not connected, or was removed
+  from the machine while the project kept its hooks, every edit is refused. The message tells the
+  agent to stop and tell the developer; `docs/troubleshooting.md` has the two ways out;
+- a command the developer edited by hand is never rewritten, so an unquoted one in a path with a
+  space keeps exiting 1 and still reads as `registered` (the check is a marker substring);
+- an entry the matcher cannot express never matches and says so only by refusing: `{a,b}`,
+  `[abc]`, a leading `./`, a trailing `/`. None occurs in 6,131 recorded entries;
+- an entry is compared, case-sensitively, with the resolved spelling — the on-disk one on Windows
+  and macOS, the typed one inside WSL on `/mnt/c` (where `realpath` does not fold case): `src/**`
+  never covers a folder stored as `Src`, nor `alias/**` a link named `alias` whose target is
+  `real/`. The refusal names the path that was judged;
+- the hook judges from the project root the client gives it (`CLAUDE_PROJECT_DIR`, else
+  `payload.cwd`) without walking up, so pointed at a SUBFOLDER it governs only that subtree, while
+  `rsct_check_edit_scope` walks up to the `.rsct.json` — the two then answer differently. Same as
+  HEAD, and in the installed layout the hook is not registered in a subfolder;
+- a folder that differs from the project folder only in letter case, in a directory Windows
+  treats as case-sensitive, is judged as the project (the stricter way);
+- a hard link outside the project to a file inside it is outside; making one needs a shell (#91);
+- a batch token keeps authorizing commits while the lane is withheld, and the dialog that mints
+  it does not carry the warning line;
+- a worktree kept inside the project (`.claude/worktrees/…`) is judged by the main checkout's
+  list when the client leaves `CLAUDE_PROJECT_DIR` there — not measured;
+- `\\?\C:\…` typed for a file inside the project is refused as network-style; a project opened
+  through a share of its own machine is not recognised when the file is typed by drive letter;
+- a project opened through a network path, whose server exposes the same tree under a SECOND share
+  name, has an in-project file reachable through that second share and judged as outside (allowed).
+  The refusal only fires for a different HOST. MEASURED: the "allowed" verdict for a different
+  share of the same host (built hook). NOT MEASURED: a server actually aliasing the project under
+  two shares — it needs a share created with admin rights, so this stays a reasoned gap, in the
+  same class as the hard-link and terminal holes (the guard is a soft ceiling, defeated by Bash —
+  #91). Closing it would mean refusing every different-share path, which false-blocks a genuinely
+  separate share of the same host; left as a limit rather than that.
+macOS, Linux and the IDE extension were not measured with a real client; the compiled programs
+run on the CI matrix, and by hand on Windows and in the three WSL combinations.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -846,6 +963,16 @@ carrying its name would not be this project's — and the server that enforces t
 replaceable that way. A temporary staging folder adds a second failure:
 an npm that ignores the flag (6.14.18, 7.24.2, 8.7.0) links to the stage, which is then deleted.
 ADR-021 keeps the link and moves its target.
+
+### AD-008 — Do not let a module decide at load time whether it is the program being run
+`if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) { main(); process.exit(…) }` at
+the bottom of a module that is also imported. MEASURED (#114): bundled into another entry with
+`splitting: false`, `import.meta.url` is the importing bundle's file, the check is true there, and
+the imported module's `main` runs first and exits — 25 releases shipped an edit guard that ran the
+sanitizer instead of itself, with every unit test green because they imported the functions and
+never launched the file. Launched by hand through a link, the same equality is false and the
+program does nothing, silently. ADR-022 removes the check: a file under `src/scripts/` always
+runs, and exports nothing that could tempt an import.
 
 ---
 
@@ -917,6 +1044,39 @@ ADR-021 keeps the link and moves its target.
   `npm_config_prefix` is then a second key, and the child process received the inherited one: the
   installer tests' sandbox pin had never constrained a real npm. A pre-flight `npm root -g` caught
   it before anything was installed; `overlayEnv` now drops every spelling of a key before setting it.
+- **Of the exit codes of a `PreToolUse` hook, only 2 refuses the tool call** (#114, Claude Code
+  2.1.173 on Windows, headless `-p`). Exit 1 — what node returns when the command line was split
+  at a space — lets the write happen. The same client honours exit 2 for the matcher `Bash` as
+  well. A hook can also answer with a JSON decision; that route is not used here and was not
+  measured.
+- **What the client hands the hook as `file_path`** (#114, same client). An absolute path in the
+  letter case the model typed. A relative name, a `~/…` path and a Git-Bash-style `/c/Users/…`
+  all arrive already expanded to `C:\Users\…`; a `\\localhost\C$\…` path arrives as typed, and
+  the client then holds that write for manual approval on its own ("suspicious Windows path
+  pattern"), `--allowedTools Write` notwithstanding. Interactive and bypass-permission modes, and
+  other client versions, were not measured — the guard still resolves a relative path itself.
+- **Inside WSL, `realpath` does not fold letter case on the Windows disk** (#114, WSL2, Node
+  22.14). `realpathSync.native('/mnt/c/USERS/…')` returns the path as typed, while `statSync`
+  reports the same `dev:ino` for `/mnt/c/USERS/…` and `/mnt/c/Users/…` and a different one for the
+  parent folder. On Windows itself `realpath` folds the case.
+- **On Windows `dev` from a path `stat` is not a volume identity** (#114, Node 22.14, NTFS). A
+  plain local folder reads `dev=0`; a junction pointing straight at it reads the volume serial
+  with the same `ino`; so does a loopback share path. The drive root reads `ino` 0x5000000000005
+  — the root record of every NTFS volume — so a project at `D:\` and the folder `C:\` cannot be
+  told apart by number.
+- **Windows path resolution, as Node reports it** (#114, Node 22). `realpathSync.native` resolves a
+  `subst` drive to its target and folds `\\?\C:\…` to `C:\…`, but keeps `\\localhost\C$\…` as it
+  is. On a share that does not exist (`\\localhost\<name>\a\b`) the walk up to an existing ancestor
+  took 4.9 s; on a host that does not resolve, 0.13 s. `statSync` through the loopback share
+  returns the same `ino` and a different `dev`.
+- **`path.relative` answers `..env.ts` for a file of that name directly under the root** (#114). A
+  test for "outside the root" must be `=== '..'` or a `..` followed by the separator, never a bare
+  `startsWith('..')`.
+- **The field never saw the edit guard work** (#114, 19 real projects, read with the developer's
+  OK). 13 of 13 installed guard copies were the inert build; 421 code phases were recorded, none
+  with an empty `scope_globs`, and 316 of them left `progress_<slug>.md` out of the list. The
+  sanitizer riding on every edit wrote 9,938 `settings.baseline` lines out of 30,644 audit lines,
+  up to 430 in one day. Of 663 commits, none used the dialog-free lane.
 
 ---
 
@@ -1193,8 +1353,40 @@ those files. Keyed by module and symbol; restatements of what the code says were
   `{}` — stopped being true with the #53 allowlist; the rule stays, because a report must not route
   the reader into a mutation.
 
+### `lib/edit-guard.ts`, `lib/edit-scope-hook.ts`, `tools/check-edit-scope.ts` (#114)
+
+- **`judgeEditScope` tests `context_stale` before the empty-list short-circuit.** Closing a plan
+  wipes `scope_globs` in the same write that arms the flag, so the other order would answer
+  `unknown` for exactly the state the flag exists to refuse.
+- **The network-style check runs twice.** Once on the path as typed, so a foreign share is refused
+  without a disk or network round trip (4.9 s measured on a missing share); once on the resolved
+  path, for a link or a mapped drive that lands on one.
+- **`ScopePathDeps`** exists so the Windows rules run on the Linux and macOS cells as well
+  (`path.win32`, a recording `canonical`, a scripted `identity`); production passes nothing.
+- **`matchesAnyGlob` is called without a project root** on purpose: given one, it also tries the
+  absolute path as a candidate, which is what let a folder above the project satisfy `**/x/**`.
+- The identity walk runs only for a path that already reads as outside, so an edit inside the
+  project costs no extra `stat`. It stops at once when the path and the project root do not share
+  a top folder (another drive, another share): without that, a project at a drive root matched the
+  root of every other NTFS drive. Where the separator is a backslash `dev` is not compared.
+- `nativeScopePaths` is exported for one test, which keeps the real `stat` reader and swaps only
+  the path resolver: no ordinary disk on the CI cells offers a second spelling `realpath` leaves
+  alone, so without it nothing would run the production reader.
+- A refusal for a file the list does not cover carries `judged_as`, the path below the root in
+  the spelling that was matched — the only clue when the list and the disk differ in letter case.
+- **Fail-open on machinery, fail-closed on policy.** The hook exits 2 only for `out_of_scope` and
+  `stale_context`. Empty or malformed stdin, a payload with no `file_path` / `notebook_path`, an
+  unmanaged project (no `.rsct.json`), an unreadable phase-state (`infra_error`) and any thrown
+  fault exit 0 — a broken guard must never stop all editing.
+- `phase_state_override` of `rsct_check_edit_scope` carries `context_stale` so a what-if call can
+  ask about a stale context.
+
 ### `prompts/01-setup.md`
 
+- **Hook registration (#114).** The quote character is built with `String.fromCharCode(34)`
+  inside `node -e`, for the reason the backslash is (MSYS rewrites escapes). The rewrite is keyed on
+  the exact legacy command, not on the marker: the marker also matches a command the developer
+  edited, and that one is not ours to change.
 - The `.rsct/reports/` backfill (#62) follows the #73 clause: whole-file exact-line guard,
   block-scoped splice right after `.rsct/phase-state.lock` (the CAP-25 clause just before it
   guarantees that line exists), LF out, and a sanity check inside the markers.
@@ -1326,6 +1518,18 @@ those files. Keyed by module and symbol; restatements of what the code says were
   fixture must carry `phase`: `completePhaseGeneric` deletes `phase` in the same write that arms the
   flag, and the abandon early-returns without writing when `phase` is absent. State is read from
   disk, never through `phase_state_override`.
+- `compiled-hooks.test.ts` (#114) launches the files in `dist/scripts/` the way a project holds
+  them: shebang, stamp line, body, a `package.json` with `"type": "module"`, an explicit
+  `CLAUDE_PROJECT_DIR`. Unit tests that import the functions cannot see what the bundle does when
+  it is run — that is how 25 releases shipped the inert guard. `RSCT_TEST_HOOK_DIST` points the
+  same rows at another build; against the released 2.12.3 files 10 of the 11 launch rows fail
+  (the plain sanitizer row is the one that passes). Every allow row has a block row on the same
+  state. The link case asserts that the link and the real path differ before it trusts its
+  result, and does not skip. A row that needs a literal `..` builds the string by hand:
+  `path.join` folds it away, and two rows once tested `README.md` under that name.
+- `hook-registration.test.ts` (#114) runs the registered command LITERALLY through `bash -c` in a
+  project whose path has a space; asserting the string alone would pass with the quotes in the
+  wrong place.
 
 ### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
 

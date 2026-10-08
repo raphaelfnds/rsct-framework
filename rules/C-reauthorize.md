@@ -160,11 +160,15 @@ the lane locks and the next commit falls back to a per-action `dev_approval`.
 
 **The lane is suspended while RSCT enforcement is not running.** It is a privilege
 granted on the premise that the mechanical layer is trustworthy; when an
-enforcement script under `.rsct/scripts/` is missing, or is present with no hook
-in `.claude/settings.json` wired to run it, that premise is provably false and the
+enforcement script under `.rsct/scripts/` is missing, is present with no hook
+in `.claude/settings.json` wired to run it, or is an edit guard from a build
+that cannot block (rsct-mcp 2.2.0 to 2.12.3), that premise is provably false and the
 next commit falls back to a per-action `dev_approval`. Nothing is blocked — the
 commit still lands, it just costs one dialog, and the dialog is the point: it is
 the one channel that carries the warning where the agent cannot summarize it away.
+One exception to know: a batch token that is still valid keeps authorizing
+commits without a dialog, and the dialog that mints a token does not carry the
+warning — relay the `hints[]` line to the dev yourself.
 Be clear on what this buys, though: **reach, not enforcement.** If the sanitizer
 is not running, a poison-pill permission can persist and the agent can bypass
 `rsct_request_commit` entirely — suspending the lane does not close that. Run

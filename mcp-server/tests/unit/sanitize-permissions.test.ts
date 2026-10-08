@@ -10,13 +10,13 @@ import {
 import { join } from 'node:path'
 import { hashSettingsContent } from '../../src/lib/settings-drift.js'
 import { tmpdir } from 'node:os'
+import { resolveProjectRootFromArgs } from '../../src/lib/hook-project-root.js'
 import {
   containsMachinePath,
   isPoisonPill,
   main,
-  resolveProjectRootFromArgs,
   sanitize,
-} from '../../src/scripts/sanitize-permissions.js'
+} from '../../src/lib/sanitize-permissions.js'
 
 let tmpRoot: string
 

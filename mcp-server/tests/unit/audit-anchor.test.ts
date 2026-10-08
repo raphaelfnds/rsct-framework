@@ -16,7 +16,7 @@ import {
   clearAuditMigrationMemo,
 } from '../../src/lib/audit-log.js'
 import { clearAnchorCache, sameDirectory, canonicalPath } from '../../src/lib/repo-anchor.js'
-import { sanitize } from '../../src/scripts/sanitize-permissions.js'
+import { sanitize } from '../../src/lib/sanitize-permissions.js'
 
 /**
  * #92 — the audit log is the anti-rollback anchor, so where it resolves decides

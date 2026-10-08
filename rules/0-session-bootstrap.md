@@ -152,11 +152,17 @@ Before any `Edit` / `Write` to executable behavior files
   `mcp__rsct__rsct_check_edit_scope({ file_path })` — returns
   `in_scope` / `out_of_scope` / `unknown` / `stale_context`. If
   `out_of_scope`, STOP and ask the dev to expand `scope_globs` (requires
-  re-opening spec) or to defer the change. If **`stale_context`** (or a
-  PreToolUse guard blocks an edit): a plan closed in this session and the
-  context is stale — STOP and re-run `mcp__rsct__rsct_load_context` to
-  re-read plan/decisions/knowledge before editing (plan-lifecycle-v2 item 5;
-  a bare `rsct_status` does **not** clear it).
+  re-opening spec) or to defer the change. If **`stale_context`**: a plan
+  closed in this session and the context is stale — STOP and re-run
+  `mcp__rsct__rsct_load_context` to re-read plan/decisions/knowledge before
+  editing (plan-lifecycle-v2 item 5; a bare `rsct_status` does **not** clear
+  it). The PreToolUse guard refuses the edit itself in both cases and its
+  message names which one (`out_of_scope` or `stale_context`) — a refusal is
+  a STOP, never something to route around through the terminal. While a
+  list is active, `plan_*.md`, `progress_*.md` and `spec_*.md` at the
+  project root are always `in_scope`, and a path outside the project is
+  `unknown` (on Windows a network-style path on a different host is refused
+  instead). List entries are relative to the project root.
 - Never write a comment into code. A decision, a convention or a measured
   fact belongs in `documentation/decisions.md`,
   `documentation/knowledge/anti-decisions.md` or `CONVENTIONS.md`.

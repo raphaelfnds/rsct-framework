@@ -18,6 +18,7 @@ import {
   matchesAnyGlob,
   readPhaseState,
 } from '../../src/lib/phase-scope.js'
+import { evaluateEditGuard } from '../../src/lib/edit-guard.js'
 import { resolveProjectRoot } from '../../src/lib/project-root.js'
 
 let tmpRoot: string
@@ -491,5 +492,60 @@ describe('lib/phase-scope — a path carrying a line terminator is never in scop
       phase_state_override: { scope_globs: ['**/x.ts'] },
     })) as CheckEditScopeOutput
     expect(out.status).toBe('in_scope')
+  })
+})
+
+describe('rsct_check_edit_scope — answers like the edit guard (#114)', () => {
+  const LF = String.fromCharCode(10)
+
+  async function ask(file_path: string): Promise<CheckEditScopeOutput> {
+    return (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path,
+      phase_state_override: { scope_globs: ['src/**'] },
+    })) as CheckEditScopeOutput
+  }
+
+  it('reports a plan-tracking file as in scope, with no glob and a hint of its own', async () => {
+    const out = await ask('progress_demo.md')
+    expect(out.status).toBe('in_scope')
+    expect(out.matched_glob).toBeNull()
+    expect(out.hints).toContain(
+      'File is a plan-tracking file (plan_*.md, progress_*.md or spec_*.md at the project root) — always editable while a scope is active.',
+    )
+    expect(out.hints.join(' ')).not.toContain("'null'")
+    expect((await ask('notes_demo.md')).status).toBe('out_of_scope')
+  })
+
+  it('keeps naming the glob for a file the list covers', async () => {
+    const out = await ask('src/a.ts')
+    expect(out.matched_glob).toBe('src/**')
+    expect(out.hints).toContain("File is in scope via glob 'src/**'. Edits proceed normally.")
+  })
+
+  it('reports a path outside the project as unknown and says why', async () => {
+    const outside = join(tmpdir(), 'rsct-elsewhere', 'note.md')
+    const out = await ask(outside)
+    expect(out.status).toBe('unknown')
+    expect(out.hints).toContain(`File '${outside}' is outside the project root — the phase scope does not govern it.`)
+    expect((await ask('README.md')).status).toBe('out_of_scope')
+  })
+
+  it.each([
+    'src/a.ts',
+    'README.md',
+    'plan_demo.md',
+    'docs/plan_demo.md',
+    'src/../README.md',
+    'other/../src/a.ts',
+    'src/../../escaped.ts',
+    '..env.ts',
+    `a${LF}b.ts`,
+  ])('gives %j the status the guard gives it', async (path) => {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(join(tmpRoot, '.rsct', 'phase-state.json'), JSON.stringify({ phase: 'code', scope_globs: ['src/**'] }))
+    const tool = (await checkEditScopeHandler({ project_root: tmpRoot, file_path: path })) as CheckEditScopeOutput
+    const hook = evaluateEditGuard({ projectRoot: tmpRoot, rsctInstalled: true, filePath: path })
+    expect(tool.status).toBe(hook.status)
   })
 })

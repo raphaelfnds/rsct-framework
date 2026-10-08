@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sanitize, isAbsoluteEntry } from '../../src/scripts/sanitize-permissions.js'
+import { sanitize, isAbsoluteEntry } from '../../src/lib/sanitize-permissions.js'
 
 let tmpRoot: string
 beforeEach(() => {
