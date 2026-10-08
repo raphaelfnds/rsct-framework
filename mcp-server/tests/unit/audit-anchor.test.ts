@@ -18,12 +18,6 @@ import {
 import { clearAnchorCache, sameDirectory, canonicalPath } from '../../src/lib/repo-anchor.js'
 import { sanitize } from '../../src/lib/sanitize-permissions.js'
 
-/**
- * #92 — the audit log is the anti-rollback anchor, so where it resolves decides
- * whether a crafted `project_root` can present a blank history for commits that
- * land in the real repository.
- */
-
 function hasGit(): boolean {
   try {
     execFileSync('git', ['--version'], { stdio: 'ignore' })
@@ -70,7 +64,6 @@ afterEach(() => {
 
 describe.runIf(GIT)('the log resolves at the repository, not at the declared root', () => {
   it('a crafted subdirectory resolves to the PARENT repository', () => {
-    // Mutation that reddens: base the default path on `projectRoot` again.
     const repo = join(box, 'repo')
     initRepo(repo)
     const crafted = join(repo, 'docs', 'scratch')
@@ -83,7 +76,6 @@ describe.runIf(GIT)('the log resolves at the repository, not at the declared roo
   })
 
   it('a plain repo is unchanged — the common case must not move', () => {
-    // Mutation that reddens: always relocate to the parent directory.
     const repo = join(box, 'repo')
     initRepo(repo)
     expect(resolveAuditPath(repo)).toBe(join(repo, '.rsct', 'audit.log'))
@@ -91,7 +83,6 @@ describe.runIf(GIT)('the log resolves at the repository, not at the declared roo
   })
 
   it('a directory with no git keeps the log where it is', () => {
-    // Mutation that reddens: treat a missing identity as a relocation.
     const plain = join(box, 'plain')
     mkdirSync(plain, { recursive: true })
     expect(resolveAuditPath(plain)).toBe(join(plain, '.rsct', 'audit.log'))
@@ -101,9 +92,6 @@ describe.runIf(GIT)('the log resolves at the repository, not at the declared roo
 
 describe.runIf(GIT)('audit.path containment', () => {
   it('an absolute path OUTSIDE the base is refused and falls back', () => {
-    // Mutation that reddens: honour the configured path unconditionally. This
-    // is the escape that survives the root binding untouched — MEASURED, it
-    // relocates both free-lane anchors from the CORRECT root.
     const repo = join(box, 'repo')
     initRepo(repo)
     const outside = join(box, 'elsewhere', 'audit.log')
@@ -114,7 +102,6 @@ describe.runIf(GIT)('audit.path containment', () => {
   })
 
   it('a path INSIDE the base is honoured', () => {
-    // Mutation that reddens: refuse every configured path.
     const repo = join(box, 'repo')
     initRepo(repo)
     const d = decideAuditPath(repo, { path: 'logs/rsct.log' })
@@ -123,8 +110,6 @@ describe.runIf(GIT)('audit.path containment', () => {
   })
 
   it('containment uses the anchor normalization, not a raw prefix', () => {
-    // Mutation that reddens: replace `isInside` with `candidate.startsWith(base)`.
-    // A sibling whose name merely EXTENDS the base would then read as inside.
     const repo = join(box, 'repo')
     initRepo(repo)
     const sibling = repo + '-evil'
@@ -137,12 +122,6 @@ describe.runIf(GIT)('audit.path containment', () => {
 
 describe.runIf(GIT)('AUDIT-1 — the SessionStart hook and the reader agree on the log', () => {
   it("the sanitizer's settings.baseline lands where request-commit reads it, in a RELOCATED project", () => {
-    // Mutation that reddens: give `resolveAuditLogPath` its own copy of the path
-    // logic again (it had one, justified by "audit-log reaches zod" — measured
-    // false today: the whole runtime chain is node builtins, and the bundle has
-    // zero `zod` occurrences). Two copies would be a second way for this hook
-    // and the reader to disagree about WHERE the log is, and the old docstring
-    // named the consequence: "the drift report is silently dead".
     const repo = join(box, 'mono')
     initRepo(repo)
     const pkg = join(repo, 'packages', 'app')
@@ -154,8 +133,6 @@ describe.runIf(GIT)('AUDIT-1 — the SessionStart hook and the reader agree on t
 
     sanitize(pkg, { now: new Date('2026-09-10T12:00:00.000Z') })
 
-    // The reader resolves the log at the repository; the hook must have written
-    // its baseline into that same file, not into the package directory.
     const readerPath = decideAuditPath(pkg).path
     expect(readerPath).toBe(join(repo, '.rsct', 'audit.log'))
     expect(readFileSync(readerPath, 'utf8')).toContain('settings.baseline')
@@ -165,8 +142,6 @@ describe.runIf(GIT)('AUDIT-1 — the SessionStart hook and the reader agree on t
 
 describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across the upgrade', () => {
   it('a legacy log at the old location is migrated, and the migration is audited', () => {
-    // Mutation that reddens: skip the migration. The ceiling would reset to 0
-    // and a locked budget would silently unlock on the first run after upgrade.
     const repo = join(box, 'mono')
     initRepo(repo)
     const pkg = join(repo, 'packages', 'app')
@@ -182,7 +157,6 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
   })
 
   it('the legacy file is COPIED, never moved — a half-done migration cannot destroy the only copy', () => {
-    // Mutation that reddens: use renameSync instead of copyFileSync.
     const repo = join(box, 'mono')
     initRepo(repo)
     const pkg = join(repo, 'packages', 'app')
@@ -195,7 +169,6 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
   })
 
   it('when BOTH logs exist the migration is skipped — merging would double-count the ceiling', () => {
-    // Mutation that reddens: append the legacy file to the existing target.
     const repo = join(box, 'mono')
     initRepo(repo)
     const pkg = join(repo, 'packages', 'app')
@@ -212,8 +185,6 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
   })
 
   it('nothing is migrated when the root and the repository already agree', () => {
-    // Mutation that reddens: drop the `sameDirectory` guard, so a plain repo
-    // would rewrite its own log through the migration path on every process.
     const repo = join(box, 'repo')
     initRepo(repo)
     mkdirSync(join(repo, '.rsct'), { recursive: true })

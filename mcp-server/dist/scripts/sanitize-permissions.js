@@ -220,36 +220,17 @@ function hashSettingsFile(projectRoot) {
 // src/lib/sanitize-permissions.ts
 var GIT_GLOBAL_OPT = [
   `-[cC]\\s+(?:"[^"]*"|'[^']*'|[^\\s)]+)`,
-  // -C <path>, -c key=value
   '--(?:git-dir|work-tree|exec-path|namespace)=(?:"[^"]*"|[^\\s)]+)',
   "--(?:no-pager|paginate|bare|literal-pathspecs|no-replace-objects)",
   "-p\\b"
 ].join("|");
 var GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`;
 var POISON_PILL_PATTERNS = [
-  // Git mutations, with any run of global options between `git` and the
-  // subcommand: Bash(git commit ...), Bash(git -C /repo commit),
-  // Bash(git --git-dir=/r/.git push), Bash(git -c user.name=x merge).
   new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, "i"),
-  // A wildcard stands where the SUBCOMMAND should be, so it authorises every
-  // subcommand — commit included: Bash(git*), Bash(git:*), Bash(git -C:*).
-  // The option class deliberately excludes `:` and `*` so the wildcard is not
-  // swallowed as part of an option token.
   /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
-  // Blanket Bash wildcard at start: Bash(*), Bash(:*)
   /^Bash\(\s*[:*]/i,
-  // Path-prefixed git mutation: Bash(/usr/bin/git commit), Bash(./bin/git push),
-  // Bash(C:/Program Files/Git/bin/git merge). Lazy `[^)]*?` allows spaces inside
-  // the path (Windows "Program Files") without sliding past the final separator.
-  // The closing `git\s+(commit|push|merge)(?![\w-])` anchor pins the basename so
-  // Bash(/somewhere/git-credential-store ...) (a different binary) does NOT
-  // match — the `\s+` requires whitespace, not a dash, after `git`.
   /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
-  // Shell wrapper around a git mutation: Bash(sh -c "git commit ..."), Bash(bash -c 'git push origin')
-  // Any of the common POSIX shells + -c flag + content containing git commit/push/merge.
   /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
-  // Wildcard-around-git: Bash(*git*) and similar — the bash matcher would
-  // pick up commit/push/merge inside the wildcard envelope.
   /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i
 ];
 var SETTINGS_FILES = ["settings.json", "settings.local.json"];
@@ -262,23 +243,10 @@ function isAbsoluteEntry(v) {
 }
 var MACHINE_HOME_RE = new RegExp(
   [
-    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
-    // so this branch needs no anchor. Case-folded by explicit class rather than
-    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
     "[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]",
-    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
-    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
-    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
-    // working permission from the file the whole team shares.
     `(^|[\\s"'=(,;])/home/`,
-    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
-    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
     `(^|[\\s"'=(,;])/Users/`,
-    // WSL reaching a Windows drive. Not subsumed by the branch above: here
-    // `/Users/` is preceded by the drive letter, not by a token boundary.
     "/mnt/[a-z]/[Uu]sers/",
-    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
-    // shell actually produces, and it is the CAP-41 field-report environment.
     "//wsl\\.localhost/",
     "\\\\\\\\wsl\\.localhost\\\\"
   ].join("|")

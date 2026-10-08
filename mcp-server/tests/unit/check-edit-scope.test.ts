@@ -85,8 +85,6 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
     expect(r.matched_glob).toBeUndefined()
   })
 
-  // PH-1: relativization via prefix-strip against projectRoot (the reported
-  // bug — an absolute file_path never matched a root-relative glob).
   it('matches an ABSOLUTE path under root against a root-relative glob', () => {
     const r = matchesAnyGlob('/proj/pom.xml', ['pom.xml'], '/proj')
     expect(r.matched).toBe(true)
@@ -119,10 +117,8 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
   })
 
   it('falls back to the absolute form when path is not under root (no regression)', () => {
-    // glob loose enough to match the absolute form still matches
     const hit = matchesAnyGlob('/other/src/x.ts', ['**/src/**'], '/proj')
     expect(hit.matched).toBe(true)
-    // a root-relative glob does NOT spuriously match an out-of-root path
     const miss = matchesAnyGlob('/other/pom.xml', ['pom.xml'], '/proj')
     expect(miss.matched).toBe(false)
   })
@@ -133,7 +129,6 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
   })
 
   it('is case-sensitive in the glob body (only the drive letter folds)', () => {
-    // documented limit — a lowercase glob does not match a differently-cased body
     expect(matchesAnyGlob('/proj/Pom.xml', ['pom.xml'], '/proj').matched).toBe(
       false,
     )
@@ -275,8 +270,6 @@ describe('rsct_check_edit_scope — handler', () => {
   })
 
   it('matches an ABSOLUTE file_path against a root-relative glob (PH-1, end-to-end)', async () => {
-    // Build the abs path from the SAME root the handler resolves, so this is
-    // robust to any symlink/realpath normalization (macOS /var→/private/var).
     const root = resolveProjectRoot(tmpRoot).root
     const abs = join(root, 'pom.xml')
     const out = (await checkEditScopeHandler({
@@ -290,9 +283,6 @@ describe('rsct_check_edit_scope — handler', () => {
 })
 
 describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
-  // tmpRoot from the outer beforeEach is reused — no fresh setup needed.
-  // The outer afterEach cleans up the tmpdir between cases.
-
   it('writes the phase-state.json with pretty-printed JSON + trailing newline', async () => {
     const { writePhaseState } = await import(
       '../../src/lib/phase-scope.js'
@@ -362,7 +352,6 @@ describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
     const result = writePhaseState(tmpRoot, { phase: 'spec' })
     expect(result.ok).toBe(true)
     expect(existsSync(join(tmpRoot, '.rsct/phase-state.json'))).toBe(true)
-    // Lock cleared after the successful write
     expect(existsSync(join(tmpRoot, '.rsct/phase-state.lock'))).toBe(false)
   })
 
@@ -384,10 +373,8 @@ describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
     const { writePhaseState } = await import(
       '../../src/lib/phase-scope.js'
     )
-    // First write — should succeed and release the lock.
     const r1 = writePhaseState(tmpRoot, { phase: 'spec' })
     expect(r1.ok).toBe(true)
-    // Second write — lock is gone (released by first), so this also succeeds.
     const r2 = writePhaseState(tmpRoot, { phase: 'code' })
     expect(r2.ok).toBe(true)
     const content = readFileSync(

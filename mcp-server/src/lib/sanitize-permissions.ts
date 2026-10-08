@@ -1,25 +1,3 @@
-/**
- * INV-2.3 poison-pill closer (SessionStart hook).
- *
- * The §C-gated tools (rsct_request_commit/_push/_merge) require an
- * out-of-band dev_approval before mutating git. A "trust forever" entry
- * like `Bash(git commit:*)` in .claude/settings.local.json would let
- * the model bypass that by running git commit directly. This script
- * strips such entries from `permissions.allow[]` in both
- * .claude/settings.json and .claude/settings.local.json. It is meant
- * to run as a Claude Code SessionStart hook so the poison pill is
- * removed at every session boot.
- *
- * Constraints:
- *  - Zero external deps (Node builtins only) — runs before the MCP
- *    server is loaded.
- *  - Never throws; always exits 0 so a malformed settings file cannot
- *    block session start. Failures are reported to stderr and (best
- *    effort) appended to .rsct/audit.log.
- *  - Scope intentionally narrow: only git commit/push/merge bypasses.
- *    Other Bash patterns and tool permissions are preserved.
- */
-
 import { decideAuditPath } from './audit-log.js'
 import {
   appendFileSync,
@@ -30,64 +8,25 @@ import {
 } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
-// Node builtins only, transitively — this file is bundled into a standalone
-// SessionStart hook and never reaches zod. MEASURED after #92 folded the shared
-// audit-path resolver back in: 19 KB, zero `zod` occurrences in
-// `dist/scripts/sanitize-permissions.js`. (It read "~11 KB" before that change;
-// the number is kept honest rather than dropped, because it is the budget this
-// constraint exists to protect — for scale, the sibling edit-scope-guard bundle
-// is 152 KB.)
 import { resolveProjectRootFromArgs } from './hook-project-root.js'
 import { stripBom } from './io-utils.js'
 import { hashSettingsFile } from './settings-drift.js'
 
-/**
- * A git GLOBAL option — one of the tokens that may legally sit between `git` and
- * its subcommand (#32).
- *
- * This is the gap that let five bypass forms through: every pattern used to
- * assume `commit|push|merge` came immediately after `git`, but
- * `git -C <path> commit` is valid — and it commits in ANOTHER repository, which
- * also escapes the project-scoped reasoning the rest of the framework relies on.
- *
- * The value-taking forms accept a quoted argument, because a Windows path with
- * spaces (`git -C "C:\Program Files\repo" commit`) is exactly the shape that
- * would otherwise slip past.
- */
 const GIT_GLOBAL_OPT = [
-  '-[cC]\\s+(?:"[^"]*"|\'[^\']*\'|[^\\s)]+)', // -C <path>, -c key=value
+  '-[cC]\\s+(?:"[^"]*"|\'[^\']*\'|[^\\s)]+)',
   '--(?:git-dir|work-tree|exec-path|namespace)=(?:"[^"]*"|[^\\s)]+)',
   '--(?:no-pager|paginate|bare|literal-pathspecs|no-replace-objects)',
   '-p\\b',
 ].join('|')
 
-/** Zero or more global options, each preceded by whitespace. */
 const GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`
 
 const POISON_PILL_PATTERNS: RegExp[] = [
-  // Git mutations, with any run of global options between `git` and the
-  // subcommand: Bash(git commit ...), Bash(git -C /repo commit),
-  // Bash(git --git-dir=/r/.git push), Bash(git -c user.name=x merge).
   new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, 'i'),
-  // A wildcard stands where the SUBCOMMAND should be, so it authorises every
-  // subcommand — commit included: Bash(git*), Bash(git:*), Bash(git -C:*).
-  // The option class deliberately excludes `:` and `*` so the wildcard is not
-  // swallowed as part of an option token.
   /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
-  // Blanket Bash wildcard at start: Bash(*), Bash(:*)
   /^Bash\(\s*[:*]/i,
-  // Path-prefixed git mutation: Bash(/usr/bin/git commit), Bash(./bin/git push),
-  // Bash(C:/Program Files/Git/bin/git merge). Lazy `[^)]*?` allows spaces inside
-  // the path (Windows "Program Files") without sliding past the final separator.
-  // The closing `git\s+(commit|push|merge)(?![\w-])` anchor pins the basename so
-  // Bash(/somewhere/git-credential-store ...) (a different binary) does NOT
-  // match — the `\s+` requires whitespace, not a dash, after `git`.
   /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
-  // Shell wrapper around a git mutation: Bash(sh -c "git commit ..."), Bash(bash -c 'git push origin')
-  // Any of the common POSIX shells + -c flag + content containing git commit/push/merge.
   /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
-  // Wildcard-around-git: Bash(*git*) and similar — the bash matcher would
-  // pick up commit/push/merge inside the wildcard envelope.
   /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i,
 ]
 
@@ -98,8 +37,6 @@ export type FileStatus =
   | 'malformed'
   | 'no_change'
   | 'sanitized'
-  // plan-lifecycle-v2 Trilha 2: machine-absolute additionalDirectories moved
-  // from the versioned settings.json into the per-user settings.local.json.
   | 'migrated'
   | 'migration_skipped'
 
@@ -134,95 +71,25 @@ export function isPoisonPill(entry: unknown): entry is string {
   return POISON_PILL_PATTERNS.some((re) => re.test(entry))
 }
 
-/**
- * plan-lifecycle-v2 Trilha 2: is `v` a machine-absolute path? `isAbsolute`
- * catches POSIX `/...` and, on win32, `C:\...`; the drive-letter regex is the
- * OR-complement so a `C:\...` / `C:/...` string is ALSO flagged when this runs
- * on a POSIX-built Node (where `isAbsolute('C:/x')` is false). Host-independent.
- */
 export function isAbsoluteEntry(v: unknown): v is string {
   return typeof v === 'string' && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v))
 }
 
-/**
- * Home-directory shapes, matched ANYWHERE in a string (#12).
- *
- * `permissions.allow[]` entries are not paths — they are `Bash(...)`,
- * `Read(...)`, `WebFetch(...)` or `mcp__...` strings that may EMBED one. So
- * `isAbsoluteEntry` is useless here: it is start-anchored, and every allow entry
- * starts with a tool name. Measured against a corpus of real entries, it matched
- * 0 of 21 — including every genuine leak.
- *
- * The obvious replacement — "an absolute path anywhere" — is worse than useless,
- * because a false positive DELETES a working permission from the file the team
- * shares. Measured false positives on that predicate:
- *
- *   WebFetch(domain:https://github.com)      → `//github.com` reads as POSIX absolute
- *   Bash(curl -s https://registry.npmjs.org/) → same
- *   Bash(sed "s:/opt:/srv:")                  → the `:` delimiter reads as a drive letter
- *
- * So anchor on the HOME shapes instead, never on a bare `/`. That is also the
- * honest scope: §E is about "absolute paths with the OS username", and
- * `Read(/etc/hosts)` or `Bash(cd /tmp && ls)` carry no username, are identical on
- * every machine, and relocating them would only make teammates re-approve them.
- *
- * `//wsl.localhost/` is in the list because the WSL2-from-Windows setup is
- * exactly the environment that produces those entries (CAP-41 field report).
- */
 const MACHINE_HOME_RE = new RegExp(
   [
-    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
-    // so this branch needs no anchor. Case-folded by explicit class rather than
-    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
     '[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]',
-    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
-    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
-    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
-    // working permission from the file the whole team shares.
     '(^|[\\s"\'=(,;])/home/',
-    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
-    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
     '(^|[\\s"\'=(,;])/Users/',
-    // WSL reaching a Windows drive. Not subsumed by the branch above: here
-    // `/Users/` is preceded by the drive letter, not by a token boundary.
     '/mnt/[a-z]/[Uu]sers/',
-    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
-    // shell actually produces, and it is the CAP-41 field-report environment.
     '//wsl\\.localhost/',
     '\\\\\\\\wsl\\.localhost\\\\',
   ].join('|'),
 )
 
-/**
- * Does this entry embed a machine home path? Used for `permissions.allow[]`,
- * where the path is buried inside a command string.
- */
 export function containsMachinePath(v: unknown): v is string {
   return typeof v === 'string' && MACHINE_HOME_RE.test(v)
 }
 
-/**
- * plan-lifecycle-v2 Trilha 2, generalised in #12: move entries carrying a
- * machine path out of the VERSIONED `.claude/settings.json` into the per-user,
- * auto-gitignored `.claude/settings.local.json`. A `C:\Users\me\...` path in the
- * shared file breaks teammates and leaks the local layout (§E).
- *
- * Parameterised by `key` + `matches` so `additionalDirectories` (bare paths,
- * `isAbsoluteEntry`) and `allow` (paths embedded in command strings,
- * `containsMachinePath`) share one migration engine. The DETECTION differs; the
- * migration does not — and the migration is the part with the atomicity rules
- * worth having exactly once.
- *
- * Entries are relocated VERBATIM. The command text is never rewritten and the
- * path is never genericised: the goal is to get it out of the versioned file,
- * not to guess what the dev meant.
- *
- * LOCAL-WRITE-FIRST for atomicity: write the entries into settings.local.json
- * BEFORE stripping them from settings.json, and ABORT (leaving settings.json
- * untouched) if the local file is malformed or unwritable — so a failed
- * migration can never lose the entries. Dedups against what local already has.
- * Returns a FileResult for the source, or null when there is nothing to migrate.
- */
 function migrateAbsoluteEntries(
   projectRoot: string,
   key: 'additionalDirectories' | 'allow',
@@ -235,7 +102,7 @@ function migrateAbsoluteEntries(
   try {
     settings = JSON.parse(stripBom(readFileSync(settingsPath, 'utf8'))) as SettingsShape
   } catch {
-    return null // the main loop reports settings.json as malformed
+    return null
   }
   const dirs = settings.permissions?.[key]
   if (!Array.isArray(dirs) || dirs.length === 0) return null
@@ -271,7 +138,6 @@ function migrateAbsoluteEntries(
     return { path: settingsPath, status: 'migration_skipped', error: `settings.local.json write failed: ${error}` }
   }
 
-  // Local now holds the entries → strip them from the versioned settings.json.
   const keptDirs = dirs.filter((d) => !matches(d))
   const nextSettings: SettingsShape = {
     ...settings,
@@ -280,8 +146,6 @@ function migrateAbsoluteEntries(
   try {
     writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + '\n', 'utf8')
   } catch (err) {
-    // Entries are safe in local; settings.json still has them. A re-run retries
-    // the strip (dedup prevents local duplicates). Report as skipped.
     const error = err instanceof Error ? err.message : String(err)
     audit({ event: 'sanitize.migration_skipped', file: settingsPath, reason: 'source_write_failed', error })
     return { path: settingsPath, status: 'migration_skipped', error: `settings.json write failed: ${error}` }
@@ -290,15 +154,6 @@ function migrateAbsoluteEntries(
   return { path: settingsPath, status: 'migrated', stripped: absolute }
 }
 
-/**
- * Fold the per-key migration results into ONE result per file. Without this a
- * single `settings.json` yields two entries, the stderr loop prints "migrated N
- * machine-absolute paths" twice, and a reader counts the same file as two.
- *
- * A `migration_skipped` dominates: it means the local file could not be written,
- * so nothing moved and the source was left untouched — reporting a partial
- * success beside it would misdescribe the state on disk.
- */
 function mergeMigrations(results: (FileResult | null)[]): FileResult | null {
   const present = results.filter((r): r is FileResult => r !== null)
   if (present.length === 0) return null
@@ -316,17 +171,6 @@ export function sanitize(
   const audit =
     options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now))
   const result: SanitizeResult = { projectRoot, files: [] }
-  // Trilha 2 + #12: migrate machine paths out of the versioned settings.json
-  // FIRST — the poison-pill loop below then re-reads the (migrated) file.
-  //
-  // The order is load-bearing, not incidental. An entry can be BOTH a machine
-  // path and a poison pill (`Bash(git -C "C:\Users\me\repo" commit)`). Running
-  // the migration first relocates it verbatim into settings.local.json, and the
-  // loop's SECOND iteration — over that same local file — strips the pill in the
-  // same pass. Reversed, the pill would be stripped from the versioned file and
-  // then... nothing, because the migration would find no entry to move. Worse,
-  // migrating after would move a live §C bypass into the file nobody reviews and
-  // leave it there until the next session.
   const migration = mergeMigrations([
     migrateAbsoluteEntries(projectRoot, 'additionalDirectories', isAbsoluteEntry, audit),
     migrateAbsoluteEntries(projectRoot, 'allow', containsMachinePath, audit),
@@ -394,14 +238,6 @@ export function sanitize(
     })
   }
 
-  // #17: record what `.claude/settings.json` looks like as the framework leaves
-  // it. Anything that diverges from this later in the session is drift the
-  // framework did not author — which is what `rsct_request_commit` reports.
-  //
-  // LAST, deliberately: both the migration and the poison-pill strip may have
-  // rewritten the file above, and a baseline taken before them would freeze the
-  // very entries this run just removed, reporting the framework's own cleanup as
-  // drift on the next commit.
   const baselineHash = hashSettingsFile(projectRoot)
   if (baselineHash !== null) {
     audit({ event: 'settings.baseline', file: join(projectRoot, '.claude', 'settings.json'), hash: baselineHash })
@@ -410,30 +246,6 @@ export function sanitize(
   return result
 }
 
-/**
- * Where the audit log lives for this project.
- *
- * This used to REIMPLEMENT `lib/audit-log.ts`'s resolver, with a docstring
- * explaining that the duplication was forced: *"this file is bundled into a
- * standalone SessionStart hook, and `resolveAuditPath` sits in a module that
- * reaches zod."* **That is no longer true, and it was verified rather than
- * assumed** — `audit-log.ts`'s runtime imports are `node:fs`, `node:path`,
- * `io-utils` (node builtins) and `repo-anchor` (→ `git.ts`, node builtins); its
- * only `project-root` import is `import type`, which is erased at build. The
- * bundle stays on node builtins.
- *
- * So the duplication is removed rather than tested. That matters more since
- * #92: the resolver now also derives the REPOSITORY anchor, and two copies of
- * that would be a second way for this hook and `rsct_request_commit` to disagree
- * about where the log is. The old docstring named the consequence exactly —
- * *"written to a different file than the reader looks at, the drift report is
- * silently dead"* — and #17's `settings.baseline` is written HERE and read
- * THERE.
- *
- * The bare `JSON.parse` for the one config key stays: reading `audit.path`
- * without zod is what kept this file light, and only the PATH LOGIC was ever
- * the duplication worth removing.
- */
 function resolveAuditLogPath(projectRoot: string): string {
   let configured: string | undefined
   try {
@@ -443,7 +255,6 @@ function resolveAuditLogPath(projectRoot: string): string {
       configured = cfg.audit.path
     }
   } catch {
-    // No config, unreadable, or malformed → the shared resolver's default.
   }
   return decideAuditPath(projectRoot, configured === undefined ? undefined : { path: configured })
     .path
@@ -460,7 +271,6 @@ function defaultAuditWriter(
     const stamped = { ...entry, ts: now.toISOString() }
     appendFileSync(auditPath, JSON.stringify(stamped) + '\n', 'utf8')
   } catch {
-    // Never block session start on audit failure.
   }
 }
 

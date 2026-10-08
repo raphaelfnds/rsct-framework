@@ -1381,6 +1381,116 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - `phase_state_override` of `rsct_check_edit_scope` carries `context_stale` so a what-if call can
   ask about a stale context.
 
+### `lib/sanitize-permissions.ts` (migrated in the #114 REVIEW)
+
+- **What it is for (INV-2.3).** The §C tools need an out-of-band approval; a standing
+  `Bash(git commit:*)` in a settings file lets the agent run git directly. The sanitizer strips
+  such entries from `permissions.allow[]` of `.claude/settings.json` and
+  `.claude/settings.local.json`. Narrow on purpose: commit, push, merge and the wildcards that
+  cover them; every other entry is preserved.
+- **It never blocks a session.** It never throws and exits 0 on a malformed file, reporting to
+  stderr and, best effort, to the audit log.
+- **Node builtins only, transitively** — it runs before the server exists. MEASURED after #92
+  folded the shared audit-path resolver in: 19 KB, zero `zod` occurrences in the bundle (17 KB
+  since #114, when the comments esbuild carried inside its literals went)
+  (`audit-log.ts` reaches only `io-utils` and `repo-anchor` → `git.ts` at runtime; its
+  `project-root` import is type-only). `audit.path` is read with a bare `JSON.parse`, which is what
+  keeps zod out. There is ONE resolver because `settings.baseline` is written here and read by
+  `rsct_request_commit`: a second copy of the path logic is a baseline written where nobody reads.
+- **Git global options (#32).** Every pattern assumed the subcommand came right after `git`, but
+  `git -C <path> commit` is valid and commits in ANOTHER repository; five forms walked past.
+  Value-taking options accept a quoted argument (`git -C "C:\Program Files\repo" commit`). The
+  option class excludes `:` and `*`, so a wildcard standing where the subcommand belongs
+  (`Bash(git -C:*)`) is not swallowed as an option. `(?![\w-])` after the verb keeps
+  `commit-graph`, `merge-base` and `merge-tree`: a hyphen is not a word character, so `commit\b`
+  matched them before.
+- **Path-prefixed git.** A lazy `[^)]*?` lets the path hold spaces without sliding past the last
+  separator, and `git\s+` pins the basename: `git-credential-store` is another binary.
+- **`isAbsoluteEntry`** also tests a drive-letter pattern, so `C:/x` is flagged on a POSIX Node,
+  where `isAbsolute('C:/x')` is false.
+- **Machine paths inside `allow[]` (#12).** Those entries are command strings that may EMBED a
+  path, so a start-anchored test is useless: MEASURED 0 of 21 real entries, every real leak
+  included. "An absolute path anywhere" is worse, because a false positive DELETES a working
+  permission from the file the team shares — measured on `WebFetch(domain:https://github.com)` and
+  `Bash(curl -s https://registry.npmjs.org/)` (`//host` reads as POSIX absolute) and on
+  `Bash(sed "s:/opt:/srv:")` (the `:` reads as a drive letter). So the match is on HOME shapes:
+  `C:\Users\` (case folded by an explicit class, because the POSIX branches must stay
+  case-sensitive); `/home/<u>/` and `/Users/<u>/` only at the start of a token — unanchored they
+  matched `Read(src/pages/home/**)` and `Bash(gh api /users/octocat)`, found in REVIEW because the
+  first corpus had no path-style entry; capital `U` is load-bearing (macOS against an API path);
+  `/mnt/<d>/Users/`; and `//wsl.localhost/` in both slash spellings (CAP-41 field report).
+  `Read(/etc/hosts)` carries no user name and is the same on every machine — moving it would only
+  make teammates approve it again.
+- **Migration.** Verbatim: the command text is never rewritten and the path never made generic.
+  Local-write-first: entries reach `settings.local.json` before they leave `settings.json`, and the
+  run stops with the source untouched when the local file is malformed or unwritable; a re-run
+  retries the strip and the dedup prevents duplicates. One engine for both keys and one result per
+  file — `migration_skipped` dominates, since nothing moved.
+- **Order.** Migration first, then the poison-pill loop over both files. An entry can be both
+  (`Bash(git -C "C:\Users\me\repo" commit)`): the loop's second iteration strips it from the local
+  file in the same run. Reversed, a live §C bypass would sit in the file nobody reviews until the
+  next session.
+- **`settings.baseline` is written last (#17).** It records the file as the framework leaves it;
+  taken before the strip it would freeze the entries this run removed, and the next commit would
+  report the framework's own cleanup as drift.
+- **BOM (#12).** A UTF-8 BOM used to make the file `malformed`: the strip never ran and a
+  `Bash(git commit:*)` entry survived while every surface reported healthy. Tolerated on read,
+  never written back.
+
+### `lib/version-drift.ts` (migrated in the #114 REVIEW)
+
+- **Two axes.** Version (`normal`): the project's `rsct_version` is older than the running
+  binary. Component: is enforcement running — the script is there AND its hook is registered
+  (#24: a byte-perfect script with no hook entry enforces nothing and used to read as healthy).
+- **What escalates to `security`.** `absent`; `unregistered`, only for a script that could be
+  seen (`current` or `stale`); and since #114 `inert`. `unreadable` never does: a script that
+  could not be read, or settings that could not be parsed, is absence of evidence.
+- **`stale` does not escalate.** The scripts are bundles — `edit-scope-guard.js` embeds the whole
+  config layer, so one unrelated `.rsct.json` key changes its bytes. Ranked as security it would
+  fire in every project on almost every release, and a signal that is always on is one nobody
+  reads. Comparing content answers "is it the same build", never "is a fix missing". The wording
+  is "differs from", never "outdated": `.rsct/scripts/` is committed, a teammate on an older
+  binary can hold a NEWER script, and the comparison has no direction.
+- **The body is compared, not the stamp.** Line 2 carries the release version, the same axis as
+  `rsct_version`, so "project behind" would always imply "stamp behind". `STAMP_RE` is anchored at
+  the line start (a bundler line containing `v=1` is not a stamp), requires a leading digit
+  (setup's `v=unknown` yields no version) and is exported so the bash test asserts the writer
+  against the pattern itself. Whether line 2 IS a stamp is a separate question: `v=unknown` is
+  still a stamp and still left out of the body, while a pre-stamp install carries source there.
+- **Normalisation.** CRLF is folded: the directory is not gitignored, so `autocrlf` checks out
+  CRLF while the shipped copy is LF. Trailing newlines are dropped: setup builds the file inside
+  `$( … )`, which strips them, and writes it back with `printf '%s\n'`, while the shipped bundle
+  ends at its sourceMappingURL with none. An empty body on either side is never `current` — two
+  empty bodies would compare equal, a fail-open in the very case the check exists for.
+- **Registration.** `registered` on a marker match under the canonical event in any project
+  settings file; `unregistered` only when every candidate was parsed or is provably absent (an
+  absent file holds no hook — the fresh-clone case of #24); `unknown` otherwise, and when there is
+  no candidate at all. Three states, because `null` would have to mean both "could not read" and
+  "no canonical event". The event is required: a sanitizer wired under `PreToolUse` does not run
+  at session start. Backslashes are folded on the parsed command — setup writes forward slashes,
+  so this matters only for a hand-edited Windows path, where a miss would be a false security
+  claim; the bash side does not fold and must not be "fixed" to. The marker is stored literally,
+  not derived from the name: the setup and uninstall prompts hardcode the same string. A hook
+  declared at user or enterprise level is invisible here, so the sentence names the files that
+  were searched, taken from the reader's own list.
+- **Enumeration.** Data-driven over `.rsct/scripts/*.js`. `ENFORCEMENT_SCRIPTS` is the only
+  hand-kept list, and a `Map`, because names come from `readdirSync` and `'constructor' in {}` is
+  true. Its names are reported even when the directory lacks them. A directory that does not exist
+  is positive evidence (`absent`); any other failure (ENOTDIR, EACCES, a stalled share) is
+  `unreadable`. Registration is reported whatever the file state, so the audit log can tell an
+  entry left behind after the scripts were deleted from one never written. Settings are read once
+  per sweep. With no shipped directory to compare against (running from source) there is no
+  verdict.
+- **Reporting.** `absent` wins over `unregistered` in the sentence — an absent script is always
+  unregistered too. Every component that is not running is named. `affected_components` (renamed
+  from `stale_components` in #24, since it also carries `current` entries) is stored verbatim in
+  the `install.drift_detected` audit payload. A hand-typed leading `v` in `rsct_version` is
+  stripped for display. The check is local — no network, no cache, no switch — and separate from
+  `update-check.ts`, which has one.
+- **Suggest-only.** An unreadable script, an unresolvable shipped reference, a missing or
+  unparseable `rsct_version`, an equal version, or a project newer than the binary all degrade
+  quietly; `isNewer` is false for anything it cannot parse.
+
 ### `prompts/01-setup.md`
 
 - **Hook registration (#114).** The quote character is built with `String.fromCharCode(34)`
@@ -1518,6 +1628,22 @@ those files. Keyed by module and symbol; restatements of what the code says were
   fixture must carry `phase`: `completePhaseGeneric` deletes `phase` in the same write that arms the
   flag, and the abandon early-returns without writing when `phase` is absent. State is read from
   disk, never through `phase_state_override`.
+- `audit-anchor.test.ts` (#92): each case exists for one mutation — the default path based on
+  `projectRoot` again; always relocating to the parent; a missing identity treated as a
+  relocation; a configured path honoured unconditionally (MEASURED: it moves both free-lane anchors
+  away from the CORRECT root); every configured path refused; `isInside` as a bare `startsWith`
+  (a sibling whose name extends the base reads as inside); a second copy of the path logic in the
+  hook; the legacy-log migration skipped (the ceiling resets to 0 and a locked budget unlocks);
+  `renameSync` in place of `copyFileSync`; the legacy file appended to an existing target; the
+  `sameDirectory` guard dropped (a plain repository would rewrite its own log on every process).
+- `check-edit-scope.test.ts`: the root-relative cases pin PH-1 — an absolute `file_path` never
+  matched a root-relative glob. The matcher itself stays case-sensitive (a lower-case glob does not
+  match a differently-cased body); the absolute path is built from the root the handler resolves,
+  because macOS turns `/var` into `/private/var`.
+- `sanitize-permissions.test.ts`: the machine-path corpus IS the spec — real entries from the #17
+  field report plus common permission shapes — and its negatives matter as much as its positives,
+  since a false positive deletes a teammate's permission. The `git -C` relocation case was pinned
+  as a documented gap in 2.5.0 and inverted by #32.
 - `compiled-hooks.test.ts` (#114) launches the files in `dist/scripts/` the way a project holds
   them: shebang, stamp line, body, a `package.json` with `"type": "module"`, an explicit
   `CLAUDE_PROJECT_DIR`. Unit tests that import the functions cannot see what the bundle does when
