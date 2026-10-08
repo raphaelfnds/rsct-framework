@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { readFileSync, existsSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, realpathSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { resolve, isAbsolute, join, dirname, basename } from 'path';
-import { cwd } from 'process';
+import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, mkdirSync, copyFileSync } from 'fs';
+import { isAbsolute, resolve, join, dirname, sep, relative, basename } from 'path';
+import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
-import { randomUUID, createHash } from 'crypto';
+import { cwd } from 'process';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -14,6 +13,381 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+function ensureParentDir(filePath) {
+  mkdirSync(dirname(filePath), { recursive: true });
+}
+
+// src/lib/phase-scope.ts
+randomUUID();
+var PHASE_STATE_RELATIVE = ".rsct/phase-state.json";
+function phaseStatePath(projectRoot) {
+  return join(projectRoot, PHASE_STATE_RELATIVE);
+}
+function readPhaseState(projectRoot) {
+  const path = phaseStatePath(projectRoot);
+  if (!existsSync(path)) {
+    return { exists: false, state: null };
+  }
+  try {
+    const raw = readFileSync(path, "utf8").replace(/^﻿/, "");
+    if (raw.trim() === "") return { exists: true, state: null };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { exists: true, state: null, parse_error: "top-level value is not an object" };
+    }
+    return { exists: true, state: parsed };
+  } catch (err) {
+    return {
+      exists: true,
+      state: null,
+      parse_error: err instanceof Error ? err.message : String(err)
+    };
+  }
+}
+var globRegexCache = /* @__PURE__ */ new Map();
+function globToRegex(glob) {
+  const cached = globRegexCache.get(glob);
+  if (cached) return cached;
+  let out = "^";
+  let i = 0;
+  while (i < glob.length) {
+    const ch = glob[i];
+    if (ch === "*") {
+      if (glob[i + 1] === "*") {
+        const atSegmentStart = i === 0 || glob[i - 1] === "/";
+        const followedBySlash = glob[i + 2] === "/";
+        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
+          out += "(?:[^/]*/)*";
+          i += 3;
+        } else {
+          out += ".*";
+          i += followedBySlash ? 3 : 2;
+        }
+      } else {
+        out += "[^/]*";
+        i++;
+      }
+    } else if (ch === "?") {
+      out += "[^/]";
+      i++;
+    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
+      out += `\\${ch}`;
+      i++;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  out += "$";
+  const re = new RegExp(out);
+  globRegexCache.set(glob, re);
+  return re;
+}
+var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
+function pathCarriesLineTerminator(path) {
+  return LINE_TERMINATORS.some((terminator) => path.includes(terminator));
+}
+function toPosix(p) {
+  return p.split("\\").join("/");
+}
+function matchesAnyGlob(path, globs, projectRoot) {
+  const candidates = [toPosix(path)];
+  for (const glob of globs) {
+    const re = globToRegex(glob.replace(/\\/g, "/"));
+    for (const candidate of candidates) {
+      if (re.test(candidate)) return { matched: true, matched_glob: glob };
+    }
+  }
+  return { matched: false };
+}
+function readWorktreeInfo(projectRoot) {
+  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
+    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
+  }
+  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
+  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
+  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
+  let isWorktree = false;
+  let name = null;
+  if (gitDirRaw !== null) {
+    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
+    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
+    if (m) {
+      isWorktree = true;
+      name = m[1] ?? null;
+    }
+  }
+  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
+}
+function safeGit(cwd2, args) {
+  const raw = safeGitRaw(cwd2, args);
+  return raw !== null ? raw.trim() : null;
+}
+var safeGitRead = safeGit;
+var GIT_READ_TIMEOUT_MS = 3e4;
+new AsyncLocalStorage();
+function safeGitRaw(cwd2, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: cwd2,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: GIT_READ_TIMEOUT_MS
+    });
+  } catch {
+    return null;
+  }
+}
+
+// src/lib/repo-anchor.ts
+function canonicalPath(p) {
+  let current = resolve(p);
+  const tail = [];
+  for (; ; ) {
+    try {
+      const real = (realpathSync.native ?? realpathSync)(current);
+      return tail.length > 0 ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(p);
+      tail.push(basename(current));
+      current = parent;
+    }
+  }
+}
+function comparable(p) {
+  const abs = canonicalPath(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+function sameDirectory(a, b) {
+  return comparable(a) === comparable(b);
+}
+var anchorCache = /* @__PURE__ */ new Map();
+function anchorFor(projectRoot, deps = {}) {
+  const key = canonicalPath(projectRoot);
+  const hit = anchorCache.get(key);
+  if (hit) return hit;
+  const computed = resolveRepositoryAnchor(projectRoot, deps);
+  anchorCache.set(key, computed);
+  return computed;
+}
+function resolveRepositoryAnchor(projectRoot, deps = {}) {
+  const gitRead = deps.gitRead ?? safeGitRead;
+  const worktreeInfo = deps.worktreeInfo ?? readWorktreeInfo;
+  const info = worktreeInfo(projectRoot);
+  if (!info.in_git_repo) {
+    return {
+      status: "not-applicable",
+      root: resolve(projectRoot),
+      identity: null,
+      detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
+    };
+  }
+  const commonRaw = gitRead(projectRoot, ["rev-parse", "--git-common-dir"]);
+  if (commonRaw === null) {
+    return {
+      status: "unavailable",
+      root: resolve(projectRoot),
+      identity: null,
+      detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const identity = resolve(projectRoot, commonRaw).replace(/\\/g, "/");
+  let anchorRoot;
+  if (info.is_worktree) {
+    const first = gitRead(projectRoot, ["worktree", "list", "--porcelain"]);
+    const line = first?.split("\n")[0]?.trim() ?? "";
+    anchorRoot = line.startsWith("worktree ") ? line.slice("worktree ".length).trim() : null;
+    if (anchorRoot === null || anchorRoot.length === 0) anchorRoot = dirname(identity);
+  } else {
+    anchorRoot = info.toplevel;
+  }
+  if (anchorRoot === null || anchorRoot.length === 0) {
+    return {
+      status: "unavailable",
+      root: resolve(projectRoot),
+      identity,
+      detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
+    };
+  }
+  const resolved = canonicalPath(anchorRoot);
+  if (sameDirectory(resolved, projectRoot)) {
+    return { status: "same", root: resolve(projectRoot), identity, detail: null };
+  }
+  return {
+    status: "relocated",
+    root: resolved,
+    identity,
+    detail: `shared RSCT state resolves at ${resolved.replace(/\\/g, "/")}, the repository this action lands in \u2014 not at the declared project root`
+  };
+}
+
+// src/lib/edit-guard.ts
+var PLAN_TRACKING_GLOBS = ["plan_*.md", "progress_*.md", "spec_*.md"];
+function fileIdentity(path) {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+var nativeScopePaths = {
+  isAbsolute,
+  relative,
+  resolve: resolve,
+  sep,
+  dirname: dirname,
+  canonical: canonicalPath,
+  identity: fileIdentity
+};
+var BACKSLASH = String.fromCharCode(92);
+var NETWORK_ROOT = BACKSLASH + BACKSLASH;
+var GIT_BASH_DRIVE = /^\/([A-Za-z])\/(.*)$/;
+function asTheClientReads(path, deps) {
+  if (deps.sep !== BACKSLASH) return path;
+  const drive = GIT_BASH_DRIVE.exec(path);
+  return drive === null ? path : `${drive[1]}:${BACKSLASH}${drive[2]}`;
+}
+function sameFile(a, b, deps) {
+  if (a === null || b === null || a.ino === 0n || a.ino !== b.ino) return false;
+  return deps.sep === BACKSLASH || a.dev === b.dev;
+}
+function topOf(path, deps) {
+  let current = path;
+  for (; ; ) {
+    const parent = deps.dirname(current);
+    if (parent === current) return current;
+    current = parent;
+  }
+}
+function locate(root, file, deps) {
+  const fromRoot = deps.relative(root, file);
+  if (deps.isAbsolute(fromRoot)) {
+    return fromRoot.startsWith(NETWORK_ROOT) ? { where: "unverifiable" } : { where: "outside" };
+  }
+  if (fromRoot === ".." || fromRoot.startsWith(`..${deps.sep}`)) return { where: "outside" };
+  return { where: "inside", path: fromRoot };
+}
+function pathBelowRootByIdentity(root, file, deps) {
+  if (deps.relative(topOf(root, deps), topOf(file, deps)) !== "") return null;
+  const rootIdentity = deps.identity(root);
+  if (rootIdentity === null) return null;
+  let current = file;
+  for (; ; ) {
+    if (sameFile(deps.identity(current), rootIdentity, deps)) return deps.relative(current, file);
+    const parent = deps.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+function judgeEditScope(args, deps = nativeScopePaths) {
+  const { state } = args;
+  if (state?.context_stale) return { status: "stale_context" };
+  const scopeGlobs = state?.scope_globs ?? [];
+  if (!args.stateExists || state === null || scopeGlobs.length === 0) {
+    return { status: "unknown", why: "no_scope" };
+  }
+  if (pathCarriesLineTerminator(args.filePath)) {
+    return { status: "out_of_scope", why: "line_terminator" };
+  }
+  const root = deps.canonical(args.projectRoot);
+  const given = asTheClientReads(args.filePath, deps);
+  const typed = deps.isAbsolute(given) ? deps.resolve(given) : deps.resolve(args.baseDir ?? args.projectRoot, given);
+  if (locate(root, typed, deps).where === "unverifiable") {
+    return { status: "out_of_scope", why: "network_path" };
+  }
+  const file = deps.canonical(typed);
+  const located = locate(root, file, deps);
+  if (located.where === "unverifiable") {
+    return { status: "out_of_scope", why: "network_path" };
+  }
+  const belowRoot = located.where === "inside" ? located.path : pathBelowRootByIdentity(root, file, deps);
+  if (belowRoot === null) {
+    return { status: "unknown", why: "outside_project" };
+  }
+  if (matchesAnyGlob(belowRoot, PLAN_TRACKING_GLOBS).matched) {
+    return { status: "in_scope", matched_glob: null };
+  }
+  const match = matchesAnyGlob(belowRoot, scopeGlobs);
+  if (match.matched) return { status: "in_scope", matched_glob: match.matched_glob ?? null };
+  return { status: "out_of_scope", why: "not_listed", judged_as: toPosix(belowRoot) };
+}
+function outOfScopeReason(path, verdict) {
+  if (verdict.why === "not_listed") {
+    return `'${path}' is OUTSIDE the active spec scope (judged as '${verdict.judged_as}' below the project root; entries are compared case-sensitively with that spelling) \u2014 expand scope_globs (with dev approval) or re-plan`;
+  }
+  if (verdict.why === "line_terminator") {
+    return `'${path}' carries a line terminator in its name \u2014 no scope glob covers such a path`;
+  }
+  return `'${path}' is a network-style path on another root than the project \u2014 the guard cannot tell whether it points back into the project. Use the file's path under the project root, or a path on a local drive`;
+}
+function evaluateEditGuard(args) {
+  try {
+    if (!args.rsctInstalled) {
+      return { decision: "allow", status: "unmanaged", reason: "no .rsct.json \u2014 unmanaged project" };
+    }
+    const read = readPhaseState(args.projectRoot);
+    if (read.parse_error) {
+      return { decision: "allow", status: "infra_error", reason: `phase-state unreadable: ${read.parse_error}` };
+    }
+    const verdict = judgeEditScope({
+      projectRoot: args.projectRoot,
+      filePath: args.filePath,
+      ...args.cwd !== void 0 && { baseDir: args.cwd },
+      state: read.state,
+      stateExists: read.exists
+    });
+    if (verdict.status === "stale_context") {
+      return {
+        decision: "block",
+        status: "stale_context",
+        reason: "context is STALE (a plan closed / pivot) \u2014 run rsct_status + rsct_load_context before editing. If those tools are not available in this session, stop and tell the developer: the RSCT troubleshooting guide has the way out"
+      };
+    }
+    if (verdict.status === "unknown") {
+      return {
+        decision: "allow",
+        status: "unknown",
+        reason: verdict.why === "outside_project" ? `'${args.filePath}' is outside the project \u2014 the phase scope does not govern it` : "no active phase scope to enforce"
+      };
+    }
+    if (verdict.status === "in_scope") {
+      return {
+        decision: "allow",
+        status: "in_scope",
+        reason: verdict.matched_glob === null ? "plan-tracking file \u2014 always editable while a scope is active" : `in scope via '${verdict.matched_glob}'`
+      };
+    }
+    return {
+      decision: "block",
+      status: "out_of_scope",
+      reason: outOfScopeReason(args.filePath, verdict)
+    };
+  } catch (err) {
+    return {
+      decision: "allow",
+      status: "infra_error",
+      reason: `edit-guard fault: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+}
+function resolveProjectRootFromArgs(options) {
+  const { argv, env, cwd: cwd2 } = options;
+  const idx = argv.indexOf("--project-root");
+  if (idx !== -1) {
+    const value = argv[idx + 1];
+    if (value && value.length > 0) {
+      return isAbsolute(value) ? value : resolve(cwd2, value);
+    }
+  }
+  const fromEnv = env.CLAUDE_PROJECT_DIR;
+  if (fromEnv && fromEnv.length > 0) {
+    return fromEnv;
+  }
+  return cwd2;
+}
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -4054,136 +4428,6 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
-function stripBom(text) {
-  return text.charCodeAt(0) === 65279 ? text.slice(1) : text;
-}
-function ensureParentDir(filePath) {
-  mkdirSync(dirname(filePath), { recursive: true });
-}
-function readWorktreeInfo(projectRoot) {
-  if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
-    return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
-  }
-  const norm = (s) => s === null ? null : s.replace(/\\/g, "/");
-  const gitDirRaw = safeGit(projectRoot, ["rev-parse", "--git-dir"]);
-  const toplevel = norm(safeGit(projectRoot, ["rev-parse", "--show-toplevel"]));
-  let isWorktree = false;
-  let name = null;
-  if (gitDirRaw !== null) {
-    const gitDirNorm = resolve(projectRoot, gitDirRaw).replace(/\\/g, "/");
-    const m = gitDirNorm.match(/\/worktrees\/([^/]+)\/?$/);
-    if (m) {
-      isWorktree = true;
-      name = m[1] ?? null;
-    }
-  }
-  return { in_git_repo: true, is_worktree: isWorktree, toplevel, name };
-}
-function safeGit(cwd2, args) {
-  const raw = safeGitRaw(cwd2, args);
-  return raw !== null ? raw.trim() : null;
-}
-var safeGitRead = safeGit;
-var GIT_READ_TIMEOUT_MS = 3e4;
-new AsyncLocalStorage();
-function safeGitRaw(cwd2, args) {
-  try {
-    return execFileSync("git", args, {
-      cwd: cwd2,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: GIT_READ_TIMEOUT_MS
-    });
-  } catch {
-    return null;
-  }
-}
-
-// src/lib/repo-anchor.ts
-function canonicalPath(p) {
-  let current = resolve(p);
-  const tail = [];
-  for (; ; ) {
-    try {
-      const real = (realpathSync.native ?? realpathSync)(current);
-      return tail.length > 0 ? join(real, ...tail.reverse()) : real;
-    } catch {
-      const parent = dirname(current);
-      if (parent === current) return resolve(p);
-      tail.push(basename(current));
-      current = parent;
-    }
-  }
-}
-function comparable(p) {
-  const abs = canonicalPath(p).replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? abs.toLowerCase() : abs;
-}
-function sameDirectory(a, b) {
-  return comparable(a) === comparable(b);
-}
-var anchorCache = /* @__PURE__ */ new Map();
-function anchorFor(projectRoot, deps = {}) {
-  const key = canonicalPath(projectRoot);
-  const hit = anchorCache.get(key);
-  if (hit) return hit;
-  const computed = resolveRepositoryAnchor(projectRoot, deps);
-  anchorCache.set(key, computed);
-  return computed;
-}
-function resolveRepositoryAnchor(projectRoot, deps = {}) {
-  const gitRead = deps.gitRead ?? safeGitRead;
-  const worktreeInfo = deps.worktreeInfo ?? readWorktreeInfo;
-  const info = worktreeInfo(projectRoot);
-  if (!info.in_git_repo) {
-    return {
-      status: "not-applicable",
-      root: resolve(projectRoot),
-      identity: null,
-      detail: "not a git repository \u2014 no repository identity exists, so the shared anchors stay at the project root"
-    };
-  }
-  const commonRaw = gitRead(projectRoot, ["rev-parse", "--git-common-dir"]);
-  if (commonRaw === null) {
-    return {
-      status: "unavailable",
-      root: resolve(projectRoot),
-      identity: null,
-      detail: "git could not report the repository identity (absent, unreadable, or an unsupported version) \u2014 anchors stay at the project root and the binding is not enforced"
-    };
-  }
-  const identity = resolve(projectRoot, commonRaw).replace(/\\/g, "/");
-  let anchorRoot;
-  if (info.is_worktree) {
-    const first = gitRead(projectRoot, ["worktree", "list", "--porcelain"]);
-    const line = first?.split("\n")[0]?.trim() ?? "";
-    anchorRoot = line.startsWith("worktree ") ? line.slice("worktree ".length).trim() : null;
-    if (anchorRoot === null || anchorRoot.length === 0) anchorRoot = dirname(identity);
-  } else {
-    anchorRoot = info.toplevel;
-  }
-  if (anchorRoot === null || anchorRoot.length === 0) {
-    return {
-      status: "unavailable",
-      root: resolve(projectRoot),
-      identity,
-      detail: "git reported a repository but no usable working root \u2014 anchors stay at the project root and the binding is not enforced"
-    };
-  }
-  const resolved = canonicalPath(anchorRoot);
-  if (sameDirectory(resolved, projectRoot)) {
-    return { status: "same", root: resolve(projectRoot), identity, detail: null };
-  }
-  return {
-    status: "relocated",
-    root: resolved,
-    identity,
-    detail: `shared RSCT state resolves at ${resolved.replace(/\\/g, "/")}, the repository this action lands in \u2014 not at the declared project root`
-  };
-}
-
-// src/lib/audit-log.ts
 var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
 var migrationAttempted = /* @__PURE__ */ new Set();
 function migrateLegacyLog(projectRoot, base, target) {
@@ -4237,9 +4481,6 @@ function resolveAuditPath(projectRoot, config) {
   return decideAuditPath(projectRoot, config).path;
 }
 function appendAuditEntry(projectRoot, entry, config) {
-  if (config?.enabled === false) {
-    return { ok: false, reason: "disabled" };
-  }
   const path = resolveAuditPath(projectRoot, config);
   try {
     ensureParentDir(path);
@@ -4427,463 +4668,10 @@ function emitConfigViolation(projectRoot, reason, extras) {
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.
 `
   );
-  appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true });
-}
-randomUUID();
-var PHASE_STATE_RELATIVE = ".rsct/phase-state.json";
-function phaseStatePath(projectRoot) {
-  return join(projectRoot, PHASE_STATE_RELATIVE);
-}
-function readPhaseState(projectRoot) {
-  const path = phaseStatePath(projectRoot);
-  if (!existsSync(path)) {
-    return { exists: false, state: null };
-  }
-  try {
-    const raw = readFileSync(path, "utf8").replace(/^﻿/, "");
-    if (raw.trim() === "") return { exists: true, state: null };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { exists: true, state: null, parse_error: "top-level value is not an object" };
-    }
-    return { exists: true, state: parsed };
-  } catch (err) {
-    return {
-      exists: true,
-      state: null,
-      parse_error: err instanceof Error ? err.message : String(err)
-    };
-  }
-}
-var globRegexCache = /* @__PURE__ */ new Map();
-function globToRegex(glob) {
-  const cached = globRegexCache.get(glob);
-  if (cached) return cached;
-  let out = "^";
-  let i = 0;
-  while (i < glob.length) {
-    const ch = glob[i];
-    if (ch === "*") {
-      if (glob[i + 1] === "*") {
-        const atSegmentStart = i === 0 || glob[i - 1] === "/";
-        const followedBySlash = glob[i + 2] === "/";
-        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += "(?:[^/]*/)*";
-          i += 3;
-        } else {
-          out += ".*";
-          i += followedBySlash ? 3 : 2;
-        }
-      } else {
-        out += "[^/]*";
-        i++;
-      }
-    } else if (ch === "?") {
-      out += "[^/]";
-      i++;
-    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
-      out += `\\${ch}`;
-      i++;
-    } else {
-      out += ch;
-      i++;
-    }
-  }
-  out += "$";
-  const re = new RegExp(out);
-  globRegexCache.set(glob, re);
-  return re;
-}
-var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
-function pathCarriesLineTerminator(path) {
-  return LINE_TERMINATORS.some((terminator) => path.includes(terminator));
-}
-function toPosix(p) {
-  return p.split("\\").join("/");
-}
-function normForMatch(p) {
-  let s = toPosix(p);
-  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
-  if (/^[A-Za-z]:/.test(s)) s = s[0].toLowerCase() + s.slice(1);
-  return s;
-}
-function matchesAnyGlob(path, globs, projectRoot) {
-  const candidates = [toPosix(path)];
-  if (projectRoot !== void 0 && projectRoot.length > 0) {
-    const nf = normForMatch(path);
-    const nr = normForMatch(projectRoot);
-    if (nf === nr) {
-      candidates.push("");
-    } else if (nf.startsWith(`${nr}/`)) {
-      candidates.push(nf.slice(nr.length + 1));
-    }
-  }
-  for (const glob of globs) {
-    const re = globToRegex(glob.replace(/\\/g, "/"));
-    for (const candidate of candidates) {
-      if (re.test(candidate)) return { matched: true, matched_glob: glob };
-    }
-  }
-  return { matched: false };
+  appendAuditEntry(projectRoot, { event, reason, ...extras }, { });
 }
 
-// src/lib/edit-guard.ts
-function evaluateEditGuard(args) {
-  try {
-    if (!args.rsctInstalled) {
-      return { decision: "allow", status: "unmanaged", reason: "no .rsct.json \u2014 unmanaged project" };
-    }
-    const read = readPhaseState(args.projectRoot);
-    if (read.parse_error) {
-      return { decision: "allow", status: "infra_error", reason: `phase-state unreadable: ${read.parse_error}` };
-    }
-    const state = read.state;
-    if (state?.context_stale) {
-      return {
-        decision: "block",
-        status: "stale_context",
-        reason: "context is STALE (a plan closed / pivot) \u2014 run rsct_status + rsct_load_context before editing"
-      };
-    }
-    const scopeGlobs = state?.scope_globs ?? [];
-    if (!read.exists || state === null || scopeGlobs.length === 0) {
-      return { decision: "allow", status: "unknown", reason: "no active phase scope to enforce" };
-    }
-    if (pathCarriesLineTerminator(args.filePath)) {
-      return {
-        decision: "block",
-        status: "out_of_scope",
-        reason: `'${args.filePath}' carries a line terminator in its name \u2014 no scope glob covers such a path`
-      };
-    }
-    const match = matchesAnyGlob(args.filePath, scopeGlobs, args.projectRoot);
-    if (match.matched) {
-      return { decision: "allow", status: "in_scope", reason: `in scope via '${match.matched_glob}'` };
-    }
-    return {
-      decision: "block",
-      status: "out_of_scope",
-      reason: `'${args.filePath}' is OUTSIDE the active spec scope \u2014 expand scope_globs (with dev approval) or re-plan`
-    };
-  } catch (err) {
-    return {
-      decision: "allow",
-      status: "infra_error",
-      reason: `edit-guard fault: ${err instanceof Error ? err.message : String(err)}`
-    };
-  }
-}
-function hashSettingsContent(text) {
-  return createHash("sha256").update(stripBom(text).replace(/\r/g, "")).digest("hex");
-}
-function readTextOrNull(path) {
-  try {
-    if (!existsSync(path)) return null;
-    return readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-function hashSettingsFile(projectRoot) {
-  const text = readTextOrNull(join(projectRoot, ".claude", "settings.json"));
-  return text === null ? null : hashSettingsContent(text);
-}
-
-// src/scripts/sanitize-permissions.ts
-var GIT_GLOBAL_OPT = [
-  `-[cC]\\s+(?:"[^"]*"|'[^']*'|[^\\s)]+)`,
-  // -C <path>, -c key=value
-  '--(?:git-dir|work-tree|exec-path|namespace)=(?:"[^"]*"|[^\\s)]+)',
-  "--(?:no-pager|paginate|bare|literal-pathspecs|no-replace-objects)",
-  "-p\\b"
-].join("|");
-var GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`;
-var POISON_PILL_PATTERNS = [
-  // Git mutations, with any run of global options between `git` and the
-  // subcommand: Bash(git commit ...), Bash(git -C /repo commit),
-  // Bash(git --git-dir=/r/.git push), Bash(git -c user.name=x merge).
-  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, "i"),
-  // A wildcard stands where the SUBCOMMAND should be, so it authorises every
-  // subcommand — commit included: Bash(git*), Bash(git:*), Bash(git -C:*).
-  // The option class deliberately excludes `:` and `*` so the wildcard is not
-  // swallowed as part of an option token.
-  /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
-  // Blanket Bash wildcard at start: Bash(*), Bash(:*)
-  /^Bash\(\s*[:*]/i,
-  // Path-prefixed git mutation: Bash(/usr/bin/git commit), Bash(./bin/git push),
-  // Bash(C:/Program Files/Git/bin/git merge). Lazy `[^)]*?` allows spaces inside
-  // the path (Windows "Program Files") without sliding past the final separator.
-  // The closing `git\s+(commit|push|merge)(?![\w-])` anchor pins the basename so
-  // Bash(/somewhere/git-credential-store ...) (a different binary) does NOT
-  // match — the `\s+` requires whitespace, not a dash, after `git`.
-  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
-  // Shell wrapper around a git mutation: Bash(sh -c "git commit ..."), Bash(bash -c 'git push origin')
-  // Any of the common POSIX shells + -c flag + content containing git commit/push/merge.
-  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
-  // Wildcard-around-git: Bash(*git*) and similar — the bash matcher would
-  // pick up commit/push/merge inside the wildcard envelope.
-  /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i
-];
-var SETTINGS_FILES = ["settings.json", "settings.local.json"];
-function isPoisonPill(entry) {
-  if (typeof entry !== "string") return false;
-  return POISON_PILL_PATTERNS.some((re) => re.test(entry));
-}
-function isAbsoluteEntry(v) {
-  return typeof v === "string" && (isAbsolute(v) || /^[A-Za-z]:[\\/]/.test(v));
-}
-var MACHINE_HOME_RE = new RegExp(
-  [
-    // C:\Users\ · c:/users/ — a drive letter is unambiguous wherever it appears,
-    // so this branch needs no anchor. Case-folded by explicit class rather than
-    // the `i` flag, because the POSIX branches below MUST stay case-sensitive.
-    "[A-Za-z]:[\\\\/]{1,2}[Uu][Ss][Ee][Rr][Ss][\\\\/]",
-    // /home/<user>/ and /Users/<user>/ must start a TOKEN, not appear mid-path.
-    // Unanchored, `/home/` matched `Read(src/pages/home/**)` and `/users/`
-    // matched `Bash(gh api /users/octocat)` — and a false positive here DELETES a
-    // working permission from the file the whole team shares.
-    `(^|[\\s"'=(,;])/home/`,
-    // Capital U is load-bearing: macOS is `/Users/`, while `/users/` lower-case
-    // is an API path (`gh api /users/x`, `localhost:3000/api/users/1`).
-    `(^|[\\s"'=(,;])/Users/`,
-    // WSL reaching a Windows drive. Not subsumed by the branch above: here
-    // `/Users/` is preceded by the drive letter, not by a token boundary.
-    "/mnt/[a-z]/[Uu]sers/",
-    // Windows reaching WSL, in both spellings — the `\\` form is what a Windows
-    // shell actually produces, and it is the CAP-41 field-report environment.
-    "//wsl\\.localhost/",
-    "\\\\\\\\wsl\\.localhost\\\\"
-  ].join("|")
-);
-function containsMachinePath(v) {
-  return typeof v === "string" && MACHINE_HOME_RE.test(v);
-}
-function migrateAbsoluteEntries(projectRoot, key, matches, audit) {
-  const settingsPath = join(projectRoot, ".claude", "settings.json");
-  if (!existsSync(settingsPath)) return null;
-  let settings;
-  try {
-    settings = JSON.parse(stripBom(readFileSync(settingsPath, "utf8")));
-  } catch {
-    return null;
-  }
-  const dirs = settings.permissions?.[key];
-  if (!Array.isArray(dirs) || dirs.length === 0) return null;
-  const absolute = dirs.filter(matches);
-  if (absolute.length === 0) return null;
-  const localPath = join(projectRoot, ".claude", "settings.local.json");
-  let local = {};
-  if (existsSync(localPath)) {
-    try {
-      local = JSON.parse(stripBom(readFileSync(localPath, "utf8")));
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_malformed", error });
-      return { path: settingsPath, status: "migration_skipped", error: `settings.local.json malformed: ${error}` };
-    }
-  }
-  const localPerms = local.permissions && typeof local.permissions === "object" ? { ...local.permissions } : {};
-  const localDirs = Array.isArray(localPerms[key]) ? localPerms[key] : [];
-  const localSet = new Set(localDirs.filter((x) => typeof x === "string"));
-  const toAdd = absolute.filter((a) => !localSet.has(a));
-  const nextLocal = {
-    ...local,
-    permissions: { ...localPerms, [key]: [...localDirs, ...toAdd] }
-  };
-  try {
-    mkdirSync(dirname(localPath), { recursive: true });
-    writeFileSync(localPath, JSON.stringify(nextLocal, null, 2) + "\n", "utf8");
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "local_write_failed", error });
-    return { path: settingsPath, status: "migration_skipped", error: `settings.local.json write failed: ${error}` };
-  }
-  const keptDirs = dirs.filter((d) => !matches(d));
-  const nextSettings = {
-    ...settings,
-    permissions: { ...settings.permissions, [key]: keptDirs }
-  };
-  try {
-    writeFileSync(settingsPath, JSON.stringify(nextSettings, null, 2) + "\n", "utf8");
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    audit({ event: "sanitize.migration_skipped", file: settingsPath, reason: "source_write_failed", error });
-    return { path: settingsPath, status: "migration_skipped", error: `settings.json write failed: ${error}` };
-  }
-  audit({ event: "sanitize.migrated", file: settingsPath, key, migrated: absolute, to: localPath, count: absolute.length });
-  return { path: settingsPath, status: "migrated", stripped: absolute };
-}
-function mergeMigrations(results) {
-  const present = results.filter((r) => r !== null);
-  if (present.length === 0) return null;
-  const skipped = present.find((r) => r.status === "migration_skipped");
-  if (skipped) return skipped;
-  const stripped = present.flatMap((r) => r.stripped ?? []);
-  return { path: present[0].path, status: "migrated", stripped };
-}
-function sanitize(projectRoot, options = {}) {
-  const now = options.now ?? /* @__PURE__ */ new Date();
-  const audit = options.auditWriter ?? ((entry) => defaultAuditWriter(projectRoot, entry, now));
-  const result = { projectRoot, files: [] };
-  const migration = mergeMigrations([
-    migrateAbsoluteEntries(projectRoot, "additionalDirectories", isAbsoluteEntry, audit),
-    migrateAbsoluteEntries(projectRoot, "allow", containsMachinePath, audit)
-  ]);
-  if (migration) result.files.push(migration);
-  for (const name of SETTINGS_FILES) {
-    const path = join(projectRoot, ".claude", name);
-    if (!existsSync(path)) {
-      result.files.push({ path, status: "absent" });
-      continue;
-    }
-    let raw;
-    try {
-      raw = readFileSync(path, "utf8");
-    } catch (err) {
-      result.files.push({
-        path,
-        status: "malformed",
-        error: err instanceof Error ? err.message : String(err)
-      });
-      continue;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(stripBom(raw));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      result.files.push({ path, status: "malformed", error: message });
-      audit({ event: "sanitize.malformed", file: path, error: message });
-      continue;
-    }
-    const allow = parsed.permissions?.allow;
-    if (!Array.isArray(allow) || allow.length === 0) {
-      result.files.push({ path, status: "no_change" });
-      continue;
-    }
-    const stripped = [];
-    const kept = [];
-    for (const entry of allow) {
-      if (isPoisonPill(entry)) {
-        stripped.push(entry);
-      } else {
-        kept.push(entry);
-      }
-    }
-    if (stripped.length === 0) {
-      result.files.push({ path, status: "no_change" });
-      continue;
-    }
-    const nextPermissions = { ...parsed.permissions ?? {}, allow: kept };
-    const next = { ...parsed, permissions: nextPermissions };
-    try {
-      writeFileSync(path, JSON.stringify(next, null, 2) + "\n", "utf8");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      result.files.push({ path, status: "malformed", error: message, stripped });
-      continue;
-    }
-    result.files.push({ path, status: "sanitized", stripped });
-    audit({
-      event: "sanitize.stripped",
-      file: path,
-      stripped,
-      count: stripped.length
-    });
-  }
-  const baselineHash = hashSettingsFile(projectRoot);
-  if (baselineHash !== null) {
-    audit({ event: "settings.baseline", file: join(projectRoot, ".claude", "settings.json"), hash: baselineHash });
-  }
-  return result;
-}
-function resolveAuditLogPath(projectRoot) {
-  let configured;
-  try {
-    const raw = stripBom(readFileSync(join(projectRoot, ".rsct.json"), "utf8"));
-    const cfg = JSON.parse(raw);
-    if (typeof cfg.audit?.path === "string" && cfg.audit.path.length > 0) {
-      configured = cfg.audit.path;
-    }
-  } catch {
-  }
-  return decideAuditPath(projectRoot, configured === void 0 ? void 0 : { path: configured }).path;
-}
-function defaultAuditWriter(projectRoot, entry, now) {
-  try {
-    const auditPath = resolveAuditLogPath(projectRoot);
-    mkdirSync(dirname(auditPath), { recursive: true });
-    const stamped = { ...entry, ts: now.toISOString() };
-    appendFileSync(auditPath, JSON.stringify(stamped) + "\n", "utf8");
-  } catch {
-  }
-}
-function resolveProjectRootFromArgs(options) {
-  const { argv, env, cwd: cwd2 } = options;
-  const idx = argv.indexOf("--project-root");
-  if (idx !== -1) {
-    const value = argv[idx + 1];
-    if (value && value.length > 0) {
-      return isAbsolute(value) ? value : resolve(cwd2, value);
-    }
-  }
-  const fromEnv = env.CLAUDE_PROJECT_DIR;
-  if (fromEnv && fromEnv.length > 0) {
-    return fromEnv;
-  }
-  return cwd2;
-}
-function main(options) {
-  const projectRoot = resolveProjectRootFromArgs({
-    argv: options.argv,
-    env: options.env,
-    cwd: options.cwd
-  });
-  const result = sanitize(projectRoot);
-  for (const file of result.files) {
-    if (file.status === "sanitized") {
-      const count = file.stripped?.length ?? 0;
-      const label = count === 1 ? "entry" : "entries";
-      options.stderr(
-        `[rsct-sanitize] stripped ${count} poison-pill ${label} from ${file.path}`
-      );
-    } else if (file.status === "malformed") {
-      options.stderr(
-        `[rsct-sanitize] could not process ${file.path}: ${file.error ?? "unknown error"}`
-      );
-    } else if (file.status === "migrated") {
-      const count = file.stripped?.length ?? 0;
-      const label = count === 1 ? "path" : "paths";
-      options.stderr(
-        `[rsct-sanitize] migrated ${count} machine-absolute ${label} from ${file.path} to settings.local.json (keep machine paths out of the versioned file)`
-      );
-    } else if (file.status === "migration_skipped") {
-      options.stderr(
-        `[rsct-sanitize] skipped migrating absolute paths from ${file.path}: ${file.error ?? "unknown error"} (settings.json left untouched)`
-      );
-    }
-  }
-  return 0;
-}
-function isCliEntry() {
-  if (!process.argv[1]) return false;
-  try {
-    return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-  } catch {
-    return false;
-  }
-}
-if (isCliEntry()) {
-  const exitCode = main({
-    argv: process.argv.slice(2),
-    env: process.env,
-    cwd: process.cwd(),
-    stderr: (msg) => process.stderr.write(msg + "\n")
-  });
-  process.exit(exitCode);
-}
-
-// src/scripts/edit-scope-guard.ts
+// src/lib/edit-scope-hook.ts
 function decide(rawStdin, env, cwd2) {
   try {
     const trimmed = rawStdin.trim();
@@ -4897,26 +4685,31 @@ function decide(rawStdin, env, cwd2) {
       return { exitCode: 0, message: null };
     }
     const toolInput = payload.tool_input && typeof payload.tool_input === "object" ? payload.tool_input : {};
-    const rawPath = toolInput.file_path ?? toolInput.notebook_path;
-    if (typeof rawPath !== "string" || rawPath.length === 0) {
-      return { exitCode: 0, message: null };
-    }
+    const paths = [toolInput.file_path, toolInput.notebook_path].filter(
+      (value) => typeof value === "string" && value.length > 0
+    );
+    if (paths.length === 0) return { exitCode: 0, message: null };
     const cwdForResolve = typeof payload.cwd === "string" && payload.cwd.length > 0 ? payload.cwd : cwd2;
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve });
     const resolution = resolveProjectRoot(projectRoot);
-    const guard = evaluateEditGuard({
-      projectRoot: resolution.root,
-      rsctInstalled: resolution.rsct_installed,
-      filePath: rawPath
-    });
-    if (guard.decision === "block") {
-      return { exitCode: 2, message: `[rsct] Edit blocked (${guard.status}): ${guard.reason}` };
+    for (const filePath of paths) {
+      const guard = evaluateEditGuard({
+        projectRoot: resolution.root,
+        rsctInstalled: resolution.rsct_installed,
+        filePath,
+        cwd: cwdForResolve
+      });
+      if (guard.decision === "block") {
+        return { exitCode: 2, message: `[rsct] Edit blocked (${guard.status}): ${guard.reason}` };
+      }
     }
     return { exitCode: 0, message: null };
   } catch {
     return { exitCode: 0, message: null };
   }
 }
+
+// src/scripts/edit-scope-guard.ts
 function readStdin() {
   try {
     return readFileSync(0, "utf8");
@@ -4924,21 +4717,9 @@ function readStdin() {
     return "";
   }
 }
-function isMain() {
-  if (!process.argv[1]) return false;
-  try {
-    return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-  } catch {
-    return false;
-  }
-}
-if (isMain()) {
-  const decision = decide(readStdin(), process.env, process.cwd());
-  if (decision.message) process.stderr.write(`${decision.message}
+var decision = decide(readStdin(), process.env, process.cwd());
+if (decision.message) process.stderr.write(`${decision.message}
 `);
-  process.exit(decision.exitCode);
-}
-
-export { decide };
+process.exit(decision.exitCode);
 //# sourceMappingURL=edit-scope-guard.js.map
 //# sourceMappingURL=edit-scope-guard.js.map

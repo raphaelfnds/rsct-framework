@@ -461,7 +461,13 @@ export async function requestCommitHandler(
       approval: input.dev_approval,
       dialog: {
         title: 'RSCT — commit approval',
-        message: `Approve commit on '${branchLabel}'?\n\nmessage: ${input.message}` + gateDialogFooter(projectRoot, config),
+        message:
+          [
+            `Approve commit on '${branchLabel}'?`,
+            ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+            '',
+            `message: ${input.message}`,
+          ].join('\n') + gateDialogFooter(projectRoot, config),
       },
       projectRoot,
       ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),

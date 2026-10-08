@@ -125,10 +125,14 @@ The Code phase (§B-approved plan moving into execution) is wrapped by:
    forces an OS dialog and the override is audit-logged.
 2. Before each `Edit` / `Write`:
    `mcp__rsct__rsct_check_edit_scope({ file_path })` returns
-   `in_scope` / `out_of_scope` / `unknown`. If `out_of_scope`, STOP
-   and ask the dev to expand `scope_globs` (via re-opening spec) or
-   to defer the edit. The check is read-only and cheap — call it for
-   every Edit, not just the first one.
+   `in_scope` / `out_of_scope` / `unknown` / `stale_context`. If
+   `out_of_scope`, STOP and ask the dev to expand `scope_globs` (via
+   re-opening spec) or to defer the edit. If `stale_context`, re-run
+   `rsct_load_context` first. The check is read-only and cheap — call it
+   for every Edit, not just the first one. The PreToolUse guard runs the
+   same judgement on the edit itself and refuses `out_of_scope` and
+   `stale_context`. Pass the absolute path: for a relative one the tool
+   starts from the project root and the guard from the current directory.
 3. `mcp__rsct__rsct_phase_code_complete({ spec_ref, dev_approval })`
    — §C gate after all edits land.
 4. `rsct_phase_test_start({ spec_ref })` → tests →

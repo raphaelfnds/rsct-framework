@@ -61,7 +61,7 @@ commit without asking you, and `edit-scope-guard.js` blocks edits outside the
 current task's scope. This message means one of them is not doing its job. It
 never blocks anything.
 
-The message says which of the two failure modes it found:
+The message says which of the three failure modes it found:
 
 - **"`X` is not installed"** — the file is not under `.rsct/scripts/`. Usually
   the project was set up before that script existed, or before the `rsct-mcp`
@@ -71,10 +71,18 @@ The message says which of the two failure modes it found:
   nothing, which is why this ranks the same as a missing file. Usually a
   `.claude/settings.json` that was reset, hand-edited, or resolved to one side of
   a merge conflict after setup ran.
+- **"`edit-scope-guard.js` is installed, but it is a build that cannot block an
+  edit"** — the project holds a copy written by `rsct-mcp` 2.2.0 to 2.12.3.
+  Every one of those builds exited before reaching its own check, so the edit
+  guard never refused an edit in any project set up with them. Every project
+  installed before the fix shows this until `/rsct-setup` is run again.
 
-Fix, for both:
+Fix, for all three:
 
-1. Run `/rsct-setup` — it installs the scripts and registers their hooks.
+1. Run `/rsct-setup` — it installs the scripts and registers their hooks. It
+   also rewrites the hook command older setups registered without quotes: in a
+   project whose path contains a space that command was split by the shell and
+   neither hook ran.
 2. **Fully restart the IDE.** The running server compares against the copy it
    ships; until it restarts you may still see the old message.
 3. Confirm with `rsct_status` that the message is gone.
@@ -92,6 +100,52 @@ If it survives that:
   `.rsct/scripts/sanitize-permissions.js`, and a `hooks.PreToolUse` entry
   containing `.rsct/scripts/edit-scope-guard.js`. Either one may live in
   `.claude/settings.local.json` instead — RSCT accepts both.
+
+**While the message is up** the dialog-free commit lane is withheld, the commit,
+push and merge dialogs carry a warning line, and each of those calls — and each
+`rsct_load_context` — adds one `install.drift_detected` line to the audit log.
+Nothing is refused.
+
+**What the edit guard does once it runs.** Two refusals, for `Edit`, `Write`,
+`MultiEdit` and `NotebookEdit`:
+
+- After a plan closes, **every** edit is refused, whatever the path, until the
+  context is reloaded (`rsct_load_context`; `rsct_status` alone does not clear
+  it).
+- Otherwise, while a phase has declared a list of files (`scope_globs`), an edit
+  outside that list is refused. The list is matched against the path below the
+  project root; entries are relative to it and compared, case-sensitively, with
+  the resolved spelling — the refusal names the path it judged, which is
+  the place to look when an entry "should have matched" (on Windows and macOS
+  that is the on-disk spelling; inside WSL on `/mnt/c` it is the spelling you
+  typed, so match the case there). Three things are let
+  through here:
+  the plan-tracking files at the project root (`plan_*.md`, `progress_*.md`,
+  `spec_*.md`), a path outside the project, and everything when no phase has
+  declared a list.
+
+It does not watch the terminal: a shell command that writes a file is not seen.
+In a project the framework does not manage — no `.rsct.json`, or one it
+rejected — the guard lets everything through, while `rsct_check_edit_scope`
+still answers from the recorded list.
+
+One refusal can surprise on Windows: a network-style path (`\\server\share\…`)
+on a different host than the project is refused while a list is active, because
+the guard cannot tell it apart from a path that points back into the project.
+Use the file's path under the project root, or a path on a local drive.
+
+**Every edit is refused with `stale_context` and there is no `rsct_load_context`
+to call.** The guard is a file in the project and works without the server; the
+flag it reads (`context_stale` in `.rsct/phase-state.json`) can only be cleared
+by the server. So a project whose last plan was closed keeps refusing edits when
+`rsct-mcp` is not connected in the session, or was removed from the machine with
+`scripts/uninstall-framework.sh` while the project kept its hooks. Two ways out:
+
+- You still use the framework: install or reconnect `rsct-mcp` (run the
+  installer, restart the IDE) and let the session call `rsct_load_context`.
+- You do not: remove the two entries whose command contains `.rsct/scripts/`
+  from `hooks` in `.claude/settings.json` (and `.claude/settings.local.json`, if
+  they are there), then delete `.rsct/scripts/`.
 
 **One blind spot worth knowing.** RSCT only reads this project's
 `.claude/settings.json` and `.claude/settings.local.json`. A hook you registered
@@ -118,7 +172,8 @@ Two cases where the message is expected and fine:
 - `.rsct/scripts/` is committed to the repo, so a teammate whose global
   `rsct-mcp` is older than the committed scripts will see it until they update
   the binary. Update `rsct-mcp` — do not re-run setup to "fix" it, that would
-  push the scripts backwards.
+  push the scripts backwards. With an `rsct-mcp` of 2.12.3 or older, "backwards"
+  means back to an edit guard that cannot block.
 - You updated the binary and ran `/rsct-setup` but have not restarted the IDE
   yet.
 
@@ -199,10 +254,12 @@ RSCT withheld that. It is not a block: approve the commit per-action with a
 `dev_approval` and it lands.
 
 The lane is a privilege granted on the premise that the mechanical layer is
-working. When an enforcement script is missing, or is present with no hook wired
-to run it, that premise is false — so the next commit falls back to a dialog,
-which is the one channel that carries the warning where the agent cannot
-summarize it away.
+working. When an enforcement script is missing, is present with no hook wired to
+run it, or is an edit guard that cannot block, that premise is false — so the
+next commit falls back to a dialog, which is the one channel that carries the
+warning where the agent cannot summarize it away. A batch token that is still
+valid is the exception: it keeps authorizing commits with no dialog, and the
+dialog that created it does not carry the warning.
 
 Fix: run `/rsct-setup`, restart the IDE. The lane restores itself; there is no
 flag to reset. See the SECURITY section above for how to confirm.

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sanitize, isAbsoluteEntry } from '../../src/scripts/sanitize-permissions.js'
+import { sanitize, isAbsoluteEntry } from '../../src/lib/sanitize-permissions.js'
 
 let tmpRoot: string
 beforeEach(() => {
@@ -45,8 +45,8 @@ describe('sanitize — additionalDirectories migration (Trilha 2)', () => {
     expect(mig?.stripped).toEqual(['C:\\Users\\me\\universe'])
 
     const settings = readJson(settingsPath())
-    expect(settings.permissions.additionalDirectories).toEqual(['./rel-ok']) // absolute stripped
-    expect(settings.model).toBe('opus') // other keys preserved
+    expect(settings.permissions.additionalDirectories).toEqual(['./rel-ok'])
+    expect(settings.model).toBe('opus')
 
     const local = readJson(localPath())
     expect(local.permissions.additionalDirectories).toEqual(['C:\\Users\\me\\universe'])
@@ -57,7 +57,6 @@ describe('sanitize — additionalDirectories migration (Trilha 2)', () => {
     writeFileSync(localPath(), '{ not valid json')
     const r = sanitize(tmpRoot, { auditWriter: noAudit })
     expect(r.files.some((f) => f.status === 'migration_skipped')).toBe(true)
-    // settings.json still has the absolute entry (nothing lost)
     expect(readJson(settingsPath()).permissions.additionalDirectories).toEqual(['/abs/path'])
   })
 
@@ -65,8 +64,8 @@ describe('sanitize — additionalDirectories migration (Trilha 2)', () => {
     writeSettings({ permissions: { additionalDirectories: ['/abs/shared'] } })
     writeFileSync(localPath(), JSON.stringify({ permissions: { additionalDirectories: ['/abs/shared'] } }))
     sanitize(tmpRoot, { auditWriter: noAudit })
-    expect(readJson(localPath()).permissions.additionalDirectories).toEqual(['/abs/shared']) // not duplicated
-    expect(readJson(settingsPath()).permissions.additionalDirectories).toEqual([]) // still stripped
+    expect(readJson(localPath()).permissions.additionalDirectories).toEqual(['/abs/shared'])
+    expect(readJson(settingsPath()).permissions.additionalDirectories).toEqual([])
   })
 
   it('is a no-op when there are no absolute dirs', () => {
