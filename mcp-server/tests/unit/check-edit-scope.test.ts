@@ -18,6 +18,7 @@ import {
   matchesAnyGlob,
   readPhaseState,
 } from '../../src/lib/phase-scope.js'
+import { evaluateEditGuard } from '../../src/lib/edit-guard.js'
 import { resolveProjectRoot } from '../../src/lib/project-root.js'
 
 let tmpRoot: string
@@ -84,8 +85,6 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
     expect(r.matched_glob).toBeUndefined()
   })
 
-  // PH-1: relativization via prefix-strip against projectRoot (the reported
-  // bug — an absolute file_path never matched a root-relative glob).
   it('matches an ABSOLUTE path under root against a root-relative glob', () => {
     const r = matchesAnyGlob('/proj/pom.xml', ['pom.xml'], '/proj')
     expect(r.matched).toBe(true)
@@ -118,10 +117,8 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
   })
 
   it('falls back to the absolute form when path is not under root (no regression)', () => {
-    // glob loose enough to match the absolute form still matches
     const hit = matchesAnyGlob('/other/src/x.ts', ['**/src/**'], '/proj')
     expect(hit.matched).toBe(true)
-    // a root-relative glob does NOT spuriously match an out-of-root path
     const miss = matchesAnyGlob('/other/pom.xml', ['pom.xml'], '/proj')
     expect(miss.matched).toBe(false)
   })
@@ -132,7 +129,6 @@ describe('lib/phase-scope — matchesAnyGlob', () => {
   })
 
   it('is case-sensitive in the glob body (only the drive letter folds)', () => {
-    // documented limit — a lowercase glob does not match a differently-cased body
     expect(matchesAnyGlob('/proj/Pom.xml', ['pom.xml'], '/proj').matched).toBe(
       false,
     )
@@ -274,8 +270,6 @@ describe('rsct_check_edit_scope — handler', () => {
   })
 
   it('matches an ABSOLUTE file_path against a root-relative glob (PH-1, end-to-end)', async () => {
-    // Build the abs path from the SAME root the handler resolves, so this is
-    // robust to any symlink/realpath normalization (macOS /var→/private/var).
     const root = resolveProjectRoot(tmpRoot).root
     const abs = join(root, 'pom.xml')
     const out = (await checkEditScopeHandler({
@@ -289,9 +283,6 @@ describe('rsct_check_edit_scope — handler', () => {
 })
 
 describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
-  // tmpRoot from the outer beforeEach is reused — no fresh setup needed.
-  // The outer afterEach cleans up the tmpdir between cases.
-
   it('writes the phase-state.json with pretty-printed JSON + trailing newline', async () => {
     const { writePhaseState } = await import(
       '../../src/lib/phase-scope.js'
@@ -361,7 +352,6 @@ describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
     const result = writePhaseState(tmpRoot, { phase: 'spec' })
     expect(result.ok).toBe(true)
     expect(existsSync(join(tmpRoot, '.rsct/phase-state.json'))).toBe(true)
-    // Lock cleared after the successful write
     expect(existsSync(join(tmpRoot, '.rsct/phase-state.lock'))).toBe(false)
   })
 
@@ -383,10 +373,8 @@ describe('lib/phase-scope — writePhaseState + file lock (CAP-3)', () => {
     const { writePhaseState } = await import(
       '../../src/lib/phase-scope.js'
     )
-    // First write — should succeed and release the lock.
     const r1 = writePhaseState(tmpRoot, { phase: 'spec' })
     expect(r1.ok).toBe(true)
-    // Second write — lock is gone (released by first), so this also succeeds.
     const r2 = writePhaseState(tmpRoot, { phase: 'code' })
     expect(r2.ok).toBe(true)
     const content = readFileSync(
@@ -491,5 +479,60 @@ describe('lib/phase-scope — a path carrying a line terminator is never in scop
       phase_state_override: { scope_globs: ['**/x.ts'] },
     })) as CheckEditScopeOutput
     expect(out.status).toBe('in_scope')
+  })
+})
+
+describe('rsct_check_edit_scope — answers like the edit guard (#114)', () => {
+  const LF = String.fromCharCode(10)
+
+  async function ask(file_path: string): Promise<CheckEditScopeOutput> {
+    return (await checkEditScopeHandler({
+      project_root: tmpRoot,
+      file_path,
+      phase_state_override: { scope_globs: ['src/**'] },
+    })) as CheckEditScopeOutput
+  }
+
+  it('reports a plan-tracking file as in scope, with no glob and a hint of its own', async () => {
+    const out = await ask('progress_demo.md')
+    expect(out.status).toBe('in_scope')
+    expect(out.matched_glob).toBeNull()
+    expect(out.hints).toContain(
+      'File is a plan-tracking file (plan_*.md, progress_*.md or spec_*.md at the project root) — always editable while a scope is active.',
+    )
+    expect(out.hints.join(' ')).not.toContain("'null'")
+    expect((await ask('notes_demo.md')).status).toBe('out_of_scope')
+  })
+
+  it('keeps naming the glob for a file the list covers', async () => {
+    const out = await ask('src/a.ts')
+    expect(out.matched_glob).toBe('src/**')
+    expect(out.hints).toContain("File is in scope via glob 'src/**'. Edits proceed normally.")
+  })
+
+  it('reports a path outside the project as unknown and says why', async () => {
+    const outside = join(tmpdir(), 'rsct-elsewhere', 'note.md')
+    const out = await ask(outside)
+    expect(out.status).toBe('unknown')
+    expect(out.hints).toContain(`File '${outside}' is outside the project root — the phase scope does not govern it.`)
+    expect((await ask('README.md')).status).toBe('out_of_scope')
+  })
+
+  it.each([
+    'src/a.ts',
+    'README.md',
+    'plan_demo.md',
+    'docs/plan_demo.md',
+    'src/../README.md',
+    'other/../src/a.ts',
+    'src/../../escaped.ts',
+    '..env.ts',
+    `a${LF}b.ts`,
+  ])('gives %j the status the guard gives it', async (path) => {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(join(tmpRoot, '.rsct', 'phase-state.json'), JSON.stringify({ phase: 'code', scope_globs: ['src/**'] }))
+    const tool = (await checkEditScopeHandler({ project_root: tmpRoot, file_path: path })) as CheckEditScopeOutput
+    const hook = evaluateEditGuard({ projectRoot: tmpRoot, rsctInstalled: true, filePath: path })
+    expect(tool.status).toBe(hook.status)
   })
 })

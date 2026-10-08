@@ -12,6 +12,91 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The edit-scope guard now blocks; from 2.2.0 to 2.12.3 it never did (#114).** The installed
+  `.rsct/scripts/edit-scope-guard.js` carried the sanitizer's entry block ahead of its own code: on
+  every edit it ran the sanitizer and exited 0. No edit was ever refused — not outside the
+  `scope_globs` a phase declared, not after a plan closed (`stale_context`). MEASURED on the builds
+  of 2.2.0, 2.8.0 and 2.12.3 (Windows) and 2.12.3 (WSL2), and end to end with Claude Code 2.1.173;
+  all 25 released tags carry the line. The two hook programs are now launchers that call one library
+  function and exit; nothing can be bundled ahead of them, and a test drives the compiled files in
+  the layout the installer writes.
+  **What changes for you:** once `/rsct-setup` has run again in a project, an `Edit`, `Write`,
+  `MultiEdit` or `NotebookEdit` outside the list a phase declared is refused, and so is every edit
+  after a plan closes until `rsct_load_context` runs. Until then the project keeps the old copy —
+  see the notice under "Changed". A hook that was already registered starts refusing the moment
+  setup replaces the file, with no restart: if setup's own next write is refused with
+  `stale_context`, run `rsct_load_context` and carry on.
+- **The hook command is registered with the path quoted (#114).**
+  `node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js` was split by the shell when the project path
+  contained a space; node exited 1, which the client does not treat as a refusal, so neither hook
+  ran there. MEASURED with the real client: unquoted — the file was written; quoted — refused.
+  `/rsct-setup` now writes `node "${CLAUDE_PROJECT_DIR}/…"` and rewrites the exact command older
+  setups wrote. A command edited by hand is left alone.
+- **The guard judges the file an edit really reaches (#114).** The project root and the file are
+  resolved first (`..`, links, letter case on a case-insensitive disk): `src/../README.md` no longer
+  passes a `src/**` list, and a project opened through a link, or typed in another letter case, no
+  longer has its own files refused. The list is matched against the path BELOW the project root
+  only. MEASURED before that: with the project under a folder named `src`, a list of `**/src/**`
+  put every file of the project in scope, because the folders above it were matched too. An entry
+  written as an absolute path no longer matches — entries are relative to the project root — and
+  an entry is compared, case-sensitively, with the resolved spelling (the on-disk one on Windows
+  and macOS; inside WSL on `/mnt/c` the typed one, since `realpath` does not fold case there):
+  `src/**` does not cover a folder stored as `Src`, and the refusal names the path it judged.
+  `rsct_check_edit_scope` runs the same judgement as the hook. They can
+  still differ in three cases: a project with no usable `.rsct.json` (the hook lets everything
+  through), a relative path (the tool starts from the project root, the hook from the
+  directory the client reports), and a session whose root is a subfolder of the project (the
+  tool walks up to the `.rsct.json`, the hook takes the root it is given).
+- **The commit dialog carries the enforcement-down warning (#25, #114).** The rules and the 2.5.0
+  notes said the dialog a suspended lane falls back to shows it; only the push and merge dialogs
+  did. `rsct_request_commit` now adds the same single line.
+
+### Changed
+
+- **Plan-tracking files are always editable while a list is active (#114).** `plan_*.md`,
+  `progress_*.md` and `spec_*.md` at the project root answer `in_scope` (`matched_glob: null`).
+  MEASURED on 19 real projects: 316 of 421 recorded code phases declared a list that left the
+  progress file out, so a guard that blocks would have refused the update the framework itself asks
+  for. `stale_context` still refuses them. For `rsct_check_edit_scope` this takes effect with the
+  server upgrade, before any re-setup: it used to answer `out_of_scope`.
+- **A path outside the project is not governed by the phase scope (#114).** It answers `unknown`
+  and the edit goes through — the client's memory folder, a temp file, a sibling repository.
+  `stale_context` still refuses it. A path counts as inside when it resolves under the project
+  root, or when one of its parent folders IS the project root under another spelling — checked by
+  file identity (MEASURED inside WSL with the project on the Windows disk: `/mnt/c/USERS/…` and
+  `/mnt/c/Users/…` are one folder, and the first used to pass as outside). Whatever is not shown
+  to be inside is treated as outside, with one exception: on Windows a network-style path
+  (`\\server\share\…`) on a **different host** than the project is refused, because it cannot be
+  told apart from a path that points back into the project (MEASURED: `\\localhost\C$\…` reaches
+  the project's own files). A different share of the SAME host counts as outside and is allowed —
+  reaching an in-project file that way would need the server to expose the project under two share
+  names, which was not measured (see the limit in ADR-022). On Windows a Git-Bash-style drive path
+  (`/c/Users/…`) is read the way the client reads it, as `C:\Users\…`.
+- **An installed guard that cannot block is reported as enforcement not running (#114).** A project
+  holding a 2.2.0–2.12.3 copy gets the security-tier install notice in `rsct_status`,
+  `rsct_load_context` and `rsct_audit`; a warning line in the commit, push and merge dialogs; one
+  `install.drift_detected` audit line per commit, push, merge or `rsct_load_context` call; and the
+  dialog-free commit lane is withheld (the batch token is unaffected). Nothing is refused. That is
+  every project set up before this release, until `/rsct-setup` runs again and the IDE restarts.
+- **The sanitizer runs at session start only (#114).** Because of the defect above it also ran on
+  every edit. Two things follow, both on the less strict side and both decided: a poison-pill
+  grant, and a machine path added to `settings.json`, that appear in the middle of a session are
+  handled at the next session start instead of at the next edit. The audit log gets one
+  `settings.baseline` line per session instead of one per edit (MEASURED on the same projects:
+  9,938 of 30,644 audit lines, up to 430 in one day). One more consequence: the commit-gate report
+  "`.claude/settings.json` has changed since this session started" (#17) now compares with the
+  session start, as designed; while the sanitizer rode on every edit, any edit reset it.
+- **Rules §0, §C and §D describe the guard as it behaves now.** A project receives them on its next
+  `/rsct-setup`, like any rule change.
+
+Not closed, named on purpose: a phase that declares no list leaves the guard nothing to enforce; the
+terminal is not watched (#91); a teammate whose `rsct-mcp` is 2.12.3 or older puts the old copy back
+by running `/rsct-setup` — everyone on a fixed server then sees the notice again; and a project left
+with a closed plan and no `rsct-mcp` to reload the context has every edit refused until the hooks
+are removed (`docs/troubleshooting.md`).
+
 ## [2.12.3] - 2026-10-04
 
 ### Fixed
@@ -39,8 +124,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   npm reports success the script resolves `rsct-mcp` again and says what is true: removed; still
   running from the copy, which is then kept (it belongs to another npm prefix); or another
   `rsct-mcp` still on PATH, named. A folder it cannot delete is a warning, not an abort that would
-  leave the user-scope registration behind, and every "do it later" line says to run the uninstaller
-  again — it prints no `rm -rf` to paste.
+  leave the user-scope registration behind, and every hint about removing the copy later says to
+  run the uninstaller again — it prints no `rm -rf` to paste.
 
   Two limits, both repaired by running the installer again: an uninstaller older than this release,
   run against this layout, deletes `~/.rsct` first and leaves the command's shims behind on

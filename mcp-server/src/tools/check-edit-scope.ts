@@ -1,12 +1,8 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
+import { judgeEditScope } from '../lib/edit-guard.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
-import {
-  matchesAnyGlob,
-  pathCarriesLineTerminator,
-  readPhaseState,
-  type PhaseState,
-} from '../lib/phase-scope.js'
+import { readPhaseState, type PhaseState } from '../lib/phase-scope.js'
 
 const phaseStateOverrideSchema = z
   .object({
@@ -14,8 +10,6 @@ const phaseStateOverrideSchema = z
     phase: z.string().optional(),
     scope_globs: z.array(z.string()).optional(),
     started_at: z.string().optional(),
-    // plan-lifecycle-v2 (Bloco 3.3, F9): the override must be able to carry the
-    // re-bootstrap flag so tests / the guard can simulate a stale context.
     context_stale: z
       .object({ since: z.string(), reason: z.enum(['plan_closed', 'pivot']) })
       .strict()
@@ -127,25 +121,14 @@ export async function checkEditScopeHandler(
   }
 
   const scope_globs = state?.scope_globs ?? []
-  let status: ScopeStatus
-  let matched_glob: string | null = null
-
-  // plan-lifecycle-v2 (Bloco 3.3): the re-bootstrap gate is evaluated BEFORE the
-  // empty-scope short-circuit — a just-closed plan has scope_globs wiped, which
-  // would otherwise read as 'unknown' and let the edit through. While
-  // context_stale is set, a managed edit is blocked until rsct_load_context
-  // clears it.
-  if (state?.context_stale) {
-    status = 'stale_context'
-  } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
-    status = 'unknown'
-  } else {
-    const match = pathCarriesLineTerminator(input.file_path)
-      ? { matched: false }
-      : matchesAnyGlob(input.file_path, scope_globs, resolution.root)
-    status = match.matched ? 'in_scope' : 'out_of_scope'
-    matched_glob = match.matched_glob ?? null
-  }
+  const verdict = judgeEditScope({
+    projectRoot: resolution.root,
+    filePath: input.file_path,
+    state,
+    stateExists: phase_state_exists,
+  })
+  const status: ScopeStatus = verdict.status
+  const matched_glob = verdict.status === 'in_scope' ? verdict.matched_glob : null
 
   const output: CheckEditScopeOutput = {
     rsct_installed: resolution.rsct_installed,
@@ -164,6 +147,9 @@ export async function checkEditScopeHandler(
       status,
       file_path: input.file_path,
       matched_glob,
+      outside_project: verdict.status === 'unknown' && verdict.why === 'outside_project',
+      network_path: verdict.status === 'out_of_scope' && verdict.why === 'network_path',
+      judged_as: verdict.status === 'out_of_scope' && verdict.why === 'not_listed' ? verdict.judged_as : null,
     }),
   }
   if (parse_error !== undefined) output.phase_state_parse_error = parse_error
@@ -178,6 +164,9 @@ interface HintInputs {
   status: ScopeStatus
   file_path: string
   matched_glob: string | null
+  outside_project: boolean
+  network_path: boolean
+  judged_as: string | null
 }
 
 function buildHints(input: HintInputs): string[] {
@@ -209,14 +198,29 @@ function buildHints(input: HintInputs): string[] {
     )
     return hints
   }
-  if (input.status === 'in_scope') {
+  if (input.outside_project) {
     hints.push(
-      `File is in scope via glob '${input.matched_glob}'. Edits proceed normally.`,
+      `File '${input.file_path}' is outside the project root — the phase scope does not govern it.`,
+    )
+  } else if (input.status === 'in_scope') {
+    hints.push(
+      input.matched_glob === null
+        ? 'File is a plan-tracking file (plan_*.md, progress_*.md or spec_*.md at the project root) — always editable while a scope is active.'
+        : `File is in scope via glob '${input.matched_glob}'. Edits proceed normally.`,
+    )
+  } else if (input.network_path) {
+    hints.push(
+      `File '${input.file_path}' is a network-style path on another root than the project — it cannot be compared with the project root, so it is treated as out of scope. Use the file's path under the project root, or a path on a local drive.`,
     )
   } else if (input.status === 'out_of_scope') {
     hints.push(
       `File '${input.file_path}' is OUTSIDE the active spec scope. Either expand scope_globs in the phase state with explicit dev approval, or pause and re-plan before editing.`,
     )
+    if (input.judged_as !== null) {
+      hints.push(
+        `It was judged as '${input.judged_as}' below the project root; list entries are relative to that root and compared case-sensitively with the spelling on disk.`,
+      )
+    }
   }
   return hints
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createRequire, builtinModules } from 'module';
-import path, { join, resolve, dirname, isAbsolute, sep, relative, basename, posix, normalize } from 'path';
+import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
@@ -3016,7 +3016,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve8.call(this, root, ref);
+      let _sch = resolve9.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3043,7 +3043,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve8(root, ref) {
+    function resolve9(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3873,7 +3873,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve8(baseURI, relativeURI, options) {
+    function resolve9(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3906,49 +3906,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative5, options, skipNormalization) {
+    function resolveComponent(base, relative6, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative5 = parse4(serialize2(relative5, options), options);
+        relative6 = parse4(serialize2(relative6, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative5.scheme) {
-        target.scheme = relative5.scheme;
-        target.userinfo = relative5.userinfo;
-        target.host = relative5.host;
-        target.port = relative5.port;
-        target.path = removeDotSegments(relative5.path || "");
-        target.query = relative5.query;
+      if (!options.tolerant && relative6.scheme) {
+        target.scheme = relative6.scheme;
+        target.userinfo = relative6.userinfo;
+        target.host = relative6.host;
+        target.port = relative6.port;
+        target.path = removeDotSegments(relative6.path || "");
+        target.query = relative6.query;
       } else {
-        if (relative5.userinfo !== void 0 || relative5.host !== void 0 || relative5.port !== void 0) {
-          target.userinfo = relative5.userinfo;
-          target.host = relative5.host;
-          target.port = relative5.port;
-          target.path = removeDotSegments(relative5.path || "");
-          target.query = relative5.query;
+        if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
+          target.userinfo = relative6.userinfo;
+          target.host = relative6.host;
+          target.port = relative6.port;
+          target.path = removeDotSegments(relative6.path || "");
+          target.query = relative6.query;
         } else {
-          if (!relative5.path) {
+          if (!relative6.path) {
             target.path = base.path;
-            if (relative5.query !== void 0) {
-              target.query = relative5.query;
+            if (relative6.query !== void 0) {
+              target.query = relative6.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative5.path[0] === "/") {
-              target.path = removeDotSegments(relative5.path);
+            if (relative6.path[0] === "/") {
+              target.path = removeDotSegments(relative6.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative5.path;
+                target.path = "/" + relative6.path;
               } else if (!base.path) {
-                target.path = relative5.path;
+                target.path = relative6.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative5.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative5.query;
+            target.query = relative6.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3956,7 +3956,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative5.fragment;
+      target.fragment = relative6.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4242,7 +4242,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve8,
+      resolve: resolve9,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -9669,7 +9669,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join34, isAbsolute: isAbsolute8, sep: sep2 } = __require("path");
+    var { join: join34, isAbsolute: isAbsolute9, sep: sep3 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9768,7 +9768,7 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute8(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute9(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
@@ -9777,7 +9777,7 @@ var require_transport = __commonJS({
         let fixTarget2;
         for (const filePath of callers) {
           try {
-            const context = filePath === "node:repl" ? process.cwd() + sep2 : filePath;
+            const context = filePath === "node:repl" ? process.cwd() + sep3 : filePath;
             fixTarget2 = createRequire(context).resolve(origin);
             break;
           } catch (err2) {
@@ -21622,7 +21622,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
+        await new Promise((resolve9) => setTimeout(resolve9, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21639,7 +21639,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve8, reject2) => {
+    return new Promise((resolve9, reject2) => {
       const earlyReject = (error2) => {
         reject2(error2);
       };
@@ -21717,7 +21717,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject2(parseResult.error);
           } else {
-            resolve8(parseResult.data);
+            resolve9(parseResult.data);
           }
         } catch (error2) {
           reject2(error2);
@@ -21978,12 +21978,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve8, reject2) => {
+    return new Promise((resolve9, reject2) => {
       if (signal.aborted) {
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve8, interval);
+      const timeoutId = setTimeout(resolve9, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22850,12 +22850,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve8) => {
+    return new Promise((resolve9) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve8();
+        resolve9();
       } else {
-        this._stdout.once("drain", resolve8);
+        this._stdout.once("drain", resolve9);
       }
     });
   }
@@ -23801,23 +23801,8 @@ function pathCarriesLineTerminator(path2) {
 function toPosix(p) {
   return p.split("\\").join("/");
 }
-function normForMatch(p) {
-  let s = toPosix(p);
-  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
-  if (/^[A-Za-z]:/.test(s)) s = s[0].toLowerCase() + s.slice(1);
-  return s;
-}
 function matchesAnyGlob(path2, globs, projectRoot) {
   const candidates = [toPosix(path2)];
-  if (projectRoot !== void 0 && projectRoot.length > 0) {
-    const nf = normForMatch(path2);
-    const nr = normForMatch(projectRoot);
-    if (nf === nr) {
-      candidates.push("");
-    } else if (nf.startsWith(`${nr}/`)) {
-      candidates.push(nf.slice(nr.length + 1));
-    }
-  }
   for (const glob of globs) {
     const re = globToRegex(glob.replace(/\\/g, "/"));
     for (const candidate of candidates) {
@@ -24584,6 +24569,8 @@ var ENFORCEMENT_SCRIPTS = /* @__PURE__ */ new Map([
 ]);
 var STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/;
 var STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/;
+var INERT_GUARD_NAME = "edit-scope-guard.js";
+var INERT_GUARD_LINE = "if (isCliEntry()) {";
 function shippedScriptsDir() {
   try {
     return join(fileURLToPath(new URL(".", import.meta.url)), "scripts");
@@ -24722,6 +24709,10 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
       continue;
     }
     const stamp_version = stampOf(installed);
+    if (name2 === INERT_GUARD_NAME && installed.split("\n").includes(INERT_GUARD_LINE)) {
+      evidence.push({ name: name2, state: "inert", security_relevant, stamp_version, registration });
+      continue;
+    }
     const shipped = shippedDir === null ? null : readNormalized(join(shippedDir, name2));
     if (shipped === null) {
       evidence.push({ name: name2, state: "unreadable", security_relevant, stamp_version, registration });
@@ -24736,6 +24727,9 @@ function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
 }
 function describeNotRunning(c) {
   if (c.state === "absent") return `${c.name} is not installed`;
+  if (c.state === "inert") {
+    return `${c.name} is installed, but it is a build that cannot block an edit (every rsct-mcp from 2.2.0 to 2.12.3 shipped it that way)`;
+  }
   const event = ENFORCEMENT_SCRIPTS.get(c.name)?.event;
   const searched = PROJECT_SETTINGS_FILES.map((f) => `.claude/${f}`).join(" or ");
   return `${c.name} is installed, but no ${event ?? "hook"} entry pointing at it was found in this project's ${searched}`;
@@ -24745,7 +24739,7 @@ function describeStale(c) {
   return `${c.name} differs from this binary's copy${at}`;
 }
 function isNotRunning(e) {
-  if (e.state === "absent") return true;
+  if (e.state === "absent" || e.state === "inert") return true;
   if (e.state === "current" || e.state === "stale") return e.registration === "unregistered";
   return false;
 }
@@ -27875,13 +27869,106 @@ function buildHints7(input) {
 
 // src/tools/check-edit-scope.ts
 init_esm_shims();
+
+// src/lib/edit-guard.ts
+init_esm_shims();
+var PLAN_TRACKING_GLOBS = ["plan_*.md", "progress_*.md", "spec_*.md"];
+function fileIdentity(path2) {
+  try {
+    const stat = statSync(path2, { bigint: true });
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+var nativeScopePaths = {
+  isAbsolute: isAbsolute,
+  relative: relative,
+  resolve: resolve,
+  sep: sep,
+  dirname: dirname,
+  canonical: canonicalPath,
+  identity: fileIdentity
+};
+var BACKSLASH = String.fromCharCode(92);
+var NETWORK_ROOT = BACKSLASH + BACKSLASH;
+var GIT_BASH_DRIVE = /^\/([A-Za-z])\/(.*)$/;
+function asTheClientReads(path2, deps) {
+  if (deps.sep !== BACKSLASH) return path2;
+  const drive = GIT_BASH_DRIVE.exec(path2);
+  return drive === null ? path2 : `${drive[1]}:${BACKSLASH}${drive[2]}`;
+}
+function sameFile(a, b, deps) {
+  if (a === null || b === null || a.ino === 0n || a.ino !== b.ino) return false;
+  return deps.sep === BACKSLASH || a.dev === b.dev;
+}
+function topOf(path2, deps) {
+  let current = path2;
+  for (; ; ) {
+    const parent = deps.dirname(current);
+    if (parent === current) return current;
+    current = parent;
+  }
+}
+function locate(root, file, deps) {
+  const fromRoot = deps.relative(root, file);
+  if (deps.isAbsolute(fromRoot)) {
+    return fromRoot.startsWith(NETWORK_ROOT) ? { where: "unverifiable" } : { where: "outside" };
+  }
+  if (fromRoot === ".." || fromRoot.startsWith(`..${deps.sep}`)) return { where: "outside" };
+  return { where: "inside", path: fromRoot };
+}
+function pathBelowRootByIdentity(root, file, deps) {
+  if (deps.relative(topOf(root, deps), topOf(file, deps)) !== "") return null;
+  const rootIdentity = deps.identity(root);
+  if (rootIdentity === null) return null;
+  let current = file;
+  for (; ; ) {
+    if (sameFile(deps.identity(current), rootIdentity, deps)) return deps.relative(current, file);
+    const parent = deps.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+function judgeEditScope(args2, deps = nativeScopePaths) {
+  const { state } = args2;
+  if (state?.context_stale) return { status: "stale_context" };
+  const scopeGlobs = state?.scope_globs ?? [];
+  if (!args2.stateExists || state === null || scopeGlobs.length === 0) {
+    return { status: "unknown", why: "no_scope" };
+  }
+  if (pathCarriesLineTerminator(args2.filePath)) {
+    return { status: "out_of_scope", why: "line_terminator" };
+  }
+  const root = deps.canonical(args2.projectRoot);
+  const given = asTheClientReads(args2.filePath, deps);
+  const typed = deps.isAbsolute(given) ? deps.resolve(given) : deps.resolve(args2.baseDir ?? args2.projectRoot, given);
+  if (locate(root, typed, deps).where === "unverifiable") {
+    return { status: "out_of_scope", why: "network_path" };
+  }
+  const file = deps.canonical(typed);
+  const located = locate(root, file, deps);
+  if (located.where === "unverifiable") {
+    return { status: "out_of_scope", why: "network_path" };
+  }
+  const belowRoot = located.where === "inside" ? located.path : pathBelowRootByIdentity(root, file, deps);
+  if (belowRoot === null) {
+    return { status: "unknown", why: "outside_project" };
+  }
+  if (matchesAnyGlob(belowRoot, PLAN_TRACKING_GLOBS).matched) {
+    return { status: "in_scope", matched_glob: null };
+  }
+  const match = matchesAnyGlob(belowRoot, scopeGlobs);
+  if (match.matched) return { status: "in_scope", matched_glob: match.matched_glob ?? null };
+  return { status: "out_of_scope", why: "not_listed", judged_as: toPosix(belowRoot) };
+}
+
+// src/tools/check-edit-scope.ts
 var phaseStateOverrideSchema = external_exports.object({
   spec_slug: external_exports.string().optional(),
   phase: external_exports.string().optional(),
   scope_globs: external_exports.array(external_exports.string()).optional(),
   started_at: external_exports.string().optional(),
-  // plan-lifecycle-v2 (Bloco 3.3, F9): the override must be able to carry the
-  // re-bootstrap flag so tests / the guard can simulate a stale context.
   context_stale: external_exports.object({ since: external_exports.string(), reason: external_exports.enum(["plan_closed", "pivot"]) }).strict().optional()
 }).strict();
 var checkEditScopeInputSchema = external_exports.object({
@@ -27952,17 +28039,14 @@ async function checkEditScopeHandler(rawInput) {
     parse_error = read.parse_error;
   }
   const scope_globs = state?.scope_globs ?? [];
-  let status;
-  let matched_glob = null;
-  if (state?.context_stale) {
-    status = "stale_context";
-  } else if (!phase_state_exists || state === null || scope_globs.length === 0) {
-    status = "unknown";
-  } else {
-    const match = pathCarriesLineTerminator(input.file_path) ? { matched: false } : matchesAnyGlob(input.file_path, scope_globs, resolution.root);
-    status = match.matched ? "in_scope" : "out_of_scope";
-    matched_glob = match.matched_glob ?? null;
-  }
+  const verdict = judgeEditScope({
+    projectRoot: resolution.root,
+    filePath: input.file_path,
+    state,
+    stateExists: phase_state_exists
+  });
+  const status = verdict.status;
+  const matched_glob = verdict.status === "in_scope" ? verdict.matched_glob : null;
   const output = {
     rsct_installed: resolution.rsct_installed,
     phase_state_exists,
@@ -27979,7 +28063,10 @@ async function checkEditScopeHandler(rawInput) {
       parse_error,
       status,
       file_path: input.file_path,
-      matched_glob
+      matched_glob,
+      outside_project: verdict.status === "unknown" && verdict.why === "outside_project",
+      network_path: verdict.status === "out_of_scope" && verdict.why === "network_path",
+      judged_as: verdict.status === "out_of_scope" && verdict.why === "not_listed" ? verdict.judged_as : null
     })
   };
   if (parse_error !== void 0) output.phase_state_parse_error = parse_error;
@@ -28014,14 +28101,27 @@ function buildHints8(input) {
     );
     return hints;
   }
-  if (input.status === "in_scope") {
+  if (input.outside_project) {
     hints.push(
-      `File is in scope via glob '${input.matched_glob}'. Edits proceed normally.`
+      `File '${input.file_path}' is outside the project root \u2014 the phase scope does not govern it.`
+    );
+  } else if (input.status === "in_scope") {
+    hints.push(
+      input.matched_glob === null ? "File is a plan-tracking file (plan_*.md, progress_*.md or spec_*.md at the project root) \u2014 always editable while a scope is active." : `File is in scope via glob '${input.matched_glob}'. Edits proceed normally.`
+    );
+  } else if (input.network_path) {
+    hints.push(
+      `File '${input.file_path}' is a network-style path on another root than the project \u2014 it cannot be compared with the project root, so it is treated as out of scope. Use the file's path under the project root, or a path on a local drive.`
     );
   } else if (input.status === "out_of_scope") {
     hints.push(
       `File '${input.file_path}' is OUTSIDE the active spec scope. Either expand scope_globs in the phase state with explicit dev approval, or pause and re-plan before editing.`
     );
+    if (input.judged_as !== null) {
+      hints.push(
+        `It was judged as '${input.judged_as}' below the project root; list entries are relative to that root and compared case-sensitively with the spelling on disk.`
+      );
+    }
   }
   return hints;
 }
@@ -39007,8 +39107,8 @@ var Module2 = (() => {
     var moduleRtn;
     var Module = moduleArg;
     var readyPromiseResolve, readyPromiseReject;
-    var readyPromise = new Promise((resolve8, reject2) => {
-      readyPromiseResolve = resolve8;
+    var readyPromise = new Promise((resolve9, reject2) => {
+      readyPromiseResolve = resolve9;
       readyPromiseReject = reject2;
     });
     var ENVIRONMENT_IS_WEB = typeof window == "object";
@@ -39090,13 +39190,13 @@ var Module2 = (() => {
         }
         readAsync = /* @__PURE__ */ __name(async (url) => {
           if (isFileURI(url)) {
-            return new Promise((resolve8, reject2) => {
+            return new Promise((resolve9, reject2) => {
               var xhr = new XMLHttpRequest();
               xhr.open("GET", url, true);
               xhr.responseType = "arraybuffer";
               xhr.onload = () => {
                 if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                  resolve8(xhr.response);
+                  resolve9(xhr.response);
                   return;
                 }
                 reject2(xhr.status);
@@ -39319,10 +39419,10 @@ var Module2 = (() => {
       __name(receiveInstantiationResult, "receiveInstantiationResult");
       var info2 = getWasmImports();
       if (Module["instantiateWasm"]) {
-        return new Promise((resolve8, reject2) => {
+        return new Promise((resolve9, reject2) => {
           Module["instantiateWasm"](info2, (mod, inst) => {
             receiveInstance(mod, inst);
-            resolve8(mod.exports);
+            resolve9(mod.exports);
           });
         });
       }
@@ -42923,7 +43023,7 @@ function createModuleResolver(args2) {
     }
     return [...files];
   };
-  const resolve8 = (fromRel, specifier) => {
+  const resolve9 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
@@ -43009,7 +43109,7 @@ function createModuleResolver(args2) {
     const source = settingsFor(fromRel)?.jsxImportSource;
     return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
   };
-  return { resolve: resolve8, prefixFiles, jsxFactories, jsxRuntimes };
+  return { resolve: resolve9, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -44907,9 +45007,12 @@ async function requestCommitHandler(rawInput, internal = {}) {
       approval: input.dev_approval,
       dialog: {
         title: "RSCT \u2014 commit approval",
-        message: `Approve commit on '${branchLabel}'?
-
-message: ${input.message}` + gateDialogFooter(projectRoot, config2)
+        message: [
+          `Approve commit on '${branchLabel}'?`,
+          ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : [],
+          "",
+          `message: ${input.message}`
+        ].join("\n") + gateDialogFooter(projectRoot, config2)
       },
       projectRoot,
       ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },

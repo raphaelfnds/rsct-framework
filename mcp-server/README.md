@@ -183,8 +183,8 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**40 tools · 5 resources · tsc strict · ESM ~1.76 MB
-(server) + ~19 KB (sanitize-permissions hook) + ~150 KB (edit-scope guard) +
+**40 tools · 5 resources · tsc strict · ESM ~1.88 MB
+(server) + ~17 KB (sanitize-permissions hook) + ~140 KB (edit-scope guard) +
 ~5.3 MB (tree-sitter grammars, `grammars/`) ·
 cross-platform (Windows / macOS / Linux)**
 
@@ -722,10 +722,45 @@ Compares a file path against the active spec phase's scope globs in
 `.rsct/phase-state.json`.
 
 - Input: `project_root?`, `file_path`
-- Output: `status: 'in_scope' | 'out_of_scope' | 'unknown'`, `active_phase`, `matched_glob?`
+- Output: `status: 'in_scope' | 'out_of_scope' | 'unknown' | 'stale_context'`,
+  `matched_glob` (`null` when none), `phase`, `spec_slug`, `scope_globs`,
+  `rsct_installed`, `phase_state_exists`, `hints`
 
-`status='unknown'` when `.rsct/phase-state.json` is missing or empty
-(M3 owns the canonical schema). Glob support v1: `*`, `**`, `?` plus
+The answer comes from the same function the PreToolUse edit-scope guard runs, so
+the tool and the hook agree on an absolute path in a managed project whose root
+is the one holding `.rsct.json`. (Without a usable `.rsct.json` the hook lets
+everything through; the tool still answers from the recorded list. For a
+relative path, or a root that is a subfolder, the tool walks up to the
+`.rsct.json` while the hook takes the root it is given.) In order:
+`stale_context` while the re-bootstrap flag
+is set, whatever the path; `unknown` when `.rsct/phase-state.json` is missing or
+empty or no phase declared `scope_globs`; `out_of_scope` for a path carrying a
+line terminator, and on Windows for a network-style path (`\\server\share\…`)
+on a different host than the project, which cannot be told apart from one
+pointing back into it; `unknown` for any other path outside the project root
+(a different share of the same host included) — the scope
+governs the project tree only; `in_scope` with `matched_glob: null` for a
+plan-tracking file at the project root (`plan_*.md`, `progress_*.md`,
+`spec_*.md`); then the declared globs.
+
+Both the project root and the file are resolved first (`..`, links, letter
+case on a case-insensitive disk), so `src/../README.md` is judged as
+`README.md` and a project opened through a link matches its own list. On
+Windows a Git-Bash drive path (`/c/Users/…`) is read as `C:\Users\…`. A path
+that still reads as outside is checked once more by file identity: if one of
+its parent folders IS the project root under another spelling, it is judged as
+inside; anything not shown to be inside is outside. The globs are matched
+against the path below the project root and nothing else — the folders above
+the project never count, and an entry written as an absolute path does not
+match. The comparison is case-sensitive and uses the resolved spelling (the
+on-disk one on Windows and macOS; the typed one inside WSL on `/mnt/c`, where
+`realpath` does not fold case) — `src/**` does not cover a folder stored as
+`Src`; when the answer is `out_of_scope` because the list did not match, a
+second hint names the path that was judged. A relative
+`file_path` is taken from the project root (the hook takes it from the
+directory the client reports).
+
+Glob support v1: `*`, `**`, `?` plus
 regex metachar escape; `{a,b}` and `[abc]` are deferred to v2. A leading
 `**/` spans whole directories, so a scope of `**/build/**` covers `build/`
 and `a/b/build/`, never `webbuild/` (2.11.2 — a scope that relied on the
@@ -789,7 +824,7 @@ no overrides, so a protected branch or a secret finding still rejects.
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
-  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, or present with no hook entry pointing at it; either way what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and on push/merge it also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit falls back to a per-action `dev_approval`.
+  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); in each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and each of the three also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit needs a per-action `dev_approval` — unless a batch token (`rsct_plan_authorize`) is active, in which case it lands through the token with no dialog; the dialog that mints a token does not carry the line.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
 
 Approval consumption rule: never burn the approval on pre-mutation
@@ -932,6 +967,36 @@ when something changes, plus a `settings.baseline` hash of `settings.json` on
 every run — that baseline is what `rsct_request_commit` reads back to detect
 unowned drift. Honours `audit.path` from `.rsct.json`. Never blocks session
 start — malformed JSON logs to stderr and exits 0.
+
+It runs at session start only. A grant or a machine path added to
+`settings.json` in the middle of a session is handled at the next session start.
+
+### PreToolUse edit-scope guard
+
+A second standalone Node CLI, bundled at `dist/scripts/edit-scope-guard.js`,
+installed by the same `/rsct-setup` phase and registered as a
+`hooks.PreToolUse[]` entry with the matcher
+`^(Edit|Write|MultiEdit|NotebookEdit)$`. It reads the hook payload on stdin and
+exits 2 — the exit code the client treats as a refusal; 1 is not — when the
+judgement above is `out_of_scope` or `stale_context` for a path the payload
+carries (`file_path` and `notebook_path` are both judged when both are there).
+Every other outcome exits 0: an unmanaged project, an unreadable phase-state,
+a payload with no path, any fault. It does not watch the terminal: a shell
+command that writes a file is not seen.
+
+It needs no server, which cuts both ways: it enforces in a session where
+`rsct-mcp` is not connected, and there it cannot be told the context was
+reloaded — see `docs/troubleshooting.md` for a project left in that state.
+
+Both hooks are registered as `node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js"`.
+The quotes are load-bearing: without them a project path containing a space is
+split by the shell and the hook exits 1, which the client does not treat as a
+refusal. `/rsct-setup` rewrites the unquoted command older setups wrote.
+
+**Releases 2.2.0 to 2.12.3 shipped a guard that never refused an edit** (#114):
+the bundle carried the sanitizer's entry block ahead of the guard's own code,
+so the installed file ran the sanitizer and exited 0. A project still holding
+such a copy gets the security-tier install notice until `/rsct-setup` runs again.
 
 ### Audit log
 
@@ -1134,8 +1199,14 @@ src/
 │   ├── request-push.ts      # rsct_request_push (§C)     (F2.5.5b)
 │   └── request-merge.ts     # rsct_request_merge (§C)    (F2.5.5c)
 └── scripts/
-    └── sanitize-permissions.ts  # INV-2.3 SessionStart hook (standalone CLI)
+    ├── sanitize-permissions.ts  # launcher: SessionStart hook → lib/sanitize-permissions.ts
+    └── edit-scope-guard.ts      # launcher: PreToolUse hook → lib/edit-scope-hook.ts
 ```
+
+The two files under `scripts/` are launchers: they read their input, call one
+function from `lib/` and exit with its code. They export nothing and nothing
+imports them (`tests/unit/script-entries.test.ts`), so a bundle can never carry
+a second program's entry block again.
 
 Each tool: zod schema for input, structured output type, pure handler.
 Adding a new tool — create `src/tools/<name>.ts` and register it in
@@ -1193,7 +1264,7 @@ companion install (`bash scripts/install.sh`) and after
       present — no change" (idempotent).
 - [ ] `.rsct/scripts/sanitize-permissions.js` exists in the test project.
 - [ ] `.claude/settings.json` contains the `hooks.SessionStart[]` entry
-      with command `node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js`.
+      with command `node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js"`.
 - [ ] Claude Code restarted after registration.
 
 ### Tool checks (6 new in M2)
@@ -1205,7 +1276,7 @@ expected tool and the response matches the docs above.
 |---|---|---|---|
 | 1 | "Is the current branch protected?" | `rsct_check_branch` | Returns `is_protected: boolean`, `source: 'default'/'config'/'config+extras'`. |
 | 2 | "Scan the staged diff for secret leaks." | `rsct_check_secrets` | Returns `findings[]` with line-level classification; honors `secrets_extra_patterns[]`. |
-| 3 | "Is `mcp-server/src/lib/foo.ts` in scope for the active phase?" | `rsct_check_edit_scope` | Returns `status: 'in_scope'/'out_of_scope'/'unknown'` based on `.rsct/phase-state.json`. |
+| 3 | "Is `mcp-server/src/lib/foo.ts` in scope for the active phase?" | `rsct_check_edit_scope` | Returns `status: 'in_scope'/'out_of_scope'/'unknown'/'stale_context'` based on `.rsct/phase-state.json`. |
 | 4 | "Commit the staged changes with message 'feat: x'." | `rsct_request_commit` | Rejects without `dev_approval`; pops OS dialog when given a valid approval; commits + writes `commit.committed` audit entry. |
 | 5 | "Push the current branch." | `rsct_request_push` | Same flow as 4; rejects on protected branch unless `override_protected_branch.reason` is set. |
 | 6 | "Merge `feat/something` into the current branch." | `rsct_request_merge` | Same flow; extra-strict — refuses force-pushy patterns by default. |
