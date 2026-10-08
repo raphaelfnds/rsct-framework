@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-10-08
+
 ### Fixed
 
 - **The edit-scope guard now blocks; from 2.2.0 to 2.12.3 it never did (#114).** The installed
