@@ -12,6 +12,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-10-08
+
+### Security
+
+- **Three advisories cleared.** `@modelcontextprotocol/sdk` 1.30.0 → 1.32.1 (high — OAuth client),
+  which pulls `proxy-addr` 2.0.7 → 2.0.8 (critical — IP spoofing), and `source-map-js` 1.2.1 →
+  1.2.2 (high — event-loop DoS). `npm audit` now reports **0 vulnerabilities**. MEASURED: none of
+  the three reaches the bundled `dist/index.js` — `proxy-addr` is a transitive dep of the SDK's
+  HTTP server (this project uses only the stdio transport) and `source-map-js` is a build-time
+  dependency — so the shipped artifact was never exposed. The bump clears the GitHub Dependabot
+  alerts and is rebuilt into `dist/`.
+
 ## [2.13.0] - 2026-10-08
 
 ### Fixed
