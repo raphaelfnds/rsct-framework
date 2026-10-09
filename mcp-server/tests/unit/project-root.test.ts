@@ -271,12 +271,12 @@ describe('lib/project-root — HIGH-4 bounds violations are rejected + audited',
   it('still NULLS the config on an OUT-OF-BOUNDS known approval_modes field (HIGH-4 preserved)', () => {
     writeConfig({
       ...VALID_MIN,
-      approval_modes: { free_commit_max: 9999 },
+      approval_modes: { plan_token_max_actions: 9999 },
     })
     const r = resolveProjectRoot()
     expect(r.rsct_installed).toBe(false)
     const errs = readAuditEntries()[0]!.validation_errors as Array<{ path: string }>
-    expect(errs.some((e) => e.path.includes('free_commit_max'))).toBe(true)
+    expect(errs.some((e) => e.path.includes('plan_token_max_actions'))).toBe(true)
   })
 
   it('reports multiple violations in a single audit entry', () => {

@@ -47,7 +47,7 @@ describe('rsct_audit (#55)', () => {
     const r = await run()
     expect(r.rsct_installed).toBe(false)
     expect(r.install_drift).toBeNull()
-    expect(r.free_commit_eligibility).toBeNull()
+    expect(r.mechanical_health).toBeNull()
     expect(r.plans.map((p) => p.slug)).toEqual(['x'])
   })
 
@@ -76,14 +76,15 @@ describe('rsct_audit (#55)', () => {
     expect(r.hints.join(' ')).not.toMatch(/enforcement is not running/i)
   })
 
-  it('names free-commit eligibility for what it is, not "unhealthy"', async () => {
+  it('reports the mechanical layer as healthy on a fresh install, not as a fault', async () => {
     install()
     const r = await run()
-    // A fresh install has no audit history, so the fail-closed guard says false.
-    // Mutation that reddens this: surface health.reasons raw with no translation.
-    expect(r.free_commit_eligibility?.eligible).toBe(false)
-    expect(r.free_commit_eligibility?.reasons).toContain('audit_history_absent')
-    expect(r.free_commit_eligibility?.explanation).toMatch(/not a fault|NOT a fault/i)
+    // A fresh install has no audit history, which is NOT a fault — ok stays true
+    // and no reason is surfaced as a fault.
+    // Mutation that reddens this: stop filtering audit_history_absent out of faults.
+    expect(r.mechanical_health?.ok).toBe(true)
+    expect(r.mechanical_health?.faults).toEqual([])
+    expect(r.mechanical_health?.explanation).toMatch(/no audit history yet/i)
   })
 
   it('reports open-phase age from the VERIFICATION block when V is the open phase', async () => {
@@ -169,10 +170,10 @@ describe('rsct_audit (#55)', () => {
     writeFileSync(join(tmpRoot, '.rsct/phase-state.json'), '{ torn', 'utf8')
     const r = await run()
     // Mutation that reddens this: drop the `faults` branch from
-    // explainEligibility, lumping a torn phase-state in with a fresh install.
-    expect(r.free_commit_eligibility?.eligible).toBe(false)
-    expect(r.free_commit_eligibility?.explanation).toMatch(/genuine fault/)
-    expect(r.free_commit_eligibility?.explanation).not.toMatch(/NOT a fault/)
+    // explainHealth, lumping a torn phase-state in with a fresh install.
+    expect(r.mechanical_health?.ok).toBe(false)
+    expect(r.mechanical_health?.explanation).toMatch(/genuine fault/)
+    expect(r.mechanical_health?.explanation).not.toMatch(/NOT a fault/)
   })
 
   it('actually orders plans by file mtime, not just claims to', async () => {

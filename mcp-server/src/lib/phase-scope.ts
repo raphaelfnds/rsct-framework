@@ -129,15 +129,6 @@ export interface PlanAuthorizationBlock {
   slide_minutes?: number
 }
 
-export interface FreeCommitBudget {
-  plan_slug: string
-  files_touched_paths: string[]
-  commits_used: number
-  lines_changed: number
-  locked: boolean
-  locked_reason?: 'commit_cap' | 'volume_cap' | 'tier_divergence'
-}
-
 export interface PhaseReviewBlock {
   spec_ref: string
   completed_at?: string
@@ -204,7 +195,6 @@ export interface PhaseState {
   dead_code_keeps?: DeadCodeKeepRecord[]
   last_classify?: LastClassifyBlock
   plan_authorization?: PlanAuthorizationBlock
-  free_commit_budget?: FreeCommitBudget
   disposition?: PlanDispositionBlock
   context_stale?: ContextStaleBlock
   bootstrap_at?: string

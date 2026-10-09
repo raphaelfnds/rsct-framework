@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AuditEntry } from '../../src/lib/audit-log.js'
-import { evaluateFreeEligibility } from '../../src/lib/free-commit.js'
-import type { GitExecutor, StagedStats } from '../../src/lib/git.js'
+import type { GitExecutor } from '../../src/lib/git.js'
 import { evaluateInstallAdvisory } from '../../src/lib/install-advisory.js'
 import type { DialogOptions } from '../../src/lib/os-dialog.js'
 import { getInstallDriftNotice, readScriptEvidence } from '../../src/lib/version-drift.js'
@@ -156,8 +155,8 @@ describe('getInstallDriftNotice — an inert guard is enforcement that is not ru
   })
 })
 
-describe('an inert guard reaches the dialogs, the audit log and the dialog-free lane (#114)', () => {
-  it('marks the advisory as security, writes one drift line and makes the lane ineligible', () => {
+describe('an inert guard reaches the dialogs and the audit log (#114)', () => {
+  it('marks the advisory as security and writes one drift line', () => {
     const root = project(stamped(RELEASED_2_12_3_GUARD_FRAGMENT))
     const written: AuditEntry[] = []
     const advisory = evaluateInstallAdvisory({
@@ -174,18 +173,6 @@ describe('an inert guard reaches the dialogs, the audit log and the dialog-free 
     expect(advisory.isSecurity).toBe(true)
     expect(advisory.dialogLine).toBe('⚠ RSCT enforcement is NOT running in this project (see hints).')
     expect(written.map((e) => e.event)).toEqual(['install.drift_detected'])
-
-    const lane = evaluateFreeEligibility({
-      projectRoot: root,
-      config: null,
-      now: new Date(),
-      state: null,
-      activePlanSlug: null,
-      installDriftSecurity: advisory.isSecurity,
-      healthOverride: { healthy: true, reasons: [] },
-    })
-    expect(lane.eligible).toBe(false)
-    expect(lane.reason).toBe('install drift at security tier — RSCT enforcement is not running in this project')
   })
 
   it('raises nothing for a guard copy that does not carry the line', () => {
@@ -206,7 +193,6 @@ describe('an inert guard reaches the dialogs, the audit log and the dialog-free 
 describe('the tools a developer meets, in a project that holds an inert guard (#114)', () => {
   const NOW = new Date('2026-07-11T12:00:00.000Z')
   const WARNING = '⚠ RSCT enforcement is NOT running in this project (see hints).'
-  const SMALL: StagedStats = { files: 1, insertions: 2, deletions: 1, paths: ['a.ts'] }
   const commitOk: GitExecutor = (_root, args) => ({
     ok: true,
     stdout: args.join(' ').startsWith('rev-parse') ? 'bbbb222' : '',
@@ -243,7 +229,6 @@ describe('the tools a developer meets, in a project that holds an inert guard (#
         gitStateOverride: { available: true, branch: 'feat/x', head_sha: 'aaaa111', is_clean: false },
         gitExecutor: commitOk,
         stagedDiffOverride: '',
-        stagedStatsOverride: SMALL,
         now: NOW,
         promptFn: async (opts: DialogOptions) => {
           dialogs.push(opts.message)
@@ -254,10 +239,10 @@ describe('the tools a developer meets, in a project that holds an inert guard (#
     return { out, dialogs }
   }
 
-  it('rsct_request_commit withholds the dialog-free lane', async () => {
+  it('rsct_request_commit refuses an unapproved commit without a dialog, carrying the notice', async () => {
     const { out, dialogs } = await commit(managed(stamped(RELEASED_2_12_3_GUARD_FRAGMENT)), false)
     expect(out.status).toBe('rejected')
-    expect(out.reason).toContain('dialog-free commit lane is suspended')
+    expect(out.reject_kind).toBe('plan_token_invalid')
     expect(out.hints[0]).toContain(INERT_SENTENCE)
     expect(dialogs).toEqual([])
   })
@@ -271,12 +256,10 @@ describe('the tools a developer meets, in a project that holds an inert guard (#
     expect(lines.filter((line) => line === WARNING)).toHaveLength(1)
   })
 
-  it('rsct_request_commit keeps the lane and a plain dialog when the guard does not carry the line', async () => {
+  it('rsct_request_commit shows a plain dialog when the guard does not carry the line', async () => {
     const healthy = stamped(builtBody(GUARD))
-    const free = await commit(managed(healthy), false)
-    expect(free.out.status).toBe('committed')
-    expect(free.out.authorized_via).toBe('free_commit')
     const approved = await commit(managed(healthy), true)
+    expect(approved.out.status).toBe('committed')
     expect(approved.dialogs).toHaveLength(1)
     expect(approved.dialogs[0]).not.toContain('RSCT enforcement')
     expect(approved.dialogs[0]!.startsWith("Approve commit on 'feat/x'?\n\nmessage: checkpoint")).toBe(true)

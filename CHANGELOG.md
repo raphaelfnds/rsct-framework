@@ -12,6 +12,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The dialog-free free-commit lane is removed (#80).** `trivial`/`small` tasks no longer
+  commit without an OS dialog through a budget-capped lane — MEASURED over 663 field commits,
+  none used it. `rsct_request_commit` without a `dev_approval` now goes straight to the batch
+  plan token (`rsct_plan_authorize`); no token gives a coherent `plan_token_invalid` refusal.
+  Removed with it: the per-plan budget and lock latch, the `free_commit.*` ledger events, the
+  `free_commit` channel / `authorized_via` / output field, and the `free_commit_max`,
+  `free_commit_max_files` and `free_commit_max_lines` config keys (silently dropped from an
+  existing `.rsct.json` — `approval_modes` is `.strip()`, so no project breaks). The batch plan
+  token is unchanged (33 of those 663 commits used it). See ADR-023.
+
+### Changed
+
+- **`rsct_audit` reports `mechanical_health` in place of `free_commit_eligibility`.** The
+  fault-vs-fresh-install diagnostic (torn phase-state / stale lock / corrupt config) is kept
+  under a lane-neutral name, and "no audit history yet" is reported as the non-fault it is. The
+  install-drift SECURITY NOTICE still rides `hints[]` on every gated call (advisory-only); only
+  the "dialog-free lane suspended" consequence is gone.
+
 ## [2.13.3] - 2026-10-09
 
 ### Security

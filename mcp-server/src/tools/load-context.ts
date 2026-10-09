@@ -296,7 +296,7 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
 
   if (write === null) {
     return [
-      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
+      `⚠ .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? 'unknown error')}) — the §0 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`,
     ]
   }
 

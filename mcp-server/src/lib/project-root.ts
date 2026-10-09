@@ -10,9 +10,6 @@ export interface RsctApprovalModes {
   trust_allowed_for?: string[]
   plan_token_ttl_minutes?: number
   plan_token_max_actions?: number
-  free_commit_max?: number
-  free_commit_max_files?: number
-  free_commit_max_lines?: number
   plan_token_ttl_slide_minutes?: number
   plan_token_ttl_abs_minutes?: number
 }
@@ -87,9 +84,6 @@ const RsctApprovalModesSchema = z
     trust_allowed_for: z.array(z.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
     plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
     plan_token_max_actions: z.number().int().min(1).max(100).optional(),
-    free_commit_max: z.number().int().min(1).max(50).optional(),
-    free_commit_max_files: z.number().int().min(1).max(500).optional(),
-    free_commit_max_lines: z.number().int().min(1).max(100000).optional(),
     plan_token_ttl_slide_minutes: z.number().int().min(5).max(1440).optional(),
     plan_token_ttl_abs_minutes: z.number().int().min(5).max(10080).optional(),
   })

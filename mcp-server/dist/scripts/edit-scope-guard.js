@@ -4520,9 +4520,6 @@ var RsctApprovalModesSchema = external_exports.object({
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
   plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  free_commit_max: external_exports.number().int().min(1).max(50).optional(),
-  free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
-  free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
   plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
   plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
 }).strip();
