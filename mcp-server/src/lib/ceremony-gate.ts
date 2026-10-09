@@ -22,7 +22,7 @@ export function readClassifyEvidence(
   projectRoot: string,
   config: RsctConfig | null,
 ): ClassifyEvidence {
-  const ceiling = deriveAuditCeiling(projectRoot, config, '')
+  const ceiling = deriveAuditCeiling(projectRoot, config)
   const stateMax = readPhaseState(projectRoot).state?.last_classify?.tier_max
   return {
     present: ceiling.classifyEvidencePresent || stateMax !== undefined,

@@ -240,13 +240,6 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
         actions_used: 1,
         approval_ref: { action_scope: 'plan_authorize:feat-x', timestamp: VALID_TS },
       },
-      free_commit_budget: {
-        plan_slug: 'feat-x',
-        files_touched_paths: ['src/a.ts'],
-        commits_used: 2,
-        lines_changed: 40,
-        locked: false,
-      },
       last_classify: {
         tier: 'standard',
         tier_max: 'standard',
@@ -284,7 +277,6 @@ describe('rsct_phase_abandon — the preserve-list (#53)', () => {
       'scope_globs',
       'started_at',
       'plan_authorization',
-      'free_commit_budget',
       'disposition',
       'review',
       'review_findings',

@@ -45,7 +45,7 @@ export function auditFields(audit: AuditAppendResult): {
  *
  * `escaped` reports a configured `audit.path` that resolves OUTSIDE that base.
  * Such a path is NOT honoured — the log falls back to the default location —
- * because MEASURED, an absolute `audit.path` relocates both free-lane anchors
+ * because MEASURED, an absolute `audit.path` relocates the audit-log anchors
  * from the correct root and therefore survives the binding untouched. The
  * fallback is the safe direction; the caller surfaces `escaped` so the
  * developer is told rather than silently redirected.
@@ -67,12 +67,10 @@ const migrationAttempted = new Set<string>()
  *
  * Without this, the first run after the upgrade in a RELOCATING project (a
  * monorepo package, a project nested in an unrelated repo) finds no log at the
- * new base. `audit_history_absent` fires and the lane suspends — the safe
- * direction — but the old log is orphaned, and with it go the free-commit count,
- * the `free_commit.locked` latch, the tier ratchet, every `settings.baseline`
- * and every consumed-approval record. **A locked budget would silently unlock
- * and a spent approval would become replayable**: the exact failure this release
- * exists to prevent, delivered by its own upgrade.
+ * new base — the old log is orphaned, and with it go the tier ratchet, every
+ * `settings.baseline` and every consumed-approval record. **A spent approval
+ * would become replayable**: the exact failure this release exists to prevent,
+ * delivered by its own upgrade.
  *
  * Copy, never move: the old file stays as evidence, and a half-finished
  * migration cannot destroy the only copy. If BOTH exist the migration is

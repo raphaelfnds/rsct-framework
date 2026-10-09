@@ -502,7 +502,7 @@ export async function phaseReviewCompleteHandler(
     })
   }
 
-  const ceiling = deriveAuditCeiling(projectRoot, config, '')
+  const ceiling = deriveAuditCeiling(projectRoot, config)
   const keepDecisions = ceiling.deadCodeKeepDecisions
   const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions)
   const grantedKeeps = sweepInput.data.dead_code_keeps ?? []

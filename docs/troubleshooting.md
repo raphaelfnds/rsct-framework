@@ -101,10 +101,9 @@ If it survives that:
   containing `.rsct/scripts/edit-scope-guard.js`. Either one may live in
   `.claude/settings.local.json` instead — RSCT accepts both.
 
-**While the message is up** the dialog-free commit lane is withheld, the commit,
-push and merge dialogs carry a warning line, and each of those calls — and each
-`rsct_load_context` — adds one `install.drift_detected` line to the audit log.
-Nothing is refused.
+**While the message is up** the commit, push and merge dialogs carry a warning
+line, and each of those calls — and each `rsct_load_context` — adds one
+`install.drift_detected` line to the audit log. Nothing is refused.
 
 **What the edit guard does once it runs.** Two refusals, for `Edit`, `Write`,
 `MultiEdit` and `NotebookEdit`:
@@ -246,23 +245,6 @@ Three ways to resolve it — RSCT will not pick for you:
 
 If you see this on every commit and never resolve it, that is the accumulation
 the report exists to stop — pick one.
-
-## "the dialog-free commit lane is suspended while RSCT enforcement is not running"
-
-You are on a `trivial`/`small` task that normally commits without a dialog, and
-RSCT withheld that. It is not a block: approve the commit per-action with a
-`dev_approval` and it lands.
-
-The lane is a privilege granted on the premise that the mechanical layer is
-working. When an enforcement script is missing, is present with no hook wired to
-run it, or is an edit guard that cannot block, that premise is false — so the
-next commit falls back to a dialog, which is the one channel that carries the
-warning where the agent cannot summarize it away. A batch token that is still
-valid is the exception: it keeps authorizing commits with no dialog, and the
-dialog that created it does not carry the warning.
-
-Fix: run `/rsct-setup`, restart the IDE. The lane restores itself; there is no
-flag to reset. See the SECURITY section above for how to confirm.
 
 ## RSCT never tells me a new release is out
 

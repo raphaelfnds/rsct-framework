@@ -576,38 +576,6 @@ describe('rsct_request_commit — REVIEW gate', () => {
 })
 
 describe('rsct_request_commit — REVIEW gate on the other authorization paths', () => {
-  function eligibleFreeLane(): void {
-    write('plan_p.md', '# Plan\n\n| Status | in progress |\n')
-    mkdirSync(join(root, '.rsct', 'scripts'), { recursive: true })
-    for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
-      writeFileSync(join(root, '.rsct', 'scripts', name), 'export {}\n')
-    }
-    writeFileSync(join(root, '.rsct', 'audit.log'), `${JSON.stringify({ event: 'classify.verdict', tier: 'small' })}\n`)
-    const statePath = join(root, '.rsct', 'phase-state.json')
-    const prev = existsSync(statePath) ? readJson('.rsct/phase-state.json') : {}
-    writeFileSync(
-      statePath,
-      JSON.stringify({ ...prev, last_classify: { tier: 'small', tier_max: 'small', classified_at: new Date().toISOString() } }),
-    )
-  }
-
-  it('the free lane carries reviewed code and refuses unreviewed code', async () => {
-    write('src/a.ts', 'export const a = 1\n')
-    expect((await completeReview()).status).toBe('completed')
-    eligibleFreeLane()
-    git(root, 'add', 'src/a.ts')
-    const ok = await requestCommitHandler({ project_root: root, message: 'free checkpoint' }, { promptFn: prompts().fn })
-    expect(ok.authorized_via).toBe('free_commit')
-    expect(ok.status).toBe('committed')
-
-    write('src/b.ts', 'export const b = 1\n')
-    git(root, 'add', 'src/b.ts')
-    const p = prompts()
-    const refused = await requestCommitHandler({ project_root: root, message: 'free checkpoint 2' }, { promptFn: p.fn })
-    expect(refused.reject_kind).toBe('review_missing')
-    expect(p.seen).toHaveLength(0)
-  })
-
   it('the plan-token path is gated, and its token re-arm keeps a recorded drift', async () => {
     write('src/a.ts', 'export const a = 1\n')
     expect((await completeReview()).status).toBe('completed')

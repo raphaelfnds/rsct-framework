@@ -55,7 +55,7 @@ a process problem, not a framework limitation.
 §C above is the conversational/social contract. The `rsct-mcp` companion
 provides the mechanical layer that backs it — **four** §C-gated MCP tools
 that require a single-use `dev_approval` payload AND pop a cross-platform
-OS dialog before the mutation lands (with the free-commit-lane exception
+OS dialog before the mutation lands (with the batch plan-token exception
 noted under "Plan execution modes" below):
 
 - `mcp__rsct__rsct_request_commit` — replaces `Bash(git commit ...)`. Rejects a
@@ -71,7 +71,7 @@ noted under "Plan execution modes" below):
   `Bash(git merge --squash ...)` (history-rewriting integration: `mode:'rebase'`
   runs `git rebase <ref>`, `mode:'squash'` runs `git merge --squash`; ALWAYS
   per-action, requires a `pre_merge_ack`, runs INV-5 on the current branch, and
-  is never covered by a batch/free lane)
+  is never covered by a batch token)
 
 Each call consumes a single approval (INV-2 anti-reuse store at
 `.rsct/approvals-seen.json`) so the same payload cannot authorize two
@@ -147,36 +147,11 @@ A push to a **non-protected** feature/WIP branch (e.g. to trigger CI on an
 open PR) does **not** require the ack — forcing an attestation there would
 only train dishonest "all true" stamps.
 
-**Plan execution modes — free lane (trivial/small) · one-at-a-time · batch (T3):**
+**Plan execution modes — one-at-a-time · batch (T3):**
 
-**Free-commit lane (`trivial`/`small` tasks, plan-lifecycle-v2).** For a task the
-classifier tiered `trivial` or `small`, `rsct_request_commit` commits **without a
-per-commit OS dialog**, within a mechanical, audit-log-anchored ceiling (default
-~5 commits per plan, plus cumulative file/line caps). The ceiling is re-derived
-from the append-only `.rsct/audit.log`, so deleting `phase-state.json` cannot
-silently reset it (fail-closed). Branch protection (INV-5) and the secret scan
-(INV-6) still apply — the free path carries no overrides. When the ceiling trips,
-the lane locks and the next commit falls back to a per-action `dev_approval`.
-
-**The lane is suspended while RSCT enforcement is not running.** It is a privilege
-granted on the premise that the mechanical layer is trustworthy; when an
-enforcement script under `.rsct/scripts/` is missing, is present with no hook
-in `.claude/settings.json` wired to run it, or is an edit guard from a build
-that cannot block (rsct-mcp 2.2.0 to 2.12.3), that premise is provably false and the
-next commit falls back to a per-action `dev_approval`. Nothing is blocked — the
-commit still lands, it just costs one dialog, and the dialog is the point: it is
-the one channel that carries the warning where the agent cannot summarize it away.
-One exception to know: a batch token that is still valid keeps authorizing
-commits without a dialog, and the dialog that mints a token does not carry the
-warning — relay the `hints[]` line to the dev yourself.
-Be clear on what this buys, though: **reach, not enforcement.** If the sanitizer
-is not running, a poison-pill permission can persist and the agent can bypass
-`rsct_request_commit` entirely — suspending the lane does not close that. Run
-`/rsct-setup` and restart the IDE; the lane restores itself, with nothing to reset.
-
-For `standard`/`complex` tasks, execution is **one-at-a-time**: every commit needs
-its own fresh `dev_approval` (the anti-reuse rule above), unless the dev opts in
-to batch mode.
+By default, execution is **one-at-a-time**: every commit needs its own fresh
+`dev_approval` (the anti-reuse rule above), unless the dev opts in to batch mode.
+This is the same for every tier — there is no dialog-free lane.
 
 For longer plan runs, the dev may grant a **plan-scoped batch token** so you
 don't have to stop for an OK on every single commit:

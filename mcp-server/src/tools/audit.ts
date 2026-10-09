@@ -43,9 +43,9 @@ export interface AuditInstallDrift {
   message: string | null
 }
 
-export interface AuditFreeCommitEligibility {
-  eligible: boolean
-  reasons: string[]
+export interface AuditMechanicalHealth {
+  ok: boolean
+  faults: string[]
   explanation: string
 }
 
@@ -54,7 +54,7 @@ export interface AuditOutput {
   rsct_installed: boolean
   project: { root: string }
   install_drift: AuditInstallDrift | null
-  free_commit_eligibility: AuditFreeCommitEligibility | null
+  mechanical_health: AuditMechanicalHealth | null
   open_phase: AuditOpenPhase | null
   plans: PlanSummary[]
   plans_ordered_by: 'plan_file_mtime'
@@ -64,24 +64,23 @@ export interface AuditOutput {
 
 const DAY_MS = 86_400_000
 
-function explainEligibility(eligible: boolean, reasons: string[]): string {
-  if (eligible) {
-    return 'The dialog-free free-commit lane is available for this project. Every commit still goes through rsct_request_commit.'
-  }
-  const faults = reasons.filter((r) => r !== 'audit_history_absent')
+function explainHealth(faults: string[], historyAbsent: boolean): string {
   if (faults.length > 0) {
     const commits = faults.includes('phase_state_corrupt')
       ? 'rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted.'
       : 'Commits still work; they go through the per-action §C path.'
-    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. ${commits}`
+    return `The RSCT mechanical layer has at least one genuine fault rather than a fresh-install condition: ${faults.join(', ')}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write — worth looking at directly. ${commits}`
   }
-  return 'Free commits are closed because this project has no audit history yet — expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action §C path instead.'
+  if (historyAbsent) {
+    return 'No fault in the RSCT mechanical layer. This project has no audit history yet — expected on a fresh install; commits go through the per-action §C path.'
+  }
+  return 'No fault in the RSCT mechanical layer; every signal is clean.'
 }
 
 export const auditTool: Tool = {
   name: 'rsct_audit',
   description:
-    "On-demand report on this project's RSCT surface: install drift, free-commit-lane eligibility, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only — no git, no network — and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing — do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
+    "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only — no git, no network — and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing — do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -118,16 +117,17 @@ export async function auditHandler(
     }
   }
 
-  let free_commit_eligibility: AuditFreeCommitEligibility | null = null
+  let mechanical_health: AuditMechanicalHealth | null = null
   if (resolution.rsct_installed) {
     const health = evaluateMcpHealth(resolution.root, {
       now,
       config: resolution.config,
     })
-    free_commit_eligibility = {
-      eligible: health.healthy,
-      reasons: health.reasons,
-      explanation: explainEligibility(health.healthy, health.reasons),
+    const faults = health.reasons.filter((r) => r !== 'audit_history_absent')
+    mechanical_health = {
+      ok: faults.length === 0,
+      faults,
+      explanation: explainHealth(faults, health.reasons.includes('audit_history_absent')),
     }
   }
 
@@ -153,8 +153,8 @@ export async function auditHandler(
   if (!resolution.rsct_installed) {
     hints.push(
       existsSync(join(resolution.root, '.rsct.json'))
-        ? 'A .rsct.json is PRESENT here but was rejected — unreadable, malformed, or carrying a value outside the enforced bounds — so RSCT is treating this project as unmanaged and neither install drift nor free-commit eligibility is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo.'
-        : 'This project is not rsct-managed (no .rsct.json), so install drift and free-commit eligibility are not reported. Plans found at the root are still listed.',
+        ? 'A .rsct.json is PRESENT here but was rejected — unreadable, malformed, or carrying a value outside the enforced bounds — so RSCT is treating this project as unmanaged and neither install drift nor mechanical-layer health is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo.'
+        : 'This project is not rsct-managed (no .rsct.json), so install drift and mechanical-layer health are not reported. Plans found at the root are still listed.',
     )
   }
 
@@ -169,7 +169,7 @@ export async function auditHandler(
     rsct_installed: resolution.rsct_installed,
     project: { root: resolution.root },
     install_drift,
-    free_commit_eligibility,
+    mechanical_health,
     open_phase,
     plans,
     plans_ordered_by: 'plan_file_mtime',

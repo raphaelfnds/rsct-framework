@@ -31,16 +31,11 @@ When `rsct-mcp` is installed, prefer the §C-gated MCP tools over plain
 mechanically (single-use `dev_approval` payload + cross-platform OS
 dialog + audit log entry per call):
 
-- `mcp__rsct__rsct_request_commit` for commits (for `trivial`/`small` tasks the
-  dialog-free free-commit lane applies — bounded, audit-log-anchored ceiling;
-  branch-protection + secret-scan still enforced. Every path, the free lane
-  included, carries only code a completed REVIEW stamped: a staged code file
-  that no REVIEW covers, or that still has a comment, is rejected before any
-  dialog (`review_missing` / `comments_present`). The lane is SUSPENDED while
-  RSCT enforcement is not running — an enforcement script absent, with no hook
-  wired to it, or an edit guard from a build that cannot block — and the next
-  commit falls back to a per-action `dev_approval`, unless a batch token is
-  still valid)
+- `mcp__rsct__rsct_request_commit` for commits (every commit pops the OS dialog,
+  unless a plan-scoped batch token is active; either path carries only code a
+  completed REVIEW stamped — a staged code file that no REVIEW covers, or that
+  still has a comment, is rejected before any dialog, `review_missing` /
+  `comments_present`)
 - `mcp__rsct__rsct_request_push` for pushes
 - `mcp__rsct__rsct_request_merge` for merges
 - `mcp__rsct__rsct_request_rebase` for rebases / `--squash` merges
