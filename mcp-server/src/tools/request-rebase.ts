@@ -100,7 +100,7 @@ export interface RequestRebaseInternal {
 export const requestRebaseTool: Tool = {
   name: 'rsct_request_rebase',
   description:
-    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token or the free-commit lane). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
+    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
   inputSchema: {
     type: 'object',
     properties: {

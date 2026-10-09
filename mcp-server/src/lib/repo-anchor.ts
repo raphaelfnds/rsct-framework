@@ -190,7 +190,7 @@ export function repositoryDialogLine(projectRoot: string): string {
  * | submodule        | inside .git/modules | inside .git   | ok              |
  *
  * So: a LINKED worktree resolves to its main worktree (that is what makes the
- * free-commit ceiling survive `git worktree add`); everything else resolves to
+ * audit-log ceiling survive `git worktree add`); everything else resolves to
  * its own toplevel. `readWorktreeInfo` supplies the discriminator and its own
  * docstring records why detecting the `/worktrees/<name>` tail is the robust
  * test rather than string-comparing git-dir against common-dir.

@@ -42,11 +42,10 @@ function initRepo(dir: string): void {
   git(dir, ['commit', '-qm', 'init'])
 }
 
-const LOCKED = JSON.stringify({
+const LEGACY_LINE = JSON.stringify({
   ts: '2026-01-01T00:00:00.000Z',
-  event: 'free_commit.locked',
-  plan_slug: 'alpha',
-  reason: 'commit_cap',
+  event: 'classify.verdict',
+  tier: 'small',
 })
 
 let box: string
@@ -146,13 +145,13 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
     initRepo(repo)
     const pkg = join(repo, 'packages', 'app')
     mkdirSync(join(pkg, '.rsct'), { recursive: true })
-    writeFileSync(join(pkg, '.rsct', 'audit.log'), LOCKED + '\n')
+    writeFileSync(join(pkg, '.rsct', 'audit.log'), LEGACY_LINE + '\n')
 
     const target = decideAuditPath(pkg).path
     expect(target).toBe(join(repo, '.rsct', 'audit.log'))
 
     const carried = readFileSync(target, 'utf8')
-    expect(carried).toContain('free_commit.locked')
+    expect(carried).toContain('classify.verdict')
     expect(carried).toContain('audit_log.migrated')
   })
 
@@ -162,7 +161,7 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
     const pkg = join(repo, 'packages', 'app')
     mkdirSync(join(pkg, '.rsct'), { recursive: true })
     const legacy = join(pkg, '.rsct', 'audit.log')
-    writeFileSync(legacy, LOCKED + '\n')
+    writeFileSync(legacy, LEGACY_LINE + '\n')
 
     decideAuditPath(pkg)
     expect(existsSync(legacy)).toBe(true)
@@ -174,13 +173,13 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
     const pkg = join(repo, 'packages', 'app')
     mkdirSync(join(pkg, '.rsct'), { recursive: true })
     mkdirSync(join(repo, '.rsct'), { recursive: true })
-    writeFileSync(join(pkg, '.rsct', 'audit.log'), LOCKED + '\n')
+    writeFileSync(join(pkg, '.rsct', 'audit.log'), LEGACY_LINE + '\n')
     writeFileSync(join(repo, '.rsct', 'audit.log'), '{"event":"already.here"}\n')
 
     const target = decideAuditPath(pkg).path
     const content = readFileSync(target, 'utf8')
     expect(content).toContain('already.here')
-    expect(content).not.toContain('free_commit.locked')
+    expect(content).not.toContain('classify.verdict')
     expect(content).not.toContain('audit_log.migrated')
   })
 
@@ -188,7 +187,7 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
     const repo = join(box, 'repo')
     initRepo(repo)
     mkdirSync(join(repo, '.rsct'), { recursive: true })
-    writeFileSync(join(repo, '.rsct', 'audit.log'), LOCKED + '\n')
+    writeFileSync(join(repo, '.rsct', 'audit.log'), LEGACY_LINE + '\n')
 
     decideAuditPath(repo)
     expect(readFileSync(join(repo, '.rsct', 'audit.log'), 'utf8')).not.toContain(

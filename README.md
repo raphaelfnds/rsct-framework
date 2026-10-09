@@ -472,11 +472,10 @@ step doesn't behave as described, that's a bug worth filing.
    - Plain `Bash(git commit ...)` will be refused or surface a §C
      reauthorization request (per the rules in `CLAUDE.md`).
    - With `rsct-mcp` installed: Claude proposes
-     `mcp__rsct__rsct_request_commit` instead. A `standard`/`complex` task
-     pops a native OS dialog to confirm out-of-band before the commit lands;
-     a `trivial`/`small` task uses the dialog-free free-commit lane (bounded
-     by an audit-log-anchored ceiling, branch-protection + secret-scan still
-     enforced). Audit trail goes to `.rsct/audit.log`.
+     `mcp__rsct__rsct_request_commit` instead. Every commit pops a native OS
+     dialog to confirm out-of-band before it lands, unless the dev has minted a
+     plan-scoped batch token (`rsct_plan_authorize`). Audit trail goes to
+     `.rsct/audit.log`.
 5. **Reverse it.** `/rsct-uninstall` cleanly removes everything the
    framework added to *this project* (markers + SHA256 detect any
    developer edits and protect them). Then
@@ -806,7 +805,7 @@ walk the surface end-to-end:
   9 more — `rsct_get_universe`, `rsct_get_topology`, `rsct_detect_onboarding`,
   `rsct_plan_authorize`/`_revoke`, `rsct_phase_review_start`/`_complete`,
   `rsct_plan_dispose` (keep|delete disposition for a plan's artifacts), and
-  `rsct_audit` (read-only report: install drift, free-commit-lane eligibility,
+  `rsct_audit` (read-only report: install drift, mechanical-layer health,
   open-phase age, and every plan at the project root).
 
 That's **7 + 7 + 17 + 9 = 40 tools**. Smoke: ask Claude to call

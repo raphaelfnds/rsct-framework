@@ -112,11 +112,9 @@ misbehaves, that's a bug worth filing.
 3. **Run `/rsct-setup`.** Expect a few discovery questions, then a plan to
    approve, then the files above written under your OK.
 4. **Ask Claude to commit something.** With `rsct-mcp` installed, Claude proposes
-   `rsct_request_commit`. For a `standard`/`complex` task this pops a native OS
-   dialog for you to confirm out-of-band before the commit lands; for a
-   `trivial`/`small` task it goes through the **dialog-free free-commit lane**
-   (bounded by an audit-log-anchored ceiling, with branch-protection and the
-   secret-scan still enforced). Either way the audit trail goes to
+   `rsct_request_commit`. Every commit pops a native OS dialog for you to confirm
+   out-of-band before it lands, unless you have minted a plan-scoped batch token
+   (`rsct_plan_authorize`) for a longer run. The audit trail goes to
    `.rsct/audit.log` — at the **git repository the commit lands in**, which is the
    same folder in the normal case and one level up in a monorepo package, a project
    nested inside another repository, or a linked worktree. When it differs, the

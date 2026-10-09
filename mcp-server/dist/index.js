@@ -22964,50 +22964,6 @@ function getRangePaths(projectRoot, base, head) {
   if (raw === null) return { status: "unavailable" };
   return { status: "ok", paths: splitNulPaths(raw) };
 }
-function getStagedStats(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--numstat", "-z"]);
-  if (raw === null) return null;
-  return parseNumstatZ(raw);
-}
-function parseNumstatZ(raw) {
-  const tokens = raw.split("\0");
-  const paths = [];
-  let insertions = 0;
-  let deletions = 0;
-  let i2 = 0;
-  while (i2 < tokens.length) {
-    const tok = tokens[i2];
-    if (tok === "") {
-      i2 += 1;
-      continue;
-    }
-    const firstTab = tok.indexOf("	");
-    const secondTab = firstTab >= 0 ? tok.indexOf("	", firstTab + 1) : -1;
-    if (firstTab < 0 || secondTab < 0) {
-      i2 += 1;
-      continue;
-    }
-    const addedRaw = tok.slice(0, firstTab);
-    const deletedRaw = tok.slice(firstTab + 1, secondTab);
-    const rest = tok.slice(secondTab + 1);
-    const added = addedRaw === "-" ? 0 : Number.parseInt(addedRaw, 10);
-    const deleted = deletedRaw === "-" ? 0 : Number.parseInt(deletedRaw, 10);
-    insertions += Number.isFinite(added) ? added : 0;
-    deletions += Number.isFinite(deleted) ? deleted : 0;
-    if (rest !== "") {
-      paths.push(rest.replace(/\\/g, "/"));
-      i2 += 1;
-    } else {
-      const newPath = tokens[i2 + 2];
-      if (newPath !== void 0 && newPath !== "") {
-        paths.push(newPath.replace(/\\/g, "/"));
-      }
-      i2 += 3;
-    }
-  }
-  return { files: paths.length, insertions, deletions, paths };
-}
 function getFileAtHead(projectRoot, relPath) {
   if (!isGitRepo(projectRoot)) return null;
   return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
@@ -23438,9 +23394,6 @@ var RsctApprovalModesSchema = external_exports.object({
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
   plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  free_commit_max: external_exports.number().int().min(1).max(50).optional(),
-  free_commit_max_files: external_exports.number().int().min(1).max(500).optional(),
-  free_commit_max_lines: external_exports.number().int().min(1).max(1e5).optional(),
   plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
   plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
 }).strip();
@@ -23982,7 +23935,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.13.3";
+var RSCT_MCP_VERSION = "2.13.4";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -24943,7 +24896,7 @@ function bootstrapHints(refresh) {
   const { marker, read, write } = refresh;
   if (write === null) {
     return [
-      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
+      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
     ];
   }
   const hints = [];
@@ -25764,7 +25717,7 @@ function bootstrapHints2(refresh) {
   const { marker, read, write } = refresh;
   if (write === null) {
     return [
-      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization, free-commit budget or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
+      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
     ];
   }
   const hints = [];
@@ -28164,64 +28117,7 @@ function deletionBlob(headBlob) {
   return `deleted:${headBlob}`;
 }
 
-// src/lib/health.ts
-init_esm_shims();
-var LOCK_STALE_MS2 = 3e4;
-function evaluateMcpHealth(projectRoot, opts = {}) {
-  const now = opts.now ?? /* @__PURE__ */ new Date();
-  const reasons = [];
-  const configPath = join(projectRoot, ".rsct.json");
-  if (!existsSync(configPath)) {
-    reasons.push("config_absent");
-  } else {
-    try {
-      JSON.parse(readFileSync(configPath, "utf8"));
-    } catch {
-      reasons.push("config_unparseable");
-    }
-  }
-  if (readPhaseState(projectRoot).parse_error) {
-    reasons.push("phase_state_corrupt");
-  }
-  const lockPath = join(projectRoot, ".rsct", "phase-state.lock");
-  if (existsSync(lockPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
-      const lockedAtMs = parsed.locked_at ? new Date(parsed.locked_at).getTime() : NaN;
-      const ageMs = now.getTime() - lockedAtMs;
-      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS2) {
-        reasons.push("phase_state_lock_stale");
-      }
-    } catch {
-      reasons.push("phase_state_lock_stale");
-    }
-  }
-  const auditPath = resolveAuditPath(projectRoot, opts.config?.audit);
-  let historyOk = false;
-  try {
-    if (existsSync(auditPath)) {
-      const stat = statSync(auditPath);
-      historyOk = stat.isFile() && stat.size > 0;
-    }
-  } catch {
-    historyOk = false;
-  }
-  if (!historyOk) {
-    reasons.push("audit_history_absent");
-  }
-  return { healthy: reasons.length === 0, reasons };
-}
-
 // src/lib/free-commit.ts
-var FREE_COMMIT_MAX_DEFAULT = 5;
-var FREE_COMMIT_MAX_MIN = 1;
-var FREE_COMMIT_MAX_MAX = 50;
-var FREE_COMMIT_MAX_FILES_DEFAULT = 20;
-var FREE_COMMIT_MAX_FILES_MIN = 1;
-var FREE_COMMIT_MAX_FILES_MAX = 500;
-var FREE_COMMIT_MAX_LINES_DEFAULT = 600;
-var FREE_COMMIT_MAX_LINES_MIN = 1;
-var FREE_COMMIT_MAX_LINES_MAX = 1e5;
 function isFreeTier(tier) {
   return tier === "trivial" || tier === "small";
 }
@@ -28232,28 +28128,6 @@ function higherTier(a, b) {
   if (bv === void 0) return av;
   return tierRank(av) >= tierRank(bv) ? av : bv;
 }
-function clampInt(v, def, min, max) {
-  if (v === void 0 || !Number.isFinite(v)) return def;
-  return Math.min(max, Math.max(min, Math.trunc(v)));
-}
-function resolveFreeBudgetLimits(config2) {
-  const m = config2?.approval_modes;
-  return {
-    maxCommits: clampInt(m?.free_commit_max, FREE_COMMIT_MAX_DEFAULT, FREE_COMMIT_MAX_MIN, FREE_COMMIT_MAX_MAX),
-    maxFiles: clampInt(
-      m?.free_commit_max_files,
-      FREE_COMMIT_MAX_FILES_DEFAULT,
-      FREE_COMMIT_MAX_FILES_MIN,
-      FREE_COMMIT_MAX_FILES_MAX
-    ),
-    maxLines: clampInt(
-      m?.free_commit_max_lines,
-      FREE_COMMIT_MAX_LINES_DEFAULT,
-      FREE_COMMIT_MAX_LINES_MIN,
-      FREE_COMMIT_MAX_LINES_MAX
-    )
-  };
-}
 var DEAD_CODE_KEPT_EVENT = "review.dead_code_kept";
 var PUBLIC_API_APPROVED_EVENT = "review.public_api_approved";
 function deadCodeKeepKey(path2, name2, declarationSha2562) {
@@ -28262,13 +28136,10 @@ function deadCodeKeepKey(path2, name2, declarationSha2562) {
 function publicApiApprovalKey(publicApiSha256, path2, name2, declarationSha2562) {
   return `${publicApiSha256}\0${path2}\0${name2}\0${declarationSha2562}`;
 }
-function deriveAuditCeiling(projectRoot, config2, planSlug) {
+function deriveAuditCeiling(projectRoot, config2) {
   const failClosed = {
     classifyEvidencePresent: false,
     auditTierMax: null,
-    freeCommitsUsed: 0,
-    auditLocked: false,
-    readable: false,
     unverifiedDecisions: /* @__PURE__ */ new Set(),
     deadCodeKeepDecisions: /* @__PURE__ */ new Set(),
     publicApiApprovals: /* @__PURE__ */ new Set()
@@ -28284,8 +28155,6 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
   let classifyEvidencePresent = false;
   let maxRank = -1;
   let auditTierMax = null;
-  let freeCommitsUsed = 0;
-  let auditLocked = false;
   const unverifiedDecisions = /* @__PURE__ */ new Set();
   const deadCodeKeepDecisions = /* @__PURE__ */ new Set();
   const publicApiApprovals = /* @__PURE__ */ new Set();
@@ -28308,10 +28177,6 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
         maxRank = r;
         auditTierMax = entry.tier;
       }
-    } else if (event === "free_commit.committed" && entry.plan_slug === planSlug) {
-      freeCommitsUsed += 1;
-    } else if (event === "free_commit.locked" && entry.plan_slug === planSlug) {
-      auditLocked = true;
     } else if (event === "review.unverified_decision" && entry.answer === "yes" && typeof entry.path === "string" && typeof entry.blob === "string") {
       unverifiedDecisions.add(decisionKey(entry.path, entry.blob));
     } else if (event === DEAD_CODE_KEPT_EVENT && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
@@ -28323,115 +28188,10 @@ function deriveAuditCeiling(projectRoot, config2, planSlug) {
   return {
     classifyEvidencePresent,
     auditTierMax,
-    freeCommitsUsed,
-    auditLocked,
-    readable: true,
     unverifiedDecisions,
     deadCodeKeepDecisions,
     publicApiApprovals
   };
-}
-function reserveFreeBudget(args2) {
-  const prev = args2.prev && args2.prev.plan_slug === args2.planSlug ? args2.prev : void 0;
-  const wasLocked = prev?.locked ?? false;
-  const unionPaths = Array.from(
-    /* @__PURE__ */ new Set([...prev?.files_touched_paths ?? [], ...args2.stats.paths])
-  );
-  const commitsUsed = (prev?.commits_used ?? 0) + 1;
-  const thisCommitLines = args2.stats.insertions + args2.stats.deletions;
-  const linesChanged = (prev?.lines_changed ?? 0) + thisCommitLines;
-  const signals = [];
-  let lockedReason;
-  if (args2.stats.files > args2.limits.maxFiles || thisCommitLines > args2.limits.maxLines) {
-    signals.push("tier_volume_divergence");
-    lockedReason = "tier_divergence";
-  }
-  if (lockedReason === void 0) {
-    if (commitsUsed >= args2.limits.maxCommits) {
-      lockedReason = "commit_cap";
-    } else if (unionPaths.length > args2.limits.maxFiles || linesChanged > args2.limits.maxLines) {
-      lockedReason = "volume_cap";
-    }
-  }
-  const locked = wasLocked || lockedReason !== void 0;
-  const nextBudget = {
-    plan_slug: args2.planSlug,
-    files_touched_paths: unionPaths,
-    commits_used: commitsUsed,
-    lines_changed: linesChanged,
-    locked
-  };
-  const effectiveReason = lockedReason ?? prev?.locked_reason;
-  if (locked && effectiveReason !== void 0) nextBudget.locked_reason = effectiveReason;
-  return { nextBudget, newlyLocked: locked && !wasLocked, signals };
-}
-function evaluateFreeEligibility(args2) {
-  const health = args2.healthOverride ?? evaluateMcpHealth(args2.projectRoot, { now: args2.now, config: args2.config });
-  if (!health.healthy) {
-    return { eligible: false, reason: `mcp unhealthy: ${health.reasons.join(", ")}` };
-  }
-  if (args2.installDriftSecurity === true) {
-    return {
-      eligible: false,
-      reason: "install drift at security tier \u2014 RSCT enforcement is not running in this project",
-      installDriftSecurity: true
-    };
-  }
-  if (!args2.activePlanSlug) {
-    return { eligible: false, reason: "no active plan" };
-  }
-  const planSlug = args2.activePlanSlug;
-  const stateTierMax = args2.state?.last_classify?.tier_max;
-  if (stateTierMax !== void 0 && !isFreeTier(stateTierMax)) {
-    return {
-      eligible: false,
-      reason: `tier_max '${stateTierMax}' is not in {trivial, small}`,
-      planSlug,
-      tierMax: stateTierMax
-    };
-  }
-  const ceiling = deriveAuditCeiling(args2.projectRoot, args2.config, planSlug);
-  if (!ceiling.readable) {
-    return { eligible: false, reason: "audit ceiling unreadable" };
-  }
-  if (!ceiling.classifyEvidencePresent) {
-    return { eligible: false, reason: "no classify evidence in audit history" };
-  }
-  const effTierMax = higherTier(stateTierMax, ceiling.auditTierMax);
-  if (effTierMax === void 0) {
-    return { eligible: false, reason: "no tier_max" };
-  }
-  if (!isFreeTier(effTierMax)) {
-    return {
-      eligible: false,
-      reason: `tier_max '${effTierMax}' is not in {trivial, small}`,
-      planSlug,
-      tierMax: effTierMax
-    };
-  }
-  const stateBudget = args2.state?.free_commit_budget && args2.state.free_commit_budget.plan_slug === planSlug ? args2.state.free_commit_budget : void 0;
-  const locked = (stateBudget?.locked ?? false) || ceiling.auditLocked;
-  if (locked) {
-    return {
-      eligible: false,
-      reason: "free budget locked for this plan",
-      lockedHint: true,
-      planSlug,
-      tierMax: effTierMax
-    };
-  }
-  const effUsed = Math.max(stateBudget?.commits_used ?? 0, ceiling.freeCommitsUsed);
-  const limits = resolveFreeBudgetLimits(args2.config);
-  if (effUsed >= limits.maxCommits) {
-    return {
-      eligible: false,
-      reason: "free commit budget exhausted",
-      lockedHint: true,
-      planSlug,
-      tierMax: effTierMax
-    };
-  }
-  return { eligible: true, planSlug, tierMax: effTierMax };
 }
 
 // src/lib/comment-sweep/review.ts
@@ -44927,7 +44687,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
       options: { sqlDialect: config2?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       ledger: sweepState?.review_sweep,
       drift: sweepState?.review_drift,
-      unverifiedDecisions: deriveAuditCeiling(projectRoot, config2 ?? null, "").unverifiedDecisions
+      unverifiedDecisions: deriveAuditCeiling(projectRoot, config2 ?? null).unverifiedDecisions
     });
   };
   const rejectSweep = (check2, stage) => {
@@ -44965,7 +44725,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
   };
   const runDeadCodeCheck = async (entries) => {
     const paths = entries.map((entry) => entry.path);
-    const ceiling = deriveAuditCeiling(projectRoot, config2 ?? null, "");
+    const ceiling = deriveAuditCeiling(projectRoot, config2 ?? null);
     try {
       return await checkStagedDeadCode({
         projectRoot,
@@ -45023,7 +44783,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
   let approval = null;
   let fabricationSignals = [];
   let tokenCtx = null;
-  let freeCtx = null;
   if (input.dev_approval !== void 0) {
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
@@ -45083,73 +44842,52 @@ async function requestCommitHandler(rawInput, internal = {}) {
     fabricationSignals = gate.fabrication_signals;
   } else {
     const existing = readPhaseState(projectRoot);
-    const activePlan2 = findActivePlan(projectRoot);
-    const elig = evaluateFreeEligibility({
-      installDriftSecurity: installAdvisory.isSecurity,
-      projectRoot,
-      config: config2 ?? null,
+    const token = readToken(existing.state);
+    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
+    const verdict = validateToken(token, {
       now,
-      state: existing.state,
-      activePlanSlug: activePlan2?.slug ?? null
+      branch: gitState.branch,
+      tokenPlan,
+      action: "commit"
     });
-    if (elig.eligible && elig.planSlug !== void 0) {
-      channel = "free_commit";
-      authorizedVia = "free_commit";
-      freeCtx = { planSlug: elig.planSlug, baseState: existing.state ?? {} };
-    } else {
-      const token = readToken(existing.state);
-      const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
-      const verdict = validateToken(token, {
-        now,
-        branch: gitState.branch,
-        tokenPlan,
-        action: "commit"
-      });
-      if (!verdict.valid) {
-        let reason = planTokenRejectReason(verdict.reason);
-        if (verdict.reason === "absent" && elig.lockedHint) {
-          reason = `free-commit budget is locked for this plan (${elig.reason}) \u2014 re-classify with rsct_classify_task, or mint a batch token with rsct_plan_authorize`;
-        }
-        if (verdict.reason === "absent" && elig.installDriftSecurity) {
-          reason = "the dialog-free commit lane is suspended while RSCT enforcement is not running \u2014 approve this commit per-action (dev_approval), or run /rsct-setup and restart the IDE to restore it";
-        }
-        const audit2 = appendAudit(
-          projectRoot,
-          {
-            event: "request_commit.rejected",
-            tool: "rsct_request_commit",
-            reject_kind: "plan_token_invalid",
-            token_reason: verdict.reason,
-            reason,
-            branch: gitState.branch
-          },
-          config2?.audit
-        );
-        return {
-          status: "rejected",
-          branch: gitState.branch,
-          channel: null,
-          authorized_via: null,
+    if (!verdict.valid) {
+      const reason = planTokenRejectReason(verdict.reason);
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_commit.rejected",
+          tool: "rsct_request_commit",
           reject_kind: "plan_token_invalid",
+          token_reason: verdict.reason,
           reason,
-          fabrication_signals: [],
-          sha_before: gitState.head_sha,
-          sha_after: null,
-          branch_check: { protected: false, override_used: false },
-          secrets_check: { findings_count: 0, findings: [], override_used: false },
-          plan_token: null,
-          ...auditFields(audit2),
-          anti_replay_persisted: null,
-          anti_replay_error: null,
-          hints: withAdvisories([
-            `Approval rejected (plan_token_invalid): ${reason}`
-          ])
-        };
-      }
-      channel = "plan_token";
-      authorizedVia = "plan_token";
-      tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
+          branch: gitState.branch
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
+        reject_kind: "plan_token_invalid",
+        reason,
+        fabrication_signals: [],
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([
+          `Approval rejected (plan_token_invalid): ${reason}`
+        ])
+      };
     }
+    channel = "plan_token";
+    authorizedVia = "plan_token";
+    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
   }
   const overrideBranch = approval?.override_protected_branch;
   const overrideSecrets = approval?.override_secrets_check;
@@ -45344,8 +45082,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
   const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked);
   if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, "before_commit");
   let reservedToken = null;
-  let reservedFreeBudget = null;
-  let freeNewlyLocked = false;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
     const reserve = writePhaseState(projectRoot, {
@@ -45392,67 +45128,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
         hints: withAdvisories([reason])
       };
     }
-  } else if (freeCtx) {
-    const rejectFreeReserve = (reason) => {
-      const audit2 = appendAudit(
-        projectRoot,
-        {
-          event: "request_commit.rejected",
-          tool: "rsct_request_commit",
-          reject_kind: "free_budget_reserve_failed",
-          reason,
-          branch: gitState.branch,
-          channel
-        },
-        config2?.audit
-      );
-      return {
-        status: "rejected",
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia,
-        reject_kind: "free_budget_reserve_failed",
-        reason,
-        fabrication_signals: fabricationSignals,
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: branchProtected, override_used: branchProtected },
-        secrets_check: { findings_count: findings.length, findings, override_used: false },
-        plan_token: null,
-        free_commit: null,
-        contract_check: contractResult,
-        ...auditFields(audit2),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason])
-      };
-    };
-    const stats = internal.stagedStatsOverride ?? getStagedStats(projectRoot);
-    if (stats === null) {
-      return rejectFreeReserve(
-        "could not measure the staged diff (git unavailable) \u2014 commit with a per-action dev_approval"
-      );
-    }
-    const limits = resolveFreeBudgetLimits(config2 ?? null);
-    const reserve = reserveFreeBudget({
-      planSlug: freeCtx.planSlug,
-      prev: freeCtx.baseState.free_commit_budget,
-      stats,
-      limits
-    });
-    reservedFreeBudget = reserve.nextBudget;
-    freeNewlyLocked = reserve.newlyLocked;
-    fabricationSignals = [...fabricationSignals, ...reserve.signals];
-    const write = writePhaseState(projectRoot, {
-      ...freeCtx.baseState,
-      free_commit_budget: reserve.nextBudget
-    });
-    if (!write.ok) {
-      const detail = write.reason === "locked" ? `phase-state.json is being edited by another session (locked ${write.lock_age_ms}ms ago)` : write.error;
-      return rejectFreeReserve(
-        `could not reserve the free-commit budget (${detail}) \u2014 retry, or commit with a per-action dev_approval`
-      );
-    }
   }
   const commit = gitCommit(projectRoot, input.message, gitExecutor);
   if (!commit.ok) {
@@ -45464,13 +45139,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
         plan_authorization: tokenCtx.token
       });
       refundNote = refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
-    } else if (freeCtx) {
-      const prevBudget = freeCtx.baseState.free_commit_budget;
-      const restored = { ...freeCtx.baseState };
-      if (prevBudget) restored.free_commit_budget = prevBudget;
-      else delete restored.free_commit_budget;
-      const refund = writePhaseState(projectRoot, restored);
-      refundNote = refund.ok ? " The reserved free-commit budget was refunded." : " \u26A0 the reserved free-commit budget could NOT be refunded (phase-state write failed) \u2014 the spend stays (fail-safe).";
     }
     const audit2 = appendAudit(
       projectRoot,
@@ -45501,20 +45169,18 @@ async function requestCommitHandler(rawInput, internal = {}) {
         override_used: findings.length > 0
       },
       plan_token: null,
-      free_commit: null,
       contract_check: contractResult,
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: withAdvisories([
-        authorizedVia === "plan_token" || authorizedVia === "free_commit" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+        authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
       ])
     };
   }
   let antiReplayPersisted;
   let antiReplayError = null;
   let tokenSummary = null;
-  let freeSummary = null;
   const bookkeepingHints = [];
   let sweepDrift = [];
   if (commit.sha_after && sweepAtCommit.skipped === null) {
@@ -45583,7 +45249,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
         `\u26A0 commit landed, but I could not record this approval as used: ${record2.error}. The same dev_approval (action_scope='${approval.action_scope}', timestamp='${approval.timestamp}') could be accepted again by mistake for a short time \u2014 use a fresh approval next time, or repair .rsct/approvals-seen.json.`
       );
     }
-  } else if (tokenCtx) {
+  } else {
     antiReplayPersisted = true;
     tokenSummary = {
       plan_slug: reservedToken.plan_slug,
@@ -45604,46 +45270,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
           "\u26A0 token sliding-window re-arm did not persist \u2014 the token keeps its current expiry (fail-safe)."
         );
       }
-    }
-  } else {
-    antiReplayPersisted = true;
-    freeSummary = {
-      plan_slug: reservedFreeBudget.plan_slug,
-      commits_used: reservedFreeBudget.commits_used,
-      files_touched: reservedFreeBudget.files_touched_paths.length,
-      lines_changed: reservedFreeBudget.lines_changed,
-      locked: reservedFreeBudget.locked,
-      ...reservedFreeBudget.locked_reason !== void 0 && {
-        locked_reason: reservedFreeBudget.locked_reason
-      }
-    };
-    const ledger = appendAudit(
-      projectRoot,
-      {
-        event: "free_commit.committed",
-        tool: "rsct_request_commit",
-        channel: "free_commit",
-        plan_slug: reservedFreeBudget.plan_slug,
-        sha_after: commit.sha_after
-      },
-      config2?.audit
-    );
-    if (!ledger.ok && ledger.reason !== "disabled") {
-      bookkeepingHints.push(
-        `\u26A0 the durable free_commit.committed ledger event did not persist (${ledger.error ?? "write failed"}) \u2014 if phase-state is later wiped, the free-commit count could under-count by one.`
-      );
-    }
-    if (freeNewlyLocked) {
-      appendAudit(
-        projectRoot,
-        {
-          event: "free_commit.locked",
-          tool: "rsct_request_commit",
-          plan_slug: reservedFreeBudget.plan_slug,
-          reason: reservedFreeBudget.locked_reason ?? "commit_cap"
-        },
-        config2?.audit
-      );
     }
   }
   const audit = appendAudit(
@@ -45677,13 +45303,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
     const remaining = tokenSummary.max_actions - tokenSummary.actions_used;
     hints.push(
       `Authorized by plan token '${tokenSummary.plan_slug}' (${tokenSummary.actions_used}/${tokenSummary.max_actions} used, ${remaining} left, expires ${tokenSummary.expires_at}). No dev_approval needed within scope.`
-    );
-  }
-  if (freeSummary) {
-    const limit = resolveFreeBudgetLimits(config2 ?? null).maxCommits;
-    const remaining = Math.max(0, limit - freeSummary.commits_used);
-    hints.push(
-      freeSummary.locked ? `Free commit on '${freeSummary.plan_slug}' \u2014 budget is now LOCKED (${freeSummary.locked_reason}). Further commits need a per-action dev_approval or a batch token (rsct_plan_authorize).` : `Free (dialog-free) commit on '${freeSummary.plan_slug}' \u2014 ${freeSummary.commits_used}/${limit} used, ${remaining} left. No approval needed for trivial/small within budget.`
     );
   }
   hints.push(...deadAtCommit.hints);
@@ -45734,7 +45353,6 @@ async function requestCommitHandler(rawInput, internal = {}) {
       override_used: findings.length > 0
     },
     plan_token: tokenSummary,
-    free_commit: freeSummary,
     contract_check: contractResult,
     bootstrap_marker: bootstrap,
     ...afields,
@@ -47335,7 +46953,7 @@ var requestRebaseInputSchema = external_exports.object({
 }).strict();
 var requestRebaseTool = {
   name: "rsct_request_rebase",
-  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token or the free-commit lane). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Validates dev_approval, pops the OS dialog, requires a pre_merge_ack, and runs INV-5 on the CURRENT branch (rewriting a PROTECTED branch's history requires override_protected_branch). mode='rebase' runs `git rebase <ref>`; mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 commit it afterward via rsct_request_commit). Conflicts surface as mutation_failed with git's stderr; nothing is force-pushed.",
   inputSchema: {
     type: "object",
     properties: {
@@ -49889,7 +49507,7 @@ var CEREMONY_BYPASS_LABELS = {
   plan_tracking: "start without plan_/progress_ tracking files"
 };
 function readClassifyEvidence(projectRoot, config2) {
-  const ceiling = deriveAuditCeiling(projectRoot, config2, "");
+  const ceiling = deriveAuditCeiling(projectRoot, config2);
   const stateMax = readPhaseState(projectRoot).state?.last_classify?.tier_max;
   return {
     present: ceiling.classifyEvidencePresent || stateMax !== void 0,
@@ -51069,7 +50687,7 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
       extra: { paths: withComments.map((f) => f.path) }
     });
   }
-  const ceiling = deriveAuditCeiling(projectRoot, config2, "");
+  const ceiling = deriveAuditCeiling(projectRoot, config2);
   const keepDecisions = ceiling.deadCodeKeepDecisions;
   const storedKeeps = auditBoundKeeps(readDeadCodeKeeps(readPhaseState(projectRoot).state?.dead_code_keeps), keepDecisions);
   const grantedKeeps = sweepInput.data.dead_code_keeps ?? [];
@@ -53080,6 +52698,56 @@ async function tutorStepHandler(rawInput) {
 
 // src/tools/audit.ts
 init_esm_shims();
+
+// src/lib/health.ts
+init_esm_shims();
+var LOCK_STALE_MS2 = 3e4;
+function evaluateMcpHealth(projectRoot, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const reasons = [];
+  const configPath = join(projectRoot, ".rsct.json");
+  if (!existsSync(configPath)) {
+    reasons.push("config_absent");
+  } else {
+    try {
+      JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {
+      reasons.push("config_unparseable");
+    }
+  }
+  if (readPhaseState(projectRoot).parse_error) {
+    reasons.push("phase_state_corrupt");
+  }
+  const lockPath = join(projectRoot, ".rsct", "phase-state.lock");
+  if (existsSync(lockPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
+      const lockedAtMs = parsed.locked_at ? new Date(parsed.locked_at).getTime() : NaN;
+      const ageMs = now.getTime() - lockedAtMs;
+      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS2) {
+        reasons.push("phase_state_lock_stale");
+      }
+    } catch {
+      reasons.push("phase_state_lock_stale");
+    }
+  }
+  const auditPath = resolveAuditPath(projectRoot, opts.config?.audit);
+  let historyOk = false;
+  try {
+    if (existsSync(auditPath)) {
+      const stat = statSync(auditPath);
+      historyOk = stat.isFile() && stat.size > 0;
+    }
+  } catch {
+    historyOk = false;
+  }
+  if (!historyOk) {
+    reasons.push("audit_history_absent");
+  }
+  return { healthy: reasons.length === 0, reasons };
+}
+
+// src/tools/audit.ts
 var auditInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
 }).strict();
@@ -53092,20 +52760,19 @@ var COVERAGE_BOUNDARY = [
   `install_drift.message is relayed VERBATIM from the drift detector and can contain a repair instruction (e.g. "Run /rsct-setup"). That text is the detector's, not this report's recommendation \u2014 nothing here tells you to run a tool that mutates RSCT phase state.`
 ];
 var DAY_MS = 864e5;
-function explainEligibility(eligible, reasons) {
-  if (eligible) {
-    return "The dialog-free free-commit lane is available for this project. Every commit still goes through rsct_request_commit.";
-  }
-  const faults = reasons.filter((r) => r !== "audit_history_absent");
+function explainHealth(faults, historyAbsent) {
   if (faults.length > 0) {
     const commits = faults.includes("phase_state_corrupt") ? "rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted." : "Commits still work; they go through the per-action \xA7C path.";
-    return `Free commits are closed, and at least one reason is a genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. ${commits}`;
+    return `The RSCT mechanical layer has at least one genuine fault rather than a fresh-install condition: ${faults.join(", ")}. A corrupt config, a torn phase-state or a stale lock means a writer failed mid-write \u2014 worth looking at directly. ${commits}`;
   }
-  return "Free commits are closed because this project has no audit history yet \u2014 expected on a fresh install, and permanent when audit.enabled is false. This is NOT a fault: commits go through the per-action \xA7C path instead.";
+  if (historyAbsent) {
+    return "No fault in the RSCT mechanical layer. This project has no audit history yet \u2014 expected on a fresh install; commits go through the per-action \xA7C path.";
+  }
+  return "No fault in the RSCT mechanical layer; every signal is clean.";
 }
 var auditTool = {
   name: "rsct_audit",
-  description: "On-demand report on this project's RSCT surface: install drift, free-commit-lane eligibility, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
+  description: "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
   inputSchema: {
     type: "object",
     properties: {
@@ -53135,16 +52802,17 @@ async function auditHandler(rawInput, deps = {}) {
       message: drift.hint
     };
   }
-  let free_commit_eligibility = null;
+  let mechanical_health = null;
   if (resolution.rsct_installed) {
     const health = evaluateMcpHealth(resolution.root, {
       now,
       config: resolution.config
     });
-    free_commit_eligibility = {
-      eligible: health.healthy,
-      reasons: health.reasons,
-      explanation: explainEligibility(health.healthy, health.reasons)
+    const faults = health.reasons.filter((r) => r !== "audit_history_absent");
+    mechanical_health = {
+      ok: faults.length === 0,
+      faults,
+      explanation: explainHealth(faults, health.reasons.includes("audit_history_absent"))
     };
   }
   const state = readPhaseState(resolution.root).state;
@@ -53161,7 +52829,7 @@ async function auditHandler(rawInput, deps = {}) {
   const plans = listPlans(resolution.root, { now });
   if (!resolution.rsct_installed) {
     hints.push(
-      existsSync(join(resolution.root, ".rsct.json")) ? "A .rsct.json is PRESENT here but was rejected \u2014 unreadable, malformed, or carrying a value outside the enforced bounds \u2014 so RSCT is treating this project as unmanaged and neither install drift nor free-commit eligibility is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo." : "This project is not rsct-managed (no .rsct.json), so install drift and free-commit eligibility are not reported. Plans found at the root are still listed."
+      existsSync(join(resolution.root, ".rsct.json")) ? "A .rsct.json is PRESENT here but was rejected \u2014 unreadable, malformed, or carrying a value outside the enforced bounds \u2014 so RSCT is treating this project as unmanaged and neither install drift nor mechanical-layer health is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo." : "This project is not rsct-managed (no .rsct.json), so install drift and mechanical-layer health are not reported. Plans found at the root are still listed."
     );
   }
   if (open_phase && open_phase.age_days !== null && open_phase.age_days >= 7) {
@@ -53174,7 +52842,7 @@ async function auditHandler(rawInput, deps = {}) {
     rsct_installed: resolution.rsct_installed,
     project: { root: resolution.root },
     install_drift,
-    free_commit_eligibility,
+    mechanical_health,
     open_phase,
     plans,
     plans_ordered_by: "plan_file_mtime",

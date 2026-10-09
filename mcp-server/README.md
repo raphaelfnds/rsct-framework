@@ -778,8 +778,8 @@ forced-dialog mode regardless of trust.
 
 **Three of them require a `dev_approval` payload on every call** (INV-2
 anti-reuse): push, merge and rebase. `rsct_request_commit` is the exception — its
-authorization is EITHER a per-action `dev_approval` OR a plan-scoped batch token
-OR the free-commit lane, as described under its own heading below.
+authorization is EITHER a per-action `dev_approval` OR a plan-scoped batch token,
+as described under its own heading below.
 
 **Pre-integration hygiene pre-gate (PH-5):** `rsct_request_merge` (always),
 `rsct_request_rebase` (always — a rebase/squash rewrites history, which is an
@@ -823,9 +823,9 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 no overrides, so a protected branch or a secret finding still rejects.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
-- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | 'free_commit' | null`, `channel` (gate channel, `'plan_token'` or `'free_commit'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'free_budget_reserve_failed'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `free_commit?` (free-lane summary), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
-  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); in each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and each of the three also appends one line to the OS dialog body — the one channel the agent cannot summarize away. While it is active the dialog-free free-commit lane is **suspended**, so the next commit needs a per-action `dev_approval` — unless a batch token (`rsct_plan_authorize`) is active, in which case it lands through the token with no dialog; the dialog that mints a token does not carry the line.
+  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); in each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and each of the three also appends one line to the OS dialog body — the one channel the agent cannot summarize away. A commit authorized by an active batch token (`rsct_plan_authorize`) lands with no dialog, so the dialog that mints a token does not carry the line — relay the `hints[]` line to the dev.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
 
 Approval consumption rule: never burn the approval on pre-mutation
@@ -884,7 +884,7 @@ The history-rewriting integration paths. `mode:'rebase'` runs `git rebase <ref>`
 `mode:'squash'` runs `git merge --squash <ref>`, which STAGES the combined change
 without committing it — commit it afterwards through `rsct_request_commit`.
 
-**Always per-action**: never covered by a plan token or the free-commit lane, and
+**Always per-action**: never covered by a plan token, and
 it always requires a `pre_merge_ack`. Runs INV-5 on the CURRENT branch, since
 rewriting a protected branch's history needs `override_protected_branch`.
 
@@ -1021,7 +1021,7 @@ commits actually go:
 |---|---|
 | repository whose root carries `.rsct.json` (the common case) | unchanged |
 | submodule | its own working root |
-| **linked worktree** | the **main** worktree — so the free-commit ceiling survives `git worktree add` |
+| **linked worktree** | the **main** worktree — so the audit-log ceiling (tier ratchet, review decisions) survives `git worktree add` |
 | **monorepo package with its own `.rsct.json`** | the repository root |
 | **project nested inside an unrelated repository** | that repository's root |
 | not a git repository | unchanged; the binding reports `not-applicable` |

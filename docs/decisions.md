@@ -26,8 +26,7 @@ missing config) and forces an `rsct_json.bounds_violation` event into the audit 
 developer can see what happened.
 
 Bounded fields and their ranges live in `mcp-server/src/lib/project-root.ts`:
-`plan_token_ttl_minutes` 5–480, `plan_token_max_actions` 1–100, `free_commit_max` 1–50,
-`free_commit_max_files` 1–500, `free_commit_max_lines` 1–100000,
+`plan_token_ttl_minutes` 5–480, `plan_token_max_actions` 1–100,
 `plan_token_ttl_slide_minutes` 5–1440, `plan_token_ttl_abs_minutes` 5–10080. `sql_dialect`
 is a closed enum (`postgresql`, `mysql`, `none`): an unknown dialect would have the REVIEW
 sweep read SQL with the wrong comment syntax.
@@ -73,7 +72,7 @@ be kept honest; an entry that stops being true is worse here than in a comment, 
 this file is where people will look.
 
 ### ADR-002 — Tier `trivial`/`small` bypasses ceremony; `standard`/`complex` does not (ref: CAP-28, PH-1, DX-4)
-**Status**: active for V and plan tracking; the REVIEW part is superseded by ADR-011 (2.11.0)
+**Status**: active for V and plan tracking; the REVIEW part is superseded by ADR-011 (2.11.0), and the free-commit-lane part by ADR-023 (#80, 2.13.4)
 **Tags**: gates, tiers
 **Context**: The canonical RSCT tier table (`rules/B-architect-plan.md`) makes ceremony
 proportional to risk.
@@ -191,7 +190,7 @@ pinned by a test — widening the enum by one known name must not become widenin
 `z.string()`.
 
 ### ADR-011 — REVIEW is mandatory, runs after the tests, and is anchored at the commit gate (#62, 2.11.0)
-**Status**: active
+**Status**: active; the free-lane consequence ("the free lane carries only reviewed bytes") is superseded by ADR-023 (#80, 2.13.4)
 **Tags**: gates, review, comments
 **Context**: REVIEW was opt-in end to end. MEASURED on `ed648d9`: `rsct_request_commit`,
 `_push`, `_merge` and `lib/request-gate.ts` never read review state, and a trivial task
@@ -789,7 +788,7 @@ pins it. The scripts are bash, not sh: measured with dash, the previous installe
 measured locally; one test drives a real npm on the CI matrix.
 
 ### ADR-022 — The hook programs are launchers, and the edit-scope guard judges resolved paths (#114)
-**Status**: active
+**Status**: active; the dialog-free-lane-suspension consequence is superseded by ADR-023 (#80, 2.13.4)
 **Tags**: hooks, edit-scope, setup, install-drift, cross-os
 **Context**: from 2.2.0 to 2.12.3 the installed `edit-scope-guard.js` never refused an edit. Three
 causes, each MEASURED. (1) `src/scripts/edit-scope-guard.ts` imported one helper from
@@ -904,6 +903,37 @@ Named limits:
   separate share of the same host; left as a limit rather than that.
 macOS, Linux and the IDE extension were not measured with a real client; the compiled programs
 run on the CI matrix, and by hand on Windows and in the three WSL combinations.
+
+### ADR-023 — The dialog-free free-commit lane is removed (#80, 2.13.4)
+**Status**: active. Supersedes the free-lane consequences of ADR-002 (the lane that
+`trivial`/`small` tasks used), ADR-011 (the "free lane carries only reviewed bytes"
+consequence) and ADR-022 (the "dialog-free lane withheld" install-drift consequence). Those
+ADR bodies are left intact as the historical record; only their free-lane clauses no longer hold.
+
+**Context**: plan-lifecycle-v2 Bloco 1 gave `trivial`/`small` tasks a dialog-free "free commit"
+path — budget-capped and audit-anchored. MEASURED over 663 field commits: none used it (see
+"Measured facts" below). It carried a whole subsystem — eligibility, a per-plan budget, a lock
+latch, a health gate in front of it, and the install-drift suspension — for a privilege nobody took.
+
+**Decision**: remove the lane. `rsct_request_commit` without a `dev_approval` now goes straight
+to the batch plan token (`rsct_plan_authorize`); no token means a coherent
+`plan_token_invalid` (`absent`) refusal. Removed: `evaluateFreeEligibility`, `reserveFreeBudget`,
+`resolveFreeBudgetLimits` and the `free_commit.committed`/`free_commit.locked` ledger; the
+`free_commit` channel / `authorized_via` / output field; the `free_commit_budget` phase-state
+field; the `free_commit_max`/`_files`/`_lines` config keys.
+
+**Kept**: the batch plan token is untouched (33 of 663 commits used it). `deriveAuditCeiling`
+stays, trimmed to the tier ratchet and the review decision sets the ceremony evidence gate and
+the REVIEW/dead-code gate read. The install-drift SECURITY NOTICE stays (it rides `hints[]` on
+every outcome, advisory-only); only the lane-suspension consequence is gone. `rsct_audit` keeps
+the mechanical-layer fault diagnostic under `mechanical_health` (torn phase-state / stale lock /
+corrupt config, separated from the benign "no audit history yet"); the #101 "a fault is named a
+fault" guarantee is preserved — `lib/health.ts` now backs that report instead of the lane.
+
+**Consequences**: a project that set any `free_commit_max*` key is unaffected — `approval_modes`
+is `.strip()` (ADR-005), so the keys drop silently. The test suite drops by exactly the removed
+lane tests; no shared guarantee was lost (the no-dialog-on-review-refusal assertion moved to the
+plan-token test).
 
 ---
 
@@ -1153,22 +1183,15 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### `lib/free-commit.ts`
 
-- The audit log is the anti-rollback anchor for the free lane; phase-state is the primary
-  counter. Residual: a truncate-and-rewrite forge of the gitignored log (Fork 1/A — no
-  privilege boundary with a same-user agent). #92 measured that pointing `project_root` at a
-  crafted subdirectory committed in the parent repo while debiting the subdirectory's budget;
-  the log now resolves at the repository the commit lands in.
-- `free_commit.committed` is counted cumulatively over the whole log, never "since the last
-  `classify.verdict`" — classify is ungated, so a counting boundary there would be a counter
-  reset primitive.
-- `reserveFreeBudget` is debit-first: persisted before `gitCommit` ("can't record the spend"
-  means "can't spend"), refunded on commit failure. A cap-tripping commit lands and locks;
-  the next one is refused.
-- `evaluateFreeEligibility` only ever withholds; `tier_max` and the count are
-  `max(state, audit)`, and absence of classify evidence is ineligible. Security install drift
-  withholds the lane (#25) — that buys reach, not enforcement: it moves the warning from
-  `hints[]` into the per-action dialog. When the state ratchet already says non-free the audit
-  scan is skipped, safely, because the audit max is a superset a wipe cannot lower.
+- `deriveAuditCeiling` makes one pass over the audit log and reconstructs the tier ratchet
+  (`auditTierMax` = MAX over `classify.verdict` tiers) plus the review decision sets
+  (unverified decisions, dead-code keeps, public-API approvals). It is the shared,
+  wipe-resistant source the ceremony evidence gate and the REVIEW/dead-code gate read.
+- The tier ratchet is a MAX over the whole log, never "since the last `classify.verdict`" —
+  classify is ungated, so a counting boundary there would be a reset primitive. A wiped
+  phase-state cannot lower the audit-recorded tier (`higherTier(state, audit)`).
+- `isFreeTier`/`higherTier` are the tier helpers the evidence gate uses to decide which tiers
+  skip ceremony (`trivial`/`small`) and which do not.
 
 ### `lib/phase-machine.ts`, `lib/phase-scope.ts`
 
@@ -1252,20 +1275,16 @@ those files. Keyed by module and symbol; restatements of what the code says were
 ### `tools/request-commit.ts`
 
 - The message-length check (#20) and the REVIEW gate run before authorization, so a commit
-  they refuse never costs a dialog, a token action or free budget; the REVIEW gate runs again
-  right before the token or free-lane reserve. Branch protection, secrets and the contract
-  gate run after authorization.
+  they refuse never costs a dialog or a token action; the REVIEW gate runs again right before
+  the token reserve. Branch protection, secrets and the contract gate run after authorization.
 - `internal.*Override` seams (staged diff, paths, stats, git state, audit writer, approval
   recorder) are test-only; the MCP dispatch passes no `internal`, closing the fabricated-diff
   hole (A2).
 - #17: `.claude/settings.json` drift is reported, never staged or discarded; the audit keeps a
   redacted excerpt only.
-- A lane withheld for security drift must not surface as `plan_token_invalid` (#25) — that
-  would send the dev to mint a token instead of repairing enforcement.
 - Token path: the action is debited before the commit and refunded on failure; if the refund
   write fails the action stays spent (tightens, never loosens). The sliding window re-arms on
-  success only. Free lane: same debit-first discipline; the durable `free_commit.committed`
-  event is the backstop a phase-state wipe cannot erase.
+  success only.
 - INV-7 contract gate diverges only on a confirmed multi-repo topology, and a confirmed
   multi-repo commit where it could not enforce says so at commit time (RV3).
 - CAP-33 bootstrap and CAP-53 plan-tracking notices are advisory, never rejections.
@@ -1290,7 +1309,8 @@ those files. Keyed by module and symbol; restatements of what the code says were
   count. A real 2026-06-09 task (DTO + service + listener + template + test) returned standard
   before CAP-29 and skipped V.
 - The verdict is persisted with a `tier_max` ratchet and emitted as `classify.verdict` to the
-  audit log, the positive evidence the free lane requires; both writes are best-effort.
+  audit log, the positive evidence the ceremony evidence gate and the tier ratchet require;
+  both writes are best-effort.
 - The PH-3 worktree nudge stays conditional because classify runs before the plan exists.
 
 ### `tools/plan-authorize.ts` (migrated in the #101 REVIEW)
@@ -1330,12 +1350,12 @@ those files. Keyed by module and symbol; restatements of what the code says were
   boundary say so rather than claiming "no writes".
 - The coverage boundary ships in the OUTPUT, not only in the docs: "is this project's process
   healthy?" is a completeness claim the tool cannot make, and a clean report is not a clean project.
-- `explainEligibility` answers a corrupt or torn signal FIRST, so a real fault is never described in
-  the same breath as a fresh install; `audit_history_absent` alone is not a fault. Dropped and NOT
-  migrated: the doc comment that said `evaluateMcpHealth` answers "does this project qualify for the
-  dialog-free lane?" and that a project with `audit.enabled: false` reports it forever. #80 measured
-  both as wrong — health is one of several conditions in front of the lane, and `audit.enabled:
-  false` is unreachable (the schema is `z.literal(true)`).
+- `explainHealth` answers a corrupt or torn signal FIRST, so a real fault is never described in
+  the same breath as a fresh install; `audit_history_absent` alone is not a fault. `rsct_audit`
+  surfaces this as `mechanical_health` {ok, faults, explanation}; `evaluateMcpHealth` (`lib/health.ts`)
+  is its only consumer now that the dialog-free lane is gone (ADR-023). `audit.enabled: false` is
+  unreachable (the schema is `z.literal(true)`), so a project cannot be stuck reporting "no history"
+  forever.
 - Install drift is reported ONLY in the structured field, never pushed into `hints[]` (decision of
   2026-08-21, shared by #53/#54/#55): one advisory surface, one dedup rule per overlapping pair.
   `rsct_status` owns the install-drift hint; repeating it would show the same line twice.
@@ -1683,10 +1703,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
   disk, never through `phase_state_override`.
 - `audit-anchor.test.ts` (#92): each case exists for one mutation — the default path based on
   `projectRoot` again; always relocating to the parent; a missing identity treated as a
-  relocation; a configured path honoured unconditionally (MEASURED: it moves both free-lane anchors
+  relocation; a configured path honoured unconditionally (MEASURED: it moves the audit-log anchors
   away from the CORRECT root); every configured path refused; `isInside` as a bare `startsWith`
   (a sibling whose name extends the base reads as inside); a second copy of the path logic in the
-  hook; the legacy-log migration skipped (the ceiling resets to 0 and a locked budget unlocks);
+  hook; the legacy-log migration skipped (the audit-log ceiling resets to 0);
   `renameSync` in place of `copyFileSync`; the legacy file appended to an existing target; the
   `sameDirectory` guard dropped (a plain repository would rewrite its own log on every process).
 - `check-edit-scope.test.ts`: the root-relative cases pin PH-1 — an absolute `file_path` never

@@ -7,7 +7,7 @@ import {
   type RequestCommitOutput,
   type RequestCommitInternal,
 } from '../../src/tools/request-commit.js'
-import type { GitExecutor, GitState, StagedStats } from '../../src/lib/git.js'
+import type { GitExecutor, GitState } from '../../src/lib/git.js'
 import type { PhaseState } from '../../src/lib/phase-scope.js'
 import { hashSettingsContent } from '../../src/lib/settings-drift.js'
 
@@ -22,11 +22,10 @@ beforeEach(() => {
     'utf8',
   )
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
-  // #25: the free lane is withheld while install drift is at the `security`
-  // tier, and an EMPTY `.rsct/scripts` reads as `absent` — which is that tier.
-  // A project this suite is about is a healthy install, so give it the scripts.
-  // Their bodies are irrelevant here: under vitest the shipped reference does
-  // not resolve, so they read `unreadable`, which escalates on neither axis.
+  // An EMPTY `.rsct/scripts` reads as install drift at the `security` tier, so a
+  // healthy install needs the scripts present. Their bodies are irrelevant here:
+  // under vitest the shipped reference does not resolve, so they read
+  // `unreadable`, which escalates on neither axis.
   mkdirSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true })
   for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
     writeFileSync(join(tmpRoot, '.rsct', 'scripts', name), '// present\n', 'utf8')
@@ -64,177 +63,44 @@ function readAudit(): string {
   return readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
 }
 
-function internal(stats: StagedStats, over: Partial<RequestCommitInternal> = {}): RequestCommitInternal {
+const yesPrompt: RequestCommitInternal['promptFn'] = async () => ({ response: 'yes', channel: 'windows' })
+
+const approval = {
+  timestamp: FIXED_NOW.toISOString(),
+  action_scope: 'commit',
+  reason: 'landing the change',
+}
+
+function internal(over: Partial<RequestCommitInternal> = {}): RequestCommitInternal {
   return {
     gitStateOverride: gitState('feat/x'),
     gitExecutor: okExec,
     stagedDiffOverride: '', // no secrets
-    stagedStatsOverride: stats,
+    promptFn: yesPrompt,
     now: FIXED_NOW,
     ...over,
   }
 }
 
-const smallStats: StagedStats = { files: 1, insertions: 2, deletions: 1, paths: ['a.ts'] }
-
-/** A project set up so the free lane is eligible: small tier + active plan + classify history. */
-function eligibleProject(): void {
+/** A healthy, classified project with an active plan. */
+function healthyProject(): void {
   writePlan('p')
   writeAudit([{ event: 'classify.verdict', tier: 'small' }])
   writeState({ last_classify: { tier: 'small', tier_max: 'small', classified_at: FIXED_NOW.toISOString() } })
 }
 
-describe('rsct_request_commit — free-commit lane (Bloco 1)', () => {
-  it('lands a dialog-free commit via the free_commit channel', async () => {
-    eligibleProject()
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'free checkpoint' },
-      internal(smallStats),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('committed')
-    expect(out.channel).toBe('free_commit')
-    expect(out.authorized_via).toBe('free_commit')
-    expect(out.free_commit?.commits_used).toBe(1)
-    expect(out.free_commit?.locked).toBe(false)
-    // durable ledger event emitted for the anti-rollback anchor
-    expect(readAudit()).toMatch(/"event":"free_commit\.committed"/)
-  })
-
-  it('a cap-blowing commit still LANDS but locks the budget + flags divergence', async () => {
-    eligibleProject()
-    const huge: StagedStats = { files: 99, insertions: 9000, deletions: 0, paths: ['big.ts'] }
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'huge free commit' },
-      internal(huge),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('committed')
-    expect(out.free_commit?.locked).toBe(true)
-    expect(out.free_commit?.locked_reason).toBe('tier_divergence')
-    expect(out.fabrication_signals).toContain('tier_volume_divergence')
-    expect(readAudit()).toMatch(/"event":"free_commit\.locked"/)
-  })
-
-  it('ANTI-ROLLBACK: audit history of exhausted commits refuses free even with NO state budget', async () => {
-    writePlan('p')
-    writeAudit([
-      { event: 'classify.verdict', tier: 'small' },
-      { event: 'free_commit.committed', plan_slug: 'p' },
-      { event: 'free_commit.committed', plan_slug: 'p' },
-      { event: 'free_commit.committed', plan_slug: 'p' },
-      { event: 'free_commit.committed', plan_slug: 'p' },
-      { event: 'free_commit.committed', plan_slug: 'p' },
-    ])
-    // state deliberately has NO free_commit_budget (as if wiped)
-    writeState({ last_classify: { tier: 'small', tier_max: 'small', classified_at: FIXED_NOW.toISOString() } })
-
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'sixth free commit' },
-      internal(smallStats),
-    )) as RequestCommitOutput
-
-    // Not eligible → falls through to the token path → no token → rejected.
-    expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('plan_token_invalid')
-    expect(out.reason).toMatch(/locked/i)
-  })
-
-  it('falls through to the strict path when the audit tier is complex (not free)', async () => {
-    writePlan('p')
-    writeAudit([{ event: 'classify.verdict', tier: 'complex' }])
-    writeState({ last_classify: { tier: 'complex', tier_max: 'complex', classified_at: FIXED_NOW.toISOString() } })
-
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'not eligible' },
-      internal(smallStats),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('plan_token_invalid') // fell to token, none present
-    expect(out.channel).not.toBe('free_commit')
-  })
-
-  it('fails CLOSED when the staged diff cannot be measured (no override, non-git root)', async () => {
-    eligibleProject()
-    // Omit stagedStatsOverride → getStagedStats reads the (non-git) tmpRoot →
-    // null → the free lane must refuse rather than proceed with zero stats.
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'unmeasurable free commit' },
-      {
-        gitStateOverride: gitState('feat/x'),
-        gitExecutor: okExec,
-        stagedDiffOverride: '',
-        now: FIXED_NOW,
-      },
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('free_budget_reserve_failed')
-    expect(out.reason).toMatch(/could not measure/i)
-  })
-
-  it('still blocks a protected branch on the free lane (INV-5, no override)', async () => {
-    eligibleProject()
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'free on main' },
-      internal(smallStats, { gitStateOverride: gitState('main') }),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('protected_branch')
-    expect(out.authorized_via).toBe('free_commit') // free auth resolved, then INV-5 blocked
-  })
-})
-
-describe('rsct_request_commit — the free lane is suspended while enforcement is down (#25)', () => {
+describe('rsct_request_commit — a per-action approval carries the security notice while enforcement is down (#25)', () => {
   /** Remove the scripts beforeEach seeded → install drift goes `security`. */
   function breakEnforcement(): void {
     rmSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true, force: true })
   }
 
-  it('withholds the dialog-free lane and says why, without blaming the token', async () => {
-    // The lane is a PRIVILEGE granted on the premise that the mechanical
-    // enforcement layer is trustworthy. A `security` drift says, verbatim, that
-    // enforcement is not running — so the premise is provably false.
+  it('a per-action approval still lands the commit while enforcement is down', async () => {
+    // Install drift at the `security` tier does not gate: the dev keeps a way
+    // through — it just costs one dialog, which IS the point: the dialog is the
+    // out-of-band channel that carries the warning where hints[] cannot.
     breakEnforcement()
-    eligibleProject()
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'free checkpoint' },
-      internal(smallStats),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('rejected')
-    expect(out.channel).not.toBe('free_commit')
-    // The reason must NOT send the dev to mint a token: nothing is wrong with
-    // the token, and that would be repairing the wrong thing.
-    expect(out.reason).toContain('dialog-free commit lane is suspended')
-    expect(out.reason).toContain('/rsct-setup')
-    expect(out.reason).not.toContain('rsct_plan_authorize')
-    // The advisory itself still rides hints[], prepended.
-    expect(out.hints[0]).toMatch(/SECURITY: RSCT enforcement is not running/)
-  })
-
-  it('the lane works again as soon as enforcement is back — nothing to reset', async () => {
-    // Self-clearing by construction: the scripts seeded by beforeEach are what
-    // /rsct-setup reinstalls, and the verdict is recomputed per call. No flag,
-    // no stored state, no repair step.
-    eligibleProject()
-    const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'free checkpoint' },
-      internal(smallStats),
-    )) as RequestCommitOutput
-
-    expect(out.status).toBe('committed')
-    expect(out.authorized_via).toBe('free_commit')
-  })
-
-  it('a per-action approval still lands the commit while the lane is suspended', async () => {
-    // Withholding a privilege is not gating. The dev keeps a way through — it
-    // just costs one dialog, which IS the point: the dialog is the out-of-band
-    // channel that actually carries the warning where hints[] cannot.
-    breakEnforcement()
-    eligibleProject()
+    healthyProject()
     const out = (await requestCommitHandler(
       {
         project_root: tmpRoot,
@@ -245,7 +111,7 @@ describe('rsct_request_commit — the free lane is suspended while enforcement i
           reason: 'approved by hand',
         },
       },
-      internal(smallStats, { promptFn: async () => ({ response: 'yes', channel: 'windows' }) }),
+      internal(),
     )) as RequestCommitOutput
 
     expect(out.status).toBe('committed')
@@ -257,7 +123,7 @@ describe('rsct_request_commit — the free lane is suspended while enforcement i
 describe('rsct_request_commit — settings.json drift is reported, never gated (#17)', () => {
   /**
    * Record a baseline as the SessionStart sanitizer would have — APPENDED, like
-   * the real writer. `eligibleProject()` rewrites the audit log wholesale, so a
+   * the real writer. `healthyProject()` rewrites the audit log wholesale, so a
    * seed that overwrote would either lose the classify evidence or be lost by it,
    * depending on call order. Appending makes the order irrelevant.
    */
@@ -280,12 +146,12 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
     // VERSIONED file, the agent truthfully says it did not modify it, and nobody
     // stages it. Before #17 no gate had anything to say about that.
     writeSettingsJson(['Bash(mvn -version)', 'Bash(echo "exit=$?")'])
-    eligibleProject()
+    healthyProject()
     seedBaseline('a-different-hash')
 
     const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'feat: unrelated work' },
-      internal(smallStats),
+      { project_root: tmpRoot, message: 'feat: unrelated work', dev_approval: approval },
+      internal(),
     )) as RequestCommitOutput
 
     // Reported, not blocked — an unrelated dirty settings file must never stop a
@@ -300,27 +166,29 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
 
   it('says nothing when the file matches the baseline', async () => {
     writeSettingsJson(['Bash(mvn -version)'])
-    eligibleProject()
+    healthyProject()
     seedBaseline(
       hashSettingsContent(readFileSync(join(tmpRoot, '.claude', 'settings.json'), 'utf8')),
     )
 
     const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'feat: x' },
-      internal(smallStats),
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval },
+      internal(),
     )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
     expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
   })
 
   it('says nothing when the dev already staged the file — that is ownership taken', async () => {
     writeSettingsJson(['Bash(mvn -version)'])
-    eligibleProject()
+    healthyProject()
     seedBaseline('a-different-hash')
 
     const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'chore: update settings' },
-      internal(smallStats, { stagedPathsOverride: ['.claude/settings.json'] }),
+      { project_root: tmpRoot, message: 'chore: update settings', dev_approval: approval },
+      internal({ stagedPathsOverride: ['.claude/settings.json'] }),
     )) as RequestCommitOutput
+    expect(out.status).toBe('committed')
     expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')
   })
 
@@ -328,11 +196,11 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
     // A project whose SessionStart hook never ran is not drifting — it is
     // unmeasured, and the check must not invent a finding from that.
     writeSettingsJson(['Bash(anything)'])
-    eligibleProject()
+    healthyProject()
 
     const out = (await requestCommitHandler(
-      { project_root: tmpRoot, message: 'feat: x' },
-      internal(smallStats),
+      { project_root: tmpRoot, message: 'feat: x', dev_approval: approval },
+      internal(),
     )) as RequestCommitOutput
     expect(out.status).toBe('committed')
     expect(out.hints.join('\n')).not.toContain('.claude/settings.json has changed')

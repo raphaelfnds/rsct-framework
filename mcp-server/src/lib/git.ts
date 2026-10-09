@@ -84,13 +84,6 @@ export interface StagedStats {
   paths: string[]
 }
 
-export function getStagedStats(projectRoot: string): StagedStats | null {
-  if (!isGitRepo(projectRoot)) return null
-  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--numstat', '-z'])
-  if (raw === null) return null
-  return parseNumstatZ(raw)
-}
-
 export function parseNumstatZ(raw: string): StagedStats {
   const tokens = raw.split('\0')
   const paths: string[] = []
