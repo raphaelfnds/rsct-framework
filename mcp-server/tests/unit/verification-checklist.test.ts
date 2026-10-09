@@ -110,6 +110,25 @@ describe('runVerificationChecklist — gap category (premise check)', () => {
     )
     expect(gapAddressNow.length).toBeGreaterThanOrEqual(1)
   })
+
+  it('surfaces the match score and the shared tokens in the premise-check finding detail (#79)', () => {
+    const r = runVerificationChecklist({
+      projectRoot: SAMPLE_RSCT,
+      declaredPaths: ['src/orders.ts'],
+      discoveredImporters: [],
+      specClaims: ['allow UPDATE statements on financial events tables'],
+    })
+    const premise = r.findings.filter((f) => f.source === 'premise-check')
+    expect(premise.length).toBeGreaterThanOrEqual(1)
+    for (const f of premise) {
+      const m = /score (\d+), shared: ([^.)]+)/.exec(f.detail)
+      expect(m, `detail without score/shared tokens: ${f.detail}`).not.toBeNull()
+      const score = Number(m![1])
+      const shared = m![2].split(', ').filter((t) => t.length > 0)
+      expect(score).toBeGreaterThanOrEqual(2)
+      expect(shared.length).toBe(score)
+    }
+  })
 })
 
 describe('runVerificationChecklist — breakage category', () => {

@@ -337,7 +337,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'block',
           title: `Anti-decision hit: ${antiHit.entry.id} — ${antiHit.entry.title}`,
-          detail: `Claim "${claim}" overlaps an anti-decision. Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
+          detail: `Claim "${claim}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(', ')}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
@@ -350,7 +350,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'address-now',
           title: `Conflict with ${topMatch.entry.id}: ${topMatch.entry.title}`,
-          detail: `Claim "${claim}" matches a decision with rollback/rejection language. Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
+          detail: `Claim "${claim}" matches a decision with rollback/rejection language (score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}). Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
@@ -360,7 +360,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'address-now',
           title: `Requires revision: matches ${topMatch.entry.id}`,
-          detail: `Claim "${claim}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}). Read the entry and align the claim or surface an explicit override.`,
+          detail: `Claim "${claim}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}) — score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}. Read the entry and align the claim or surface an explicit override.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
