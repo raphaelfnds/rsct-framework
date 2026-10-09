@@ -687,6 +687,7 @@ and `rsct_plan_revoke` are filed there by subject while belonging to the post-M3
 group. M2 is four. `README.md`'s group breakdown is the arithmetic of record. Together they materialize §C/§D/§E from
 [CLAUDE.md governance rules](../rules/) as enforceable contracts: an "always
 allow" entry in `permissions.allow[]` no longer bypasses commit/push/merge
+(nor, since #91, rebase/cherry-pick/revert or `gh pr merge`)
 on a protected branch or with secrets in the diff.
 
 ### Pure queries (NOT §C-gated)
@@ -939,6 +940,13 @@ entries from `permissions.allow[]` in both `.claude/settings.json` and
 - `Bash(git commit*)` / `Bash(git commit:*)` / `Bash(git commit -m "x")`
 - `Bash(git push*)` / `Bash(git push:*)`
 - `Bash(git merge*)` / `Bash(git merge:*)`
+- **Verbs that bypass a §C-gated outcome beyond commit/push/merge (#91):** `git rebase`
+  (`rsct_request_rebase` is gated), `git cherry-pick` and `git revert` (they create commits that
+  skip the commit gate) in every shape above, and `gh pr merge` (direct or path-prefixed — it
+  merges the PR). Recovery forms (`git rebase --abort`) are stripped too, as `git merge --abort`
+  already was. NOT stripped: a broad `Bash(gh pr:*)` / `Bash(gh:*)` grant (it also authorises
+  read-only `gh pr view` / `gh issue` / `gh api`) — it still authorises the merge, which is why the
+  real Bash-side guard is tracked in #84; and read-only `gh pr view` / `gh pr list`.
 - `Bash(git*)` / `Bash(git:*)`
 - Path-prefixed forms (MED-12): `Bash(/usr/bin/git commit)`, `Bash(./bin/git push)`, `Bash(C:/Program Files/Git/bin/git merge)`. Allows spaces in the path; pins basename to `git` so a different binary like `Bash(/usr/bin/git-credential-store)` is NOT stripped.
 - Shell-wrapped forms (MED-12): `Bash(sh -c "git commit ...")`, `Bash(bash -c 'git push origin')` and the other POSIX shell variants (`zsh`, `dash`, `fish`, `ksh`, `csh`).
