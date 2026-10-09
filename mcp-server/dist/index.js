@@ -47598,7 +47598,6 @@ function evidenceForSource(f) {
   if (f.source === "impact-doc") {
     return {
       kind: "reported",
-      // affected_paths[1] is the doc; [0] is the declared path that matched it.
       source: f.affected_paths[1] ?? "documentation/impact/",
       verified_against: "working_tree"
     };
