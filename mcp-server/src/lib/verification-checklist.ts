@@ -20,15 +20,6 @@ import {
 
 export type FindingCategory = 'gap' | 'breakage' | 'redundancy' | 'forgotten'
 
-/**
- * Suggested severity that the V phase complete tool surfaces to the dev. The
- * dev's final action lives in the `findings_actions[]` input of
- * `rsct_phase_verification_complete` — these are recommendations, not gates.
- *
- * Re-exported from `lib/findings.ts` rather than redeclared (#19), so this
- * module's consumers keep importing it from here and the value list has exactly
- * one home. See that module for why severity and action stay two names.
- */
 export type { FindingSeverity } from './findings.js'
 
 export interface VerificationFinding {
@@ -39,40 +30,11 @@ export interface VerificationFinding {
   detail: string
   affected_paths: string[]
   source: string
-  /**
-   * #75. How this finding is known. The V phase has no agent-declared findings
-   * channel — `phaseVerificationStartInputSchema` is `.strict()` with no
-   * `findings` field, so everything here is machine-produced — which means the
-   * framework must classify its OWN findings or the class covers half the record.
-   *
-   * Derived from `source` by {@link evidenceForSource}, a static table authored
-   * once in this file and reviewed in a diff. That is what makes
-   * `also_explained_by` honest on this side: it is written by a person, checked
-   * by a reviewer, and cannot be produced under queue pressure by an agent that
-   * wants to move on.
-   */
   evidence: FindingEvidence
 }
 
-/** What the emission sites build. Evidence is added centrally — see below. */
 type RawFinding = Omit<VerificationFinding, 'evidence'>
 
-/**
- * `source` → evidence class. TOTAL by construction: the `default` arm returns the
- * WEAKEST class, so a source literal added years from now degrades safely instead
- * of inheriting whatever row sat next to it. That is the same door policy the
- * rest of the design runs on — absent or unrecognised is never fact.
- *
- * Matched by PREFIX for `knowledge-category:`, which is interpolated per category
- * (`verification-checklist.ts` builds `knowledge-category:${cat}`); an equality
- * table would miss every one of them.
- *
- * `tests/unit/verification-evidence.test.ts` asserts no source the checklist can
- * actually emit reaches the `default` arm, so drift is named on the day it lands.
- * The type of `source` is deliberately left as `string` rather than narrowed to a
- * union — that is a retype with ripple through every `VerificationFinding`
- * consumer, and it is not riding along on this feature.
- */
 export function evidenceForSource(f: RawFinding): FindingEvidence {
   if (f.source === 'reverse-dep-walk') {
     return {
@@ -86,7 +48,6 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
   if (f.source === 'impact-doc') {
     return {
       kind: 'reported',
-      // affected_paths[1] is the doc; [0] is the declared path that matched it.
       source: f.affected_paths[1] ?? 'documentation/impact/',
       verified_against: 'working_tree',
     }
@@ -128,15 +89,6 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
         'This is a PROMPT, not an observation: the checklist saw that the category exists, never that the spec ignored it. If the spec already covers it, the finding is answered by saying so.',
     }
   }
-  // Weakest class, and it names the literal so the exhaustiveness test can report
-  // WHICH source drifted rather than only that one did.
-  //
-  // DO NOT DELETE as redundant now that `RawFinding` makes classification total.
-  // That totality covers EMISSION — a site cannot build a finding without going
-  // through this function. It does NOT cover this function's own input: `source`
-  // is a `string`, so a literal added by a future emission site lands here with no
-  // type error. (The same split is why `coerceEvidence` keeps its own fallback for
-  // stored values.) Removing either one trades a loud degrade for a silent gap.
   return {
     kind: 'hypothesis',
     how_to_falsify: `Unclassified checklist source '${f.source}' — no evidence class is recorded for it, so it is treated as a guess. Add a row to evidenceForSource().`,
@@ -145,12 +97,6 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
   }
 }
 
-/**
- * Structurally identical to `DiscoveredImporter` in `lib/reverse-dep-walk.ts`,
- * which is what actually flows in here — the two were declared separately and
- * stayed in sync by luck (#10). Aliased rather than deleted so existing importers
- * keep their path; `reverse-dep-walk` is the producer and therefore the owner.
- */
 export type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
 
 export interface ChecklistInput {
@@ -160,18 +106,8 @@ export interface ChecklistInput {
   specClaims?: string[]
   specTier?: 'trivial' | 'small' | 'standard' | 'complex'
   existingProjectFiles?: string[]
-  /**
-   * #75 Part B. The org contract graph, read by the caller (which holds the
-   * config `detectTopology` needs). Injected rather than read here so this module
-   * keeps taking a project root and nothing else, and so a test can hand it a
-   * graph without a universe on disk.
-   *
-   * Omitted or empty is a NO-OP, not a failure — see `contract_graph` in the stats.
-   */
   contractGraph?: ContractGraph
-  /** This project's app name, the producer side of a contract. */
   appName?: string | null
-  /** Whether a universe root resolved at all — distinguishes two of the no-op states. */
   universeLinked?: boolean
 }
 
@@ -183,19 +119,6 @@ export interface ChecklistStats {
   anti_decisions_scanned: number
   impact_docs_consulted: number
   architecture_overview_present: boolean
-  /**
-   * #75 Part B. Why the contract check did or did not produce anything. FOUR of
-   * these five are no-ops, and they are reported rather than collapsed into one
-   * silent "raised nothing":
-   *
-   *  - `no_universe`    — no-op: the project is not linked to an org universe
-   *  - `no_manifest`    — no-op: linked, but no readable `contracts.json`. This is
-   *                       the DEFAULT state of every universe — the file is
-   *                       hand-written and no installer creates it.
-   *  - `degraded`       — no-op: present but oversize / unreadable / malformed
-   *  - `not_run`        — no-op: the tier skipped the checklist entirely
-   *  - `available`      — the only non-no-op: a real graph was consulted
-   */
   contract_graph: 'no_universe' | 'no_manifest' | 'degraded' | 'available' | 'not_run'
   contracts_scanned: number
 }
@@ -206,11 +129,6 @@ export interface ChecklistResult {
   hints: string[]
 }
 
-/**
- * Exported for the #75 exhaustiveness test, which derives its expected
- * `knowledge-category:*` source set from these keys rather than hand-listing
- * them — a hand-written list goes stale the day a category is added, silently.
- */
 export const CATEGORY_PROMPTS: Record<string, string> = {
   'business-rules':
     'Did the spec consider business-rules.md? Check for invariants or compliance constraints.',
@@ -254,8 +172,6 @@ export function runVerificationChecklist(
 ): ChecklistResult {
   const findings: RawFinding[] = []
   const hints: string[] = []
-  // `v-` prefix: V-phase ids must stay distinguishable from REVIEW-phase ones in
-  // a shared audit trail, since findings_actions[] references them by hand.
   const nextId = makeIdGenerator('v')
 
   const stats: ChecklistStats = {
@@ -274,9 +190,6 @@ export function runVerificationChecklist(
     hints.push(
       `spec_tier=${input.specTier} — verification checklist skipped per tier table.`,
     )
-    // Nothing was raised, so nothing needs classifying — and returning `findings`
-    // here would leak the unclassified RawFinding[] out of the one door that adds
-    // the class. Empty literal keeps that door the only way out.
     return { findings: [], stats, hints }
   }
 
@@ -293,11 +206,6 @@ export function runVerificationChecklist(
   stats.architecture_overview_present = architecture.exists
   stats.impact_docs_consulted = impactModules.files.length
 
-  // #58 — "no findings against the available corpus" is only true if the corpus was
-  // actually readable. A file that exists but could not be read, or that carries ids
-  // nothing parsed, must not be counted as an empty-but-fine corpus: this checklist
-  // is what closes the V phase, so a clean pass over an unread file is the same
-  // silent zero #49 and #58 exist to remove — one phase later, and more expensive.
   const corpusUnread: string[] = []
   const describeMiss = (file: string, miss: CorpusMiss): void => {
     if (miss === 'unreadable') corpusUnread.push(`${file} (exists, unreadable)`)
@@ -337,7 +245,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'block',
           title: `Anti-decision hit: ${antiHit.entry.id} — ${antiHit.entry.title}`,
-          detail: `Claim "${claim}" overlaps an anti-decision. Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
+          detail: `Claim "${claim}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(', ')}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
@@ -350,7 +258,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'address-now',
           title: `Conflict with ${topMatch.entry.id}: ${topMatch.entry.title}`,
-          detail: `Claim "${claim}" matches a decision with rollback/rejection language. Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
+          detail: `Claim "${claim}" matches a decision with rollback/rejection language (score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}). Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
@@ -360,7 +268,7 @@ export function runVerificationChecklist(
           category: 'gap',
           severity: 'address-now',
           title: `Requires revision: matches ${topMatch.entry.id}`,
-          detail: `Claim "${claim}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}). Read the entry and align the claim or surface an explicit override.`,
+          detail: `Claim "${claim}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}) — score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}. Read the entry and align the claim or surface an explicit override.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
@@ -429,18 +337,6 @@ export function runVerificationChecklist(
     }
   }
 
-  // #75 Part B. Graph-backed adjacency: does this change touch a surface another
-  // app declares a dependency on? Answered MECHANICALLY, from a manifest, instead
-  // of trusting an assertion that it was checked — which is the whole point.
-  //
-  // No dependency on #54: `contractsTouchingPaths` returns this shape in-process
-  // today. What #54 would add is persistence and a queryable tool, neither of
-  // which this needs.
-  //
-  // Four of the five `contract_graph` states are no-ops, each recorded rather
-  // than hidden — see `ChecklistStats`. `no_manifest` is the common case, not an
-  // edge: `contracts.json` is hand-written and no installer creates it, so an
-  // empty graph is the DEFAULT state of every universe.
   const graph = input.contractGraph ?? EMPTY_CONTRACT_GRAPH
   if (!input.universeLinked) stats.contract_graph = 'no_universe'
   else if (graph.available) stats.contract_graph = 'available'
@@ -452,8 +348,6 @@ export function runVerificationChecklist(
     const touched = contractsTouchingPaths(graph, input.appName ?? null, input.declaredPaths)
     for (const contract of touched) {
       const consumers = affectedConsumers([contract])
-      // A contract with no consumers gates nothing — reporting it would charge a
-      // mandatory action for a dependency nobody declared.
       if (consumers.length === 0) continue
       findings.push({
         id: nextId('breakage'),
@@ -538,17 +432,12 @@ export function runVerificationChecklist(
         'Verification corpus is empty (no decisions.md, anti-decisions.md, knowledge categories, or architecture.md). Bootstrap via /rsct-setup so this checklist has signal to surface.',
       )
     } else if (corpusUnread.length === 0) {
-      // Only claim a clean pass when every corpus file was actually read — the
-      // warning above already says what happened when one was not.
       hints.push(
         'Verification checklist found no findings to surface against the available corpus.',
       )
     }
   }
 
-  // #75. The ONE place a checklist finding acquires its class. Assigning here
-  // rather than at the nine emission sites is what makes the table total: a new
-  // site cannot forget to classify, because the type it builds has no such field.
   const classified: VerificationFinding[] = findings.map((f) => ({
     ...f,
     evidence: evidenceForSource(f),

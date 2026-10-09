@@ -1591,8 +1591,53 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - `claude mcp remove … </dev/null`, as in the installer: without it a run with stdin left open hung
   on the test stub, which drains stdin.
 
+### `lib/verification-checklist.ts` (migrated in the #79 REVIEW)
+
+- **Every checklist finding gets its evidence class at ONE door** (`evidenceForSource`), not at the
+  nine emission sites: the `RawFinding` a site builds has no `evidence` field, so a site cannot
+  forget to classify (#75). The table is TOTAL — the `default` arm returns the WEAKEST class and
+  names the offending `source` literal, so a literal added later degrades safely and loudly.
+  `source` stays typed `string` on purpose (narrowing to a union ripples through every consumer and
+  is not riding this feature), which is why the `default` arm and `coerceEvidence`'s own fallback
+  both stay; `tests/unit/verification-evidence.test.ts` asserts no emittable source reaches
+  `default`.
+- **The V phase has no agent-declared findings** — `phaseVerificationStartInputSchema` is
+  `.strict()` with no `findings` field, so every finding is machine-produced; the framework must
+  classify its own, and `also_explained_by` is person-authored and reviewer-checked, not producible
+  by an agent under queue pressure (#75).
+- **`DiscoveredImporter` is aliased from `lib/reverse-dep-walk.ts`** (the producer and owner), not
+  redeclared — the two had stayed in sync by luck (#10).
+- **The org contract graph is injected by the caller** (#75 Part B), so this module still takes only
+  a project root and a test can hand it a graph with no universe on disk. No dependency on #54:
+  `contractsTouchingPaths` already returns the shape in-process; #54 would add persistence and a
+  query tool, neither needed here.
+- **Four of the five `contract_graph` states are no-ops, each reported, never collapsed** into one
+  silent "raised nothing". `no_manifest` is the DEFAULT state of every universe — `contracts.json`
+  is hand-written and no installer creates it — so an empty graph is the common case, not an edge. A
+  contract with no consumers gates nothing: reporting it would charge a mandatory action for a
+  dependency nobody declared.
+- **Finding ids carry a `v-` prefix** so V-phase ids stay distinguishable from REVIEW-phase ids in
+  the shared audit trail, where `findings_actions[]` reference them by hand.
+- **The `knowledge-category:*` source set is exported** so the exhaustiveness test derives it from
+  the keys rather than a hand list that would go stale silently; the match is by prefix because the
+  source is interpolated per category.
+- **"No findings against the corpus" is claimed only when every corpus file was actually read**
+  (#49/#58): a clean pass over a present-but-unreadable file is the same silent zero those issues
+  removed, and this checklist closes the V phase, so the miss is worse one phase later. The
+  empty-findings path returns an empty literal, never the unclassified `RawFinding[]`, so the
+  central-classification door stays the only exit.
+- `affected_paths[1]` is the doc; `[0]` is the declared path that matched it.
+- **The premise-check findings show `score N, shared: …` (#79)** — the match carries them and the
+  developer needs them to triage by strength; display-only, the gate baseline never reads `detail`.
+
 ### Tests and build
 
+- `verification-checklist.test.ts`: the clean-pass suppression is scoped to the corpus MISS, not to
+  a small corpus — the cases use only `decisions.md` with no `knowledge/` directory, because a
+  present knowledge category emits `forgotten` prompts that would lift the count above zero and skip
+  the branch for an unrelated reason; a directory AT a category path is "present but unreadable".
+  The #58 case pins that a clean pass over an unread file is the V-closing silent zero; the #79 case
+  pins the `score N, shared: …` detail (mutation: drop the append).
 - `tsup.config.ts`: runtime deps are bundled (`noExternal`) so `dist/index.js` runs with no
   `node_modules` (the 2026-06-22 "no mcp__rsct__* tools" incident); pino's dynamic
   `require('node:os')` needs the `createRequire` banner, with the shebang kept on line 1.
