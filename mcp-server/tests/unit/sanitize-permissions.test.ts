@@ -141,6 +141,52 @@ describe('sanitize-permissions — isPoisonPill', () => {
     }
   })
 
+  it('matches the §C-bypass verbs rebase, cherry-pick, revert and gh pr merge (#91)', () => {
+    const poisonous = [
+      'Bash(git rebase:*)',
+      'Bash(git rebase -i HEAD~3)',
+      'Bash(git -C /r rebase main)',
+      'Bash(git rebase --abort)',
+      'Bash(git cherry-pick:*)',
+      'Bash(git cherry-pick abc123)',
+      'Bash(git revert HEAD)',
+      'Bash(git revert --no-commit HEAD)',
+      'Bash(/usr/bin/git cherry-pick abc)',
+      'Bash(sh -c "git revert HEAD")',
+      'Bash(bash -c "git rebase main")',
+      'Bash(gh pr merge:*)',
+      'Bash(gh pr merge 123)',
+      'Bash(gh pr merge --squash)',
+      'Bash(gh  pr  merge)',
+      'Bash(/usr/bin/gh pr merge --admin)',
+    ]
+    for (const entry of poisonous) {
+      expect(isPoisonPill(entry), `expected poison: ${entry}`).toBe(true)
+    }
+  })
+
+  it('keeps the verb lookalikes, read-only gh, and the documented broad-gh grant (#91)', () => {
+    const benign = [
+      'Bash(git cherry -v main)',
+      'Bash(git cherry-pickaxe)',
+      'Bash(git revert-foo)',
+      'Bash(git rebase-todo)',
+      'Bash(git merge-base a b)',
+      'Bash(git merge-tree x y)',
+      'Bash(gh pr view)',
+      'Bash(gh pr list)',
+      'Bash(gh pr create:*)',
+      'Bash(gh pr merged)',
+      'Bash(gh pr merge-queue list)',
+      'Bash(gh api /users/octocat)',
+      'Bash(gh pr:*)',
+      'Bash(gh:*)',
+    ]
+    for (const entry of benign) {
+      expect(isPoisonPill(entry), `expected benign: ${entry}`).toBe(false)
+    }
+  })
+
   it('ignores non-string entries defensively', () => {
     expect(isPoisonPill(null)).toBe(false)
     expect(isPoisonPill(undefined)).toBe(false)

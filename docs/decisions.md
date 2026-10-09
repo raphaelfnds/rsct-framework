@@ -1386,8 +1386,16 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **What it is for (INV-2.3).** The §C tools need an out-of-band approval; a standing
   `Bash(git commit:*)` in a settings file lets the agent run git directly. The sanitizer strips
   such entries from `permissions.allow[]` of `.claude/settings.json` and
-  `.claude/settings.local.json`. Narrow on purpose: commit, push, merge and the wildcards that
-  cover them; every other entry is preserved.
+  `.claude/settings.local.json`. The verb set is the ops that bypass a §C-gated outcome: commit,
+  push, merge, and — since #91 — rebase, cherry-pick, revert (git verbs, in the git-globals /
+  path-prefixed / shell-wrapped shapes) and `gh pr merge` (its own pattern, direct or
+  path-prefixed), plus the wildcards that cover them; every other entry is preserved. Recovery
+  forms (`git rebase --abort`) are stripped too, consistent with the existing `git merge --abort`
+  strip (MEASURED: the sanitizer stripped `git merge --abort`/`--continue` before #91). Left on
+  purpose (named limits, the real Bash guard is #84): a broad `Bash(gh pr:*)` / `Bash(gh:*)` grant
+  is NOT stripped — mirroring git's `git:*` catch-all would over-strip read-only `gh pr view` /
+  `gh issue` / `gh api`; and the Hole-1 user-scope settings file and Hole-3 wrapper forms
+  (`env git`, `git.exe`, shell-wrapped `gh`) are untouched.
 - **It never blocks a session.** It never throws and exits 0 on a malformed file, reporting to
   stderr and, best effort, to the audit log.
 - **Node builtins only, transitively** — it runs before the server exists. MEASURED after #92

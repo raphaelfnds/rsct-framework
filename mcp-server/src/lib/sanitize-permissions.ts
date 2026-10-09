@@ -22,12 +22,13 @@ const GIT_GLOBAL_OPT = [
 const GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`
 
 const POISON_PILL_PATTERNS: RegExp[] = [
-  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, 'i'),
+  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge|rebase|cherry-pick|revert)(?![\\w-])`, 'i'),
   /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
   /^Bash\(\s*[:*]/i,
-  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
-  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
+  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge|rebase|cherry-pick|revert)(?![\w-])/i,
+  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge|rebase|cherry-pick|revert)(?![\w-])/i,
   /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i,
+  /^Bash\(\s*(?:[^)]*?[/\\])?gh\s+pr\s+merge(?![\w-])/i,
 ]
 
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'] as const
