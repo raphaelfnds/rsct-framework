@@ -23935,7 +23935,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.13.3";
+var RSCT_MCP_VERSION = "2.13.4";
 
 // src/lib/universe.ts
 init_esm_shims();

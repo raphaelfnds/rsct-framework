@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.4] - 2026-10-09
+
 ### Removed
 
 - **The dialog-free free-commit lane is removed (#80).** `trivial`/`small` tasks no longer
