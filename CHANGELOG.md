@@ -12,6 +12,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.3] - 2026-10-09
+
+### Security
+
+- **The SessionStart sanitizer strips standing grants for `git rebase`, `git cherry-pick`,
+  `git revert` and `gh pr merge` (#91, partial).** It stripped only `commit`/`push`/`merge`, so a
+  standing `permissions.allow[]` entry for a rebase (a §C-gated tool), a cherry-pick/revert (they
+  create commits that skip the commit gate) or `gh pr merge` (it merges the PR) let the agent run
+  those in the ungated Bash tool with no prompt. The three git patterns gain the verbs and a new
+  pattern catches `gh pr merge`; recovery forms (`git rebase --abort`) are stripped too, as
+  `git merge --abort` already was. **Still open (#91):** this is the SessionStart doorbell
+  (deleting a grant restores Claude Code's "ask"), not a lock — the mechanical Bash guard ships
+  with #84, and a broad `Bash(gh pr:*)`/`Bash(gh:*)` grant and the user-scope settings file are not
+  covered.
+
 ## [2.13.2] - 2026-10-08
 
 ### Changed

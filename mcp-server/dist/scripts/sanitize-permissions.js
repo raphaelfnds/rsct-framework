@@ -226,12 +226,13 @@ var GIT_GLOBAL_OPT = [
 ].join("|");
 var GIT_GLOBALS = `(?:\\s+(?:${GIT_GLOBAL_OPT}))*`;
 var POISON_PILL_PATTERNS = [
-  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge)(?![\\w-])`, "i"),
+  new RegExp(`^Bash\\(\\s*git${GIT_GLOBALS}\\s+(?:commit|push|merge|rebase|cherry-pick|revert)(?![\\w-])`, "i"),
   /^Bash\(\s*git(?:\s+-[^\s:*)]*)*\s*[:*]/i,
   /^Bash\(\s*[:*]/i,
-  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge)(?![\w-])/i,
-  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge)(?![\w-])/i,
-  /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i
+  /^Bash\(\s*[^)]*?[/\\]git\s+(commit|push|merge|rebase|cherry-pick|revert)(?![\w-])/i,
+  /^Bash\(\s*(?:sh|bash|zsh|dash|fish|ksh|csh)\s+-c\b[^)]*\bgit\s+(commit|push|merge|rebase|cherry-pick|revert)(?![\w-])/i,
+  /^Bash\([^)]*\*[^)]*\bgit\b[^)]*\*/i,
+  /^Bash\(\s*(?:[^)]*?[/\\])?gh\s+pr\s+merge(?![\w-])/i
 ];
 var SETTINGS_FILES = ["settings.json", "settings.local.json"];
 function isPoisonPill(entry) {
