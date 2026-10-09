@@ -78,7 +78,6 @@ describe('runVerificationChecklist — gap category (premise check)', () => {
   })
 
   it('emits a block-severity finding when a claim matches an anti-decision', () => {
-    // Sample fixture has anti-decisions.md with known abandoned tech
     const r = runVerificationChecklist({
       projectRoot: SAMPLE_RSCT,
       declaredPaths: ['src/orders.ts'],
@@ -88,13 +87,9 @@ describe('runVerificationChecklist — gap category (premise check)', () => {
     const blocks = r.findings.filter(
       (f) => f.category === 'gap' && f.severity === 'block',
     )
-    // Either an anti-decision hit (block) or a conflict (address-now) — both are valid signals
     const gapFindings = r.findings.filter((f) => f.category === 'gap')
     expect(gapFindings.length).toBeGreaterThanOrEqual(0)
-    // If the fixture has an anti-decision with overlap, we expect at least one block
-    // If not, we at least expect the gap category to have run
     expect(r.stats.categories_run).toContain('gap')
-    // Sanity: blocks (if any) must come from premise-check
     blocks.forEach((b) => expect(b.source).toBe('premise-check'))
   })
 
@@ -109,6 +104,25 @@ describe('runVerificationChecklist — gap category (premise check)', () => {
       (f) => f.category === 'gap' && f.severity === 'address-now',
     )
     expect(gapAddressNow.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('surfaces the match score and the shared tokens in the premise-check finding detail (#79)', () => {
+    const r = runVerificationChecklist({
+      projectRoot: SAMPLE_RSCT,
+      declaredPaths: ['src/orders.ts'],
+      discoveredImporters: [],
+      specClaims: ['allow UPDATE statements on financial events tables'],
+    })
+    const premise = r.findings.filter((f) => f.source === 'premise-check')
+    expect(premise.length).toBeGreaterThanOrEqual(1)
+    for (const f of premise) {
+      const m = /score (\d+), shared: ([^.)]+)/.exec(f.detail)
+      expect(m, `detail without score/shared tokens: ${f.detail}`).not.toBeNull()
+      const score = Number(m![1])
+      const shared = m![2].split(', ').filter((t) => t.length > 0)
+      expect(score).toBeGreaterThanOrEqual(2)
+      expect(shared.length).toBe(score)
+    }
   })
 })
 
@@ -303,9 +317,6 @@ describe('runVerificationChecklist — stats coverage', () => {
   })
 })
 
-// #58 — this checklist is what closes the V phase. "Found no findings against the
-// available corpus" over a file that was never read is the same silent zero the
-// issue was filed for, one phase later and more expensive.
 describe('runVerificationChecklist — corpus that was not read (#58)', () => {
   const run = () =>
     runVerificationChecklist({
@@ -317,7 +328,6 @@ describe('runVerificationChecklist — corpus that was not read (#58)', () => {
 
   it('reports an unreadable anti-decisions.md instead of a clean pass', () => {
     writeFile('documentation/decisions.md', '### ADR-001 — Something\nBody.\n')
-    // A directory at the path: exists, cannot be read.
     mkdirSync(join(tmpRoot, 'documentation', 'knowledge', 'anti-decisions.md'), {
       recursive: true,
     })
@@ -328,15 +338,9 @@ describe('runVerificationChecklist — corpus that was not read (#58)', () => {
         (h) => h.includes('was NOT read') && h.includes('anti-decisions.md (exists, unreadable)'),
       ),
     ).toBe(true)
-    // No clean-pass assertion here on purpose: a directory at that path still counts
-    // as a present knowledge category, so this case emits a `forgotten` finding and
-    // the clean-pass hint would be absent for an unrelated reason. The suppression is
-    // tested in the next case, where the findings set is provably empty.
   })
 
   it('reports a decisions.md that carries ids but parses to nothing, and drops the clean pass', () => {
-    // No knowledge/ directory: nothing else can add a finding, so the clean-pass hint
-    // is absent because of the suppression and for no other reason.
     writeFile('documentation/decisions.md', '#### ADR-001 -- wrong level and separator\nBody.\n')
 
     const r = run()
@@ -355,10 +359,6 @@ describe('runVerificationChecklist — corpus that was not read (#58)', () => {
   })
 
   it('still claims the clean pass when the corpus was actually read', () => {
-    // The suppression must be scoped to the miss, not applied whenever the corpus is
-    // small. Only decisions.md here, and no knowledge/ directory: a present knowledge
-    // category emits `forgotten` prompts, which would take the findings count above
-    // zero and skip this branch for an unrelated reason.
     writeFile('documentation/decisions.md', '### ADR-001 — Something\nBody.\n')
 
     const r = run()

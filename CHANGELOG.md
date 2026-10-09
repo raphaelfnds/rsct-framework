@@ -12,6 +12,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.2] - 2026-10-08
+
+### Changed
+
+- **The V-phase premise-check findings now show the match score and the shared tokens (#79, step 1).**
+  A finding read only "shares vocabulary with `<id>`", so a two-generic-word match and a
+  four-distinctive-word match looked identical. The three `gap` findings now carry
+  `score N, shared: …`, taken from the match the scorer already produced, so the developer can
+  triage by strength and the score distribution is recoverable from an ordinary V run. Display-only:
+  the findings gate keys on `id`/`category`/`title`/`evidence`, never on `detail` — nothing raised,
+  and no severity, changes. Steps 2 (scoring a real corpus) and 3 (tuning `MIN_SCORE`) of #79 stay
+  open.
+
 ## [2.13.1] - 2026-10-08
 
 ### Security
