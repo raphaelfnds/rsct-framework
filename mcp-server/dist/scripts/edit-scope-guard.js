@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, mkdirSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, copyFileSync } from 'fs';
 import { isAbsolute, resolve, join, dirname, sep, relative, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
@@ -4659,13 +4659,54 @@ function readRsctConfig(projectRoot) {
   }
   return validation.data;
 }
+var VIOLATION_AUDIT_CONFIG = { enabled: true };
+var VIOLATION_REPEAT_MS = 60 * 60 * 1e3;
+var VIOLATION_TAIL_BYTES = 64 * 1024;
 function emitConfigViolation(projectRoot, reason, extras) {
   const event = reason === "malformed" ? "rsct_json.malformed" : "rsct_json.bounds_violation";
   process.stderr.write(
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.
 `
   );
-  appendAuditEntry(projectRoot, { event, reason, ...extras }, { });
+  const entry = { event, reason, ...extras };
+  if (recordedWithinRepeatWindow(projectRoot, entry)) return;
+  appendAuditEntry(projectRoot, entry, VIOLATION_AUDIT_CONFIG);
+}
+function recordedWithinRepeatWindow(projectRoot, candidate) {
+  try {
+    const wanted = JSON.stringify(candidate);
+    const tail = readTail(resolveAuditPath(projectRoot, VIOLATION_AUDIT_CONFIG), VIOLATION_TAIL_BYTES);
+    const now = Date.now();
+    return tail.split("\n").some((line) => {
+      const stamped = parseStampedEntry(line);
+      if (stamped === null || stamped.body !== wanted) return false;
+      const age = now - stamped.at;
+      return age >= 0 && age <= VIOLATION_REPEAT_MS;
+    });
+  } catch {
+    return false;
+  }
+}
+function parseStampedEntry(line) {
+  try {
+    const { ts, ...rest } = JSON.parse(line);
+    const at = typeof ts === "string" ? Date.parse(ts) : Number.NaN;
+    return Number.isNaN(at) ? null : { at, body: JSON.stringify(rest) };
+  } catch {
+    return null;
+  }
+}
+function readTail(path, maxBytes) {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, size - length);
+    return buffer.toString("utf8", 0, read);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // src/lib/edit-scope-hook.ts

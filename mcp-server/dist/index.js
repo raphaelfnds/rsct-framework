@@ -3,7 +3,7 @@ import { createRequire, builtinModules } from 'module';
 import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fstatSync, readSync, closeSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
@@ -23533,13 +23533,54 @@ function readRsctConfig(projectRoot) {
   }
   return validation.data;
 }
+var VIOLATION_AUDIT_CONFIG = { enabled: true };
+var VIOLATION_REPEAT_MS = 60 * 60 * 1e3;
+var VIOLATION_TAIL_BYTES = 64 * 1024;
 function emitConfigViolation(projectRoot, reason, extras) {
   const event = reason === "malformed" ? "rsct_json.malformed" : "rsct_json.bounds_violation";
   process.stderr.write(
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.
 `
   );
-  appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true });
+  const entry = { event, reason, ...extras };
+  if (recordedWithinRepeatWindow(projectRoot, entry)) return;
+  appendAuditEntry(projectRoot, entry, VIOLATION_AUDIT_CONFIG);
+}
+function recordedWithinRepeatWindow(projectRoot, candidate) {
+  try {
+    const wanted = JSON.stringify(candidate);
+    const tail = readTail(resolveAuditPath(projectRoot, VIOLATION_AUDIT_CONFIG), VIOLATION_TAIL_BYTES);
+    const now = Date.now();
+    return tail.split("\n").some((line2) => {
+      const stamped = parseStampedEntry(line2);
+      if (stamped === null || stamped.body !== wanted) return false;
+      const age = now - stamped.at;
+      return age >= 0 && age <= VIOLATION_REPEAT_MS;
+    });
+  } catch {
+    return false;
+  }
+}
+function parseStampedEntry(line2) {
+  try {
+    const { ts, ...rest } = JSON.parse(line2);
+    const at = typeof ts === "string" ? Date.parse(ts) : Number.NaN;
+    return Number.isNaN(at) ? null : { at, body: JSON.stringify(rest) };
+  } catch {
+    return null;
+  }
+}
+function readTail(path2, maxBytes) {
+  const fd = openSync(path2, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, size - length);
+    return buffer.toString("utf8", 0, read);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // src/lib/branch-protection.ts
@@ -23935,7 +23976,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.13.4";
+var RSCT_MCP_VERSION = "2.13.5";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -52756,7 +52797,7 @@ var COVERAGE_BOUNDARY = [
   "Findings are pruned when a phase closes, so a finding raised and answered in a past phase leaves no trace this report can query.",
   ".rsct/ state is per-worktree. In a linked git worktree this reports on THAT worktree only, not on the project as a whole.",
   "Rule-section bodies in CLAUDE.md are not read by THIS tool. The framework does cover that axis \u2014 every section carries a sha256-body= stamp and /rsct-setup reconciles them (since v2.7.0, #45) \u2014 rsct_audit just does not check it, so a clean report here says nothing either way about rule-body freshness.",
-  'This is a point-in-time read of local files, and it never gates. ONE exception to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records one rsct_json.* entry in .rsct/audit.log \u2014 creating that file if absent, and regardless of audit.enabled. That write belongs to resolveProjectRoot and happens identically for rsct_status and rsct_load_context; it is not specific to this report.',
+  'This is a point-in-time read of local files, and it never gates. ONE exception to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records an rsct_json.* entry in .rsct/audit.log \u2014 normally once per hour for the same violation, creating that file if absent, and regardless of audit.enabled. That write belongs to resolveProjectRoot and happens identically for rsct_status and rsct_load_context; it is not specific to this report.',
   `install_drift.message is relayed VERBATIM from the drift detector and can contain a repair instruction (e.g. "Run /rsct-setup"). That text is the detector's, not this report's recommendation \u2014 nothing here tells you to run a tool that mutates RSCT phase state.`
 ];
 var DAY_MS = 864e5;
@@ -52772,7 +52813,7 @@ function explainHealth(faults, historyAbsent) {
 }
 var auditTool = {
   name: "rsct_audit",
-  description: "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log, exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
+  description: "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log (normally once per hour for the same violation), exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
   inputSchema: {
     type: "object",
     properties: {
@@ -52829,7 +52870,7 @@ async function auditHandler(rawInput, deps = {}) {
   const plans = listPlans(resolution.root, { now });
   if (!resolution.rsct_installed) {
     hints.push(
-      existsSync(join(resolution.root, ".rsct.json")) ? "A .rsct.json is PRESENT here but was rejected \u2014 unreadable, malformed, or carrying a value outside the enforced bounds \u2014 so RSCT is treating this project as unmanaged and neither install drift nor mechanical-layer health is reported. That rejection is also recorded in .rsct/audit.log. Worth reading before assuming it is only a typo." : "This project is not rsct-managed (no .rsct.json), so install drift and mechanical-layer health are not reported. Plans found at the root are still listed."
+      existsSync(join(resolution.root, ".rsct.json")) ? "A .rsct.json is PRESENT here but was rejected \u2014 unreadable, malformed, or carrying a value outside the enforced bounds \u2014 so RSCT is treating this project as unmanaged and neither install drift nor mechanical-layer health is reported. A malformed or out-of-bounds file is also recorded in .rsct/audit.log (an unreadable one is not). Worth reading before assuming it is only a typo." : "This project is not rsct-managed (no .rsct.json), so install drift and mechanical-layer health are not reported. Plans found at the root are still listed."
     );
   }
   if (open_phase && open_phase.age_days !== null && open_phase.age_days >= 7) {

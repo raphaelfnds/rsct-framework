@@ -16,6 +16,7 @@ import {
   clearAuditMigrationMemo,
 } from '../../src/lib/audit-log.js'
 import { clearAnchorCache, sameDirectory, canonicalPath } from '../../src/lib/repo-anchor.js'
+import { resolveProjectRoot } from '../../src/lib/project-root.js'
 import { sanitize } from '../../src/lib/sanitize-permissions.js'
 
 function hasGit(): boolean {
@@ -193,5 +194,24 @@ describe.runIf(GIT)('AUDIT-2 — an existing install keeps its history across th
     expect(readFileSync(join(repo, '.rsct', 'audit.log'), 'utf8')).not.toContain(
       'audit_log.migrated',
     )
+  })
+})
+
+describe.runIf(GIT)('a rejected config in a relocating package is recorded once per hour (#93)', () => {
+  it('dedups against the repository log it writes to, not the package folder', () => {
+    const repo = join(box, 'mono')
+    initRepo(repo)
+    const pkg = join(repo, 'packages', 'app')
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(pkg, '.rsct.json'), '{ not valid json')
+
+    expect(resolveProjectRoot(pkg).rsct_installed).toBe(false)
+    expect(resolveProjectRoot(pkg).rsct_installed).toBe(false)
+
+    const recorded = readFileSync(join(repo, '.rsct', 'audit.log'), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"rsct_json.malformed"'))
+    expect(recorded).toHaveLength(1)
+    expect(existsSync(join(pkg, '.rsct', 'audit.log'))).toBe(false)
   })
 })
