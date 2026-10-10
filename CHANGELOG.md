@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.5] - 2026-10-10
+
 ### Fixed
 
 - **A rejected `.rsct.json` no longer writes an audit line on every call (#93, partial).** The
