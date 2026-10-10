@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { cwd } from 'node:process'
 import { z } from 'zod'
-import { appendAuditEntry } from './audit-log.js'
+import { appendAuditEntry, resolveAuditPath } from './audit-log.js'
 
 export interface RsctApprovalModes {
   timestamp_skew_seconds?: number
@@ -271,6 +271,10 @@ function readRsctConfig(projectRoot: string): RsctConfig | null {
 
 type ConfigViolationReason = 'malformed' | 'bounds_violation'
 
+const VIOLATION_AUDIT_CONFIG: RsctAuditConfig = { enabled: true }
+const VIOLATION_REPEAT_MS = 60 * 60 * 1000
+const VIOLATION_TAIL_BYTES = 64 * 1024
+
 function emitConfigViolation(
   projectRoot: string,
   reason: ConfigViolationReason,
@@ -281,5 +285,49 @@ function emitConfigViolation(
   process.stderr.write(
     `[rsct] .rsct.json rejected (${reason}); falling back to rsct_installed=false. See audit log for details.\n`,
   )
-  appendAuditEntry(projectRoot, { event, reason, ...extras }, { enabled: true })
+  const entry = { event, reason, ...extras }
+  if (recordedWithinRepeatWindow(projectRoot, entry)) return
+  appendAuditEntry(projectRoot, entry, VIOLATION_AUDIT_CONFIG)
+}
+
+function recordedWithinRepeatWindow(
+  projectRoot: string,
+  candidate: Record<string, unknown>,
+): boolean {
+  try {
+    const wanted = JSON.stringify(candidate)
+    const tail = readTail(resolveAuditPath(projectRoot, VIOLATION_AUDIT_CONFIG), VIOLATION_TAIL_BYTES)
+    const now = Date.now()
+    return tail.split('\n').some((line) => {
+      const stamped = parseStampedEntry(line)
+      if (stamped === null || stamped.body !== wanted) return false
+      const age = now - stamped.at
+      return age >= 0 && age <= VIOLATION_REPEAT_MS
+    })
+  } catch {
+    return false
+  }
+}
+
+function parseStampedEntry(line: string): { at: number; body: string } | null {
+  try {
+    const { ts, ...rest } = JSON.parse(line) as Record<string, unknown>
+    const at = typeof ts === 'string' ? Date.parse(ts) : Number.NaN
+    return Number.isNaN(at) ? null : { at, body: JSON.stringify(rest) }
+  } catch {
+    return null
+  }
+}
+
+function readTail(path: string, maxBytes: number): string {
+  const fd = openSync(path, 'r')
+  try {
+    const size = fstatSync(fd).size
+    const length = Math.min(size, maxBytes)
+    const buffer = Buffer.alloc(length)
+    const read = readSync(fd, buffer, 0, length, size - length)
+    return buffer.toString('utf8', 0, read)
+  } finally {
+    closeSync(fd)
+  }
 }

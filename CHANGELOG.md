@@ -12,6 +12,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A rejected `.rsct.json` no longer writes an audit line on every call (#93, partial).** The
+  config loader appended an `rsct_json.malformed` / `rsct_json.bounds_violation` line each time
+  `resolveProjectRoot` met a rejected config — nearly every tool call in the server, and every
+  edit in the edit-scope guard — so a config that stayed rejected kept growing `.rsct/audit.log`.
+  The same violation is now written once per hour: the log still shows that the config was
+  rejected and roughly for how long, to the hour rather than to the call. Nothing else changes —
+  the entry still lists every failure in full, the stderr warning still prints on every load, and
+  no other audit writer is gated. **Projects already set up need `/rsct-setup` again** for the
+  guard half: the guard is a copy inside the project, and an older copy keeps writing one line
+  per edit. **Still open (#93):** entries written by real work have no retention policy, and
+  every commit still scans the whole file. ADR-024 says why and names the limits — among them, an
+  entry larger than 64 KB is still written on every call.
+
 ## [2.13.4] - 2026-10-09
 
 ### Removed
