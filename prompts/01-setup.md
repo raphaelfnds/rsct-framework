@@ -1606,8 +1606,8 @@ that is a bug in Phase 3, not a license to skip.
 answer for universe was "no universe / leave placeholders" (or any
 shape where `universe.name` is absent / empty), the rendered
 `.rsct.json` MUST NOT contain a `universe` block at all. Writing
-`"universe": { "name": "", "local": "", "remote": "" }` produces a
-`bounds_violation` audit event on every subsequent MCP load because
+`"universe": { "name": "", "local": "", "remote": "" }` gets the whole
+config rejected (`bounds_violation`) on every subsequent MCP load because
 the strict schema in `lib/project-root.ts` requires `min(1)` on those
 fields. The block is `optional()` in the schema — omitting it is the
 correct null state. `02-canonical-source.md` (the link step of `/rsct-universe`,

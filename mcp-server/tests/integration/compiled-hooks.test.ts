@@ -207,6 +207,18 @@ describe('compiled edit-scope guard, launched as the installed hook', () => {
     expect(outside.stderr).toContain('[rsct] Edit blocked (out_of_scope)')
     expect(guard(link, join('src', 'app.ts')).status).toBe(0)
   })
+
+  it('records a rejected config once for several edits and warns on each one (#93)', () => {
+    const root = newProject(CODE_PHASE)
+    writeFileSync(join(root, '.rsct.json'), '{ not valid json')
+    for (const file of ['README.md', 'README.md', join('src', 'app.ts')]) {
+      expect(guard(root, file).stderr).toContain('.rsct.json rejected')
+    }
+    const recorded = readFileSync(join(root, '.rsct', 'audit.log'), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"rsct_json.malformed"'))
+    expect(recorded).toHaveLength(1)
+  })
 })
 
 describe('compiled sanitizer, launched as the installed hook', () => {

@@ -1081,8 +1081,14 @@ schema. Bounds-violating configs are **rejected wholesale** —
 `resolveProjectRoot()` returns `rsct_installed: false` (same surface
 as a missing `.rsct.json`), every §C-gated tool degrades to safe-no-op,
 and a `rsct_json.bounds_violation` (or `rsct_json.malformed`) event is
-**force-written** to `<root>/.rsct/audit.log` even if the rejected
-config tried to disable audit. A warning also goes to stderr.
+**force-written** to `.rsct/audit.log` (at the git repository the project
+sits in — see "Audit log" above) even if the rejected config tried to
+disable audit. A warning also goes to stderr on every load.
+The audit entry is written once per hour for the same violation, not on
+every load, so a config that stays rejected leaves an hourly trace instead
+of a flood (ADR-024 names the exceptions). A project set up before 2.13.5
+needs `/rsct-setup` again for its edit-scope guard to do the same: the
+guard is a copy inside the project.
 
 Bounds:
 

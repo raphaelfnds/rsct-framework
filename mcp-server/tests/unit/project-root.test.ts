@@ -1,11 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   resolveProjectRoot,
   __resetPlaceholderWarnings,
 } from '../../src/lib/project-root.js'
+import { appendAuditEntry } from '../../src/lib/audit-log.js'
 
 let tmpRoot: string
 let originalEnvRoot: string | undefined
@@ -319,6 +330,285 @@ describe('lib/project-root — malformed JSON', () => {
     const entries = readAuditEntries()
     expect(entries).toHaveLength(1)
     expect(entries[0]!.event).toBe('rsct_json.bounds_violation')
+  })
+})
+
+describe('lib/project-root — a rejected config is recorded once per hour (#93)', () => {
+  const MALFORMED = '{ not valid json'
+  const OVER = { ...VALID_MIN, approval_modes: { plan_token_max_actions: 9999 } }
+  const UNDER = { ...VALID_MIN, approval_modes: { plan_token_max_actions: 0 } }
+  const OTHER_KEY = { ...VALID_MIN, approval_modes: { plan_token_ttl_minutes: 1 } }
+  const MINUTE_MS = 60 * 1000
+  const HOUR_MS = 60 * MINUTE_MS
+  const TAIL_BYTES = 64 * 1024
+
+  const logPath = (): string => join(tmpRoot, '.rsct', 'audit.log')
+
+  function reject(): void {
+    expect(resolveProjectRoot().rsct_installed).toBe(false)
+  }
+
+  function violationLines(): string[] {
+    if (!existsSync(logPath())) return []
+    return readFileSync(logPath(), 'utf8')
+      .split('\n')
+      .filter((line) => /"event":"rsct_json\.(malformed|bounds_violation)"/.test(line))
+  }
+
+  function warnings(): number {
+    return stderrSpy.calls.filter((chunk) => chunk.includes('.rsct.json rejected')).length
+  }
+
+  function stampedAt(shiftMs: number): string {
+    return new Date(Date.now() + shiftMs).toISOString()
+  }
+
+  function restampLog(shiftMs: number): void {
+    const stamp = stampedAt(shiftMs)
+    const moved = readAuditEntries().map((entry) => JSON.stringify({ ...entry, ts: stamp }))
+    writeFileSync(logPath(), `${moved.join('\n')}\n`, 'utf8')
+  }
+
+  function recentFiller(bytes: number): string {
+    const line = `${JSON.stringify({ event: 'filler', pad: 'x'.repeat(100), ts: stampedAt(0) })}\n`
+    return line.repeat(Math.ceil(bytes / line.length))
+  }
+
+  it('writes ONE entry for two consecutive identical malformed configs, and warns on each load', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(1)
+    expect(warnings()).toBe(2)
+  })
+
+  it('writes ONE entry for two consecutive identical bounds violations', () => {
+    writeConfig(OVER)
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('writes a second entry when a different key is rejected', () => {
+    writeConfig(OVER)
+    reject()
+    writeConfig(OTHER_KEY)
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('writes a second entry when the same key fails a different bound', () => {
+    writeConfig(OVER)
+    reject()
+    writeConfig(UNDER)
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('writes a second entry when the JSON is malformed in a different way', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    writeConfigRaw('[1,')
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('still writes ONE entry when a real audit event lands between two identical violations', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    appendAuditEntry(tmpRoot, { event: 'classify.verdict', tier: 'small' }, { enabled: true })
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('bounds two alternating violations to one entry each', () => {
+    for (const config of [OVER, OTHER_KEY, OVER, OTHER_KEY]) {
+      writeConfig(config)
+      reject()
+    }
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('keeps deduplicating an identical entry that is 59 minutes old', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    restampLog(-59 * MINUTE_MS)
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('records the violation again once the identical entry is 61 minutes old', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    restampLog(-61 * MINUTE_MS)
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('counts both ends of the hour as inside it', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const start = Date.now()
+      writeConfigRaw(MALFORMED)
+      reject()
+      reject()
+      vi.setSystemTime(start + HOUR_MS)
+      reject()
+      expect(violationLines()).toHaveLength(1)
+      vi.setSystemTime(start + HOUR_MS + 1)
+      reject()
+      expect(violationLines()).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('finds a recent identical entry behind older history', () => {
+    appendAuditEntry(tmpRoot, { event: 'classify.verdict', tier: 'small' }, { enabled: true })
+    restampLog(-3 * HOUR_MS)
+    writeConfigRaw(MALFORMED)
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('finds a recent identical entry in front of an older line', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    const older = { event: 'classify.verdict', tier: 'small', ts: stampedAt(-3 * HOUR_MS) }
+    appendFileSync(logPath(), `${JSON.stringify(older)}\n`, 'utf8')
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('does not let an entry stamped in the future silence the violation', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    restampLog(24 * HOUR_MS)
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('ignores a future-stamped copy without losing the recent one', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    const [entry] = readAuditEntries()
+    appendFileSync(logPath(), `${JSON.stringify({ ...entry, ts: stampedAt(24 * HOUR_MS) })}\n`, 'utf8')
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('is not silenced by an identical entry that carries no usable stamp', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    const [entry] = readAuditEntries()
+    const { ts: _stamp, ...body } = entry!
+    const unstamped = [body, { ...body, ts: 'not a date' }, { ...body, ts: [stampedAt(0)] }]
+    writeFileSync(logPath(), `${unstamped.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8')
+    reject()
+    expect(violationLines()).toHaveLength(4)
+  })
+
+  it('records the first violation when the audit log is absent', () => {
+    writeConfigRaw(MALFORMED)
+    expect(existsSync(logPath())).toBe(false)
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('records the violation when the audit log exists but is empty', () => {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(logPath(), '', 'utf8')
+    writeConfigRaw(MALFORMED)
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('records once past lines that are not audit entries', () => {
+    const garbage = 'null\nnot json\n42\n"text"\n[1,2]\n{"event":"rsct_json.mal\n'
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(logPath(), garbage, 'utf8')
+    writeConfigRaw(MALFORMED)
+    reject()
+    appendFileSync(logPath(), garbage, 'utf8')
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('never throws when the audit log path is a directory', () => {
+    mkdirSync(logPath(), { recursive: true })
+    writeConfigRaw(MALFORMED)
+    expect(() => resolveProjectRoot()).not.toThrow()
+    reject()
+  })
+
+  it.skipIf(process.platform === 'win32')('records the violation when the log cannot be read but can be appended to', () => {
+    mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
+    writeFileSync(logPath(), '', 'utf8')
+    chmodSync(logPath(), 0o200)
+    writeConfigRaw(MALFORMED)
+    reject()
+    chmodSync(logPath(), 0o600)
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it.runIf(process.platform === 'linux')('closes the log after reading it', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    const before = readdirSync('/proc/self/fd').length
+    for (let i = 0; i < 50; i++) reject()
+    expect(readdirSync('/proc/self/fd').length).toBeLessThanOrEqual(before)
+  })
+
+  it.runIf(process.platform === 'linux')('closes the log when reading it fails', () => {
+    mkdirSync(logPath(), { recursive: true })
+    writeConfigRaw(MALFORMED)
+    reject()
+    const before = readdirSync('/proc/self/fd').length
+    for (let i = 0; i < 50; i++) reject()
+    expect(readdirSync('/proc/self/fd').length).toBeLessThanOrEqual(before)
+  })
+
+  it('finds a recent identical entry 48 KB back', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    appendFileSync(logPath(), recentFiller(48 * 1024), 'utf8')
+    reject()
+    expect(violationLines()).toHaveLength(1)
+  })
+
+  it('consults only the tail of the log', () => {
+    writeConfigRaw(MALFORMED)
+    reject()
+    appendFileSync(logPath(), recentFiller(100 * 1024), 'utf8')
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(2)
+  })
+
+  it('lists every failure in full, however many harmless ones come first', () => {
+    writeConfig({
+      ...VALID_MIN,
+      protected_branches: Array.from({ length: 10 }, () => ''),
+      approval_modes: { timestamp_skew_seconds: 999_999 },
+      audit: { enabled: false },
+    })
+    reject()
+    const [entry] = readAuditEntries()
+    const failures = entry!.validation_errors as Array<{ path: string; message: string }>
+    expect(failures).toHaveLength(12)
+    expect(failures.map((failure) => failure.path)).toEqual(
+      expect.arrayContaining(['approval_modes.timestamp_skew_seconds', 'audit.enabled']),
+    )
+  })
+
+  it('keeps a long message whole, and so appends an entry larger than the tail on every load', () => {
+    writeConfig({ ...VALID_MIN, sql_dialect: 'x'.repeat(100_000) })
+    reject()
+    reject()
+    expect(violationLines()).toHaveLength(2)
+    expect(Buffer.byteLength(violationLines()[0]!)).toBeGreaterThan(TAIL_BYTES)
   })
 })
 

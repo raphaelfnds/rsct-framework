@@ -788,7 +788,7 @@ pins it. The scripts are bash, not sh: measured with dash, the previous installe
 measured locally; one test drives a real npm on the CI matrix.
 
 ### ADR-022 — The hook programs are launchers, and the edit-scope guard judges resolved paths (#114)
-**Status**: active; the dialog-free-lane-suspension consequence is superseded by ADR-023 (#80, 2.13.4)
+**Status**: active; the dialog-free-lane-suspension consequence is superseded by ADR-023 (#80, 2.13.4), and the named limit "each edit there now writes one `rsct_json.*` audit line" is bounded to about one per hour by ADR-024 (#93, 2.13.5), once `/rsct-setup` has refreshed the guard copy
 **Tags**: hooks, edit-scope, setup, install-drift, cross-os
 **Context**: from 2.2.0 to 2.12.3 the installed `edit-scope-guard.js` never refused an edit. Three
 causes, each MEASURED. (1) `src/scripts/edit-scope-guard.ts` imported one helper from
@@ -935,6 +935,121 @@ is `.strip()` (ADR-005), so the keys drop silently. The test suite drops by exac
 lane tests; no shared guarantee was lost (the no-dialog-on-review-refusal assertion moved to the
 plan-token test).
 
+### ADR-024 — A rejected `.rsct.json` is recorded once per hour, not once per call (#93, 2.13.5)
+**Status**: active. Bounds the ADR-022 named limit "each edit there now writes one `rsct_json.*`
+audit line", for guard copies that carry this change; the other half of that limit — a rejected
+config switches the guard off — stands.
+**Tags**: audit-log, config, growth
+
+**Context**: `.rsct/audit.log` is kept out of git (`/rsct-setup` writes the ignore block) — there
+is no git history to fall back on — and gates re-derive state from it. MEASURED on `main` after
+#80, what reads the log by event name:
+`classify.verdict` (as presence and as a MAX — the evidence gate and the tier ratchet);
+`review.unverified_decision` / `review.dead_code_kept` / `review.public_api_approved` (the REVIEW
+and commit gates); `settings.baseline` (newest only; a report, not a gate); `tutor.step` (a count,
+for the step number); and `approval.consumed`, in one pass with two results, both after the skew
+check — whether THIS approval was already consumed (one of two witnesses, store ∪ log, and it can
+only matter while the approval's own timestamp is inside the skew tolerance, 60–600 s either
+side), and whether ANY approval was ever consumed (no time limit; it tells a deleted store from a
+fresh project). `lib/health.ts` reads only whether the file is non-empty. One writer fired on
+nearly every tool call and on every edit, whatever the call did: `emitConfigViolation` appended an
+`rsct_json.malformed` / `rsct_json.bounds_violation` line each time `resolveProjectRoot` met a
+rejected `.rsct.json` — in the server, and in the edit-scope guard, which is a fresh process per
+edit. Nothing reads that class by name.
+
+**Decision**: bound that writer, do not build a retention policy. The same violation is written
+to the log once per hour instead of once per call. Before appending, `emitConfigViolation` reads
+the last 64 KB of the log it is about to write to; if any line there is the same entry (everything
+but `ts`) with a stamp between one hour ago and now, it appends nothing. Nothing else changes: the
+entry carries every failure in full, as before, and the stderr warning still prints on every
+rejected load. The check lives in `emitConfigViolation`, not in `appendAuditEntry`, so no other
+writer is gated.
+
+**Direction**: for the audit trail this is more permissive than before, in two ways, and was
+decided by the maintainer (bound the noise; the hourly window over the last-line check). There are
+fewer lines; and the write, unconditional before, now depends on what the log already holds — a
+file a same-user process can write (see the planted-line limit below). Firm premise #1 still
+holds in this form: after every rejected load the log holds this exact entry with a stamp from the
+last hour — appended now, or already there — unless the append itself failed, as before. For every
+gate the change is neutral, since none reads the class. The stderr warning is unchanged.
+
+**Alternatives considered**:
+- A memo in process memory — rejected: the edit-scope guard is a new process per edit.
+- Comparing against the last line only — built first, rejected in REVIEW. MEASURED by simulation,
+  1080 calls over 3 hours: 1 line for one violation, but 1080 lines — no bound at all — when two
+  violations alternate. That happens with two rejected configs in one repository (the log is one
+  per repository) or with a server and a hook on different Node versions (the `malformed` entry
+  embeds the engine's parse message). It also kept only the time of the FIRST rejection, and a
+  config repaired and then broken the same way left no trace. The hourly window gives 3 and 6
+  lines for the same two runs.
+- Deduplicating the stderr warning along with the line — built second, rejected in REVIEW: it made
+  a warning that nothing could suppress depend on a file a same-user process can write.
+- Bounding the entry (the first 10 failures, messages cut at 600 characters) so that it always
+  fits in the tail — built third, rejected in REVIEW: zod reports failures in schema order
+  (MEASURED, zod 3.25.76), and `approval_modes` and `audit` sit after twelve other keys, so ten
+  harmless failures placed first would have pushed the dangerous ones out of the record. The price
+  of not bounding it is the oversized-entry limit below.
+- Reading the whole log to find the entry — rejected: it would run on nearly every tool call and
+  every edit while the config is rejected, on exactly the logs the flood had bloated (see "Measured
+  facts": a full scan costs 87.5 ms at 50k lines).
+- Compaction or rotation carrying derived state forward — not attempted: an entry carries a
+  free-form `event` name and nothing that declares whether a reader depends on it.
+- A sidecar marker file — rejected: a second managed file to ignore, migrate and clean up.
+
+**Consequences**: while something keeps calling the loader, a config that stays rejected leaves
+about one line per hour instead of one per call. The log still shows that the config was rejected
+and roughly for how long — to the hour, not to the call: the last line can precede the last
+rejected load by up to an hour, a first line is missing when an identical one was written in the
+hour before, and the number of calls or edits made in that state is no longer in the log. Nor do
+two lines an hour apart prove the config stayed rejected in between: a repair and an identical
+break inside the hour leave the same two lines. The resolution is stated because that state
+switches the edit-scope guard off (ADR-022).
+
+A log that cannot be read — absent, or unreadable — falls back to the append, so a read error
+never suppresses the record; lines that are not entries, or carry no usable stamp, are skipped. A
+directory sitting where the log should be does not throw, by two routes (MEASURED, Node 22, NTFS
+and ext4): Windows opens it and reports size 0, so nothing is read; Linux reports 4096 and the
+read throws `EISDIR`, which is caught. When the append itself fails — a directory there, a
+read-only tree — nothing is recorded, exactly as before this change.
+
+Projects already set up get the guard half only when `/rsct-setup` runs again: the guard is a
+copy inside each project (ADR-013, ADR-022), and a copy installed before this release keeps
+writing one line per edit. The server half applies as soon as `rsct-mcp` is updated. The notice
+that names a stale copy (`install_drift`) is computed only while the config is valid; while it is
+rejected, `rsct_status` and `rsct_load_context` suggest `/rsct-setup` as they do for an unmanaged
+project, and no tool names the stale guard. A `/rsct-setup` run from an older `rsct-mcp` puts the
+old copy back (`docs/troubleshooting.md`).
+
+Named limits:
+- within the hour a repeat adds no line: a config repaired and broken again the same way, or a
+  new session on a still-rejected config;
+- each DISTINCT violation gets its own line, so a config rewritten to fail differently on every
+  load still writes on every load. This bounds an accident, not a process that keeps changing the
+  file — which could write the log directly anyway (ADR-011);
+- a `.rsct.json` that cannot be read at all returns before this writer: no warning and no line,
+  before this change or after it;
+- an entry must fit whole in the 64 KB tail to be found. One that is larger — MEASURED (zod
+  3.25.76) at 100 KB for a single 100,000-character value, because the message repeats it — is
+  appended on every call, as before; and more than 64 KB written by other events inside the hour
+  lets one more line through;
+- an identical line planted in the log with a stamp from the last hour suppresses the real one
+  until that hour passes, and one planted with a future stamp does the same once the clock reaches
+  it, so a row of them can cover the hours ahead. A same-user process could already rewrite the
+  file (ADR-011), and the stderr warning does not depend on the log;
+- the hour runs from the stored stamp to the reader's clock: a clock set back makes a recent line
+  look future, and one more line goes through;
+- the entry carries no root and the log is one per repository, so the same violation in two
+  packages, or two linked worktrees, of one repository is recorded once per hour, not once each;
+- two values that fail the same key with the same message serialize alike and count as one
+  violation (`validation_errors` carries path, code and message, not the value), and so do two
+  malformed files that draw the same parse message;
+- the entry always goes to the default `.rsct/audit.log`, never to a configured `audit.path`: a
+  rejected config is not trusted for where to write, before this change or after it;
+- two processes that read before either writes both append (no lock); bounded by the burst;
+- lines the flood already wrote stay where they are;
+- entries written by real work still accumulate with no retention, and every commit still scans
+  the whole file. That is growth proportional to use, left as it was — #93 stays open for it.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -1030,8 +1145,10 @@ runs, and exports nothing that could tempt an import.
   changed `resolveAuditPath`'s output for every project on macOS and reddened five
   pre-existing tests unrelated to that change.
 - **`deriveAuditCeiling` full-scans the audit log**: 2.1 ms at 1k lines, 15.1 ms at 10k,
-  87.5 ms at 50k. Bounding it is issue #93. Any new reader of the log should ride an
-  existing pass rather than add one.
+  87.5 ms at 50k. Bounding it is the part of issue #93 still open (ADR-024 only bounded the
+  one writer that fired on every call and every edit). Any new reader of the log should ride an
+  existing pass rather than add one; the config-violation check cannot — it runs in the config
+  loader, before any pass — so it reads the last 64 KB instead of the file.
 - **`fast-uri` executes but is not exposed.** With every export instrumented and the SDK's
   own Ajv configuration fed the 40 tool schemas read from the running server, `parse` runs
   81 times — over exactly two constant strings, `""` (80×) and
@@ -1344,8 +1461,9 @@ those files. Keyed by module and symbol; restatements of what the code says were
   anti-rollback ceiling is re-derived from. `getInstallDriftNotice` itself only reads.
 - Honest scope of that guarantee, MEASURED by running the real handler (#55): it keeps the tool from
   writing a FALSE `install.drift_detected` entry; it does not make the handler write-free.
-  `resolveProjectRoot` appends a config-violation entry when `.rsct.json` is present but rejected,
-  creating the log if absent. `rsct_status` and `rsct_load_context` do the same on the same input —
+  `resolveProjectRoot` appends a config-violation entry when `.rsct.json` is present but rejected —
+  normally once per hour for the same violation (ADR-024) — creating the log if absent.
+  `rsct_status` and `rsct_load_context` do the same on the same input —
   the behaviour is the shared resolver's (#80). The tool description and the returned coverage
   boundary say so rather than claiming "no writes".
 - The coverage boundary ships in the OUTPUT, not only in the docs: "is this project's process
