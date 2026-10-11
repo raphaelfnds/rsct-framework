@@ -47,7 +47,7 @@ run your working tree, link it on purpose:
 ```bash
 cd mcp-server
 npm run build
-npm install -g .   # npm 10+ LINKS a folder install: the command now follows this clone
+npm install -g . --install-links=false   # LINKS the folder: the command now follows this clone
 ```
 
 From then on the branch you have checked out is the enforcement binary of every managed

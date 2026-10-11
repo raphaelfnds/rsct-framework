@@ -49,6 +49,12 @@ import {
 } from '../lib/audit-log.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import {
+  describeRetention,
+  previewRetention,
+  pruneAuditLog,
+  retentionDialogLine,
+} from '../lib/audit-retention.js'
+import {
   evaluateSettingsDrift,
   hashSettingsFile,
   readBaselineFromLog,
@@ -183,12 +189,27 @@ export interface RequestCommitInternal {
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
   shippedScriptsDir?: string | null
+  retention?: typeof pruneAuditLog
+}
+
+function runRetention(
+  prune: typeof pruneAuditLog,
+  projectRoot: string,
+  config: RsctConfig | undefined,
+  now: Date,
+): string | null {
+  try {
+    return describeRetention(prune(projectRoot, config?.audit, now))
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return `Audit log retention (ADR-025): the cut did not run (${detail}); a later commit retries it.`
+  }
 }
 
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -437,6 +458,9 @@ export async function requestCommitHandler(
   let tokenCtx: { token: PlanAuthorizationBlock; baseState: PhaseState } | null = null
 
   if (input.dev_approval !== undefined) {
+    const retentionLine = resolution.rsct_installed
+      ? retentionDialogLine(previewRetention(projectRoot, config?.audit, now))
+      : null
     const gate = await gateRequest({
       toolName: 'rsct_request_commit',
       approval: input.dev_approval,
@@ -446,6 +470,7 @@ export async function requestCommitHandler(
           [
             `Approve commit on '${branchLabel}'?`,
             ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+            ...(retentionLine ? [retentionLine] : []),
             '',
             `message: ${input.message}`,
           ].join('\n') + gateDialogFooter(projectRoot, config),
@@ -1005,6 +1030,10 @@ export async function requestCommitHandler(
   }
   hints.push(...deadAtCommit.hints)
   hints.push(...bookkeepingHints)
+  const retentionHint = resolution.rsct_installed
+    ? runRetention(internal.retention ?? pruneAuditLog, projectRoot, config, now)
+    : null
+  if (retentionHint) hints.push(retentionHint)
   const afields = auditFields(audit)
   if (afields.audit_error !== null) {
     hints.push(
