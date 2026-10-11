@@ -22,7 +22,13 @@ fix and disclosure timeline. Responsible disclosure is appreciated.
 
 Only the latest release is supported. RSCT ships as prompts plus a single MCP
 binary with no runtime state to migrate, so upgrading is a `git pull`, a
-reinstall, and a `/rsct-setup` re-run.
+reinstall, and a `/rsct-setup` re-run. One thing an upgrade to 2.14.0 or later does
+change on disk: the first commit that lands after it trims `.rsct/audit.log` to the
+retention rule — routine entries older than 10 days go, refusals included. Three kinds
+stay whatever their age: the entries a gate can still use, the entries whose event name
+marks an override, a skip, a degraded check or a bypass, and — of the records that
+repeat while something is off (a rejected config, enforcement not running) — the
+newest one (`mcp-server/README.md`, "Audit log").
 
 ## Network behaviour
 
@@ -59,7 +65,12 @@ npm *link* to that copy. This project publishes nothing to the npm registry. A p
 named `rsct-mcp` found there is not ours — do not install it, and please report it
 privately as above. A linked install is not replaced by a registry package of the same
 name on `npm update -g` (measured on npm 10.9.2 and 11.1.0; see `docs/decisions.md`,
-AD-007).
+AD-007). That is the one case measured. It does not cover installing that name from
+the registry, or running it through a package runner (`npx` and the like) — do
+neither.
+
+Not publishing is a recorded decision (`docs/decisions.md`, ADR-026). If that ever
+changes, this file on the `main` branch is where it will say so.
 
 ### `esbuild` advisories in the build toolchain
 

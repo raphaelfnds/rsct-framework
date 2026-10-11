@@ -80,7 +80,10 @@ mutations. A SessionStart sanitizer hook strips poison-pill entries
 BOTH `.claude/settings.json` and `.claude/settings.local.json` at every boot, so
 a once-approved blanket cannot persist. It also relocates entries carrying a
 machine home path out of the versioned file into the gitignored local one. Every invocation, override, or rejection is appended
-to `.rsct/audit.log` for forensic review.
+to `.rsct/audit.log` for forensic review. Routine entries — refusals included — stay
+there for 10 days. The override and skip records and the entries a gate can still use
+stay without limit; of the records that repeat while something is off (a rejected
+config, enforcement not running), the newest one stays.
 
 **CAP-33 — bootstrap visibility on mutating tools (v0.7.11+):** all the
 request tools (and `rsct_phase_code_start` from CAP-31) read

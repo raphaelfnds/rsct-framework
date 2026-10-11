@@ -78,6 +78,10 @@ skip it — copies the `rsct-mcp` companion into `~/.rsct/mcp-server` and links 
 global `rsct-mcp` command to that copy. What runs is the copy, never the clone: to
 update, `git pull` and run the installer again.
 
+This installer, run from a clone, is the only way the companion is distributed. It is
+**not on npm**: a registry package named `rsct-mcp` is not this project's — see
+[SECURITY.md](SECURITY.md#rsct-mcp-is-not-distributed-through-npm).
+
 > ⚠️ **On Windows: open Git Bash, not PowerShell, and not WSL.**
 >
 > The install/uninstall scripts are POSIX shell. PowerShell can invoke
@@ -750,7 +754,7 @@ quiet for good.
 - **`rsct-mcp` companion MCP server** (in [`mcp-server/`](mcp-server/README.md)) —
   the mechanical recall + enforcement layer: **40 tools + 5 resources** spanning
   Recall (M1), Enforcement (M2: §C-gated commit/push/merge + the SessionStart
-  sanitizer hook + the append-only `.rsct/audit.log`), the
+  sanitizer hook + the `.rsct/audit.log` trail, whose routine entries are kept 10 days), the
   **R→S→V→C→T→REVIEW** phase machine + 6 personas + Tutor (M3 + DX-4), multi-repo
   topology & the contract-surface gate (T2), guided onboarding (DX-1), and
   plan-authorization batch tokens (T3). The per-tool catalog, the boot-log tool
@@ -768,7 +772,7 @@ opposite — it installs a copy — and running it again is how you go back. See
 
 ```bash
 cd mcp-server
-npm install && npm run build && npm install -g .
+npm install && npm run build && npm install -g . --install-links=false
 # Choose ONE registration scope:
 #   user (recommended, works in every project on the machine):
 claude mcp add rsct rsct-mcp --scope user

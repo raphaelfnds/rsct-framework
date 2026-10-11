@@ -938,7 +938,11 @@ plan-token test).
 ### ADR-024 — A rejected `.rsct.json` is recorded once per hour, not once per call (#93, 2.13.5)
 **Status**: active. Bounds the ADR-022 named limit "each edit there now writes one `rsct_json.*`
 audit line", for guard copies that carry this change; the other half of that limit — a rejected
-config switches the guard off — stands.
+config switches the guard off — stands. Its decision "do not build a retention policy" is
+superseded by ADR-025 (#93, 2.14.0): of its last named limit, the missing retention is closed
+there and the whole-file scans remain; "lines the flood already wrote stay where they are" holds
+only until the first cut, which keeps the newest of them; and "roughly for how long" now holds for
+the last ten days only.
 **Tags**: audit-log, config, growth
 
 **Context**: `.rsct/audit.log` is kept out of git (`/rsct-setup` writes the ignore block) — there
@@ -1050,6 +1054,379 @@ Named limits:
 - entries written by real work still accumulate with no retention, and every commit still scans
   the whole file. That is growth proportional to use, left as it was — #93 stays open for it.
 
+### ADR-025 — The audit log keeps ten days of routine history; what gates read and bypass records stay (#93, 2.14.0)
+**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93.
+**Tags**: audit-log, retention, growth, cross-os
+
+**Context**: `.rsct/audit.log` is the only copy of what it holds and had no bound. MEASURED on 19
+real logs from one machine (2026-10-10; that machine still ran 2.12.3, so the per-edit
+`settings.baseline` fixed in 2.13.0 was still being written): 9.38 MB and 33,072 lines in all;
+`settings.baseline` about a third of the lines; the `rsct_json.*` class ADR-024 bounded, 3 lines;
+the largest log 3.4 MB and 12k lines, 46.5 ms for one whole read and parse (real entries are
+several times longer than the synthetic ones timed under "Measured facts") — and an approved commit
+reads the whole file several times (`tools/request-commit.ts`: the baseline, the ceiling at each
+sweep and dead-code check, and `consumedInAudit`). Growth on an updated install was not measured.
+Six readers consulted the log before this change, and nothing else in `src` compared an `event`
+(the cut itself now reads two: its own `audit.pruned` marker and `settings.baseline`):
+`deriveAuditCeiling` (`classify.verdict` as presence, and the three `review.*` decision sets),
+`readBaselineFromLog` (the LAST `settings.baseline` in file order with a non-empty
+`hash`), `countPriorSteps` (`tutor.step` per `spec_ref`), `consumedInAudit` (`approval.consumed`:
+this approval, reachable only inside the 60–600 s skew, and "any ever"), `evaluateMcpHealth`
+(size), and the hourly check of ADR-024 (last 64 KB). ADR-024's Context calls the MAX over
+`classify.verdict` a tier ratchet; MEASURED, no gate reads it — it reaches one output field, and
+the downgrade guard reads phase-state. One human reader is documented: `docs/troubleshooting.md`
+sends the developer to a `review.commit_drift` entry before deleting a corrupt phase-state. The
+maintainer decided the direction: delete what is older than ten days, from the top of the file
+down, keeping fixed the entries the gates read and the records of an overridden rule.
+
+**Decision**: a commit that LANDED cuts the log (`lib/audit-retention.ts`, called from
+`rsct_request_commit` after the commit, on either authorization path, when the project is
+managed). A refused, declined or unapproved call removes nothing. The hints of the call report
+every cut, and an `audit.pruned` entry records it.
+
+The approval dialog — the channel an agent cannot summarise away (the #25 precedent) — carries a
+forecast, "N lines older than 10 days are due for removal with this commit", only when the cut
+reaches an entry more than twenty days old: the first cut after an upgrade, or after weeks without
+a commit, not the daily one. With two logs, only one that goes back that far is counted. It is a
+forecast: counted before the approval is validated and the commit is made, while the cut reads
+the log again. Nobody sees it on a commit under a plan token, or on an approval trusted
+with no dialog channel (`trust_allowed_for`) — no dialog is shown there, and the hint and the entry
+are all there is. Before it forecasts, once per server process and log, the call tries the hard
+link the cut needs — it takes the lock, links, unlinks and releases — so the dialog does not
+promise a cut the volume cannot do; an attempt that fails for any other reason forecasts nothing
+and is made again on the next such call. That attempt is the only thing retention does to the
+project's files on a call that ends up refused, and it leaves none behind; a call rejected at the
+validation of its approval has read the log as well.
+
+The scan goes from the top. An entry that cannot be parsed, is not an object, has no string
+`event`, or whose `ts` is not a strict `YYYY-MM-DDTHH:MM:SS(.sss)Z` is kept and the scan goes on.
+The first entry stamped within the last ten days — or in the future — stops it: that entry and
+everything below stay untouched and are not scanned (only the last `audit.pruned` entry is looked
+up, for the running total). Above the stop, an entry older than ten days is:
+- **kept if it is the last of its kind** above the stop, when its event is a repeating state
+  record: `settings.baseline` (only one the reader accepts — that reader uses the last one and
+  nothing else), `rsct_json.malformed`, `rsct_json.bounds_violation`, `install.drift_detected`,
+  `sanitize.malformed`, `sanitize.migration_skipped`, `settings.drift_detected`, `audit.pruned`.
+  This list is consulted first, so `sanitize.migration_skipped` is newest-only although its name
+  contains `skip`;
+- **kept**, every one, when its event is pinned: `classify.verdict`, `review.unverified_decision`,
+  `review.dead_code_kept`, `review.public_api_approved`, `review.commit_drift`,
+  `approval.consumed`, `tutor.step`, `free_commit.committed` and `free_commit.locked` (servers up
+  to 2.13.3 read them), `sanitize.stripped`, `audit_log.migrated`, and any other event whose name
+  contains `override`, `skip`, `degraded` or `bypass`. `approval.consumed` was newest-only in the
+  first build — its reader gave the same answers in the equivalence test either way — and was
+  pinned in REVIEW: it is an entry a gate reads, and the decision was to keep those;
+- **dropped** otherwise — phase starts and completions, findings, commits, pushes, merges,
+  plan authorizations, bootstrap warnings, and refusals.
+
+A cut is due only when something droppable is more than eleven days old, so there is about one a
+day and a log with nothing old is never written to. Kept entries are never re-serialised: the file
+is handled as bytes split at `0x0A`, and order is preserved. Both the configured log and the default
+one are cut when they differ, since `rsct_json.*` always goes to the default one. Each cut appends
+`audit.pruned` — `dropped`, `kept`, `cutoff`, `source_bytes`, `dropped_total`, `first_cut_at`, `cut`.
+There is no config key.
+
+The swap, under `audit-prune.lock` in `<anchor>/.rsct/reports/` — the lock holds the log's path and
+a cut id: hard-link the log to `audit-prune-old.log`; read it again and write the survivors to
+`audit-prune-new.log` through one descriptor, with the log's mode, never copying bytes past the
+last newline; copy what was appended meanwhile (five rounds at most, else give up as busy); append
+the `audit.pruned` entry, which carries the cut id and, as `source_bytes`, the offset copied so far;
+`fsync`; check that the lock still carries this cut's id — give up as busy if it does not, so a
+cut that took long is not swapped under a lock someone else already cleared — and renew its time;
+rename the new file over the log; then read the linked old file past that offset and append what
+is there to the log, look again after 20 ms, until it stops growing (two looks at least, five at
+most, on every platform); unlink. Before the rename a failure removes what this call created — if
+the lock still carries its id — and leaves the log untouched. After it, the link and the lock
+stay, and a later call, once the lock is a minute old, finishes the job: it rescues from
+`source_bytes` only when the newest `audit.pruned` entry carries the lock's cut id, and simply
+unlinks when the two names are still one file. If the rescue had completed and only the unlink
+failed, the lock goes and the link stays, so the later call unlinks without rescuing twice. A lock
+stamped within a minute of the clock, on either side, is a cut in progress. A call that repairs
+never cuts.
+
+The hints say so, on every commit where it happens: a cut; an interrupted cut that was finished or
+undone; a log over 512 MB; a log path that is not a regular file; an `audit.path` that names one
+of the working files or, on Windows, a stream inside a file (nothing is cut then); a session in
+which git could not report the repository; a cut that failed, or threw. For a volume without hard
+links, and for a 9p share, they say it once per server process and log, which then stops trying. They say nothing when nothing is due, when
+another cut holds the lock or took it over, or the log would not settle (busy — a later commit
+cuts), and when the project is not managed, a rejected `.rsct.json` included.
+
+**Direction**: neutral for every gate — each event a reader consults is pinned or kept as that
+reader needs it. One test compares the ceiling, the baseline, both approval results and the health
+verdict before and after a cut that dropped lines, then runs the tutor's own counter; the hourly
+check reads the last hour only. A static test fails when `src` compares an `event` to a name the
+rule would drop. Firm premise #3 is untouched: `classify.verdict` is pinned.
+
+More permissive for the audit trail, decided by the maintainer: routine history, refusals
+included, is gone after ten days, and it was the only copy. Keeping the bypass-shaped names,
+`review.commit_drift`, the `free_commit.*` pair and the newest of each state record goes beyond what
+was asked, in the stricter direction — and is still less than `main` kept: once ten days have
+passed, the log shows THAT a config was rejected, or that enforcement was not running, and when it
+last was, not for how long. ADR-024's "roughly for how long" holds for ten days. Firm premise #1
+now reads: the newest entry of each `rsct_json.*` event is always in the log, and every one from
+the last ten days. A commit from the project whose config is rejected cuts nothing; another
+project that shares the repository's log still can. Firm premise #2 is untouched.
+
+**Alternatives considered**:
+- Cutting every entry by age — rejected: it drops what the readers above consult.
+- Judging each entry wherever it sits — rejected for the top-down form the maintainer described:
+  a back-dated entry below a recent one is kept, and nothing below the stop is scanned.
+- Cutting at the top of the call, before the gates — built first, rejected in REVIEW: a refused or
+  unapproved call deleted history, and the dialog of a call refused early never showed it.
+- A forecast line in every approval dialog — built next, narrowed in REVIEW to the cut that reaches
+  entries more than twenty days old: a line that shows up on the first commit of every day teaches
+  the reader to skip the dialog, and the dialog is the channel the gates depend on. The threshold
+  is one constant (`ANNOUNCE_MS`).
+- A forecast that only reads the log — built with it; on a volume without hard links it promised
+  a cut that never came. The one-off link attempt replaced it.
+- Deciding up front, by file identity (same device and inode), that "the log sits on a working
+  file" — built in REVIEW and dropped: while a cut runs, the old-file name IS the log, so a second
+  process took a cut in progress for a misconfigured path. Adding "and the file has a single name"
+  did not save it — the two looks are not one instant — and neither did comparing resolved paths
+  with the operating system's resolver (`realpathSync.native`): MEASURED in the stress run on
+  NTFS, one to three calls in about 1,400 still reported a misplaced log. The cause was not
+  isolated; HYPOTHESIS: Windows names a file by its open handle, so a file opened just before a
+  rename answers with the name it was renamed to. What shipped is two plain checks. Up front, the
+  spelling: the same path, or the same ignoring case on Windows and macOS. And whenever a working
+  file exists, before a cut or a repair goes on: a refusal when that file and a log are one file
+  with a single name — looked at before and after the comparison, because the new file does
+  become the log at the rename. MEASURED: a version that looked once reported a misplaced log in
+  one call of about 1,400, on NTFS and on ext4; the final module, in none of about 8,800 calls
+  on NTFS and 7,200 on ext4.
+- Read, write a temp, rename — built in a prototype and MEASURED (four writers at about 600
+  lines a second each, a rewrite every millisecond, Node 22.14): 5,042 of 10,000 lines lost on
+  NTFS, 7,312 lost and 8 torn on ext4.
+- The same, copying over what arrived before the rename — MEASURED: 35–45 lines lost per ~500
+  rewrites on NTFS, 10–12 per ~340 on ext4. The gap between the last size check and the rename is
+  real.
+- Keeping a handle on the old file — works on Linux; on Windows `renameSync` over a target any
+  process holds open is `EPERM` (MEASURED, Node 22.14, libuv 1.49.2). The hard link gives the old
+  file a second name instead, the same code on every platform.
+- A lock every writer takes — rejected: installed hook copies of older versions cannot be changed.
+- A marker in the tail to limit scans to one a day — replaced: a busy log pushes any marker out of
+  a tail, and existing logs would all gain a line. The eleven-day threshold needs no state.
+- Cutting in the SessionStart sanitizer, or inside `appendAuditEntry` — rejected: the keep rule
+  would live in a per-project copy that goes stale against a newer server's readers, and every
+  project would need `/rsct-setup`.
+- Truncating by size — rejected: noise would push evidence out; age cannot be flooded.
+- Rotating to a second file, or working files beside the log — rejected: a new name under `.rsct/`
+  needs an ignore line, a backfill and uninstall handling; `.rsct/reports/` already has the first
+  two. Names ending in `.log` and `.lock` are also ones the REVIEW sweep never takes for code.
+- A config key — rejected: `audit` is `.strict()`, so every older server would reject the whole
+  config, and `.rsct.json` is a file an agent can edit.
+
+**Consequences**: the first commit that lands after an upgrade does the first cut, which can remove
+months at once; its hints — and its dialog, in a log that goes back more than twenty days —
+`CHANGELOG.md` and `docs/troubleshooting.md` say so. Nothing changes until `rsct-mcp` is updated,
+and nothing needs `/rsct-setup` — the cut is server-side and the hook copies are untouched.
+Simulated on the 19 logs with the shipped planning function (2026-10-11): 9.38 MB → 2.78 MB,
+22,881 of 33,072 lines dropped in 17 logs, two with nothing due; 2,399 pinned lines (661 KB) kept
+above the stop — 809 of them `approval.consumed`, 1,112 the `override_invoked` events of commit,
+push and merge — and 16 newest-only ones; no entry without a usable stamp, no old entry below a
+recent one. `/rsct-uninstall` removes the three working files. `README.md`,
+`mcp-server/README.md`, `rules/C-reauthorize.md` and `SECURITY.md` no longer describe the log as
+unbounded history.
+
+MEASURED on the shipped module (2026-10-11, Node 22.14; two processes that forecast and then cut,
+three writers of pinned lines and one of routine lines at about one line a millisecond each, and a
+clock advanced so that every call could cut): NTFS, 884 cuts in three runs, 0 lines lost,
+duplicated or torn, 13–18 cuts per run abandoned cleanly on `EPERM`; ext4, everything inside WSL,
+245 cuts in five runs, 0 lost — those with one more process reading the whole log in a loop:
+254,032 looks, never missing, empty or unreadable; 100 KB lines, 0 lost or torn on both; no
+working file left after any run, and none visible to `git status` under the installed ignore
+block. The same reader on NTFS — 50,429 looks, same answer — holds the log open and turns most
+swaps into `EPERM`: 130 cuts in three runs, 669 abandoned, still 0 lost. In an earlier run of the
+same harness one call failed creating the working folder while the other process was removing
+it, and said so. Linux Node with the files on `/mnt/c`, before the refusal that now stops it: the
+swap is not atomic there — see the named limit — and the shipped module does not cut. Windows
+Node with
+the files under `//wsl.localhost/`: `linkSync` is `ENOTSUP`, the forecast says nothing, each
+process reports the volume once and does not try again, and nothing is cut. Cuts per run vary
+with the load on the machine: while one process holds the lock — an `fsync` and a 20 ms look-back
+at least — the other is busy. The same harness caught defects that reading had not: a lock
+created in the current millisecond read as older than the clock and was torn down by the second
+process; and, twice in different builds, a cut in progress was taken for a log placed on a
+working file (see the alternatives).
+
+Named limits:
+- no cut on a volume without hard links — MEASURED on `//wsl.localhost/` from Windows, the one WSL
+  combination the installer reaches — and none for a log that sits on another volume than
+  `<anchor>/.rsct/reports/` (`EXDEV`, expected, not measured). FAT and exFAT have no hard links
+  either; not measured, and the code the link answers with decides how it is told: one of the
+  listed codes, the volume is reported once; any other — libuv's table suggests `EISDIR` on
+  Windows — every commit reports a cut that failed and says a later one retries, which it does,
+  to fail the same way. None for a log over 512 MB or a path that is not a regular file, a symbolic link
+  included, none when git cannot report the repository, and none from a project whose
+  `.rsct.json` is rejected. The log keeps growing there;
+- a project that never lands a commit through `rsct_request_commit` is never cut;
+- no cut on a 9p share — a Windows disk reached from inside WSL (`/mnt/c`) is one — because
+  replacing a file is not atomic there. MEASURED with the stress harness before that refusal, in
+  six runs: twice a reader found no log (2 of 362 looks, 1 of 406), and in one run 3 of 900 lines
+  written by other processes were lost. On Linux the cut asks the volume for its type and stops
+  at 9p (`0x01021997`; MEASURED: ext4 answers `0xef53`); the hints say so once per server
+  process and log, and the log keeps growing. Other volumes where a rename is not atomic are
+  not recognised. That combination has no supported install today (#110);
+- the dialog forecast covers only a cut that reaches entries more than twenty days old, and only
+  where a dialog is shown: the daily cut, a commit under a plan token and an approval trusted with
+  no dialog channel are reported in the hints and the `audit.pruned` entry alone — text the agent
+  relays;
+- a writer stalled between its open and its write for longer than the look-back, across the swap,
+  loses that line — any entry, a pinned one included; for `approval.consumed` the store is the
+  other witness;
+- recovery is not serialised: two calls repairing at once may append the rescued lines twice. A
+  call killed between the rename and the look-back is finished later and may do the same. With an
+  unreadable lock, or a newest `audit.pruned` entry from another cut, nothing is rescued — and
+  nothing either when the lock names a log the repairing call does not use: in a repository where
+  one package moved its log (`audit.path`), a commit from another package undoes that package's
+  interrupted cut and drops what had reached the old file after the copy;
+- the only proof that a cut died is a lock a minute old, or working files with no lock beside
+  them. The lock is renewed once, right before
+  the swap, so a cut that takes longer than a minute — hundreds of megabytes on a slow volume — is
+  abandoned as busy when another call clears it meanwhile, and the log stays as it was. What
+  remains is a window of milliseconds around the rename in which a repair that had already judged
+  the lock dead can lose or double the lines that arrived during it, and a volume whose file times
+  run a minute off the machine's clock, where a live lock reads as dead (not measured);
+- a cut that keeps failing — a log another program holds open on Windows, a full disk during a
+  repair — leaves the log uncut and says so in the hints of every commit. A lock file that cannot
+  be deleted blocks every cut: each commit reports an interrupted cut and none follows;
+- the working files are ignored only where the block lists `.rsct/reports/` (set up or re-set-up
+  since 2.11) and the anchor is the project root; in a relocated project (#82) they sit at the
+  repository root, where the block and `/rsct-uninstall` do not follow. An interrupted cut leaves
+  them there until a commit lands once the lock is a minute old;
+- pinned entries are bounded by use, not by construction: `approval.consumed` adds one line per
+  approved action for good, and `tutor.step`, `verification.skip` and `classify.verdict` are
+  written by calls no dialog gates;
+- the cut compares `ts` with the pruner's clock: a clock set forward deletes more — the routine
+  history of the last days included — and an idle project cannot be told from a clock that
+  jumped; a future-stamped entry at the top blocks every cut, silently, as a planted line could
+  (ADR-011);
+- the `audit.pruned` entry is a line like any other: a log trimmed by hand cannot be told from a
+  cut one, and `dropped_total` is what earlier entries said, not something the cut can check
+  (ADR-011);
+- the oversized-entry flood of ADR-024 is written only while the config is rejected, when that
+  project cuts nothing; a log it pushed past 512 MB is not cut afterwards either;
+- every commit still reads the whole — now small — log several times; the forecast adds one read
+  to every call that carries an approval and reaches the dialog step, shown or not, and the cut
+  one to every commit that lands, two when it cuts;
+- the legacy log of a relocated project and `approvals-seen.json` are not cut;
+- a kept entry can point at a dropped one — an `approval.consumed` whose
+  `request_commit.committed` is gone, an override record whose push is gone;
+- an unterminated last line is carried over with a newline added;
+- a log with two names (a hard link) is cut once per name the project uses, each as its own file;
+- an `audit.path` spelled like a working file — or like one ignoring case, on Windows and macOS —
+  is refused up front. Reached another way — through a junction or a symbolic link to the folder,
+  tested; an 8.3 short name, or another case on a volume Linux reaches case-blind, not measured —
+  it is refused once the file exists, before a cut or a repair touches anything: a working file
+  that is a log's only name is never deleted. MEASURED on Windows before that check: the log was
+  deleted and the call reported a repair. It protects the project whose config names the file,
+  and only where the volume reports a file identity: a commit from a project with another config
+  — another package of the repository, or the same project once its `audit.path` is changed back
+  — and `/rsct-uninstall` see a leftover and remove it. macOS runs these tests in CI only;
+- on Windows an `audit.path` with a colon after the drive names a stream inside a file, and no
+  log is cut while it does. MEASURED before that refusal, with `audit.path: .rsct/audit.log:x`:
+  cutting the default log replaced the file, the stream that held the configured log went with
+  the old one, and the call reported an ordinary cut. Only retention refuses such a path; the
+  log is still written there. The resource fork of a file on macOS was not measured;
+- a cut replaces the file. Its bytes and, outside Windows, its mode are carried over; anything
+  else the old file held — an NTFS stream, extended attributes, permissions set on it by hand —
+  is not. So the refusal above lasts only while the config names the stream: entries written to
+  `audit.log:x` are gone at the first cut after `audit.path` is changed back, as they would be
+  had the file been deleted (ADR-011);
+- a default log that `audit.path` reaches through another folder name, or through a symbolic
+  link in either direction, is one log, cut under whichever of the two names is the regular
+  file, where the volume reports a file identity; elsewhere it counts as two, the second pass
+  finds nothing due and the dialog forecast counts its lines twice. Those identities are taken
+  to be unique; a volume that does not guarantee it (ReFS, by its documentation — not measured)
+  could see a normal cut refused. On a case-sensitive folder of Windows or volume of macOS, a
+  path that differs from the default only by case is another file and is taken for the same
+  one: only one of the two is cut. A repair looks for the log a lock names by spelling, among both
+  names, so a lock written under a third spelling of the same path is undone without a rescue;
+- the hints report a cut that completed. One interrupted after the swap — the lines are gone,
+  the rescue or the unlink failed — is reported as a cut that did not complete, and the repair
+  that follows as an interrupted cut finished: its count is in the `audit.pruned` entry alone;
+- the static test matches `event ===` / `!==` against a literal or an upper-case constant, and
+  accepts newest-only as known: a reader of another shape, or one that needs every entry of a
+  newest-only event, must be added to the rule by hand;
+- the stress runs covered NTFS and ext4 on Node 22.14; macOS is covered by the deterministic tests
+  in CI only, and the field logs came from a machine that had not been updated.
+
+### ADR-026 — The companion is not published to a package registry (#112, 2.14.0)
+**Status**: active. The decision #112 asked for; ADR-021 and AD-007 stand.
+**Tags**: install, supply-chain, npm
+
+**Context**: a user gets the companion only through `scripts/install.sh`, run from a source tree
+(ADR-021); a contributor can also link a working tree (`CONTRIBUTING.md`). #112 asked whether to
+publish it. MEASURED 2026-10-10 (npm 11.1.0, registry `https://registry.npmjs.org/`):
+`npm view rsct-mcp name version` answers `E404` — the unscoped name is unregistered. A mirror
+configured in `npmrc` would answer the same; the error names the default registry. npm's policy,
+re-read the same day (<https://docs.npmjs.com/policies/disputes>): "It is against npm's Terms of
+Use to publish a package, register a username or an organization name simply for the purposes of
+reserving it for future use", and "Package names are considered squatted if the package has no
+genuine function". So the name cannot be held with a placeholder; only the real server could be
+published.
+
+**Decision**: not published — not under the unscoped name, a scope, or GitHub Packages. The
+installer is the only channel for a user. The reasons, each verified in the repository:
+- a registry install would deliver the server alone (`files` is `dist`, `grammars`, `README.md`,
+  `LICENSE`); the prompts, rules, templates and slash commands come only from the installer. The
+  result looks installed and then tells the user to run a `/rsct-setup` that machine does not have;
+- a registry install is a copy in npm's tree, replaced by name on `npm update -g` (AD-007), so
+  every release would have to be published — and there is no release automation: CI runs on push
+  and pull request only, and releases have come several a week;
+- it adds a credential to protect and a second trust root: today the only way code reaches a
+  machine is a `git pull` plus the installer, and an npm account would be a push channel to every
+  registry install at once;
+- no request for a registry install is on record (REPORTED: the issue list on the decision date).
+
+**Direction**: neutral for every gate.
+
+**What is given up, by name**:
+- the unscoped name stays unregistered. If someone else ever registers it, publishing under this
+  name is no longer an option: the fallback is a scope, or renaming a command written in about
+  400 lines of about 50 tracked files (lockfile and bundle excluded) and in files projects commit;
+- a package of that name on the registry would not be this project's. `SECURITY.md` says so, says
+  not to install it, and asks for a private report. A link is not replaced on `npm update -g`
+  (MEASURED on npm 10.9.2 and 11.1.0 only); an explicit registry install over the link was not
+  measured;
+- a Claude Code that runs inside WSL still has no supported install (#110).
+
+**Alternatives considered**:
+- Publish on every release — the only option that puts the name in the project's hands. Rejected
+  for the reasons above.
+- Publish under a scope — the same cost plus a rename, and it does nothing for the unscoped name.
+- Publish the real package once, then deprecate it — reservation in purpose, an ageing enforcement
+  binary frozen under the project's name, and an account that can publish as the project.
+- A placeholder, or a pointer package on the unscoped name — forbidden by the policy quoted.
+- A tarball on each GitHub Release, installed by URL — the shape AD-007 measured with a local
+  tarball: a real folder in npm's tree, resolved by name. The URL form itself was not measured.
+- A `postinstall` that makes the package whole — the package must install and build nothing when
+  npm links it (pinned in `tests/bash/script-install.test.ts`), and npm lets a user skip install
+  scripts.
+- `"private": true` — not a rival: by npm's documentation it stops a publish by the project and
+  nothing else. Left out of this change because it alters the package the installer links, and
+  that needs the installer's install, update and uninstall proof; its effect was not measured.
+
+**Consequences**: `README.md` says in the install section where the companion comes from.
+`SECURITY.md` narrows its immunity sentence to the case that was measured and points here. The
+contributor command in `README.md` and `CONTRIBUTING.md` carries `--install-links=false` — without
+it a user config, or npm 9.0.0–9.4.1, copies instead of linking (ADR-021). The test #112 cited pins
+`npm install -g .` on four pages, not the registry form; `tests/unit/no-registry-install.test.ts`
+now fails on a line that installs the name from a registry or runs it through a package runner
+(the npm, pnpm, yarn and bun forms) — in the docs, prompts, rules, templates, scripts, workflows,
+`CHANGELOG.md` and the server's source — on a `SECURITY.md` that stops saying where the companion
+comes from, and on a `publishConfig`, or a publish step in a workflow or a package script. It is
+a lint over the project's own pages, not a proof: it reads shell text one line at a time and JSON
+server entries one object at a time, and it also fails on a warning that quotes the command.
+
+Reopen this decision when: the name is found registered; a release workflow exists, so publishing
+costs one step; someone outside the project asks for a registry install; the package becomes
+self-sufficient or the install channel is redesigned (#110); the project opens an npm account for
+any other reason; and at 3.0.0 at the latest.
+
+Not measured: the two channels on one machine, a registry install over a link, the effect of
+`"private": true`, and anything on macOS, pnpm, yarn or bun.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -1145,10 +1522,30 @@ runs, and exports nothing that could tempt an import.
   changed `resolveAuditPath`'s output for every project on macOS and reddened five
   pre-existing tests unrelated to that change.
 - **`deriveAuditCeiling` full-scans the audit log**: 2.1 ms at 1k lines, 15.1 ms at 10k,
-  87.5 ms at 50k. Bounding it is the part of issue #93 still open (ADR-024 only bounded the
-  one writer that fired on every call and every edit). Any new reader of the log should ride an
-  existing pass rather than add one; the config-violation check cannot — it runs in the config
-  loader, before any pass — so it reads the last 64 KB instead of the file.
+  87.5 ms at 50k. ADR-024 bounded the one writer that fired on every call and every edit, and
+  ADR-025 keeps the file to about ten days of routine history, so the scan stays small; it is
+  still a whole-file read — several on an approved commit, and retention adds one for the dialog
+  forecast and one after the commit, two when it cuts. Any new reader of the log should ride an existing
+  pass rather than add one — and must add its event to the keep rule in
+  `lib/audit-retention.ts`, or a cut will drop what it reads (`tests/unit/audit-anchors.test.ts`
+  catches a comparison of `event` against a name the rule would drop, not every shape a reader
+  can take). The config-violation check cannot ride a pass — it runs in the config loader, before
+  any — so it reads the last 64 KB instead of the file.
+- **Replacing a file that other processes append to loses lines unless the old file keeps a
+  name** (2.14.0, Node 22.14, four writers at ~600 lines a second each). Read, write a temp,
+  rename: 5,042 of 10,000 lines lost on NTFS, 7,312 on ext4. Copying over what arrived before the
+  rename still lost 35–45 per ~500 rewrites on NTFS and 10–12 per ~340 on ext4. A hard link to the
+  old file, read once more after the rename: 0 lost on both. On Windows `renameSync` over a target
+  ANY process holds open — for read or for append, this process included — fails with `EPERM`
+  (libuv 1.49.2); on Linux it succeeds and an open descriptor keeps writing to the old inode.
+  `linkSync` is `ENOTSUP` on a `//wsl.localhost/` share reached from Windows and works on
+  `/mnt/c` reached from WSL.
+- **What an audit log holds in the field** (19 logs, one machine on 2.12.3, 2026-10-10): 33,072
+  lines, 9.38 MB. `settings.baseline` 11,416 lines (the per-edit defect fixed in 2.13.0);
+  `verification.finding` and `verification.action` 8,653 between them; `review.sweep_stamped`
+  1,707; `approval.consumed` 1,167; the `override_invoked` events of commit, push and merge
+  1,202 (none for rebase); `classify.verdict` 343; `rsct_json.*` 3. No line without a usable stamp, and no old line below a recent one — a
+  log is chronological in practice.
 - **`fast-uri` executes but is not exposed.** With every export instrumented and the SDK's
   own Ajv configuration fed the 40 tool schemas read from the running server, `parse` runs
   81 times — over exactly two constant strings, `""` (80×) and
@@ -1307,6 +1704,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - The tier ratchet is a MAX over the whole log, never "since the last `classify.verdict`" —
   classify is ungated, so a counting boundary there would be a reset primitive. A wiped
   phase-state cannot lower the audit-recorded tier (`higherTier(state, audit)`).
+- MEASURED for ADR-025 (2.14.0): since #80 removed the free-commit lane, no gate decision reads
+  that MAX. It reaches `tier_max_recorded` in the evidence gate's output and nothing else; the
+  downgrade guard in `tools/phase-code-start.ts` reads `last_classify.tier_max` from phase-state.
+  The presence of a `classify.verdict` entry is what the evidence gate uses.
 - `isFreeTier`/`higherTier` are the tier helpers the evidence gate uses to decide which tiers
   skip ceremony (`trivial`/`small`) and which do not.
 
@@ -1457,8 +1858,9 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **`rsct_audit` deliberately bypasses `evaluateInstallAdvisory`** (#55) and must stay that way.
   That helper APPENDS an `install.drift_detected` entry when the severity is `security`, to record
   that a mutation was ATTEMPTED under degraded enforcement. `rsct_audit` attempts no mutation;
-  routing it through the advisory would write false attempt records into the append-only log the
-  anti-rollback ceiling is re-derived from. `getInstallDriftNotice` itself only reads.
+  routing it through the advisory would write false attempt records into the log the
+  anti-rollback ceiling is re-derived from (append-only until ADR-025; `install.drift_detected` is
+  one of the events whose newest entry a cut keeps). `getInstallDriftNotice` itself only reads.
 - Honest scope of that guarantee, MEASURED by running the real handler (#55): it keeps the tool from
   writing a FALSE `install.drift_detected` entry; it does not make the handler write-free.
   `resolveProjectRoot` appends a config-violation entry when `.rsct.json` is present but rejected —
