@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-10-11
+
 ### Changed
 
 - **`.rsct/audit.log` keeps ten days of routine history (#93).** The log had no bound and is the
