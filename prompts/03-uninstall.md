@@ -176,10 +176,11 @@ independently in Phase 2:
 | Path | Created by | Default action | Why |
 |---|---|---|---|
 | `.rsct/scripts/sanitize-permissions.js` | `/rsct-setup` Phase 4.V (F2.5.6) | **remove always** | Pure framework code; no dev value once rsct-mcp is uninstalled. |
-| `.rsct/audit.log` | first §C-gated tool call or sanitizer hook | **keep by default** | Forensic / compliance record (rule overrides, sanitize events). Dev can opt-in to delete. |
+| `.rsct/audit.log` | first §C-gated tool call or sanitizer hook | **keep by default** | Forensic record: rule overrides and sanitizer strips are kept without limit, routine entries for 10 days (retention, #93). Dev can opt-in to delete. |
 | `.rsct/approvals-seen.json` | first successful `rsct_request_*` mutation (INV-2 anti-reuse store) | **remove** | Internal state with no post-uninstall value. |
 | `.rsct/phase-state.json` | M3 phase machine on every `rsct_phase_*_start/_complete` call | **remove** | Internal phase-machine state with no post-uninstall value (analogous to approvals-seen). |
 | `.rsct/reports/review-comments-*.md` | `rsct_phase_review_complete` when a REVIEW removed comments or allowed unverified files (#62) | **remove** | Per-REVIEW report shown in the approval dialog; the decisions it lists live in the audit log and the decisions files. |
+| `.rsct/reports/audit-prune.lock`, `audit-prune-new.log`, `audit-prune-old.log` | an audit-log retention cut that was interrupted (#93) | **remove always** | Working files of the cut; the `-old` one is the log as it was before it. See 4.V.c for what removing it can lose. |
 
 Anything else in `.rsct/` (developer-added files, schema references):
 **always preserve** — never delete files the framework did not create.
@@ -306,7 +307,8 @@ For each Category B item, the dev will choose:
 | The `rsct` entry in `enabledMcpjsonServers` of `.claude/settings.local.json` (#73) | **remove** | yes (4.V.a3 — by value; the key is dropped when its array empties, and the file only when nothing else remains) | none — a stale approval silently re-grants on the next install |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
 | `.rsct/phase-state.json` | **remove** | yes (silent — no question raised) | none — M3 phase-machine state with no post-uninstall value |
-| `.rsct/reports/review-comments-*.md` (and `.rsct/reports/` when it ends up empty) | **remove** | yes (silent — no question raised) | none — REVIEW sweep reports with no post-uninstall value; any other file under `.rsct/reports/` is kept |
+| `.rsct/reports/review-comments-*.md` (and `.rsct/reports/` when it ends up empty) | **remove** | yes (silent — no question raised) | none — REVIEW sweep reports with no post-uninstall value |
+| `.rsct/reports/audit-prune.lock`, `audit-prune-new.log`, `audit-prune-old.log` (#93) | **remove** | yes (silent — no question raised) | none — working files of an interrupted audit-log cut (4.V.c says what goes with them); any other file under `.rsct/reports/` is kept |
 | Any other file under `.rsct/` not listed above | **keep** | no | preserved unconditionally — never delete unknowns |
 
 > **`CONVENTIONS.md`** (project root, CAP-54) is **dev-owned** — it carries no
@@ -390,7 +392,7 @@ Current branch: [CURRENT_BRANCH]
 ❓ M2 enforcement state (only asked if Category E is in scope):
   - SessionStart sanitizer hook entry: remove (recommended) | keep
   - .rsct/audit.log forensic record  : keep (recommended) | delete
-  (.rsct/scripts/, .rsct/approvals-seen.json, .rsct/phase-state.json and the .rsct/reports/review-comments-*.md sweep reports are removed silently — no value preserved.)
+  (.rsct/scripts/, .rsct/approvals-seen.json, .rsct/phase-state.json, the .rsct/reports/review-comments-*.md sweep reports and the three audit-prune working files in .rsct/reports/ are removed without a question.)
 
 ❓ Final branch for uninstall commits:
   - chore/rsct-uninstall (recommended — new branch from [CURRENT_BRANCH])
@@ -987,8 +989,18 @@ prior phase-machine write crashed mid-flight and left a stale lock.
 ```
 
 `.rsct/reports/review-comments-*.md` are the REVIEW comment-sweep reports (#62),
-always removed when Category E is in scope. Only files matching that exact name are
-deleted; `rmdir` then drops `.rsct/reports/` only if nothing else is left in it.
+always removed when Category E is in scope. Only the names listed in this step are
+deleted — those reports and the three working files below; `rmdir` then drops
+`.rsct/reports/` only if nothing else is left in it.
+
+`.rsct/reports/audit-prune.lock`, `audit-prune-new.log` and `audit-prune-old.log` are
+the working files of the audit-log retention cut (#93). They exist only while a cut
+runs; an interrupted one can leave them behind. `audit-prune-old.log` is then the log
+as it was before that cut — the history the cut was dropping and, if the cut stopped
+at the very moment of the swap, possibly a few entries that had not yet been copied
+into the new log. They are always removed here, without a question. Those few entries
+are lost with the file: only the server can carry them over, on a commit that lands
+through `rsct_request_commit` once the lock file is at least a minute old.
 
 ```bash
 REPORTS_REMOVED=0
@@ -997,6 +1009,10 @@ if [ -d .rsct/reports ]; then
     [ -f "$report" ] || continue
     rm -f "$report" && REPORTS_REMOVED=$((REPORTS_REMOVED + 1))
   done
+  rm -f .rsct/reports/audit-prune.lock .rsct/reports/audit-prune-new.log .rsct/reports/audit-prune-old.log
+  if [ -e .rsct/reports/audit-prune.lock ] || [ -e .rsct/reports/audit-prune-new.log ] || [ -e .rsct/reports/audit-prune-old.log ]; then
+    echo "  ⚠ an audit-log retention working file was not removed — inspect .rsct/reports/" >&2
+  fi
   rmdir .rsct/reports 2>/dev/null || true
 fi
 echo "  REVIEW sweep reports removed: $REPORTS_REMOVED"

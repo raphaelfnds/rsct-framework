@@ -3,7 +3,7 @@ import { createRequire, builtinModules } from 'module';
 import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, fstatSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
@@ -9223,7 +9223,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join34 } = __require("path");
+    var { join: join35 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9266,7 +9266,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join34(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join35(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9431,7 +9431,7 @@ var require_thread_stream = __commonJS({
         }
         if (this[kImpl].flushing && this[kImpl].buf.length + data.length >= MAX_STRING) {
           try {
-            writeSync(this);
+            writeSync2(this);
             this[kImpl].flushing = true;
           } catch (err2) {
             destroy(this, err2);
@@ -9441,7 +9441,7 @@ var require_thread_stream = __commonJS({
         this[kImpl].buf += data;
         if (this[kImpl].sync) {
           try {
-            writeSync(this);
+            writeSync2(this);
             return true;
           } catch (err2) {
             destroy(this, err2);
@@ -9487,7 +9487,7 @@ var require_thread_stream = __commonJS({
         if (this[kImpl].destroyed) {
           return;
         }
-        writeSync(this);
+        writeSync2(this);
         flushSync(this);
       }
       unref() {
@@ -9593,7 +9593,7 @@ var require_thread_stream = __commonJS({
         destroy(stream, err2);
       }
     }
-    function writeSync(stream) {
+    function writeSync2(stream) {
       const cb = () => {
         if (stream[kImpl].ending) {
           end(stream);
@@ -9669,7 +9669,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join34, isAbsolute: isAbsolute9, sep: sep3 } = __require("path");
+    var { join: join35, isAbsolute: isAbsolute9, sep: sep3 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9732,7 +9732,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join35(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9750,7 +9750,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join34(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join35(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9772,7 +9772,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join34(__dirname$1, "..", "file.js");
+          return join35(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10762,7 +10762,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join34 = ",";
+            let join35 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10776,7 +10776,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join34 = `,
+                join35 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10784,13 +10784,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join34;
+                res += join35;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10811,7 +10811,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join34 = `,
+              join35 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10825,13 +10825,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join34;
+                separator = join35;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join34;
+              separator = join35;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10872,7 +10872,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join34 = ",";
+            let join35 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10885,7 +10885,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join34 = `,
+                join35 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10893,13 +10893,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join34;
+                res += join35;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join34}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10912,7 +10912,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join34 = `,
+              join35 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10921,7 +10921,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join34;
+                separator = join35;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10979,20 +10979,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join35 = `,
+              const join36 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join35;
+                res2 += join36;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join36}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11008,16 +11008,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join34 = `,
+            const join35 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join34, maximumBreadth);
+              res += stringifyTypedArray(value, join35, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join34;
+              separator = join35;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11028,13 +11028,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join34;
+                separator = join35;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join34;
+              separator = join35;
             }
             if (separator !== "") {
               res = `
@@ -23976,7 +23976,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.13.5";
+var RSCT_MCP_VERSION = "2.14.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -25132,7 +25132,7 @@ function enumeratePlanFiles(projectRoot) {
 }
 function listPlans(projectRoot, opts = {}) {
   const now = (opts.now ?? /* @__PURE__ */ new Date()).getTime();
-  const DAY_MS2 = 864e5;
+  const DAY_MS3 = 864e5;
   return enumeratePlanFiles(projectRoot).map((entry) => {
     const metadata2 = extractPlanMetadata(entry.path);
     const progressPath = join(projectRoot, `progress_${entry.slug}.md`);
@@ -25149,7 +25149,7 @@ function listPlans(projectRoot, opts = {}) {
       progress_path: progressMtime !== null ? progressPath : null,
       progress_mtime: progressMtime !== null ? new Date(progressMtime).toISOString() : null,
       progress_state: progressCompletionState(projectRoot, entry.slug),
-      progress_idle_days: progressMtime !== null ? Math.floor((now - progressMtime) / DAY_MS2) : null
+      progress_idle_days: progressMtime !== null ? Math.floor((now - progressMtime) / DAY_MS3) : null
     };
   });
 }
@@ -44140,6 +44140,554 @@ function evaluateInstallAdvisory(args2) {
   };
 }
 
+// src/lib/audit-retention.ts
+init_esm_shims();
+var AUDIT_RETENTION_DAYS = 10;
+var AUDIT_PRUNED_EVENT = "audit.pruned";
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var RETENTION_MS = AUDIT_RETENTION_DAYS * DAY_MS;
+var DUE_MS = RETENTION_MS + DAY_MS;
+var ANNOUNCE_MS = 2 * RETENTION_MS;
+var LOCK_STALE_MS2 = 60 * 1e3;
+var CATCH_UP_ROUNDS = 5;
+var LOOK_BACKS = 5;
+var LOOK_BACK_WAIT_MS = 20;
+var MAX_LOG_BYTES = 512 * 1024 * 1024;
+var NEWLINE = 10;
+var CASE_BLIND = process.platform === "win32" || process.platform === "darwin";
+var DEVICE_PREFIX = /^\\\\[?.]\\/;
+var PLAN9_VOLUME = 16914839;
+var STRICT_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+var PRUNED_MARK = Buffer.from(`"event":"${AUDIT_PRUNED_EVENT}"`, "utf8");
+var NO_HARD_LINK_CODES = new Set(
+  process.platform === "win32" ? ["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"] : ["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EPERM"]
+);
+var PINNED_EVENTS = /* @__PURE__ */ new Set([
+  "classify.verdict",
+  "review.unverified_decision",
+  "review.dead_code_kept",
+  "review.public_api_approved",
+  "review.commit_drift",
+  "approval.consumed",
+  "tutor.step",
+  "free_commit.committed",
+  "free_commit.locked",
+  "sanitize.stripped",
+  "audit_log.migrated"
+]);
+var NEWEST_ONLY_EVENTS = /* @__PURE__ */ new Set([
+  "settings.baseline",
+  "rsct_json.malformed",
+  "rsct_json.bounds_violation",
+  "install.drift_detected",
+  "sanitize.malformed",
+  "sanitize.migration_skipped",
+  "settings.drift_detected",
+  AUDIT_PRUNED_EVENT
+]);
+var PINNED_NAME_PARTS = ["override", "skip", "degraded", "bypass"];
+function retentionClassOf(event) {
+  if (NEWEST_ONLY_EVENTS.has(event)) return "newest_only";
+  if (PINNED_EVENTS.has(event)) return "pinned";
+  return PINNED_NAME_PARTS.some((part) => event.includes(part)) ? "pinned" : "dated";
+}
+function readStampedLine(line2) {
+  let parsed;
+  try {
+    parsed = JSON.parse(line2.toString("utf8").trim());
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object") return null;
+  const entry = parsed;
+  const event = entry.event;
+  const stamp = entry.ts;
+  if (typeof event !== "string" || typeof stamp !== "string" || !STRICT_STAMP.test(stamp)) return null;
+  const at = Date.parse(stamp);
+  return Number.isNaN(at) ? null : { event, at, entry };
+}
+function countsAsNewest(line2) {
+  if (line2.event !== "settings.baseline") return true;
+  const hash = line2.entry.hash;
+  return typeof hash === "string" && hash.length > 0;
+}
+function planCut(source, nowMs) {
+  const slices = [];
+  const newest = /* @__PURE__ */ new Map();
+  let offset = 0;
+  while (offset < source.length) {
+    const newline = source.indexOf(NEWLINE, offset);
+    if (newline < 0) break;
+    const end = newline + 1;
+    const line2 = readStampedLine(source.subarray(offset, newline));
+    if (line2 === null) {
+      slices.push({ start: offset, end, keep: true, age: 0 });
+      offset = end;
+      continue;
+    }
+    const age = nowMs - line2.at;
+    if (age <= RETENTION_MS) break;
+    const kind = retentionClassOf(line2.event);
+    const slice = { start: offset, end, keep: kind === "pinned", age };
+    if (kind === "newest_only" && countsAsNewest(line2)) {
+      const superseded = newest.get(line2.event);
+      if (superseded !== void 0) superseded.keep = false;
+      slice.keep = true;
+      newest.set(line2.event, slice);
+    }
+    slices.push(slice);
+    offset = end;
+  }
+  const kept = slices.filter((slice) => slice.keep);
+  const oldestDroppedMs = slices.reduce((oldest, slice) => slice.keep ? oldest : Math.max(oldest, slice.age), 0);
+  return {
+    due: oldestDroppedMs > DUE_MS,
+    survivors: Buffer.concat(kept.map((slice) => source.subarray(slice.start, slice.end))),
+    tailStart: offset,
+    dropped: slices.length - kept.length,
+    kept: kept.length,
+    oldestDroppedMs
+  };
+}
+var linkSupport = /* @__PURE__ */ new Map();
+var sleeper = new Int32Array(new SharedArrayBuffer(4));
+function workingPaths(base) {
+  const dir = join(base, ".rsct", "reports");
+  return {
+    dir,
+    lock: join(dir, "audit-prune.lock"),
+    temp: join(dir, "audit-prune-new.log"),
+    old: join(dir, "audit-prune-old.log")
+  };
+}
+function skipped(path2, reason, detail = null) {
+  return { status: "skipped", path: path2, reason, detail };
+}
+function codeOf(error2) {
+  const code = error2?.code;
+  return typeof code === "string" ? code : null;
+}
+function removeQuietly(path2) {
+  try {
+    unlinkSync(path2);
+  } catch {
+    return;
+  }
+}
+function removeEmptyDir(path2) {
+  try {
+    rmdirSync(path2);
+  } catch {
+    return;
+  }
+}
+function sameFile2(a, b) {
+  try {
+    const left = statSync(a, { bigint: true });
+    const right = statSync(b, { bigint: true });
+    return left.ino !== 0n && left.dev === right.dev && left.ino === right.ino;
+  } catch {
+    return false;
+  }
+}
+function sameSpelling(a, b) {
+  return a === b || CASE_BLIND && a.toLowerCase() === b.toLowerCase();
+}
+function readRange(path2, from, to) {
+  const length = Math.max(0, to - from);
+  const buffer = Buffer.alloc(length);
+  if (length === 0) return buffer;
+  const fd = openSync(path2, "r");
+  try {
+    let done = 0;
+    while (done < length) {
+      const got = readSync(fd, buffer, done, length - done, from + done);
+      if (got === 0) break;
+      done += got;
+    }
+    return buffer.subarray(0, done);
+  } finally {
+    closeSync(fd);
+  }
+}
+function wholeLines(chunk) {
+  return chunk.subarray(0, chunk.lastIndexOf(NEWLINE) + 1);
+}
+function sizeOf(path2) {
+  return statSync(path2).size;
+}
+function writeAll(fd, bytes) {
+  let done = 0;
+  while (done < bytes.length) done += writeSync(fd, bytes, done, bytes.length - done);
+}
+function lastMarker(source) {
+  const none = { dropped_total: 0, first_cut_at: null, source_bytes: null, cut: null };
+  const mark = source.lastIndexOf(PRUNED_MARK);
+  if (mark < 0) return none;
+  const start2 = source.lastIndexOf(NEWLINE, mark) + 1;
+  const newline = source.indexOf(NEWLINE, mark);
+  const line2 = readStampedLine(source.subarray(start2, newline < 0 ? source.length : newline));
+  if (line2 === null || line2.event !== AUDIT_PRUNED_EVENT) return none;
+  const total = line2.entry.dropped_total;
+  const first = line2.entry.first_cut_at;
+  const bytes = line2.entry.source_bytes;
+  const cut = line2.entry.cut;
+  return {
+    dropped_total: typeof total === "number" && Number.isFinite(total) ? total : 0,
+    first_cut_at: typeof first === "string" ? first : null,
+    source_bytes: typeof bytes === "number" && Number.isInteger(bytes) && bytes >= 0 ? bytes : null,
+    cut: typeof cut === "string" ? cut : null
+  };
+}
+function rescueFrom(old, log, from, wait) {
+  let offset = from;
+  let unterminated = Buffer.alloc(0);
+  for (let look = 0; look < LOOK_BACKS; look++) {
+    if (look > 0) wait(LOOK_BACK_WAIT_MS);
+    const chunk = readRange(old, offset, sizeOf(old));
+    const arrived = wholeLines(chunk);
+    unterminated = chunk.subarray(arrived.length);
+    if (arrived.length > 0) {
+      appendFileSync(log, arrived);
+      offset += arrived.length;
+    } else if (look > 0) {
+      break;
+    }
+  }
+  if (unterminated.length > 0) appendFileSync(log, Buffer.concat([unterminated, Buffer.from("\n", "utf8")]));
+}
+function lockAge(paths) {
+  try {
+    return Date.now() - statSync(paths.lock).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+function pendingSwap(paths) {
+  const age = lockAge(paths);
+  if (age !== null) return Math.abs(age) < LOCK_STALE_MS2 ? "fresh" : "stale";
+  if (!existsSync(paths.old) && !existsSync(paths.temp)) return "none";
+  return lockAge(paths) === null ? "stale" : "fresh";
+}
+function readLock(paths) {
+  try {
+    const parsed = JSON.parse(readFileSync(paths.lock, "utf8"));
+    if (parsed === null || typeof parsed !== "object") return null;
+    const record2 = parsed;
+    return typeof record2.log === "string" && typeof record2.cut === "string" ? { log: record2.log, cut: record2.cut } : null;
+  } catch {
+    return null;
+  }
+}
+function takeLock(paths, log, cut, seams) {
+  ensureParentDir(paths.lock);
+  seams.onStep?.("lock", { log, old: paths.old, temp: paths.temp });
+  try {
+    writeFileSync(paths.lock, JSON.stringify({ log, cut }), { encoding: "utf8", flag: "wx" });
+    return true;
+  } catch (error2) {
+    const code = codeOf(error2);
+    if (code === "EEXIST" || code === "ENOENT") return false;
+    throw error2;
+  }
+}
+function renewLock(paths, cut) {
+  if (readLock(paths)?.cut !== cut) return false;
+  const beat = /* @__PURE__ */ new Date();
+  utimesSync(paths.lock, beat, beat);
+  return true;
+}
+function soleIdentity(path2) {
+  try {
+    const info2 = statSync(path2, { bigint: true });
+    return info2.nlink === 1n && info2.ino !== 0n ? `${info2.dev}:${info2.ino}` : null;
+  } catch {
+    return null;
+  }
+}
+function soleNameOfALog(path2, candidates) {
+  const held = soleIdentity(path2);
+  if (held === null) return false;
+  return candidates.some((log) => soleIdentity(log) === held) && soleIdentity(path2) === held;
+}
+function namesAStream(path2) {
+  return process.platform === "win32" && path2.replace(DEVICE_PREFIX, "").indexOf(":", 2) >= 0;
+}
+function isRegularFile(path2) {
+  try {
+    return lstatSync(path2, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+function finishInterruptedSwap(paths, candidates, wait) {
+  const lock = readLock(paths);
+  if (existsSync(paths.old)) {
+    const owner = lock === null ? null : candidates.find((candidate) => sameSpelling(candidate, lock.log)) ?? null;
+    if (lock !== null && owner !== null && !sameFile2(owner, paths.old)) {
+      const marker = lastMarker(readFileSync(owner));
+      if (marker.cut === lock.cut && marker.source_bytes !== null) {
+        rescueFrom(paths.old, owner, marker.source_bytes, wait);
+      }
+    }
+    unlinkSync(paths.old);
+  }
+  removeQuietly(paths.temp);
+  removeQuietly(paths.lock);
+  removeEmptyDir(paths.dir);
+}
+function inspect(log, maxBytes) {
+  const info2 = lstatSync(log, { throwIfNoEntry: false });
+  if (info2 === void 0) return { status: "idle", path: log, reason: "absent" };
+  if (!info2.isFile()) return skipped(log, "not_regular");
+  if (info2.size > maxBytes) return skipped(log, "too_large");
+  return { mode: info2.mode & 511 };
+}
+function refuseSharedVolume(log, seams) {
+  if (process.platform !== "linux" || linkSupport.get(log) !== void 0) return;
+  try {
+    const type = (seams.volumeType ?? ((path2) => statfsSync(path2).type))(log);
+    if (type === PLAN9_VOLUME) linkSupport.set(log, { linked: false, reason: "not_atomic", code: "9p", reported: false });
+  } catch {
+    return;
+  }
+}
+function knownUnsupported(log) {
+  const known = linkSupport.get(log);
+  if (known === void 0 || known.linked) return null;
+  if (known.reported) return { status: "idle", path: log, reason: "volume_refused" };
+  known.reported = true;
+  return skipped(log, known.reason, known.code);
+}
+function tryLink(log, paths, seams, reported) {
+  try {
+    ;
+    (seams.link ?? linkSync)(log, paths.old);
+    linkSupport.set(log, { linked: true });
+    return null;
+  } catch (error2) {
+    const code = codeOf(error2);
+    if (code === null || !NO_HARD_LINK_CODES.has(code)) throw error2;
+    linkSupport.set(log, { linked: false, reason: "unsupported", code, reported });
+    return code;
+  }
+}
+function probeLink(log, paths, seams) {
+  const cut = randomUUID();
+  if (!takeLock(paths, log, cut, seams)) return;
+  let linked = false;
+  try {
+    linked = tryLink(log, paths, seams, false) === null;
+  } finally {
+    if (readLock(paths)?.cut === cut) {
+      if (linked) removeQuietly(paths.old);
+      removeQuietly(paths.lock);
+      removeEmptyDir(paths.dir);
+    }
+  }
+}
+function cutOne(log, paths, candidates, nowMs, seams) {
+  const wait = seams.wait ?? ((ms) => void Atomics.wait(sleeper, 0, 0, ms));
+  refuseSharedVolume(log, seams);
+  const unsupported = knownUnsupported(log);
+  if (unsupported !== null) return unsupported;
+  const state = inspect(log, seams.maxBytes ?? MAX_LOG_BYTES);
+  if ("status" in state) return state;
+  const pending = pendingSwap(paths);
+  if (pending !== "none" && [paths.lock, paths.temp, paths.old].some((path2) => soleNameOfALog(path2, candidates))) {
+    return skipped(log, "working_path");
+  }
+  if (pending === "fresh") return skipped(log, "busy");
+  if (pending === "stale") {
+    finishInterruptedSwap(paths, candidates, wait);
+    return { status: "recovered", path: log };
+  }
+  if (!planCut(readFileSync(log), nowMs).due) return { status: "idle", path: log, reason: "not_due" };
+  const cut = randomUUID();
+  if (!takeLock(paths, log, cut, seams)) return skipped(log, "busy");
+  let linked = false;
+  let tempCreated = false;
+  let swapped = false;
+  let rescued = false;
+  let finished = false;
+  try {
+    const refused = tryLink(log, paths, seams, true);
+    if (refused !== null) return skipped(log, "unsupported", refused);
+    linked = true;
+    const source = readFileSync(log);
+    const plan = planCut(source, nowMs);
+    if (!plan.due) return { status: "idle", path: log, reason: "not_due" };
+    const fd = openSync(paths.temp, "wx", state.mode);
+    tempCreated = true;
+    let copied = wholeLines(source).length;
+    let written = 0;
+    try {
+      if (process.platform !== "win32") fchmodSync(fd, state.mode);
+      const body2 = source.subarray(plan.tailStart, copied);
+      writeAll(fd, plan.survivors);
+      writeAll(fd, body2);
+      written = plan.survivors.length + body2.length;
+      for (let round = 0; ; round++) {
+        seams.onStep?.("catch_up", { log, old: paths.old, temp: paths.temp });
+        const arrived = wholeLines(readRange(log, copied, sizeOf(log)));
+        if (arrived.length === 0) break;
+        if (round === CATCH_UP_ROUNDS) return skipped(log, "busy");
+        writeAll(fd, arrived);
+        written += arrived.length;
+        copied += arrived.length;
+      }
+      const before = lastMarker(source);
+      const stamp = new Date(nowMs).toISOString();
+      const marker = Buffer.from(
+        `${JSON.stringify({
+          event: AUDIT_PRUNED_EVENT,
+          dropped: plan.dropped,
+          kept: plan.kept,
+          cutoff: new Date(nowMs - RETENTION_MS).toISOString(),
+          source_bytes: copied,
+          dropped_total: before.dropped_total + plan.dropped,
+          first_cut_at: before.first_cut_at ?? stamp,
+          cut,
+          ts: stamp
+        })}
+`,
+        "utf8"
+      );
+      writeAll(fd, marker);
+      written += marker.length;
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    seams.onStep?.("ready", { log, old: paths.old, temp: paths.temp });
+    if (!renewLock(paths, cut)) return skipped(log, "busy");
+    (seams.rename ?? renameSync)(paths.temp, log);
+    swapped = true;
+    seams.onStep?.("swapped", { log, old: paths.old, temp: paths.temp });
+    rescueFrom(paths.old, log, copied, wait);
+    rescued = true;
+    seams.onStep?.("rescued", { log, old: paths.old, temp: paths.temp });
+    unlinkSync(paths.old);
+    finished = true;
+    return {
+      status: "pruned",
+      path: log,
+      dropped: plan.dropped,
+      kept: plan.kept,
+      cutoff: new Date(nowMs - RETENTION_MS).toISOString(),
+      bytes_before: source.length,
+      bytes_after: written
+    };
+  } finally {
+    if (readLock(paths)?.cut === cut) {
+      if (!swapped) {
+        if (tempCreated) removeQuietly(paths.temp);
+        if (linked) removeQuietly(paths.old);
+      }
+      if (!swapped || rescued) removeQuietly(paths.lock);
+      if (!swapped || finished) removeEmptyDir(paths.dir);
+    }
+  }
+}
+function candidatesFor(projectRoot, config2) {
+  const configured = decideAuditPath(projectRoot, config2);
+  const fallback = decideAuditPath(projectRoot, void 0);
+  const named = [configured.path, fallback.path];
+  const oneLog = sameSpelling(configured.path, fallback.path) || soleNameOfALog(configured.path, [fallback.path]);
+  const logs = oneLog ? [isRegularFile(fallback.path) ? fallback.path : configured.path] : named;
+  const paths = workingPaths(configured.base);
+  const working = [paths.lock, paths.temp, paths.old];
+  const refusal = configured.anchor === "unavailable" ? "anchor_unavailable" : named.some(namesAStream) ? "stream_path" : named.some((log) => working.some((path2) => sameSpelling(log, path2))) ? "working_path" : null;
+  return { logs, named, paths, refusal };
+}
+function pruneAuditLog(projectRoot, config2, now, seams = {}) {
+  const { logs, named, paths, refusal } = candidatesFor(projectRoot, config2);
+  if (refusal !== null) return logs.map((log) => skipped(log, refusal));
+  const outcomes = [];
+  for (const log of logs) {
+    let outcome;
+    try {
+      outcome = cutOne(log, paths, named, now.getTime(), seams);
+    } catch (error2) {
+      outcome = skipped(log, "failed", error2 instanceof Error ? error2.message : String(error2));
+    }
+    outcomes.push(outcome);
+    if (outcome.status === "recovered") break;
+  }
+  return outcomes;
+}
+function previewRetention(projectRoot, config2, now, seams = {}) {
+  try {
+    const { logs, paths, refusal } = candidatesFor(projectRoot, config2);
+    if (refusal !== null || pendingSwap(paths) !== "none") return 0;
+    return logs.reduce((due, log) => due + forecastFor(log, paths, now.getTime(), seams), 0);
+  } catch {
+    return 0;
+  }
+}
+function forecastFor(log, paths, nowMs, seams) {
+  try {
+    refuseSharedVolume(log, seams);
+    if (linkSupport.get(log)?.linked === false) return 0;
+    const state = inspect(log, seams.maxBytes ?? MAX_LOG_BYTES);
+    if ("status" in state) return 0;
+    const plan = planCut(readFileSync(log), nowMs);
+    if (plan.oldestDroppedMs <= ANNOUNCE_MS) return 0;
+    if (linkSupport.get(log) === void 0) probeLink(log, paths, seams);
+    return linkSupport.get(log)?.linked === true ? plan.dropped : 0;
+  } catch {
+    return 0;
+  }
+}
+function countOf(lines) {
+  return lines === 1 ? "1 line" : `${lines} lines`;
+}
+function retentionDialogLine(due) {
+  if (due <= 0) return null;
+  return `Audit log: ${countOf(due)} older than ${AUDIT_RETENTION_DAYS} days ${due === 1 ? "is" : "are"} due for removal with this commit.`;
+}
+function noteFor(outcome) {
+  if (outcome.status === "recovered") {
+    return "an audit-log cut that an earlier call left interrupted was finished or undone; a later commit cuts.";
+  }
+  if (outcome.status !== "skipped") return null;
+  const detail = String(outcome.detail);
+  switch (outcome.reason) {
+    case "unsupported":
+      return `the audit log is not cut on this volume \u2014 it cannot hard-link (${detail}) \u2014 and keeps growing.`;
+    case "not_atomic":
+      return `the audit log is not cut on this volume \u2014 replacing a file is not atomic on a ${detail} share, such as a Windows disk seen from WSL \u2014 and keeps growing.`;
+    case "too_large":
+      return `the audit log is larger than ${MAX_LOG_BYTES / (1024 * 1024)} MB and is not cut; what to do with it is the developer's decision, not the agent's.`;
+    case "not_regular":
+      return "the audit log path is not a regular file and is not cut.";
+    case "working_path":
+      return "audit.path names one of the cut's own working files, so no audit log is cut.";
+    case "stream_path":
+      return "audit.path names a stream inside a file, so no audit log is cut.";
+    case "anchor_unavailable":
+      return "git could not report the repository, so the audit log is not cut in this session.";
+    case "failed":
+      return `the cut did not complete (${detail}); a later commit finishes or retries it.`;
+    case "busy":
+      return null;
+  }
+}
+function describeRetention(outcomes) {
+  const notes = [];
+  const dropped = outcomes.reduce((sum, outcome) => sum + (outcome.status === "pruned" ? outcome.dropped : 0), 0);
+  if (dropped > 0) {
+    notes.push(
+      `${countOf(dropped)} older than ${AUDIT_RETENTION_DAYS} days ${dropped === 1 ? "was" : "were"} removed from the audit log. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. An audit.pruned entry records the cut.`
+    );
+  }
+  for (const outcome of outcomes) {
+    const note = noteFor(outcome);
+    if (note !== null && !notes.includes(note)) notes.push(note);
+  }
+  return notes.length === 0 ? null : `Audit log retention (ADR-025): ${notes.join(" Also: ")}`;
+}
+
 // src/lib/settings-drift.ts
 init_esm_shims();
 function hashSettingsContent(text2) {
@@ -44594,9 +45142,17 @@ var requestCommitInputSchema = external_exports.object({
     "The dev_approval payload (timestamp, action_scope, reason). OPTIONAL: when present, the per-action \xA7C gate runs (schema/skew/anti-reuse/fabrication). When ABSENT, the commit is authorized by an active plan-scoped batch token (mint one with rsct_plan_authorize) \u2014 but the token NEVER bypasses branch protection or the secrets scan (the token path carries no overrides). To avoid the soft `scope_mismatch` fabrication signal, make `action_scope`/`reason` mirror the ACTUAL staged diff."
   )
 }).strict();
+function runRetention(prune, projectRoot, config2, now) {
+  try {
+    return describeRetention(prune(projectRoot, config2?.audit, now));
+  } catch (error2) {
+    const detail = error2 instanceof Error ? error2.message : String(error2);
+    return `Audit log retention (ADR-025): the cut did not run (${detail}); a later commit retries it.`;
+  }
+}
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -44825,6 +45381,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
   let fabricationSignals = [];
   let tokenCtx = null;
   if (input.dev_approval !== void 0) {
+    const retentionLine = resolution.rsct_installed ? retentionDialogLine(previewRetention(projectRoot, config2?.audit, now)) : null;
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
       approval: input.dev_approval,
@@ -44833,6 +45390,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
         message: [
           `Approve commit on '${branchLabel}'?`,
           ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : [],
+          ...retentionLine ? [retentionLine] : [],
           "",
           `message: ${input.message}`
         ].join("\n") + gateDialogFooter(projectRoot, config2)
@@ -45348,6 +45906,8 @@ async function requestCommitHandler(rawInput, internal = {}) {
   }
   hints.push(...deadAtCommit.hints);
   hints.push(...bookkeepingHints);
+  const retentionHint = resolution.rsct_installed ? runRetention(internal.retention ?? pruneAuditLog, projectRoot, config2, now) : null;
+  if (retentionHint) hints.push(retentionHint);
   const afields = auditFields(audit);
   if (afields.audit_error !== null) {
     hints.push(
@@ -52742,7 +53302,7 @@ init_esm_shims();
 
 // src/lib/health.ts
 init_esm_shims();
-var LOCK_STALE_MS2 = 3e4;
+var LOCK_STALE_MS3 = 3e4;
 function evaluateMcpHealth(projectRoot, opts = {}) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
   const reasons = [];
@@ -52765,7 +53325,7 @@ function evaluateMcpHealth(projectRoot, opts = {}) {
       const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
       const lockedAtMs = parsed.locked_at ? new Date(parsed.locked_at).getTime() : NaN;
       const ageMs = now.getTime() - lockedAtMs;
-      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS2) {
+      if (Number.isNaN(lockedAtMs) || ageMs >= LOCK_STALE_MS3) {
         reasons.push("phase_state_lock_stale");
       }
     } catch {
@@ -52795,12 +53355,13 @@ var auditInputSchema = external_exports.object({
 var COVERAGE_BOUNDARY = [
   "Settings drift (.claude/settings.json ownership) is NOT checked here \u2014 it needs two git reads to assemble, and this tool spawns no processes. It already reaches you at the commit gate (rsct_request_commit).",
   "Findings are pruned when a phase closes, so a finding raised and answered in a past phase leaves no trace this report can query.",
+  ".rsct/audit.log is not the whole history: about once a day a commit that landed through rsct_request_commit removes the entries older than 10 days. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record; an audit.pruned entry carries the count and a running total (ADR-025).",
   ".rsct/ state is per-worktree. In a linked git worktree this reports on THAT worktree only, not on the project as a whole.",
   "Rule-section bodies in CLAUDE.md are not read by THIS tool. The framework does cover that axis \u2014 every section carries a sha256-body= stamp and /rsct-setup reconciles them (since v2.7.0, #45) \u2014 rsct_audit just does not check it, so a clean report here says nothing either way about rule-body freshness.",
   'This is a point-in-time read of local files, and it never gates. ONE exception to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records an rsct_json.* entry in .rsct/audit.log \u2014 normally once per hour for the same violation, creating that file if absent, and regardless of audit.enabled. That write belongs to resolveProjectRoot and happens identically for rsct_status and rsct_load_context; it is not specific to this report.',
   `install_drift.message is relayed VERBATIM from the drift detector and can contain a repair instruction (e.g. "Run /rsct-setup"). That text is the detector's, not this report's recommendation \u2014 nothing here tells you to run a tool that mutates RSCT phase state.`
 ];
-var DAY_MS = 864e5;
+var DAY_MS2 = 864e5;
 function explainHealth(faults, historyAbsent) {
   if (faults.length > 0) {
     const commits = faults.includes("phase_state_corrupt") ? "rsct_request_commit refuses every commit until .rsct/phase-state.json is repaired or deleted." : "Commits still work; they go through the per-action \xA7C path.";
@@ -52864,7 +53425,7 @@ async function auditHandler(rawInput, deps = {}) {
     open_phase = {
       phase: state.phase,
       started_at: startedAt,
-      age_days: Number.isNaN(startedMs) ? null : Math.floor((now.getTime() - startedMs) / DAY_MS)
+      age_days: Number.isNaN(startedMs) ? null : Math.floor((now.getTime() - startedMs) / DAY_MS2)
     };
   }
   const plans = listPlans(resolution.root, { now });

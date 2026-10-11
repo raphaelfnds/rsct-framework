@@ -12,6 +12,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-10-11
+
+### Changed
+
+- **`.rsct/audit.log` keeps ten days of routine history (#93).** The log had no bound and is the
+  only copy of what it holds. About once a day, a commit that **landed** through
+  `rsct_request_commit` now removes the entries older than 10 days, from the top of the file down,
+  stopping at the first younger one; a refused, declined or unapproved call removes nothing. Three
+  kinds of entry stay whatever their age: every entry a gate or a reader can still use
+  (`classify.verdict`, the three `review.*` decisions, `review.commit_drift`, `approval.consumed`,
+  `tutor.step`, `free_commit.*`); every entry named as an override, a skip, a degraded check or a
+  bypass (events named `…override…`, `…skip…`, `…degraded…`, `…bypass…`, plus `sanitize.stripped`
+  and `audit_log.migrated`); and the **newest** of each repeating state record
+  (`settings.baseline`, `rsct_json.malformed`, `rsct_json.bounds_violation`,
+  `install.drift_detected`, `sanitize.malformed`, `sanitize.migration_skipped`,
+  `settings.drift_detected`, `audit.pruned` — a state record is newest-only even when its name
+  contains one of those words). Dropped: phase starts and completions, findings,
+  commits, pushes, merges, plan authorizations, bootstrap warnings and **refusals**. No gate
+  changes its answer. **On upgrade, the first commit that lands cuts existing logs, which can
+  remove months at once; copy the file first if you want the old history.** The hints report
+  every cut and an `audit.pruned` entry records it with a running total. The approval dialog
+  forecasts a cut only when it reaches entries more than 20 days old — so that first cut is
+  forecast in a log that goes back that far, and not in a younger one — and a commit under a plan
+  token, or an approval trusted with no dialog channel, shows no dialog at all. It is
+  server-side: no `/rsct-setup` needed. **Not cut**, and the hints say so: a project on a volume
+  without hard links (measured: one reached from Windows through `//wsl.localhost/`) or on a 9p
+  share, where replacing a file is not atomic (measured: a Windows disk reached from inside WSL),
+  a log over 512 MB, a log path that is not a regular file. Not cut, silently: a project whose `.rsct.json`
+  is rejected. No setting — see ADR-025 for the rule, the measurements and the limits.
+- **The companion is not published to npm, on record (#112).** ADR-026 states the decision and
+  what it gives up: a registry package named `rsct-mcp` is not this project's. `README.md` now
+  says in the install section where the
+  companion comes from, `SECURITY.md` narrows its "a link is not replaced" sentence to the case
+  that was measured, and the contributor command in `README.md` and `CONTRIBUTING.md` carries
+  `--install-links=false`. A test now fails on any line of the docs, prompts, rules, templates,
+  scripts, workflows or server source that installs the companion from a registry or runs it
+  through a package runner.
+- **`rules/C-reauthorize.md` states the retention rule.** The §C section says how long an entry
+  stays; projects get the new text at their next `/rsct-setup`.
+- **`/rsct-uninstall` removes the working files an interrupted audit-log cut can leave** in
+  `.rsct/reports/`.
+
+### Fixed
+
+- **`mcp-server/README.md` said the audit log is "disabled when `audit.enabled: false`".** That
+  value gets the whole config rejected, as the bounds table in the same file already said.
+
 ## [2.13.5] - 2026-10-10
 
 ### Fixed

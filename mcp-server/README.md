@@ -183,7 +183,7 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**40 tools · 5 resources · tsc strict · ESM ~1.88 MB
+**40 tools · 5 resources · tsc strict · ESM ~1.89 MB
 (server) + ~17 KB (sanitize-permissions hook) + ~140 KB (edit-scope guard) +
 ~5.3 MB (tree-sitter grammars, `grammars/`) ·
 cross-platform (Windows / macOS / Linux)**
@@ -1009,8 +1009,9 @@ such a copy gets the security-tier install notice until `/rsct-setup` runs again
 ### Audit log
 
 All §C-gated tools and the SessionStart hook write structured JSONL
-entries to `.rsct/audit.log` (configurable via `.rsct.json` `audit.path`;
-disabled when `audit.enabled: false`).
+entries to `.rsct/audit.log` (configurable via `.rsct.json` `audit.path`).
+It cannot be switched off: `audit.enabled: false` gets the whole config
+rejected (see the bounds table below).
 
 **Where that resolves (#92).** The log — and the §C anti-reuse store — live at the
 **git repository the action lands in**, not at the `project_root` a caller passed.
@@ -1040,9 +1041,67 @@ Event naming convention: `<tool>.<outcome>` where outcome ∈
 {`rejected`, `override_invoked`, `committed`, `pushed`, `merged`,
 `mutation_failed`, `stripped`, `malformed`}.
 
-Single-source writer in `mcp-server/src/lib/audit-log.ts`. Append-only,
-never throws — failures surface via `{ ok: false, reason }` so the
-caller can report I/O issues without aborting tool execution.
+The writer in `mcp-server/src/lib/audit-log.ts` only appends and never throws —
+failures surface via `{ ok: false, reason }` so the caller can report I/O issues
+without aborting tool execution. Three other places append directly (the consumed
+approval record, the sanitizer hook, the one-off migration line), and the retention
+cut below is the only thing that rewrites the file.
+
+**Retention (#93, ADR-025).** The log is the only copy of what it holds — it is
+gitignored on purpose — and it is not kept forever. About once a day, a commit that
+**landed** through `rsct_request_commit` removes the entries older than **10 days**,
+from the top of the file down, and stops at the first entry younger than that. A
+refused, declined or unapproved call removes nothing. Three kinds of entry survive
+whatever their age:
+
+| kept | which entries |
+|---|---|
+| every entry a gate or a reader can still use | `classify.verdict`, `review.unverified_decision`, `review.dead_code_kept`, `review.public_api_approved`, `review.commit_drift`, `approval.consumed`, `tutor.step`, and the `free_commit.*` entries older servers still read |
+| every entry named as an override, a skip, a degraded check or a bypass | any event whose name contains `override`, `skip`, `degraded` or `bypass`; also `sanitize.stripped` and `audit_log.migrated` |
+| only the **newest** of each repeating state record | `settings.baseline`, `rsct_json.malformed`, `rsct_json.bounds_violation`, `install.drift_detected`, `sanitize.malformed`, `sanitize.migration_skipped`, `settings.drift_detected`, `audit.pruned` |
+
+The third row wins over the second: `sanitize.migration_skipped` is a state record.
+So after ten days the log still shows THAT a config was rejected, or that enforcement
+was not running, and when it last was — not for how long.
+
+Everything else — phase starts and completions, findings, commits, pushes, merges,
+plan authorizations, bootstrap warnings and **refusals** — goes after 10 days. An
+entry that cannot be parsed or carries no ISO timestamp is never removed. Kept
+entries are never rewritten: the file is handled as bytes. A kept entry can point at
+one that is gone — an `approval.consumed` whose commit entry was dropped.
+
+Who is told, and how:
+
+- **The hints of the call report every cut**, and an `audit.pruned` entry records how
+  many lines went, the cutoff and a running total. (A cut interrupted right after the
+  swap is reported as not completed; its count is in that entry alone.)
+- **The approval dialog forecasts only a cut that reaches back more than 20 days** —
+  the first cut after an upgrade, in a log that old; a cut after weeks without a
+  commit. The test is the age of the oldest entry to go, not how many go. The daily
+  cut is not forecast. The line is a forecast, counted before the commit.
+- **No dialog, no forecast**: a commit under a plan token, and an approval trusted
+  with no dialog channel (`trust_allowed_for`), cut with the hint and the entry alone.
+
+There is no setting for it. `audit` is a strict block, so a new key would make every
+older server reject the whole config, and `.rsct.json` is a file an agent can edit.
+
+Where it does not run, and whether the hints say so:
+
+| case | hints |
+|---|---|
+| a volume without hard links (measured: a project reached from Windows through `//wsl.localhost/`), or a 9p share, where replacing a file is not atomic (measured: a Windows disk reached from inside WSL, `/mnt/c`) | once per server process and log |
+| a log larger than 512 MB; a log path that is not a regular file; an `audit.path` that names one of the cut's working files, or (on Windows) a stream inside a file — a colon after the drive | every commit |
+| a cut that failed (for instance while another program holds the log open on Windows), or one an earlier call left interrupted | every commit, until a later one finishes it |
+| git could not report the repository in this session | every commit |
+| another cut holds the lock or took it over, or the log would not settle | silent — a later commit cuts |
+| the project's `.rsct.json` is rejected, the top entry is stamped in the future, or no commit ever lands through `rsct_request_commit` | silent |
+
+The cut works in `.rsct/reports/` (`audit-prune.lock`, `audit-prune-new.log`,
+`audit-prune-old.log`), which the `.gitignore` block covers in projects set up since
+2.11 — except where the log is relocated (see the limitation above: the working
+files then sit at the repository root). The files exist for the length of one cut.
+An interrupted one is finished or undone by a commit that lands once the lock file is
+a minute old; that commit does not cut, the one after it does.
 
 ### OS dialog (INV-2.1 out-of-band channel)
 
@@ -1195,7 +1254,8 @@ src/
 │   ├── branch-protection.ts # INV-5 protected branch check
 │   ├── phase-scope.ts       # INV scope-glob match for .rsct/phase-state.json
 │   ├── dev-approval.ts      # zod schema + anti-reuse store + fabrication detection
-│   ├── audit-log.ts         # single-source JSONL append writer for .rsct/audit.log
+│   ├── audit-log.ts         # JSONL append writer for .rsct/audit.log (and where it resolves)
+│   ├── audit-retention.ts   # the ten-day cut of .rsct/audit.log (#93, ADR-025)
 │   ├── os-dialog.ts         # cross-platform Yes/No dialog (Win/Mac/Linux)
 │   └── request-gate.ts      # §C orchestrator (validate → dialog → audit)
 ├── tools/

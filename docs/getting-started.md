@@ -118,7 +118,9 @@ misbehaves, that's a bug worth filing.
    `.rsct/audit.log` — at the **git repository the commit lands in**, which is the
    same folder in the normal case and one level up in a monorepo package, a project
    nested inside another repository, or a linked worktree. When it differs, the
-   approval dialog says so. Without the companion, a plain `git commit` is refused or
+   approval dialog says so. Routine entries stay there for 10 days; the entries a
+   gate can still use and the override and skip records stay for good (see "Audit
+   log" in `mcp-server/README.md`). Without the companion, a plain `git commit` is refused or
    triggers a reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes

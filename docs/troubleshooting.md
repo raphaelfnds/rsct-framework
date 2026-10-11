@@ -224,6 +224,37 @@ line to `.rsct/audit.log`). Two ways out:
 
 An empty file is not corruption; RSCT writes over it.
 
+## `.rsct/audit.log` is shorter than it used to be
+
+That is the retention rule, not a fault. Since 2.14.0, about once a day a commit that
+lands removes the entries older than 10 days — phase starts and completions,
+findings, commits, pushes, merges and refusals. Kept whatever their age: the entries
+a gate can still use, the entries named as an override, a skip, a degraded check or a
+bypass, and the newest of each repeating state record (a rejected config, enforcement
+not running, the settings baseline, a skipped settings migration). The file is the
+only copy: nothing removed can be brought back.
+
+The first commit that lands after upgrading from an older version does the first
+cut, which can remove months at once. When a cut reaches entries more than 20 days
+old, the approval dialog says how many lines are due before you answer; a log that
+does not go back that far is cut without that line. No dialog is shown for a commit
+under a plan token, or for an approval trusted with no dialog channel, so nothing
+warns beforehand there either. Afterwards the
+tool's hints report the cut, and an `audit.pruned` entry carries the count, the cutoff
+and a running total. Want the old history? Copy the file before that commit. A
+refused or declined commit removes nothing.
+
+Not cut, and the hints say so: a project on a volume without hard links (one reached
+from Windows through `//wsl.localhost/`) or on a 9p share, where replacing a file is
+not atomic (a Windows disk reached from inside WSL, `/mnt/c`), a log over 512 MB, a log
+path that is not a regular file. Not cut, and nothing says so: a project whose `.rsct.json` is
+rejected. The full rule is under "Audit log" in `mcp-server/README.md`.
+
+`.rsct/reports/audit-prune.lock`, `audit-prune-new.log` or `audit-prune-old.log` left
+behind means a cut was interrupted. Leave them: a commit that lands once the lock is
+a minute old finishes or undoes it (a younger lock is a cut in progress), and the
+commit after that one cuts.
+
 ## ".claude/settings.json has changed since this session started"
 
 Not your doing, and RSCT is not blocking anything — it is telling you about a

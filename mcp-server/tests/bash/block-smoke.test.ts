@@ -1701,4 +1701,29 @@ describe.skipIf(!BASH)('block: uninstall removes REVIEW sweep reports only (03-u
     expect(r.out).toContain('REVIEW sweep reports removed: 1')
     expect(existsSync(join(r.dir, '.rsct', 'reports'))).toBe(false)
   }, 60_000)
+
+  it('removes the working files an interrupted audit-log cut left, and nothing else (#93)', () => {
+    const r = run({
+      promptBasename: '03-uninstall.md', anchor: 'REPORTS_REMOVED=0',
+      seedFiles: {
+        '.rsct/reports/audit-prune.lock': '{"log":"x","cut":"y"}',
+        '.rsct/reports/audit-prune-new.log': 'half\n',
+        '.rsct/reports/audit-prune-old.log': 'the log before the cut\n',
+        '.rsct/reports/audit-prune-notes.md': 'mine\n',
+      },
+    })
+    expect(r.out).toContain('REVIEW sweep reports removed: 0')
+    for (const name of ['audit-prune.lock', 'audit-prune-new.log', 'audit-prune-old.log']) {
+      expect(hasIn(r, `.rsct/reports/${name}`)).toBe(false)
+    }
+    expect(hasIn(r, '.rsct/reports/audit-prune-notes.md')).toBe(true)
+  }, 60_000)
+
+  it('drops the reports directory when the working files were all it held (#93)', () => {
+    const r = run({
+      promptBasename: '03-uninstall.md', anchor: 'REPORTS_REMOVED=0',
+      seedFiles: { '.rsct/reports/audit-prune-old.log': 'the log before the cut\n', '.rsct/reports/audit-prune.lock': '{}' },
+    })
+    expect(existsSync(join(r.dir, '.rsct', 'reports'))).toBe(false)
+  }, 60_000)
 })
