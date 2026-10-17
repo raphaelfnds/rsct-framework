@@ -104,7 +104,7 @@ describe('rsct_phase_review_complete — the mix reaches the dev', () => {
     const seen: DialogOptions[] = []
     await complete(async (o) => {
       seen.push(o)
-      return { response: 'yes', channel: 'env-override' }
+      return { response: 'yes', channel: 'windows' }
     })
     expect(seen).toHaveLength(1)
     expect(seen[0]!.message).toContain('Evidence:')
@@ -118,7 +118,7 @@ describe('rsct_phase_review_complete — the mix reaches the dev', () => {
     await complete(
       async (o) => {
         seen.push(o)
-        return { response: 'yes', channel: 'env-override' }
+        return { response: 'yes', channel: 'windows' }
       },
       { dialogDetail: 'INJECTED-SHOULD-NOT-WIN' },
     )
@@ -128,14 +128,14 @@ describe('rsct_phase_review_complete — the mix reaches the dev', () => {
 
   it('T6-headless — the mix is in hints too, not only in the dialog', async () => {
     await start([{ id: 'r-1', category: 'bug', title: 'x', evidence: MEASURED }])
-    const out = await complete(async () => ({ response: 'yes', channel: 'env-override' }))
+    const out = await complete(async () => ({ response: 'yes', channel: 'windows' }))
     expect(out.hints.some((h) => h.includes('Evidence:') && h.includes('1 measured'))).toBe(true)
     expect(out.evidence_mix).toMatchObject({ measured: 1, total: 1 })
   })
 
   it('T-baseline — the mix comes from the stored baseline, not from the actions', async () => {
     await start([{ id: 'r-1', category: 'bug', title: 'x', evidence: MEASURED }])
-    const out = await complete(async () => ({ response: 'yes', channel: 'env-override' }))
+    const out = await complete(async () => ({ response: 'yes', channel: 'windows' }))
     expect(out.evidence_mix.measured).toBe(1)
     expect(out.evidence_mix.unrecorded).toBe(0)
   })
@@ -153,7 +153,7 @@ describe('rsct_phase_review_complete — the mix reaches the dev', () => {
           reason: 'ok',
         },
       },
-      { now: FIXED_NOW, promptFn: async () => ({ response: 'yes', channel: 'env-override' }) },
+      { now: FIXED_NOW, promptFn: async () => ({ response: 'yes', channel: 'windows' }) },
     )
     expect(out.evidence_mix.measurable).toBe(false)
     expect(out.hints.some((h) => h.includes('unavailable'))).toBe(true)

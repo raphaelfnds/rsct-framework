@@ -771,10 +771,11 @@ old wide match now answers `out_of_scope`).
 
 There are **four** §C-gated mutating ops: `rsct_request_commit`,
 `rsct_request_push`, `rsct_request_merge` and `rsct_request_rebase`. All four pop
-an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel) unless
-the tool's own name is listed in `approval_modes.trust_allowed_for[]` (e.g.
-`["rsct_request_commit"]`), and fabrication signals (INV-2.2) auto-elevate to
-forced-dialog mode regardless of trust.
+an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel). Where no
+dialog channel exists, commit, push and merge are accepted if the tool's own name
+is listed in `approval_modes.trust_allowed_for[]` (e.g. `["rsct_request_commit"]`);
+`rsct_request_rebase` cannot be listed. Fabrication signals (INV-2.2) auto-elevate
+to forced-dialog mode regardless of trust.
 
 **Three of them require a `dev_approval` payload on every call** (INV-2
 anti-reuse): push, merge and rebase. `rsct_request_commit` is the exception — its
@@ -1106,24 +1107,34 @@ a minute old; that commit does not cut, the one after it does.
 ### OS dialog (INV-2.1 out-of-band channel)
 
 Cross-platform Yes/No dialog implemented in
-`mcp-server/src/lib/os-dialog.ts`:
-- **Windows:** PowerShell `[System.Windows.Forms.MessageBox]`
-- **macOS:** `osascript -e 'display dialog'`
-- **Linux:** `zenity --question`
+`mcp-server/src/lib/os-dialog.ts`. Each dialog program runs by its full
+path, and the dialog's title and text reach it as data, never as part
+of a script:
+- **Windows:** `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`
+  showing `[System.Windows.Forms.MessageBox]`. The title and text travel
+  in two environment variables set for that process only.
+- **macOS:** `/usr/bin/osascript -l JavaScript` (`displayDialog`), with the
+  same two variables.
+- **Linux:** `/usr/bin/zenity --question --no-markup` — the text is shown
+  as written. A `zenity` installed anywhere else is not used, so the
+  dialog is unavailable there.
+
+A NUL character in the text is shown as `␀`. A title and text longer than
+32,000 characters together are refused before any dialog, and
+`trust_allowed_for[]` does not apply: the request is rejected with
+`reject_kind: no_channel` and a reason that gives the length and says to
+shorten the text (the REVIEW's unverified-files question treats it as
+undecided).
 
 When no channel is available (CI, headless), the tool consults
 `.rsct.json` `approval_modes.trust_allowed_for[]`: if the invoking
-tool's name (`rsct_request_commit`, `rsct_request_push`, or
-`rsct_request_merge`) is on the list, accept silently; otherwise
-reject. The match is by tool name — not by `dev_approval.action_scope`
+tool's name is on the list, accept silently; otherwise reject. The list
+accepts `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge`,
+`rsct_plan_authorize`, `rsct_capture_issue`, `rsct_phase_abandon` and the
+six `rsct_phase_*_complete` tools. A call that forces the dialog ignores
+the list. The match is by tool name — not by `dev_approval.action_scope`
 — so an entry like `["rsct_request_commit"]` trusts every commit
 request in headless mode, independent of the specific scope value.
-
-Test override: `RSCT_TEST_DIALOG_RESPONSE=yes|no` environment variable
-short-circuits the dialog. **Documented as a test/CI escape valve
-only** — in production it's a Claude bypass vector only if Claude has
-shell access to set the dev's env, which it does not from inside the
-MCP server.
 
 ### `.rsct.json` bounds + tamper defense
 
@@ -1155,7 +1166,7 @@ Bounds:
 |---|---|---|
 | `audit.enabled` | must be `true` or absent (literal in schema) | `false` defeats INV-3 forensic trail |
 | `approval_modes.timestamp_skew_seconds` | `60 ≤ n ≤ 600` | M2 gate observed 78–155s AI roundtrip; 600s = 4× headroom while still bounding INV-2 replay window |
-| `approval_modes.trust_allowed_for[]` | enum of the §C-gated tool names (11 entries — see `RsctApprovalModesSchema`) | unknown entries can't smuggle a wildcard trust |
+| `approval_modes.trust_allowed_for[]` | enum of the §C-gated tool names (12 entries — see `RsctApprovalModesSchema`) | unknown entries can't smuggle a wildcard trust |
 | `protected_branches[]` | min length 1 if present | empty disables §D wholesale; if you want zero protected branches, uninstall the framework |
 | `audit` sub-object | strict (unknown keys rejected) | blocks payloads like `audit: { enabled: true, force_disable: true }` that future versions could misinterpret |
 | `approval_modes` sub-object | strip unknown silently (since 2.2.0) | a key from a newer version must not null the whole config on a downgrade; the dangerous fields inside carry their own bounds |
@@ -1196,7 +1207,6 @@ path traversal attempts return a "Resource not found" error.
 | `RSCT_LOG_LEVEL` | pino log level (`trace`/`debug`/`info`/`warn`/`error`/`fatal`). Default `info`. Logs go to stderr only — stdout is reserved for MCP protocol. |
 | `CLAUDE_PROJECT_DIR` | Read by `dist/scripts/sanitize-permissions.js` (the SessionStart hook) as a fallback when `--project-root` is not passed. Set by Claude Code itself at hook fire time. |
 | `RSCT_UPDATE_CHECK` | Set to `off` (also `0`, `false`, `no`) to disable the session-start GitHub release check entirely — no request is made, nothing is written. **Outranks both** `rsct_status`'s `update_check` parameter and the `consent` field in `~/.rsct/update-check.json`, and it is the only switch that applies before a session exists (CI, headless, a machine that must never emit the request). `tests/setup.ts` sets it for the whole suite. |
-| `RSCT_TEST_DIALOG_RESPONSE` | Short-circuits the OS dialog with `yes` or `no`. **Test/CI only** — production code paths should never set this. |
 
 ---
 
@@ -1373,8 +1383,8 @@ expected tool and the response matches the docs above.
 | Platform | Channel | Verify |
 |---|---|---|
 | Windows | PowerShell MessageBox | Dialog appears with project name + action_scope. Yes → tool proceeds; No → tool rejects with `reject_kind: 'dialog_no'`. |
-| macOS | `osascript display dialog` | Same. Requires Accessibility permission granted to the terminal app on first run. |
-| Linux | `zenity --question` | Same. Requires `zenity` installed; if absent, `trust_allowed_for[]` is the documented fallback. |
+| macOS | `/usr/bin/osascript` (JavaScript `displayDialog`) | Same. Run only on the CI macOS cells so far (ADR-027). |
+| Linux | `/usr/bin/zenity --question` | Same. Requires `zenity` at `/usr/bin/zenity`; if absent, `trust_allowed_for[]` is the documented fallback. |
 
 If only one platform is available, document the rest as "untested on
 target platform" in the M2 sign-off — does NOT block the gate.

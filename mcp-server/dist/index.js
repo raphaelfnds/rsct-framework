@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire, builtinModules } from 'module';
-import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, posix, normalize } from 'path';
+import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, win32, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, fstatSync } from 'fs';
@@ -23976,7 +23976,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.14.0";
+var RSCT_MCP_VERSION = "2.14.1";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -44783,22 +44783,45 @@ function checkCommitMessage(message, config2) {
 
 // src/lib/os-dialog.ts
 init_esm_shims();
-var ENV_OVERRIDE_KEY = "RSCT_TEST_DIALOG_RESPONSE";
+var DIALOG_TEXT_LIMIT = 32e3;
+var DIALOG_MESSAGE_VARIABLE = "RSCT_DIALOG_MESSAGE";
+var DIALOG_TITLE_VARIABLE = "RSCT_DIALOG_TITLE";
+var MAC_OSASCRIPT = "/usr/bin/osascript";
+var LINUX_ZENITY = "/usr/bin/zenity";
+var VISIBLE_NUL = "\u2400";
+var WINDOWS_SCRIPT = `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); Write-Output $r`;
+var MAC_SCRIPT_LINES = [
+  "ObjC.import('Foundation')",
+  "const env = $.NSProcessInfo.processInfo.environment",
+  `const message = ObjC.unwrap(env.objectForKey('${DIALOG_MESSAGE_VARIABLE}'))`,
+  `const title = ObjC.unwrap(env.objectForKey('${DIALOG_TITLE_VARIABLE}'))`,
+  "const app = Application.currentApplication()",
+  "app.includeStandardAdditions = true",
+  "app.displayDialog(message, { withTitle: title, buttons: ['No', 'Yes'], defaultButton: 'Yes' }).buttonReturned"
+];
 async function promptYesNo(options, internal = {}) {
-  const env = internal.env ?? process.env;
-  const override = readEnvOverride(env);
-  if (override !== null) {
-    return { response: override, channel: "env-override" };
+  const text2 = {
+    title: options.title.replaceAll("\0", VISIBLE_NUL),
+    message: options.message.replaceAll("\0", VISIBLE_NUL)
+  };
+  const length = text2.title.length + text2.message.length;
+  if (length > DIALOG_TEXT_LIMIT) {
+    return {
+      response: "no-channel",
+      channel: "none",
+      error: `the dialog text is ${length} characters long; the limit is ${DIALOG_TEXT_LIMIT}`,
+      input_fault: true
+    };
   }
   const platform = internal.platform ?? process.platform;
   const executor = internal.executor ?? defaultExecutor;
   switch (platform) {
     case "win32":
-      return runWindowsDialog(options, executor);
+      return runWindowsDialog(text2, executor);
     case "darwin":
-      return runMacDialog(options, executor);
+      return runMacDialog(text2, executor);
     case "linux":
-      return runLinuxDialog(options, executor);
+      return runLinuxDialog(text2, executor);
     default:
       return {
         response: "no-channel",
@@ -44807,20 +44830,13 @@ async function promptYesNo(options, internal = {}) {
       };
   }
 }
-function readEnvOverride(env) {
-  const raw = env[ENV_OVERRIDE_KEY];
-  if (!raw) return null;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "yes") return "yes";
-  if (normalized === "no") return "no";
-  return null;
-}
-function defaultExecutor(cmd, args2) {
+function defaultExecutor(cmd, args2, env) {
   try {
     const stdout = execFileSync(cmd, args2, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 1024 * 1024
+      maxBuffer: 1024 * 1024,
+      ...env !== void 0 && { env: { ...process.env, ...env } }
     });
     return { exitCode: 0, stdout, stderr: "" };
   } catch (err2) {
@@ -44846,20 +44862,23 @@ function bufferOrStringToString2(value) {
   if (typeof value === "string") return value;
   return value.toString("utf8");
 }
-function escapePowerShellSingleQuoted(s) {
-  return s.replace(/'/g, "''");
+function dialogEnvironment(options) {
+  return {
+    [DIALOG_MESSAGE_VARIABLE]: options.message,
+    [DIALOG_TITLE_VARIABLE]: options.title
+  };
+}
+function windowsPowerShellPath(env = process.env) {
+  const systemRoot = env.SystemRoot;
+  const root = systemRoot !== void 0 && win32.isAbsolute(systemRoot) ? systemRoot : "C:\\Windows";
+  return win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 function runWindowsDialog(options, executor) {
-  const msg = escapePowerShellSingleQuoted(options.message);
-  const title = escapePowerShellSingleQuoted(options.title);
-  const script = `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show('${msg}', '${title}', 'YesNo', 'Question'); Write-Output $r`;
-  const exec = executor("powershell.exe", [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-Command",
-    script
-  ]);
+  const exec = executor(
+    windowsPowerShellPath(),
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_SCRIPT],
+    dialogEnvironment(options)
+  );
   if (exec.error || exec.exitCode < 0) {
     return {
       response: "no-channel",
@@ -44876,14 +44895,12 @@ function runWindowsDialog(options, executor) {
     error: `unexpected powershell output: ${stdout}`
   };
 }
-function escapeAppleScriptDoubleQuoted(s) {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
 function runMacDialog(options, executor) {
-  const msg = escapeAppleScriptDoubleQuoted(options.message);
-  const title = escapeAppleScriptDoubleQuoted(options.title);
-  const script = `display dialog "${msg}" with title "${title}" buttons {"No","Yes"} default button "Yes"`;
-  const exec = executor("osascript", ["-e", script]);
+  const exec = executor(
+    MAC_OSASCRIPT,
+    ["-l", "JavaScript", ...MAC_SCRIPT_LINES.flatMap((line2) => ["-e", line2])],
+    dialogEnvironment(options)
+  );
   if (exec.exitCode !== 0) {
     if (exec.error && exec.exitCode < 0) {
       return { response: "no-channel", channel: "none", error: exec.error };
@@ -44891,8 +44908,8 @@ function runMacDialog(options, executor) {
     return { response: "no", channel: "macos" };
   }
   const stdout = exec.stdout.trim();
-  if (stdout.includes("button returned:Yes")) return { response: "yes", channel: "macos" };
-  if (stdout.includes("button returned:No")) return { response: "no", channel: "macos" };
+  if (stdout === "Yes") return { response: "yes", channel: "macos" };
+  if (stdout === "No") return { response: "no", channel: "macos" };
   return {
     response: "no-channel",
     channel: "none",
@@ -44900,11 +44917,12 @@ function runMacDialog(options, executor) {
   };
 }
 function runLinuxDialog(options, executor) {
-  const exec = executor("zenity", [
+  const exec = executor(LINUX_ZENITY, [
     "--question",
     `--title=${options.title}`,
     `--text=${options.message}`,
-    "--no-wrap"
+    "--no-wrap",
+    "--no-markup"
   ]);
   if (exec.error && exec.exitCode < 0) {
     return { response: "no-channel", channel: "none", error: exec.error };
@@ -44939,6 +44957,14 @@ async function gateRequest(opts) {
   }
   const promptFn = opts.promptFn ?? promptYesNo;
   const dialog = await promptFn(opts.dialog);
+  if (dialog.input_fault === true) {
+    return {
+      status: "rejected",
+      reason: `the approval dialog could not show this request (${dialog.error ?? "its text was refused"}); shorten the text and call again \u2014 trust_allowed_for does not apply`,
+      reject_kind: "no_channel",
+      fabrication_signals: validation.fabrication_signals
+    };
+  }
   if (validation.must_force_dialog || opts.forceDialog === true) {
     if (dialog.response === "yes") {
       return {
