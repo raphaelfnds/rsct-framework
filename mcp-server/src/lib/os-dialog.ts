@@ -1,32 +1,9 @@
 import { execFileSync } from 'node:child_process'
-
-/**
- * Cross-platform Yes/No OS dialog adapter (INV-2.1: validation channel
- * inaccessible to Claude). F2.5.5 consumes this; F2.5.0..F2.5.3 do not.
- *
- * The dialog is rendered by the user's desktop environment, NOT by
- * Claude Code's tool-result channel — that's the property M2 leans on
- * to make the §C contract enforceable against a fabricated `dev_approval`.
- *
- * Tests cannot pop real dialogs, so this module exposes two seams:
- *
- *  1. `RSCT_TEST_DIALOG_RESPONSE=yes|no` env override — short-circuits to
- *     the configured response. Documented as test-only; in production
- *     the env var should not be set. Anyone running with it set is
- *     explicitly opting out of dialog enforcement (like `--unsafe-perm`).
- *  2. Injectable `executor` parameter on each per-platform helper — lets
- *     unit tests substitute `execFileSync` with a fake that returns
- *     known exit codes and stdout.
- */
+import { win32 } from 'node:path'
 
 export type DialogResponse = 'yes' | 'no' | 'no-channel'
 
-export type DialogChannel =
-  | 'env-override'
-  | 'windows'
-  | 'macos'
-  | 'linux-zenity'
-  | 'none'
+export type DialogChannel = 'windows' | 'macos' | 'linux-zenity' | 'none'
 
 export interface DialogOptions {
   title: string
@@ -37,6 +14,7 @@ export interface DialogResult {
   response: DialogResponse
   channel: DialogChannel
   error?: string
+  input_fault?: true
 }
 
 export interface ExecResult {
@@ -46,29 +24,52 @@ export interface ExecResult {
   error?: string
 }
 
-export type Executor = (cmd: string, args: string[]) => ExecResult
+export type Executor = (cmd: string, args: string[], env?: Record<string, string>) => ExecResult
 
 export interface PromptInternalOptions {
   platform?: NodeJS.Platform
   executor?: Executor
-  env?: NodeJS.ProcessEnv
 }
 
-const ENV_OVERRIDE_KEY = 'RSCT_TEST_DIALOG_RESPONSE'
+export const DIALOG_TEXT_LIMIT = 32_000
+export const DIALOG_MESSAGE_VARIABLE = 'RSCT_DIALOG_MESSAGE'
+export const DIALOG_TITLE_VARIABLE = 'RSCT_DIALOG_TITLE'
+const MAC_OSASCRIPT = '/usr/bin/osascript'
+const LINUX_ZENITY = '/usr/bin/zenity'
 
-/**
- * Pop a Yes/No dialog appropriate to the host OS. Sync under the hood
- * (`execFileSync`) but exposed as Promise so future async backends
- * (DBus, native module, etc.) can slot in without a breaking change.
- */
+const VISIBLE_NUL = '\u2400'
+
+const WINDOWS_SCRIPT =
+  'Add-Type -AssemblyName System.Windows.Forms; ' +
+  `$r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); ` +
+  'Write-Output $r'
+
+const MAC_SCRIPT_LINES: readonly string[] = [
+  "ObjC.import('Foundation')",
+  'const env = $.NSProcessInfo.processInfo.environment',
+  `const message = ObjC.unwrap(env.objectForKey('${DIALOG_MESSAGE_VARIABLE}'))`,
+  `const title = ObjC.unwrap(env.objectForKey('${DIALOG_TITLE_VARIABLE}'))`,
+  'const app = Application.currentApplication()',
+  'app.includeStandardAdditions = true',
+  "app.displayDialog(message, { withTitle: title, buttons: ['No', 'Yes'], defaultButton: 'Yes' }).buttonReturned",
+]
+
 export async function promptYesNo(
   options: DialogOptions,
   internal: PromptInternalOptions = {},
 ): Promise<DialogResult> {
-  const env = internal.env ?? process.env
-  const override = readEnvOverride(env)
-  if (override !== null) {
-    return { response: override, channel: 'env-override' }
+  const text: DialogOptions = {
+    title: options.title.replaceAll('\u0000', VISIBLE_NUL),
+    message: options.message.replaceAll('\u0000', VISIBLE_NUL),
+  }
+  const length = text.title.length + text.message.length
+  if (length > DIALOG_TEXT_LIMIT) {
+    return {
+      response: 'no-channel',
+      channel: 'none',
+      error: `the dialog text is ${length} characters long; the limit is ${DIALOG_TEXT_LIMIT}`,
+      input_fault: true,
+    }
   }
 
   const platform = internal.platform ?? process.platform
@@ -76,11 +77,11 @@ export async function promptYesNo(
 
   switch (platform) {
     case 'win32':
-      return runWindowsDialog(options, executor)
+      return runWindowsDialog(text, executor)
     case 'darwin':
-      return runMacDialog(options, executor)
+      return runMacDialog(text, executor)
     case 'linux':
-      return runLinuxDialog(options, executor)
+      return runLinuxDialog(text, executor)
     default:
       return {
         response: 'no-channel',
@@ -90,26 +91,13 @@ export async function promptYesNo(
   }
 }
 
-function readEnvOverride(env: NodeJS.ProcessEnv): DialogResponse | null {
-  const raw = env[ENV_OVERRIDE_KEY]
-  if (!raw) return null
-  const normalized = raw.trim().toLowerCase()
-  if (normalized === 'yes') return 'yes'
-  if (normalized === 'no') return 'no'
-  return null
-}
-
-/**
- * Default executor: wraps `execFileSync` and normalizes thrown errors
- * (non-zero exit, ENOENT) into the same `ExecResult` shape the platform
- * helpers expect.
- */
-function defaultExecutor(cmd: string, args: string[]): ExecResult {
+export function defaultExecutor(cmd: string, args: string[], env?: Record<string, string>): ExecResult {
   try {
     const stdout = execFileSync(cmd, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 1024 * 1024,
+      ...(env !== undefined && { env: { ...process.env, ...env } }),
     })
     return { exitCode: 0, stdout, stderr: '' }
   } catch (err) {
@@ -144,29 +132,25 @@ function bufferOrStringToString(value: string | Buffer | undefined): string {
   return value.toString('utf8')
 }
 
-/**
- * Escape a value for embedding inside a PowerShell single-quoted string.
- * PowerShell doubles `'` to escape; nothing else needs escaping inside
- * single-quoted strings.
- */
-function escapePowerShellSingleQuoted(s: string): string {
-  return s.replace(/'/g, "''")
+function dialogEnvironment(options: DialogOptions): Record<string, string> {
+  return {
+    [DIALOG_MESSAGE_VARIABLE]: options.message,
+    [DIALOG_TITLE_VARIABLE]: options.title,
+  }
+}
+
+export function windowsPowerShellPath(env: NodeJS.ProcessEnv = process.env): string {
+  const systemRoot = env.SystemRoot
+  const root = systemRoot !== undefined && win32.isAbsolute(systemRoot) ? systemRoot : 'C:\\Windows'
+  return win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 }
 
 export function runWindowsDialog(options: DialogOptions, executor: Executor): DialogResult {
-  const msg = escapePowerShellSingleQuoted(options.message)
-  const title = escapePowerShellSingleQuoted(options.title)
-  const script =
-    `Add-Type -AssemblyName System.Windows.Forms; ` +
-    `$r = [System.Windows.Forms.MessageBox]::Show('${msg}', '${title}', 'YesNo', 'Question'); ` +
-    `Write-Output $r`
-  const exec = executor('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    script,
-  ])
+  const exec = executor(
+    windowsPowerShellPath(),
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', WINDOWS_SCRIPT],
+    dialogEnvironment(options),
+  )
 
   if (exec.error || exec.exitCode < 0) {
     return {
@@ -185,21 +169,13 @@ export function runWindowsDialog(options: DialogOptions, executor: Executor): Di
   }
 }
 
-/**
- * Escape a value for embedding inside an AppleScript double-quoted string.
- * AppleScript escapes `"` as `\"` and `\` as `\\`.
- */
-function escapeAppleScriptDoubleQuoted(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-}
-
 export function runMacDialog(options: DialogOptions, executor: Executor): DialogResult {
-  const msg = escapeAppleScriptDoubleQuoted(options.message)
-  const title = escapeAppleScriptDoubleQuoted(options.title)
-  const script = `display dialog "${msg}" with title "${title}" buttons {"No","Yes"} default button "Yes"`
-  const exec = executor('osascript', ['-e', script])
+  const exec = executor(
+    MAC_OSASCRIPT,
+    ['-l', 'JavaScript', ...MAC_SCRIPT_LINES.flatMap((line) => ['-e', line])],
+    dialogEnvironment(options),
+  )
 
-  // Cancel / Esc → osascript exits non-zero (typically 1, "User canceled.").
   if (exec.exitCode !== 0) {
     if (exec.error && exec.exitCode < 0) {
       return { response: 'no-channel', channel: 'none', error: exec.error }
@@ -207,8 +183,8 @@ export function runMacDialog(options: DialogOptions, executor: Executor): Dialog
     return { response: 'no', channel: 'macos' }
   }
   const stdout = exec.stdout.trim()
-  if (stdout.includes('button returned:Yes')) return { response: 'yes', channel: 'macos' }
-  if (stdout.includes('button returned:No')) return { response: 'no', channel: 'macos' }
+  if (stdout === 'Yes') return { response: 'yes', channel: 'macos' }
+  if (stdout === 'No') return { response: 'no', channel: 'macos' }
   return {
     response: 'no-channel',
     channel: 'none',
@@ -217,11 +193,12 @@ export function runMacDialog(options: DialogOptions, executor: Executor): Dialog
 }
 
 export function runLinuxDialog(options: DialogOptions, executor: Executor): DialogResult {
-  const exec = executor('zenity', [
+  const exec = executor(LINUX_ZENITY, [
     '--question',
     `--title=${options.title}`,
     `--text=${options.message}`,
     '--no-wrap',
+    '--no-markup',
   ])
 
   if (exec.error && exec.exitCode < 0) {
