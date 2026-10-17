@@ -54,11 +54,6 @@ const MAC_SCRIPT_LINES: readonly string[] = [
   "app.displayDialog(message, { withTitle: title, buttons: ['No', 'Yes'], defaultButton: 'Yes' }).buttonReturned",
 ]
 
-/**
- * Pop a Yes/No dialog appropriate to the host OS. Sync under the hood
- * (`execFileSync`) but exposed as Promise so future async backends
- * (DBus, native module, etc.) can slot in without a breaking change.
- */
 export async function promptYesNo(
   options: DialogOptions,
   internal: PromptInternalOptions = {},
@@ -96,11 +91,6 @@ export async function promptYesNo(
   }
 }
 
-/**
- * Default executor: wraps `execFileSync` and normalizes thrown errors
- * (non-zero exit, ENOENT) into the same `ExecResult` shape the platform
- * helpers expect.
- */
 export function defaultExecutor(cmd: string, args: string[], env?: Record<string, string>): ExecResult {
   try {
     const stdout = execFileSync(cmd, args, {
@@ -186,7 +176,6 @@ export function runMacDialog(options: DialogOptions, executor: Executor): Dialog
     dialogEnvironment(options),
   )
 
-  // Cancel / Esc → osascript exits non-zero (typically 1, "User canceled.").
   if (exec.exitCode !== 0) {
     if (exec.error && exec.exitCode < 0) {
       return { response: 'no-channel', channel: 'none', error: exec.error }

@@ -68,7 +68,7 @@ describe('gateRequest — validate-stage rejections', () => {
   it('rejects with reject_kind=expired when the timestamp is outside the skew window', async () => {
     const r = await gateRequest({
       toolName: 'rsct_request_commit',
-      approval: approval({ timestamp: '2026-06-03T11:50:00.000Z' }), // 10 min old
+      approval: approval({ timestamp: '2026-06-03T11:50:00.000Z' }),
       dialog: DIALOG_OPTS,
       projectRoot: tmpRoot,
       now: FIXED_NOW,
@@ -184,7 +184,6 @@ describe('gateRequest — dialog stage (no fabrication signals)', () => {
 
 describe('gateRequest — forced dialog (fabrication signals)', () => {
   it('approves only on yes; trust list does not bypass forced dialog', async () => {
-    // reason_too_short triggers must_force_dialog
     const r = await gateRequest({
       toolName: 'rsct_request_commit',
       approval: approval({ reason: 'ok' }),

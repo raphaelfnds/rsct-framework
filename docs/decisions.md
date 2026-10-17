@@ -2393,6 +2393,8 @@ those files. Keyed by module and symbol; restatements of what the code says were
   an approval out of band (INV-2.1) and what the §C contract leans on against a fabricated
   `dev_approval`. Tests cannot open real dialogs, so every platform helper takes an injectable
   `executor` and `gateRequest` takes `promptFn` (ADR-027).
+- **`promptYesNo`** is synchronous underneath (`execFileSync`) but returns a Promise, so an
+  asynchronous backend (DBus, a native module) can replace it without changing its callers.
 
 ---
 
