@@ -72,6 +72,15 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   const promptFn = opts.promptFn ?? promptYesNo
   const dialog = await promptFn(opts.dialog)
 
+  if (dialog.input_fault === true) {
+    return {
+      status: 'rejected',
+      reason: `the approval dialog could not show this request (${dialog.error ?? 'its text was refused'}); shorten the text and call again — trust_allowed_for does not apply`,
+      reject_kind: 'no_channel',
+      fabrication_signals: validation.fabrication_signals,
+    }
+  }
+
   if (validation.must_force_dialog || opts.forceDialog === true) {
     if (dialog.response === 'yes') {
       return {

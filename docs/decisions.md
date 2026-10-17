@@ -1427,6 +1427,74 @@ any other reason; and at 3.0.0 at the latest.
 Not measured: the two channels on one machine, a registry install over a link, the effect of
 `"private": true`, and anything on macOS, pnpm, yarn or bun.
 
+### ADR-027 — The approval dialog gets its text as data, runs by full path, and has no test override (2.14.1)
+**Status**: active.
+**Tags**: security, dialog, cross-os
+
+**Context**: every approval the framework treats as human goes through `lib/os-dialog.ts`
+(INV-2.1). Up to 2.14.0 the dialog's title and text — which carry values the agent writes: a commit
+message, a branch name, a spec ref, a reason — were part of the script that showed the dialog on
+Windows and macOS. MEASURED 2026-10-16 (Windows 11, Windows PowerShell 5.1): a typographic
+apostrophe, as in ordinary prose, stopped the dialog from opening. The module also honoured `RSCT_TEST_DIALOG_RESPONSE`,
+which answered every dialog without showing one when set in the server's environment; only the
+module's own tests used it. The dialog programs ran by bare name, and a `no-channel` result fell to
+`trust_allowed_for` whatever caused it.
+
+**Decision**:
+- Windows and macOS run a constant script. The title and text travel in `RSCT_DIALOG_MESSAGE` and
+  `RSCT_DIALOG_TITLE`, set for the dialog process only and read as data — `$env:` in PowerShell,
+  `NSProcessInfo` in JavaScript for Automation (`osascript -l JavaScript`). The arguments are
+  byte-identical for any text. Linux passes the text as zenity's own `--text=` argument (argv, no
+  shell) with `--no-markup`.
+- The programs run by full path: `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`
+  (`C:\Windows` when `SystemRoot` is missing or relative), `/usr/bin/osascript`, `/usr/bin/zenity`.
+- Before any platform: U+0000 becomes U+2400, and a title plus text over 32,000 UTF-16 units
+  returns `no-channel` with `input_fault`. `gateRequest` refuses it before anything else, forced
+  dialog or not, without consulting `trust_allowed_for` (`reject_kind: no_channel`, the reason gives
+  the length and says to shorten the text); the REVIEW's unverified-files question treats it as
+  undecided.
+- `RSCT_TEST_DIALOG_RESPONSE`, the `env` seam of `promptYesNo` and the `env-override` channel are
+  removed. Tests inject `promptFn` or `executor`.
+
+**Direction**: stricter. No text an agent writes reaches the dialog program as code; a program of
+the same name earlier on `PATH` is not run; an input the dialog cannot show is refused instead of
+trusted; nothing answers a dialog without one.
+
+**Alternatives considered**:
+- Escape more characters — the text would still be part of the script.
+- Base64 inside the script — MEASURED verbatim for 11 of 11 texts on Windows, but the text grows
+  (4/3 for ASCII, 4 characters per CJK character, so about 8,000 CJK characters would pass the
+  command-line limit) and it does not cover macOS.
+- Arguments to `osascript` after the script — a text starting with `-` may be read as an option
+  (not measured, no Mac here); the environment makes the question moot.
+- Keep the override behind a test flag — whoever can set the variable can set the flag.
+
+**What is given up, by name**:
+- whoever controls the server's environment or files (`.mcp.json` `env`, `NODE_OPTIONS`, `PATH`,
+  `SystemRoot`, the installed `dist/`) controls the server. Removing the override is defence in
+  depth, not a closed path;
+- a `zenity` outside `/usr/bin` is not used: no dialog, so the request is refused, or trusted where
+  the tool is listed;
+- text that imitates framework lines, and bidirectional control characters, are not addressed. Agent
+  text is shown as written, in some dialogs before framework lines, and how much of a long text a
+  dialog shows depends on the platform;
+- a dialog program that starts and then fails, or is stopped, still counts as no channel, so where
+  the tool is listed in `trust_allowed_for` the call is trusted. The list is the developer's, and a
+  `.rsct.json` that lists every tool is within bounds (`mcp-server/README.md`, "`.rsct.json` bounds
+  + tamper defense");
+- another program of the same user acting on the dialog is not addressed;
+- headless users of the override move to `trust_allowed_for`.
+
+**Consequences**: `tests/unit/os-dialog.test.ts` pins the constant arguments, the text only in the
+environment, the full paths, the NUL replacement, the limit and the absence of the override.
+`tests/integration/os-dialog-real.test.ts` runs the real `powershell.exe` (Windows) and `osascript`
+(macOS) with only the dialog call swapped for an echo that returns what it was given, and requires
+every text of a corpus back verbatim. `tests/unit/request-gate.test.ts` pins that an input fault is
+refused when the tool is listed and when the dialog is forced.
+
+Not measured: macOS outside the CI macOS cells, `--no-markup` on screen, a NUL on a real
+MessageBox, and zenity other than 4.0.1.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -1621,6 +1689,16 @@ runs, and exports nothing that could tempt an import.
   with an empty `scope_globs`, and 316 of them left `progress_<slug>.md` out of the list. The
   sanitizer riding on every edit wrote 9,938 `settings.baseline` lines out of 30,644 audit lines,
   up to 430 in one day. Of 663 commits, none used the dialog-free lane.
+- **Which `powershell.exe` Node runs on Windows** (ADR-027, 2026-10-16, Node 22.14). A copy of
+  another program named `powershell.exe` in the working directory was not run by
+  `execFileSync('powershell.exe', …)`; the same copy in a folder placed first in `PATH` was (exit 1,
+  the copy's own; counter-test: the copy run by its path exits 1 too). This machine's `PATH` had no
+  user-writable folder before `WindowsPowerShell\v1.0`.
+- **An environment variable carries dialog text verbatim to PowerShell `$env:`** (ADR-027,
+  2026-10-16, Windows PowerShell 5.1): 21 of 21 texts — every quote character, `%PATH%`,
+  `$env:PATH`, LF and CRLF, accents, CJK, emoji, the empty string, a leading `-`, 30,000 ASCII and
+  30,000 CJK characters. Node refuses an environment value that holds a NUL
+  (`ERR_INVALID_ARG_VALUE`). zenity 4.0.1 (Ubuntu 24.04) lists `--no-markup` for `--question`.
 
 ---
 
@@ -2308,6 +2386,13 @@ those files. Keyed by module and symbol; restatements of what the code says were
   seeded tree as well: a scanner only ever pointed at the tree it must find nothing in cannot be
   shown to find anything. The extension filter is applied to `rel`, which is backslash-joined on
   Windows.
+
+### `lib/os-dialog.ts`
+
+- The dialog is drawn by the desktop, not by Claude Code's tool-result channel; that is what makes
+  an approval out of band (INV-2.1) and what the §C contract leans on against a fabricated
+  `dev_approval`. Tests cannot open real dialogs, so every platform helper takes an injectable
+  `executor` and `gateRequest` takes `promptFn` (ADR-027).
 
 ---
 

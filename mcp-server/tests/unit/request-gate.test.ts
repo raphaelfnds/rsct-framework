@@ -123,6 +123,51 @@ describe('gateRequest — dialog stage (no fabrication signals)', () => {
     if (r.status === 'approved') expect(r.channel).toBe('trust')
   })
 
+  it('refuses a dialog that failed on its own text even when the tool is allow-listed', async () => {
+    const r = await gateRequest({
+      toolName: 'rsct_request_commit',
+      approval: approval(),
+      dialog: DIALOG_OPTS,
+      projectRoot: tmpRoot,
+      now: FIXED_NOW,
+      approvalModes: { trust_allowed_for: ['rsct_request_commit'] },
+      promptFn: dialogReturning({
+        response: 'no-channel',
+        channel: 'none',
+        error: 'the dialog text is 40000 characters long; the limit is 32000',
+        input_fault: true,
+      }),
+    })
+    expect(r.status).toBe('rejected')
+    if (r.status === 'rejected') {
+      expect(r.reject_kind).toBe('no_channel')
+      expect(r.reason).toContain('40000 characters')
+      expect(r.reason).toContain('trust_allowed_for does not apply')
+    }
+  })
+
+  it('gives a forced dialog that failed on its own text the same refusal', async () => {
+    const r = await gateRequest({
+      toolName: 'rsct_request_commit',
+      approval: approval(),
+      dialog: DIALOG_OPTS,
+      projectRoot: tmpRoot,
+      now: FIXED_NOW,
+      forceDialog: true,
+      promptFn: dialogReturning({
+        response: 'no-channel',
+        channel: 'none',
+        error: 'the dialog text is 40000 characters long; the limit is 32000',
+        input_fault: true,
+      }),
+    })
+    expect(r.status).toBe('rejected')
+    if (r.status === 'rejected') {
+      expect(r.reject_kind).toBe('no_channel')
+      expect(r.reason).toContain('shorten the text')
+    }
+  })
+
   it('rejects with reject_kind=no_channel when no dialog and tool not allow-listed', async () => {
     const r = await gateRequest({
       toolName: 'rsct_request_commit',

@@ -12,6 +12,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **The approval dialog receives its title and text as data, on every platform.** On Windows
+  and macOS the dialog program runs a fixed script and reads the title and text from two
+  environment variables set for that process only; nothing from a commit message, branch name,
+  spec ref or reason is placed inside the script. macOS now uses `osascript -l JavaScript`. On
+  Linux, `zenity` shows the text with markup off (`--no-markup`). Each dialog program runs by its
+  full path — `powershell.exe` under `%SystemRoot%\System32\WindowsPowerShell\v1.0`,
+  `/usr/bin/osascript`, `/usr/bin/zenity` — so a program of the same name earlier on `PATH` is not
+  used; a `zenity` installed elsewhere is no longer found and the dialog is then unavailable.
+  Upgrade and restart the IDE; no `/rsct-setup` needed. See ADR-027.
+- A title and text over 32,000 characters together are refused before any dialog opens, and that
+  refusal does not fall back to `approval_modes.trust_allowed_for`. A NUL character is shown as `␀`.
+
+### Fixed
+
+- A typographic apostrophe (`’`) in a commit message no longer stops the Windows dialog from
+  opening.
+- `mcp-server/README.md` listed three tools for `approval_modes.trust_allowed_for` (and eleven in its
+  bounds table); the config accepts twelve, now all listed. Its §C section said a listed tool skips
+  the dialog; the list applies only where no dialog channel exists.
+
+### Removed
+
+- `RSCT_TEST_DIALOG_RESPONSE`. Set in the server's environment, it answered every dialog without
+  showing one. Headless use goes through `approval_modes.trust_allowed_for`.
+
 ## [2.14.0] - 2026-10-11
 
 ### Changed
