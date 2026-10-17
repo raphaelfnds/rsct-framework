@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-10-16
+
 ### Security
 
 - **The approval dialog receives its title and text as data, on every platform.** On Windows
