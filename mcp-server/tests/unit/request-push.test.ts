@@ -40,7 +40,6 @@ function approval(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// PH-5: a fully-satisfied pre_merge_ack (all self-attestations true + a note).
 function ack(overrides: Record<string, unknown> = {}) {
   return {
     plan_complete: true,
@@ -52,7 +51,6 @@ function ack(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// promptFn seam that counts invocations — proves no OS dialog on an ack reject.
 function countingPrompt(): {
   fn: (opts: DialogOptions) => Promise<DialogResult>
   calls: () => number
@@ -80,9 +78,6 @@ function gitExec(spec: Record<string, GitExecResult> = {}, fallback?: GitExecRes
   return (_root, args) => {
     const key = args.join(' ')
     if (key in spec) return spec[key]!
-    // #62 B5: model a repo that HAS remotes. Without this the allow-list is built
-    // from the empty fallback below and even 'origin' is refused — the reject is
-    // then an artifact of the fake, not of the input under test.
     if (key === 'remote') return { ok: true, stdout: 'origin\nupstream\n', stderr: '', exitCode: 0 }
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
@@ -292,7 +287,6 @@ describe('rsct_request_push — failure surfaces', () => {
     expect(out.status).toBe('mutation_failed')
     expect(out.reason).toContain('non-fast-forward')
 
-    // Retry with the SAME approval (success this time) — must NOT be 'reused'.
     const out2 = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval() },
       { ...internal, gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }) },
@@ -313,9 +307,6 @@ describe('rsct_request_push — schema', () => {
   })
 
   it('returns rejected/schema when dev_approval is missing', async () => {
-    // `z.unknown()` accepts undefined at the input-schema layer, so the handler
-    // does not throw — instead it surfaces the missing-approval as a
-    // rejection from validateDevApproval (reject_kind = 'schema').
     const out = (await requestPushHandler(
       { project_root: tmpRoot },
       {
@@ -336,10 +327,6 @@ describe('rsct_request_push — schema', () => {
     const ackProp = schema.properties.pre_merge_ack
     expect(ackProp).toBeDefined()
     expect(ackProp.additionalProperties).toBe(false)
-    // DERIVED from the Zod shape — see the same assertion in request-merge.test.ts
-    // for why a hardcoded key list here would permanently block every protected
-    // push behind a green suite.
-    // Breaks on: adding a field to preMergeAckSchema without mirroring it.
     const zodKeys = Object.keys(preMergeAckSchema.shape)
     expect(zodKeys.length).toBeGreaterThan(0)
     expect(Object.keys(ackProp.properties ?? {}).sort()).toEqual([...zodKeys].sort())
@@ -514,10 +501,6 @@ describe('rsct_request_push — PH-5 pre_merge_ack hygiene gate (protected-branc
 })
 
 describe('rsct_request_push — install-drift advisory (#25)', () => {
-  // tmpRoot has a .rsct.json and no .rsct/scripts, so both enforcement scripts
-  // read as absent → severity 'security'. Push is outward-facing and hard to
-  // reverse, which is why degraded enforcement matters MORE here than at commit
-  // — and it is exactly where the warning used to be silent.
   const SECURITY = /SECURITY: RSCT enforcement is not running/
 
   it('prepends the advisory on a successful push and audits the detection', async () => {
@@ -533,7 +516,6 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
     )) as RequestPushOutput
 
     expect(out.status).toBe('pushed')
-    // Prepended: it outranks the routine tail, it does not trail behind it.
     expect(out.hints[0]).toMatch(SECURITY)
 
     const entry = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
@@ -547,10 +529,6 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
   })
 
   it('carries the advisory when the push is REJECTED before the dialog', async () => {
-    // The pre-gate reject path: a protected branch missing its pre_merge_ack
-    // rejects in chat WITHOUT popping the dialog. That return must still drain
-    // the advisory, or the one path where enforcement matters most is the one
-    // that stays quiet.
     writeConfig(tmpRoot, { ...BASE_CONFIG, protected_branches: ['main'] })
     const out = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval() },
@@ -583,10 +561,6 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
     )
     expect(seen).toContain('Approve push')
     expect(seen).toContain('RSCT enforcement is NOT running')
-    // One line, not the whole hint — the dialog is a decision surface. The old
-    // form asserted the WHOLE message was 2 lines; #92 defect F added the
-    // repository the push lands in, so the message grew. The guarantee being
-    // protected is the advisory's own line count, and it is unchanged.
     const advisoryLines = seen
       .split('\n')
       .filter((l) => l.includes('RSCT enforcement is NOT running'))
@@ -594,7 +568,6 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
   })
 
   it('says nothing when the project is not rsct-managed', async () => {
-    // No .rsct.json at all: nothing was observed, so nothing is claimed.
     const out = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval() },
       {
@@ -608,19 +581,6 @@ describe('rsct_request_push — install-drift advisory (#25)', () => {
   })
 })
 
-// ============================================================================
-// #62 B5 — the ref/remote injection class.
-//
-// Every shape below was measured against a real bare remote on git
-// 2.45.1.windows.1: each lands on the remote's protected `main` while
-// `isProtectedBranch` (an exact string compare over the raw agent input)
-// returns false, so the whole protected block — ack AND override — is skipped.
-// ============================================================================
-
-/** A fake that THROWS on an argv it does not model, naming the argv it saw.
- *  The permissive `gitExec` above answers everything, which is how 21 of 22
- *  push argv sites went stale without one test noticing. Where the argv itself
- *  is the thing under test, silence is not an acceptable answer. */
 function strictGitExec(spec: Record<string, GitExecResult>): GitExecutor {
   return (_root, args) => {
     const key = args.join(' ')
@@ -643,9 +603,6 @@ describe('rsct_request_push — B5 destination resolution', () => {
 
   beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
 
-  // Breaks on: comparing the raw agent string against the protected list, i.e.
-  // reverting to `isProtectedBranch(input.branch)`. Each of these was measured
-  // rc=0 onto the remote's main with no ack and no override.
   it.each([
     ['+main', 'the force marker hides it from an exact compare'],
     ['HEAD:main', 'a src:dst refspec puts the destination after the colon'],
@@ -659,18 +616,12 @@ describe('rsct_request_push — B5 destination resolution', () => {
     expect(out.branch_check.protected).toBe(true)
   })
 
-  // Breaks on: dropping the second leading-'-' check, the one applied to the
-  // DERIVED destination. Also asserts the poisoned value never reaches git:
-  // `rev-parse --symbolic-full-name --all` returns rc=0 and a list of every ref.
   it('refuses +main:--all and never hands --all to git', async () => {
     const seen: string[][] = []
     const out = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch: '+main:--all' },
       {
         gitStateOverride: gitState('feat/foo'),
-        // Must answer `remote` honestly: the remote allow-list runs first, so a
-        // fake that garbles it would reject as unknown_remote and this test would
-        // pass for the wrong reason.
         gitExecutor: (_r, args) => {
           seen.push(args)
           return args[0] === 'remote'
@@ -686,27 +637,20 @@ describe('rsct_request_push — B5 destination resolution', () => {
     expect(seen.some((a) => a.includes('--all'))).toBe(false)
   })
 
-  // Breaks on: removing the glob reject. Measured rc=0 force-updating protected
-  // main while the plain push of the same state was refused.
   it('refuses a glob refspec', async () => {
     const out = await attempt('+refs/heads/main*:refs/heads/main*')
     expect(out.reject_kind).toBe('unsafe_push_target')
   })
 
-  // Breaks on: removing the empty-destination reject.
   it('refuses the bare-colon matching refspec', async () => {
     expect((await attempt(':')).reject_kind).toBe('unsafe_push_target')
   })
 
-  // VACUITY CONTROL. A reject-everything validator passes every test above.
-  // This is what it cannot pass.
   it('VACUITY: an ordinary branch still pushes', async () => {
     const out = await attempt('release/2.0')
     expect(out.status).toBe('pushed')
   })
 
-  // VACUITY CONTROL. Protection must still be overridable, or the new resolution
-  // has quietly turned every protected push into a hard stop.
   it('VACUITY: a protected destination still pushes WITH the override', async () => {
     const out = await attempt('main', {
       dev_approval: approval({ override_protected_branch: { reason: 'shipping the release' } }),
@@ -729,10 +673,6 @@ describe('rsct_request_push — B5 remote allow-list', () => {
       },
     ) as Promise<RequestPushOutput>
 
-  // Breaks on: omitting the allow-list, or implementing it as "reject
-  // option-shaped remotes" instead of "must be a configured remote". Measured:
-  // `git push <arbitrary-bare-path> main` lands the repo in a foreign
-  // repository, and `--` does NOT protect that slot.
   it('refuses a path or URL remote — this is the exfiltration vector', async () => {
     const out = await withRemote('/tmp/anywhere.git')
     expect(out.status).toBe('rejected')
@@ -740,8 +680,6 @@ describe('rsct_request_push — B5 remote allow-list', () => {
     expect(out.reason).toContain('NAMED remotes')
   })
 
-  // Breaks on: relying on `--` alone for the remote slot. Measured:
-  // `git push --mirror -- origin` is rc=0 and DELETES remote branches.
   it('refuses an option-shaped remote before git is ever run', async () => {
     const seen: string[][] = []
     const out = await withRemote('--mirror', (_r, args) => { seen.push(args); return PUSH_OK })
@@ -749,10 +687,6 @@ describe('rsct_request_push — B5 remote allow-list', () => {
     expect(seen.some((a) => a[0] === 'push')).toBe(false)
   })
 
-  // Breaks on: SKIPPING the check when the list comes back empty. That was the
-  // tempting reading of "degrade gracefully", and it is wrong: a repo with no
-  // configured remotes is exactly the shape a path remote exploits. Only an
-  // UNREADABLE list (ok:false) may skip.
   it('an EMPTY remote list rejects; an UNREADABLE one skips the check', async () => {
     const empty = await withRemote('origin', (_r, args) =>
       args[0] === 'remote' ? { ok: true, stdout: '', stderr: '', exitCode: 0 } : PUSH_OK)
@@ -765,7 +699,6 @@ describe('rsct_request_push — B5 remote allow-list', () => {
     expect(unreadable.status).toBe('pushed')
   })
 
-  // VACUITY CONTROL: a configured non-default remote still works.
   it('VACUITY: a configured remote still pushes', async () => {
     expect((await withRemote('upstream')).status).toBe('pushed')
   })
@@ -774,12 +707,6 @@ describe('rsct_request_push — B5 remote allow-list', () => {
 describe('rsct_request_push — B5 argv shape', () => {
   beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
 
-  // Breaks on: moving `--` after the remote, i.e. ['push', remote, '--', branch].
-  // That was the first authorized form and it does NOT close the hole: measured,
-  // `git push --exec=<program> -- main` RUNS THE PROGRAM, because the remote is
-  // an agent slot too and still sits in an option position.
-  // The strict fake is what makes this assertion real — under the permissive one
-  // a wrong argv is answered ok and the test passes.
   it('runs git push with -- BEFORE the remote', async () => {
     const out = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch: 'feat/foo' },
@@ -800,7 +727,6 @@ describe('rsct_request_push — B5 argv shape', () => {
 
 describe('rsct_request_push — B5 ref-store resolution arm', () => {
   beforeEach(() => writeConfig(tmpRoot, BASE_CONFIG))
-  /** rev-parse answers `resolved`; everything else succeeds. */
   const withResolver = (branch: string, resolved: string) =>
     requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval(), pre_merge_ack: ack(), branch },
@@ -816,33 +742,17 @@ describe('rsct_request_push — B5 ref-store resolution arm', () => {
       },
     ) as Promise<RequestPushOutput>
 
-  // Breaks on: removing the ref-store resolution arm.
-  // This is the ONLY shape resolution catches on its own: the string candidates
-  // for 'HEAD' are just ['HEAD'], which is in no protected list. `git push origin
-  // HEAD` while standing on main is an ordinary thing to type, and without this
-  // arm it reaches the remote's main with no ack and no override.
-  // The mutation harness caught that every other destination test passed through
-  // the STRING candidates, leaving this arm entirely unexercised.
   it('catches a destination only the ref store can resolve', async () => {
     const out = await withResolver('HEAD', 'refs/heads/main\n')
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('protected_branch')
   })
 
-  // Breaks on: guarding the resolution on `rp.ok` instead of on the output
-  // starting with 'refs/'. rc=0 does NOT mean "canonicalised" — measured,
-  // `rev-parse --symbolic-full-name` returns rc=0 with EMPTY stdout for
-  // 'main@{0}', rc=0 echoing 'HEAD' on a detached HEAD, rc=0 echoing '--mirror'
-  // unchanged, and on FAILURE it still echoes its argument. Feeding any of that
-  // into the candidate set is how a NON-protected branch becomes protected — a
-  // hard stop on legitimate work, with no override path.
   it('ignores an rc=0 answer that is not a ref', async () => {
     const out = await withResolver('feat/foo', 'main\n')
     expect(out.status).toBe('pushed')
   })
 
-  // VACUITY CONTROL for this arm: resolution that DOES return a ref, for an
-  // ordinary branch, must still push.
   it('VACUITY: a resolved non-protected ref still pushes', async () => {
     const out = await withResolver('feat/foo', 'refs/heads/feat/foo\n')
     expect(out.status).toBe('pushed')
@@ -861,10 +771,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     return { fn: (_r, base, head) => { seen.push([base, head]); return result }, seen }
   }
 
-  // A push carries <remote>/<destination>...<source>. Using the raw `branch` for
-  // both — as the first design did — composes `origin/feat/x:main` for a refspec,
-  // which is git's <rev>:<path> TREE syntax, not a range at all.
-  // Breaks on: composing the range from the raw branch input.
   it('reads <remote>/<destination>...<source> for a refspec push', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const spy = rangeSpy({ status: 'ok', paths: [] })
@@ -875,8 +781,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     expect(spy.seen).toEqual([['origin/main', 'feat/x']])
   })
 
-  // Breaks on: dropping the remote from the base, which would compare against a
-  // LOCAL ref and silently report an empty delta on an unpushed branch.
   it('reads <remote>/<branch>...<branch> for a plain protected push', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const spy = rangeSpy({ status: 'ok', paths: [] })
@@ -887,10 +791,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     expect(spy.seen).toEqual([['origin/main', 'main']])
   })
 
-  // FAIL-OPEN, and push is the ONLY one of the three. Measured: git push origin
-  // main succeeds even when origin/main was never fetched, so an unfetched
-  // remote-tracking ref is the ORDINARY state here, not the adversarial one.
-  // Breaks on: making push fail closed like merge and rebase.
   it('fails OPEN — pushes, warns, and audits the degradation', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const out = (await requestPushHandler(
@@ -899,9 +799,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     )) as RequestPushOutput
 
     expect(out.status).toBe('pushed')
-    // NAMES the range, so the agent knows which refs to fetch. A generic
-    // "could not be read" leaves it with no action it can take.
-    // Breaks on: dropping the range from the named-cause hint.
     const hint = out.hints.find((h) => h.includes('DEGRADED')) as string
     expect(hint).toContain('origin/main...main')
     expect(hint).toContain('git fetch origin')
@@ -911,9 +808,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     expect(degraded.path_crosscheck).toBe('degraded')
   })
 
-  // Fail-open must not mean "never enforce". When the range IS readable the
-  // coverage check has teeth on push too.
-  // Breaks on: skipping carriedPaths for push because it fails open.
   it('still rejects an unattested carried path when the range IS readable', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const out = (await requestPushHandler(
@@ -924,10 +818,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     expect(out.reason).toContain('src/q.ts')
   })
 
-  // A DELETE refspec (`:main`) carries no files. Composing a range from an empty
-  // source would ask git for `origin/main...` — which is a DIFFERENT range, not
-  // an empty one. Reachable with the DEFAULT protected list, no unusual config.
-  // Breaks on: dropping the source.length > 0 guard.
   it('degrades rather than composing a range for a delete refspec', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const spy = rangeSpy({ status: 'ok', paths: [] })
@@ -938,21 +828,12 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
 
     expect(spy.seen).toEqual([])
     expect(out.status).toBe('pushed')
-    // An UNNAMEABLE range is not a fetch problem, and saying so would be advice
-    // the agent cannot act on: no number of fetched refs gives a delete refspec
-    // a file list. The two causes reach the same branch and must not share prose.
-    // Breaks on: using the named-cause wording for both.
     const hint = out.hints.find((h) => h.includes('DEGRADED')) as string
     expect(hint).toContain('names no readable range')
     expect(hint).toContain('Fetching will not change this')
     expect(hint).not.toContain('git fetch')
   })
 
-  // `origin/HEAD` is the remote's DEFAULT-branch symref, not the branch being
-  // pushed — reading it would be confidently WRONG rather than degraded. Fires
-  // only when the ref store declines to canonicalise the destination AND 'HEAD'
-  // is in the effective protected list, which .rsct.json permits.
-  // Breaks on: dropping the destBare !== 'HEAD' guard.
   it('degrades rather than reading origin/HEAD when the destination stays HEAD', async () => {
     writeConfig(tmpRoot, { ...BASE_CONFIG, protected_branches: ['HEAD'] })
     const spy = rangeSpy({ status: 'ok', paths: [] })
@@ -963,10 +844,6 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
     expect(spy.seen).toEqual([])
   })
 
-  // The check is scoped to PROTECTED pushes (MCP-P1-D). On a feature push it must
-  // not run AND must not claim a result — an absent field says "not applicable"
-  // without over-claiming, which a placeholder label would not.
-  // Breaks on: labelling a non-protected push 'degraded', or running the read.
   it('does not run the check, or record a label, on a non-protected push', async () => {
     writeConfig(tmpRoot, PROTECTED)
     const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
@@ -982,21 +859,9 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
 })
 
 
-// Rv-A. Everything above this block resolves `rev-parse` through a FAKE, and a
-// fake cannot see a wrong argv. The B5 arm shipped with a `--` in the call, which
-// puts rev-parse into echo-the-operands mode — it returned `--` then the operand
-// for every input, so `startsWith('refs/')` was never true and the arm was DEAD in
-// production. The stub fed it a newline-terminated `refs/heads/main` — output real
-// git cannot produce for that argv — so the arm's mutant died honestly against a fixture
-// modelling a reality that does not exist. No harness control catches that: not a
-// broken runner, not a stale anchor — a wrong fixture.
-//
-// So this block uses a REAL repository and the REAL executor. Only `push` is
-// intercepted, and only so the test cannot write to anything.
 describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () => {
   let realRoot: string
   const attempted: string[][] = []
-  // Real for every read; `push` recorded and refused so nothing leaves the box.
   const realExceptPush: GitExecutor = (r, args) => {
     if (args[0] === 'push') {
       attempted.push(args)
@@ -1028,11 +893,6 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
       { gitStateOverride: gitState('main'), gitExecutor: realExceptPush, promptFn: alwaysYes(), now: FIXED_NOW },
     ) as Promise<RequestPushOutput>
 
-  // THE regression test. Breaks on: re-adding `--` to the rev-parse argv.
-  // Measured against git 2.45.1: with `--` the answer is "--" then "HEAD", so the
-  // arm never fires, `isProtectedBranch('HEAD', ['main'])` is false, and the push
-  // reaches the remote's main with no ack, no coverage check and no override — with
-  // the audit recording `protected: false`.
   it.each([['HEAD'], ['@']])(
     'recognises %s as the protected branch it actually resolves to',
     async (spelling) => {
@@ -1043,8 +903,6 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
     },
   )
 
-  // VACUITY CONTROL. A version that called every destination protected would pass
-  // the two rows above and prove nothing.
   it('still pushes an ordinary branch that resolves to a non-protected ref', async () => {
     g(['checkout', '-qb', 'feat/real'])
     const out = await push('HEAD')
@@ -1052,8 +910,6 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
     expect(attempted).toEqual([['push', '--', 'origin', 'HEAD']])
   })
 
-  // The string arm, against real git rather than a stub — it must keep working
-  // for the spellings that never needed the ref store.
   it('recognises refs/heads/main and heads/main through the string arm', async () => {
     for (const spelling of ['refs/heads/main', 'heads/main', '+main']) {
       const out = await push(spelling)

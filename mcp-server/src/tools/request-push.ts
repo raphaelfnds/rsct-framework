@@ -107,9 +107,7 @@ export type RequestPushRejectKind =
   | 'protected_branch'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
-  /** #62 B5: the branch/refspec is option-shaped, a glob, or has no destination. */
   | 'unsafe_push_target'
-  /** #62 B5: the remote is not a configured remote of this repository. */
   | 'unknown_remote'
 
 export interface RequestPushOutput {
@@ -124,14 +122,10 @@ export interface RequestPushOutput {
     protected: boolean
     override_used: boolean
   }
-  /** CAP-33: §0 bootstrap visibility — null when not evaluated (reject paths). */
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
-  /** See `RequestCommitOutput.audit_error` for semantics. */
   audit_error: string | null
-  /** See `RequestCommitOutput.anti_replay_persisted` for semantics. */
   anti_replay_persisted: boolean | null
-  /** See `RequestCommitOutput.anti_replay_error` for semantics. */
   anti_replay_error: string | null
   hints: string[]
 }
@@ -141,11 +135,8 @@ export interface RequestPushInternal {
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
   gitStateOverride?: GitState
-  /** Test-only seam — see `RequestCommitInternal.auditWriter`. */
   auditWriter?: typeof appendAuditEntry
-  /** Test-only seam — see `RequestCommitInternal.approvalRecorder`. */
   approvalRecorder?: typeof recordConsumedApproval
-  /** Test-only seam — see `RequestMergeInternal.rangeReader`. */
   rangeReader?: typeof getRangePaths
 }
 
@@ -201,11 +192,6 @@ export async function requestPushHandler(
 
   const { list: protectedList } = effectiveProtectedList(config)
 
-  // #25. Push is outward-facing and hard to reverse, so degraded enforcement
-  // matters MORE here than at commit — and this is exactly where the warning used
-  // to be silent. Evaluated before every pre-gate check so it reaches the dev on
-  // rejected attempts too, and drained through `withAdvisories` on every return
-  // path. Prepended: it outranks the routine hint tail.
   const advisories: string[] = []
   advisories.push(...anchorHints(projectRoot, config?.audit))
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
@@ -219,20 +205,6 @@ export async function requestPushHandler(
   })
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
 
-  // #62 B5: the remote is an agent slot that nothing validated, and it feeds the
-  // same argv. Measured: `git push <arbitrary-bare-path> main` lands the repo's
-  // contents in a foreign repository, and `--` does NOT protect that slot —
-  // `git push -- <path> main` is still rc=0. So the operand sentinel in `gitPush`
-  // is necessary and not sufficient; this is the other half.
-  //
-  // STRICT by decision: only an UNREADABLE list (`ok === false`, e.g. outside a
-  // repo) skips the check. An EMPTY list REJECTS. The two are different failures:
-  // skipping on empty would leave a repo with no configured remotes — exactly the
-  // shape an attacker-controlled path exploits — with no protection at all.
-  //
-  // BREAKING, deliberately: pushing straight to a URL or filesystem path stops
-  // working. That capability IS the exfiltration vector, and the tool's own
-  // schema has always documented this field as "Remote name (default: origin)".
   const remoteList = gitExecutor(projectRoot, ['remote'])
   if (remoteList.ok) {
     const names = remoteList.stdout
@@ -275,11 +247,6 @@ export async function requestPushHandler(
     }
   }
 
-  // #62 B5: resolve what this push actually WRITES TO before asking whether it is
-  // protected. `isProtectedBranch` is an exact compare, so `+main`, `HEAD:main`,
-  // `refs/heads/main`, `heads/main` and `@` all missed it while landing on the
-  // remote's `main` — no ack, no override. The parse is pure; the ref-store
-  // resolution below adds what only git can answer.
   const refspec = parsePushRefspec(branch ?? '')
   if (branch !== null && !refspec.ok) {
     const reason = pushRefspecRejectReason(refspec.reason, branch)
@@ -312,42 +279,7 @@ export async function requestPushHandler(
     }
   }
 
-  // Ask the ref store what the destination canonicalises to, and add that to the
-  // candidate set. Guarded on `startsWith('refs/')`, NEVER on the exit code:
-  // measured, `rev-parse --symbolic-full-name` returns rc=0 with EMPTY stdout for
-  // `HEAD@{0}`, and on FAILURE it still echoes its argument to stdout (`a.txt`
-  // comes back as `a.txt`, a nonexistent ref comes back with a `fatal:` line).
-  //
-  // NO `--` HERE, and that is load-bearing rather than an omission (Rv-A). The
-  // sentinel puts rev-parse into ECHO-THE-OPERANDS mode: measured,
-  // `rev-parse --symbolic-full-name -- main` returns `--` then `main`, never
-  // `refs/heads/main`. With it, this whole arm was DEAD — `startsWith('refs/')`
-  // could not be true for any input — and `git push origin HEAD` from a
-  // protected branch skipped the ack, the coverage check and the override, with
-  // the audit recording `protected: false`. `HEAD` and `@` are exactly the two
-  // spellings only the ref store can resolve; every other spelling is caught by
-  // the pure-string arm below.
-  //
-  // What makes dropping `--` safe is `parsePushRefspec`, which refuses a
-  // destination starting with `-` BEFORE this call — so `--all` and friends
-  // cannot reach it. Do NOT add a "reject multi-line output" guard as a second
-  // line of defence: measured, `rev-parse --symbolic-full-name --all` returns a
-  // SINGLE line in a repo with one ref, so it would not catch the very thing it
-  // appears to. The parse is the barrier; a weak guard beside it would only
-  // suggest otherwise.
-  //
-  // It answers about the LOCAL ref store while the push writes the REMOTE, so it
-  // is an addition to the string candidates, never a replacement: in a clone
-  // with no local `main`, resolution fails while `HEAD:refs/heads/main` still
-  // moves the protected branch. The prefix-stripped string arm closes that, and
-  // it cannot fail.
   const candidates = new Set(refspec.ok ? refspec.candidates : [])
-  // #62: the endpoints of the coverage cross-check, composed HERE because this is
-  // the only point where the parsed refspec and the ref store's answer are both
-  // in scope. A push CARRIES `<remote>/<destination>`...`<source>` — the local
-  // side is what is being sent, the remote-tracking side is what is already
-  // there. Both stay null when the range cannot be named, and a null range is
-  // treated as degraded (see the protected block below).
   let rangeBase: string | null = null
   let rangeHead: string | null = null
   if (refspec.ok) {
@@ -363,34 +295,16 @@ export async function requestPushHandler(
       destBare = stripRefsPrefix(resolved)
       candidates.add(destBare)
     }
-    // Two shapes name no readable range, and both DEGRADE rather than guess:
-    //  - an empty source is a DELETE refspec (`:main`) — it carries no files at
-    //    all, so there is nothing to cross-check;
-    //  - a destination still spelled `HEAD` means the ref store declined to
-    //    canonicalise it (a detached HEAD echoes `HEAD` back at rc=0). Composing
-    //    `<remote>/HEAD` there would silently read the remote's DEFAULT-branch
-    //    symref instead of the branch being pushed — wrong, not degraded, and
-    //    wrong is the worse of the two because it produces confident output.
     if (refspec.source.length > 0 && destBare !== 'HEAD') {
       rangeBase = `${remote}/${destBare}`
       rangeHead = refspec.source
     }
   }
   const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList))
-  // `null` = not applicable (this push is not to a protected branch, so the check
-  // never ran). Deliberately not `'degraded'`: that label claims an attempt was
-  // made, and the audit must not over-claim what was checked.
   let crossCheck: PathCrossCheck | null = null
   let degradedHint: string | null = null
 
-  // PH-5: pre-integration hygiene gate. Scoped to PROTECTED-branch pushes only
-  // (MCP-P1-D) — a feature/WIP push to a non-protected branch (e.g. to trigger CI
-  // on an open PR) is legitimate and must not force a dishonest attestation.
-  // Checked BEFORE gateRequest so a missing ack rejects in chat WITHOUT popping
-  // the §C OS dialog (V-P1·PH-5); the dev_approval is never validated/consumed here.
   if (branchProtected) {
-    // plan-lifecycle-v2 (Bloco 2.2, HOLE A): feed the LIGHT plan_complete
-    // cross-check the boolean for the plan on the branch being pushed.
     const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null
     const progressOpen = pushingPlan
       ? progressHasOpenItems(projectRoot, pushingPlan.slug)
@@ -404,24 +318,7 @@ export async function requestPushHandler(
       progressHasOpenItems: progressOpen,
       carriedPaths: range.status === 'ok' ? range.paths : null,
     })
-    // FAIL-OPEN — and push is the ONLY one of the three that does. Merge and
-    // rebase fail closed because the mutation can succeed where the range read
-    // cannot; push inverts that. Measured: `git push origin main` succeeds even
-    // when `origin/main` was never fetched, so `origin/main...main` is rc=128 on
-    // a perfectly ordinary first push of a clone made with `--single-branch`.
-    // Failing closed there would block a legitimate push on a purely local
-    // bookkeeping gap, and an unfetched remote-tracking ref is the NORMAL state,
-    // not the adversarial one. The push's own protection is elsewhere and
-    // independent of this: the remote allow-list, the refspec parse, INV-5 on the
-    // resolved destination, and `override_protected_branch`.
     if (ackDecision.ok && range.status !== 'ok') {
-      // Two DIFFERENT causes reach this branch and they need different advice.
-      // A named range that would not read is a fetch problem; an unnameable range
-      // is not, and telling the agent to `git fetch` there would be wrong advice
-      // it cannot act on — a delete refspec carries no files however many refs
-      // are fetched. The audit distinguishes them by `range_base: null`, which is
-      // also why `crossCheck` stays a four-way label instead of growing a fifth
-      // variant for merge and rebase to carry but never use.
       const named = rangeBase !== null && rangeHead !== null
       degradedHint = named
         ? `⚠ pre_merge_ack coverage check DEGRADED (${crossCheck}): the paths this push carries ` +
@@ -491,10 +388,6 @@ export async function requestPushHandler(
     forceDialogReason: 'a push needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — push approval',
-      // The dialog is the one channel the agent cannot rewrite or summarize
-      // away, which is why the security line belongs here and not only in
-      // hints[]. One line, deliberately: this is a decision surface, and a wall
-      // of text trains the dev to dismiss it unread.
       message: [
         `Approve push of '${branchLabel}' to '${remote}'?`,
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
@@ -657,10 +550,6 @@ export async function requestPushHandler(
       remote,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check did on the push that LANDED. Omitted
-      // entirely (rather than sent as a placeholder) when the push was not to a
-      // protected branch — the check does not apply there, and an absent field
-      // says that without claiming a result.
       ...(crossCheck !== null && { path_crosscheck: crossCheck }),
     },
     config?.audit,
@@ -680,7 +569,6 @@ export async function requestPushHandler(
     )
   }
 
-  // CAP-33: bootstrap visibility on push (mirror of request_commit).
   const bootstrap = evaluateBootstrapMarker({ projectRoot, now })
   if (bootstrap.status !== 'fresh') {
     if (bootstrap.hint) hints.push(bootstrap.hint)
@@ -699,14 +587,6 @@ export async function requestPushHandler(
     )
   }
 
-  // CAP-53: when the task's plan is marked complete, SUGGEST (advisory — never
-  // auto-perform) cleaning up the branch-local plan_/progress_/spec_ files
-  // before they can reach a protected branch (they must never be tracked on
-  // main/test). The dev decides.
-  // plan-lifecycle-v2 (Bloco 2.3, Fork 2/A — advisory-only): only a PROTECTED
-  // push carries the plan_complete ack (a non-protected WIP push never attests
-  // completion), so surface the artifact-cleanup advisory ONLY there. Resolve
-  // the plan by branch (HOLE A), falling back to the active plan.
   if (branchProtected) {
     const donePlan = (branch ? findPlanByBranch(projectRoot, branch) : null) ?? findActivePlan(projectRoot)
     if (donePlan) {

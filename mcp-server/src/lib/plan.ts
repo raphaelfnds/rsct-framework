@@ -10,11 +10,6 @@ export interface ActivePlan {
   created: string | null
 }
 
-/**
- * Find the most-recently-modified `plan_<slug>.md` at the project root.
- * Returns null if none found. Metadata extraction is best-effort — fields
- * may be null if the plan file does not follow the standard template.
- */
 export function findActivePlan(projectRoot: string): ActivePlan | null {
   let entries: string[]
   try {
@@ -24,8 +19,6 @@ export function findActivePlan(projectRoot: string): ActivePlan | null {
   }
 
   const candidates = entries
-    // CAP-53: detect the `spec_` alias too (rules/B accepts spec_ as an alias
-    // of plan_). The §C reminder hints must see either form.
     .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
     .map((name) => {
       const path = join(projectRoot, name)
@@ -53,15 +46,6 @@ export function findActivePlan(projectRoot: string): ActivePlan | null {
   }
 }
 
-/**
- * T3 (FV1): resolve a plan by its EXACT slug — `plan_<slug>.md` (preferred) or
- * `spec_<slug>.md` (fallback) at the project root. Unlike {@link findActivePlan}
- * (which returns the most-recent plan_/spec_ by mtime), this is stable against
- * mtime drift: touching an unrelated `spec_`/`plan_` mid-session does NOT change
- * what this returns. The plan-authorization token validates against THIS (its own
- * plan_slug) so an unrelated edit never falsely revokes the token. Returns null
- * when neither file exists (the token's plan was deleted → `plan_gone`).
- */
 export function findPlanBySlug(projectRoot: string, slug: string): ActivePlan | null {
   const planName = `plan_${slug}.md`
   const specName = `spec_${slug}.md`
@@ -85,37 +69,15 @@ export function findPlanBySlug(projectRoot: string, slug: string): ActivePlan | 
   }
 }
 
-/**
- * PH-1 plan-tracking gate: does a per-phase spec file `spec_<slug>.md` exist
- * at the project root? Distinct from {@link findPlanBySlug} (which also accepts
- * the `plan_` alias) — this checks the `spec_` form SPECIFICALLY, used to
- * require one spec per phase in a multi-phase plan.
- */
 export function phaseSpecExists(projectRoot: string, slug: string): boolean {
   return safeMtime(join(projectRoot, `spec_${slug}.md`)) !== null
 }
 
-/**
- * Heuristic: does a plan-tracking `Status` field denote a finished task?
- * Used by the §C push/merge tools (CAP-53) to SUGGEST — never auto-perform —
- * cleanup of the branch-local `plan_`/`progress_`/`spec_` files before they can
- * reach a protected branch (they must never be tracked on `main`/`test`).
- * Matches EN + pt-BR completion words; returns false for a null/empty status.
- */
 export function isPlanComplete(status: string | null | undefined): boolean {
   if (!status) return false
-  // `\b` so "incomplete" does NOT match "complete".
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status)
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.2 / HOLE A): resolve the plan whose `Branch`
- * metadata equals `branch` — the plan actually being integrated — rather than
- * the mtime-winner {@link findActivePlan}. The integration gate keys the
- * plan_complete check on THIS so an agent can't touch an unrelated completed
- * plan to win mtime and pass the check while the real plan still has open
- * items. Returns the most-recent matching plan, or null when none matches.
- */
 export function findPlanByBranch(projectRoot: string, branch: string): ActivePlan | null {
   let entries: string[]
   try {
@@ -141,12 +103,6 @@ export function findPlanByBranch(projectRoot: string, branch: string): ActivePla
 
 export type ProgressCompletionState = 'no_file' | 'no_checkboxes' | 'has_open' | 'all_closed'
 
-/**
- * Scan a `progress_<slug>.md` body for GitHub-style task checkboxes, ignoring
- * any inside fenced code blocks (a `- [ ]` in a doc example must not count).
- * CRLF-normalized so Windows autocrlf files parse identically. Matches indented
- * and `*`/`+` list markers, not just column-0 `-`.
- */
 function scanProgressCheckboxes(body: string): { open: number; closed: number } {
   const norm = body.replace(/\r\n?/g, '\n')
   let inFence = false
@@ -164,14 +120,6 @@ function scanProgressCheckboxes(body: string): { open: number; closed: number } 
   return { open, closed }
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.2, D2 — LIGHT plan_complete check): does the
- * plan's progress file have any OPEN `- [ ]` items? Returns FALSE when the file
- * is absent/empty — the light check is lenient (it only blocks a
- * `plan_complete:true` attestation on VISIBLE open items; it never
- * machine-verifies completion). The destructive cleanup gate uses the stricter
- * {@link progressCompletionState} instead.
- */
 export function progressHasOpenItems(projectRoot: string, slug: string): boolean {
   const path = join(projectRoot, `progress_${slug}.md`)
   let body: string
@@ -183,13 +131,6 @@ export function progressHasOpenItems(projectRoot: string, slug: string): boolean
   return scanProgressCheckboxes(body).open > 0
 }
 
-/**
- * plan-lifecycle-v2 (Bloco 2.3 — FAIL-CLOSED destructive gate): the POSITIVE
- * completion evidence for a plan's progress file. Only `'all_closed'` (≥1
- * closed item, zero open) authorizes suggesting artifact cleanup; a missing
- * file, an empty/checkbox-less file, or any open item all BLOCK — mere absence
- * of open items never vacuously green-lights destroying an unfinished plan.
- */
 export function progressCompletionState(
   projectRoot: string,
   slug: string,
@@ -218,24 +159,10 @@ function safeMtime(path: string): number | null {
 interface PlanFileEntry {
   name: string
   path: string
-  /** Derived from the FILENAME — see {@link listPlans} on why that matters. */
   slug: string
   mtime: number
 }
 
-/**
- * #55: the shared `plan_`/`spec_` enumerator — readdir + template filter + mtime
- * sort, ordered most-recent first. Returns [] when the root is unreadable.
- *
- * DELIBERATELY consumed by {@link listPlans} ONLY, for now. `findActivePlan` and
- * `findPlanByBranch` each still carry their own inline copy of this walk: #57's
- * guard rail pins `findActivePlan`'s mtime rule verbatim (an unrelated edit must
- * never be able to shift what the plan-authorization token validates against —
- * see `plan-authorization.ts:142`), and `findPlanByBranch` backs the gate in all
- * three request tools. Adopting them is a separate change that wants
- * characterization tests on the resolvers first; this is the seam for it, not
- * the migration.
- */
 function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
   let entries: string[]
   try {
@@ -258,55 +185,21 @@ function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
     .sort((a, b) => b.mtime - a.mtime)
 }
 
-/** One row of {@link listPlans}. */
 export interface PlanSummary {
-  /**
-   * Derived from the FILENAME. This is the resolution identity — the one
-   * `findPlanBySlug` and the plan-authorization token key on. Never populated
-   * from the metadata table; see `declared_slug`.
-   */
   slug: string
   plan_path: string
-  /** ISO timestamp of the plan file's mtime. The ONLY recency source here. */
   plan_mtime: string
   status: string | null
   branch: string | null
   created: string | null
-  /**
-   * #57: the metadata table's `Slug` row (`doc-templates/plan_slug.md.template:12`).
-   * Dev-written prose, reported so a mismatch with `slug` is visible. It MUST NOT
-   * be used to resolve a plan — that is what the name keeps apart.
-   */
   declared_slug: string | null
-  /**
-   * #57: the metadata table's `Last update` row (template `:16`). Carried as
-   * DATA, never as a sort key — ordering is `plan_mtime`, one source only.
-   */
   last_update: string | null
   progress_path: string | null
   progress_mtime: string | null
   progress_state: ProgressCompletionState
-  /** Whole days since the progress file was last written; null when absent. */
   progress_idle_days: number | null
 }
 
-/**
- * #55: enumerate EVERY `plan_`/`spec_` file at the project root, most-recently-
- * modified first, with its metadata and the state of its progress file.
- *
- * The four existing resolvers each return a single plan; this is the first
- * list-all. Read-only: `readdirSync` / `readFileSync` / `statSync`, no spawn, no
- * network.
- *
- * Recency has exactly ONE source: the plan file's mtime. The table's
- * `Last update` row is reported alongside it but never orders anything — two
- * recency sources would disagree the moment someone forgets to edit a row.
- *
- * NB: `slug` is NOT unique across the returned array. `plan_x.md` and `spec_x.md`
- * can coexist (normal under `plan_file_retention: documented`) and yield two rows
- * with slug `x`, both pointing at the same `progress_x.md`. That is faithful to
- * "every plan_/spec_ file at the root" — but do not key this array by `slug`.
- */
 export function listPlans(
   projectRoot: string,
   opts: { now?: Date } = {},
@@ -362,19 +255,12 @@ function extractPlanMetadata(path: string): PlanMetadata {
     }
   }
 
-  // Metadata table parsing: look for a markdown row `| Status | <value> |`
-  // anywhere in the first 60 lines.
   const head = body.split('\n').slice(0, 60).join('\n')
 
   return {
     status: extractTableField(head, 'Status'),
     branch: extractTableField(head, 'Branch'),
     created: extractTableField(head, 'Created'),
-    // #57: the template writes these two rows
-    // (`doc-templates/plan_slug.md.template:12` and `:16`) and nothing read them
-    // — a metadata table with dead rows. Surfaced through `listPlans` only; the
-    // `ActivePlan` shape the resolvers return is deliberately unchanged, so no
-    // existing tool's output moves.
     declared_slug: extractTableField(head, 'Slug'),
     last_update: extractTableField(head, 'Last update'),
   }

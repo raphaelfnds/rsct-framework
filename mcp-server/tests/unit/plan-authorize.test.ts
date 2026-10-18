@@ -117,7 +117,6 @@ describe('rsct_plan_authorize', () => {
   })
 
   it('rejects when there is no active plan', async () => {
-    // no plan_/spec_ file written
     const out = (await planAuthorizeHandler(
       { project_root: tmpRoot, dev_approval: approval() },
       internal(),
@@ -155,7 +154,6 @@ describe('rsct_plan_authorize', () => {
 
   it('preserves sibling phase-state fields when minting', async () => {
     writePlan()
-    // seed an existing phase block
     mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
     writeFileSync(
       join(tmpRoot, '.rsct/phase-state.json'),

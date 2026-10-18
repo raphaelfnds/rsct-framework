@@ -2673,6 +2673,134 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **The premise-check findings show `score N, shared: …` (#79)** — the match carries them and the
   developer needs them to triage by strength; display-only, the gate baseline never reads `detail`.
 
+### `lib/plan-authorization.ts`, `lib/plan.ts` (migrated in the 2.17.0 REVIEW)
+
+- The token functions are pure: they never throw and never touch the file system; the tools own
+  the reads and writes through the locked `writePhaseState`. The token carries no overrides, so it
+  never passes INV-5 or INV-6.
+- `validateToken` returns the first failing reason in a fixed order — absent, not covered,
+  expired, unrecorded, branch, plan gone, plan complete, exhausted — so the caller can name the
+  cause. A hand-edited token without `covers` reads as not covered instead of throwing. The caller
+  hands it the token's own plan, found by its `plan_slug`, never the newest plan by mtime (FV1):
+  touching an unrelated plan file mid-session must not change what the token is checked against.
+- TTL and `max_actions` resolve as tool input, then the config default, then the built-in default.
+  Both inputs are bounds-checked upstream (zod, `RsctApprovalModesSchema`); the token clamps again
+  so no later caller can mint an out-of-range window, and a non-finite value takes the default.
+- `findPlanBySlug` takes `plan_<slug>.md` first and `spec_<slug>.md` as the fallback;
+  `findPlanFileBySlug` (2.17.0) takes `plan_` only, and only a name the directory listing returns.
+  `phaseSpecExists` checks the `spec_` form only — one spec per phase in a multi-phase plan (PH-1).
+  The active-plan lookup accepts `spec_` as an alias of `plan_`, as rules/B does (CAP-53).
+- `findPlanByBranch` keys the integration gate's plan-complete check on the plan whose `Branch` row
+  is the branch being integrated, so touching an unrelated completed plan to win the mtime race
+  cannot pass the check (plan-lifecycle-v2, HOLE A).
+- `isPlanComplete` reads the plan's `Status` row with English and pt-BR completion words, starting
+  on a word boundary so "incomplete" is not "complete"; a plan it reads as finished ends that
+  plan's batch token (`plan_complete`). Its only caller is `validateToken`.
+- Progress checkboxes inside fenced code are ignored; CRLF is normalised; indented items and `*`/`+`
+  markers count. `progressHasOpenItems` is lenient — an absent file has no open items; it only
+  refuses a `plan_complete: true` that visible open items contradict. The destructive cleanup uses
+  `progressCompletionState`, where only `all_closed` (at least one closed item, none open) counts:
+  the absence of open items never clears an unfinished plan for deletion.
+- `listPlans` (#55) orders by the plan file's mtime only. The table's `Last update` row is reported
+  and never sorts: two recency sources disagree as soon as someone forgets to edit the row. `slug`
+  comes from the file name and is the resolution identity; the `Slug` row is reported as
+  `declared_slug` and never resolves a plan (#57). `slug` is not unique in the list — `plan_x.md`
+  and `spec_x.md` can coexist and share `progress_x.md`. `findActivePlan` and `findPlanByBranch`
+  keep their own walk; moving them onto the shared enumerator wants characterisation tests first.
+- Metadata rows are read from a markdown table within the first 60 lines.
+
+### `lib/update-check.ts` (migrated in the 2.17.0 REVIEW)
+
+- Consult by default (#38). "May I ask GitHub" (opt-out) and "do you want this release" (per tag,
+  `declined_tags`) are separate decisions; a decline silences that release only.
+- Cached in `~/.rsct/update-check.json` for 24 h, fail-silent and suggest-only: it never downloads
+  or updates anything. `rsct_status` reads only the cache; a stale cache fires a background refresh
+  whose result lands for the next call, so the status adds no network latency.
+- Off switches, in precedence order: `RSCT_UPDATE_CHECK=off` (the only one reachable before a
+  session exists — CI, headless, a machine that must never send the request), `rsct_status` with
+  `update_check: "off"`, and the cache's `consent` field. Any present `consent` other than `"yes"`
+  is off: testing for the literal `"no"` would fail open on every hand-edit variant (`"No"`,
+  `false`, `0`, `null`), and hand-editing was the only opt-out older versions had. The refresh
+  never writes `consent` — recording a "yes" nobody gave erases what the opt-out notice depends on.
+  The variable outranks the file, so a caller reports `isUpdateCheckKilled` instead of promising an
+  effect. Turning the check off spends the opt-out notice; turning it on restores it.
+- A one-shot notice is a count, not a flag: a hint may never be relayed, and a flag burned when the
+  hint is generated is spent unread. A notice is emitted only when its increment persisted — on a
+  read-only home a counter that never lands would nag on every call.
+- The cache is shared by every project and every installed version, so every field is optional and
+  unknown fields are kept: writes spread the fresh read instead of listing fields, and the write
+  after the network await reads again first, so a decline or an opt-out recorded during the request
+  is not erased.
+- Unreadable is not absent. An unreadable file fails closed and is never overwritten: a transient
+  OneDrive or antivirus lock, or a root-owned `~/.rsct`, would otherwise send a request the
+  developer opted out of and overwrite the recorded choice. Only `ENOENT` means absent. A BOM is
+  tolerated, or a file saved by a Windows editor would silence the check for good. Writes go
+  through a pid-suffixed temp file (two processes share one global binary) and report whether they
+  landed.
+- Staleness is measured from the last attempt, not the last success: a failing network never
+  advances `last_checked`, and measuring success would send a request on every call. An in-process
+  memo keyed by home bounds the attempts when the disk write never lands, and is stamped before the
+  request so the calls inside one request window do not each start their own. A stamp in the future
+  (wrong clock, VM restore) is stale, never fresh for ever; an unparseable `last_attempt` falls
+  through to `last_checked`.
+- Tags are normalised (`v`/`V`, whitespace) on the offer and the decline path alike — one capital
+  letter in a hand-made tag would otherwise silence that release. An unparseable version is never
+  a false "update available".
+- A decline must name the release being offered (cached, newer than the running version, not
+  declined), which refuses a mistyped tag, a release never offered and a release that does not
+  exist yet. Accepting a tag that is not newer than the running version lets a decline swallow a
+  real future release: decline v2.6.0 on a 3.0.0 branch, go back to 2.5.1, and v2.6.0 is silenced.
+
+### `tools/request-push.ts` (migrated in the 2.17.0 REVIEW)
+
+- The install-drift advisory is evaluated before every pre-gate check and prepended on every return
+  path (#25): a push is outward-facing and hard to reverse, so degraded enforcement matters more
+  here than at commit.
+- The remote must be a configured remote of the repository (#62 B5). MEASURED: `git push
+  <bare-path> main` lands the repository in a foreign one, `git push -- <path> main` is still rc 0,
+  and `git push --mirror -- origin` is rc 0 and deletes remote branches, so the `--` sentinel is
+  not enough on its own. Strict by decision: only an unreadable list (outside a repository) skips
+  the check; an empty list refuses, because a repository with no remotes is the shape a path remote
+  exploits. Pushing to a URL or a path stopped working on purpose; the schema always documented
+  the field as a remote name.
+- The destination is resolved before the protection check (#62 B5). `isProtectedBranch` is an exact
+  compare, and `+main`, `HEAD:main`, `refs/heads/main`, `heads/main` and `@` all landed on the
+  remote's `main` with no ack and no override (measured, git 2.45.1). Option-shaped, glob and empty
+  destinations are refused; a glob force-updated a protected `main` while the plain push of the
+  same state was refused (measured).
+- The ref store's answer is added to the string candidates, never put in their place: it answers
+  for the local ref store while the push writes the remote, and a clone with no local `main` still
+  moves the remote's `main` with `HEAD:refs/heads/main`. It is trusted only when the output starts
+  with `refs/`, never on the exit code. MEASURED: `rev-parse --symbolic-full-name` is rc 0 with
+  empty output for `HEAD@{0}`, echoes `HEAD` on a detached HEAD, and on failure still echoes its
+  argument; taking that into the set can make a branch protected that is not, a hard stop with no
+  override.
+- That `rev-parse` call has no `--`, and that is load-bearing (Rv-A). With `--` it echoes the
+  operands (`--`, then `main`), the arm was dead, and `git push origin HEAD` from a protected branch
+  skipped the ack, the coverage check and the override while the audit recorded `protected: false`.
+  The refspec parse makes this safe: it refuses a destination starting with `-` before the call. A
+  "refuse multi-line output" guard is not a second barrier — `rev-parse --symbolic-full-name --all`
+  returns one line in a repository with one ref.
+- The coverage range is `<remote>/<destination>...<source>`: what is on the remote, and what is
+  sent. Using the raw branch for both composed `origin/feat/x:main`, git's `<rev>:<path>` tree
+  syntax. Two shapes name no range and degrade: a delete refspec (`:main` carries no files, and
+  `origin/main...` would be another range) and a destination still spelled `HEAD` (`<remote>/HEAD`
+  is the remote's default-branch symref — confidently wrong). They get different advice: a named
+  range that does not read is a fetch problem, an unnameable one is not; the audit tells them apart
+  by `range_base: null`.
+- Push fails open on an unreadable range, the only one of the three. MEASURED: `git push origin
+  main` succeeds with `origin/main` never fetched, so the range is rc 128 on an ordinary first push
+  of a `--single-branch` clone. The push is protected by the remote allow-list, the refspec parse,
+  INV-5 on the resolved destination and `override_protected_branch`; a readable range is still
+  checked.
+- The pre-integration ack is required only for a protected destination (MCP-P1-D): a feature push
+  to trigger CI must not force a dishonest attestation. It is checked before the dialog, so a
+  missing ack refuses in chat and spends no approval. On a push that is not protected,
+  `path_crosscheck` is left out rather than labelled — the check did not apply.
+- The cleanup advisory after a completed plan appears only on a protected push, the only push that
+  carries the plan-complete ack; the plan is found by branch, then the active plan. It is
+  suggested, never performed.
+
 ### Tests and build
 
 - `verification-checklist.test.ts`: the clean-pass suppression is scoped to the corpus MISS, not to
@@ -2744,6 +2872,24 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - `hook-registration.test.ts` (#114) runs the registered command LITERALLY through `bash -c` in a
   project whose path has a space; asserting the string alone would pass with the quotes in the
   wrong place.
+- `request-merge.test.ts`, `request-push.test.ts`, `request-rebase.test.ts` (migrated in the 2.17.0
+  REVIEW): `tmpRoot` is not a repository, so the default range reader returns an empty but
+  readable range (`ok`, never `unavailable`); the fail-closed path has its own test. The reader is
+  a spy, so a test can assert which range was asked for — a swapped base and head is a real defect
+  class, and rebase and squash move in opposite directions. The ack schema parity tests derive the
+  keys from the Zod shape: a hard-coded key list stayed green while a field missing from the JSON
+  mirror (`additionalProperties: false`) would block every merge, protected push and rebase. Each
+  refusal case has a control that an always-refuse version cannot pass (an ordinary ref, a
+  configured non-default remote, an overridden protected push). The drift-advisory tests count the
+  advisory's own lines, not the whole message, which #92 grew by naming the repository.
+- `request-push.test.ts`: where the argv is under test, the git fake throws on an argv it does not
+  model — the permissive one let 21 of 22 argv sites go stale. A block runs a real repository and
+  the real executor, with only `push` intercepted, because a stub had fed the `rev-parse` arm output
+  real git cannot produce for that argv, and the arm's mutant died against a wrong fixture.
+- `request-rebase.test.ts`: the unsafe-revision test asserts that the token appears in the reject
+  text. The earlier "git was never invoked" assertion was vacuous, measured by deleting
+  `isSafeRevisionToken` with the test still green: the real reader runs through another seam. The
+  exec-side barrier is pinned against a real repository in `git.test.ts`.
 
 ### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
 

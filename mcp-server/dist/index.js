@@ -25219,11 +25219,6 @@ function extractPlanMetadata(path2) {
     status: extractTableField(head, "Status"),
     branch: extractTableField(head, "Branch"),
     created: extractTableField(head, "Created"),
-    // #57: the template writes these two rows
-    // (`doc-templates/plan_slug.md.template:12` and `:16`) and nothing read them
-    // — a metadata table with dead rows. Surfaced through `listPlans` only; the
-    // `ActivePlan` shape the resolvers return is deliberately unchanged, so no
-    // existing tool's output moves.
     declared_slug: extractTableField(head, "Slug"),
     last_update: extractTableField(head, "Last update")
   };
@@ -47311,10 +47306,6 @@ async function requestPushHandler(rawInput, internal = {}) {
     forceDialogReason: "a push needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal",
     dialog: {
       title: "RSCT \u2014 push approval",
-      // The dialog is the one channel the agent cannot rewrite or summarize
-      // away, which is why the security line belongs here and not only in
-      // hints[]. One line, deliberately: this is a decision surface, and a wall
-      // of text trains the dev to dismiss it unread.
       message: [
         `Approve push of '${branchLabel}' to '${remote}'?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
@@ -47470,10 +47461,6 @@ async function requestPushHandler(rawInput, internal = {}) {
       remote,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check did on the push that LANDED. Omitted
-      // entirely (rather than sent as a placeholder) when the push was not to a
-      // protected branch — the check does not apply there, and an absent field
-      // says that without claiming a result.
       ...crossCheck !== null && { path_crosscheck: crossCheck }
     },
     config2?.audit
