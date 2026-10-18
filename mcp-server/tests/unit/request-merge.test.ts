@@ -38,8 +38,6 @@ function approval(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// PH-5: a fully-satisfied pre_merge_ack (all self-attestations true + a note, so
-// the note-when-attested rule is met). Override individual fields per test.
 function ack(overrides: Record<string, unknown> = {}) {
   return {
     plan_complete: true,
@@ -51,8 +49,6 @@ function ack(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// A promptFn seam that counts invocations — proves the OS dialog is NOT shown on
-// an ack reject (the ack-check returns before gateRequest).
 function countingPrompt(): {
   fn: (opts: DialogOptions) => Promise<DialogResult>
   calls: () => number
@@ -104,19 +100,39 @@ const MERGE_OK: GitExecResult = {
   exitCode: 0,
 }
 
-// #62: the tool now READS the paths this merge carries and fails CLOSED when
-// that read is unavailable — which it always is here, because `tmpRoot` is a
-// bare mkdtemp directory, not a git repo. These tests are not about coverage,
-// so they inject an EMPTY but READABLE range: the cross-check is skipped and
-// the audit records `empty_range`. Returning `ok` rather than `unavailable` is
-// deliberate — the fail-closed path has its own test, and this default must
-// never be mistaken for one. Tests that DO exercise coverage pass their own.
 const emptyRange: RequestMergeInternal['rangeReader'] = () => ({ status: 'ok', paths: [] })
 
 const BASE_CONFIG = {
   rsct_version: '1.0.0',
   app: { name: 'test-app', org: 'test-org' },
 }
+
+describe('rsct_request_merge — the dialog is required', () => {
+  it('refuses with no dialog channel even when trust_allowed_for lists the merge', async () => {
+    writeConfig(tmpRoot, { ...BASE_CONFIG, approval_modes: { trust_allowed_for: ['rsct_request_merge'] } })
+    const merges: string[] = []
+    const exec = gitExec({
+      'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+      'merge --no-ff -- feat/foo': MERGE_OK,
+    }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      {
+        rangeReader: emptyRange,
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: (root, args) => {
+          if (args[0] === 'merge') merges.push(args.join(' '))
+          return exec(root, args)
+        },
+        promptFn: async () => ({ response: 'no-channel', channel: 'none', error: 'no display' }),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(merges).toEqual([])
+  })
+})
 
 describe('rsct_request_merge — happy path', () => {
   it('merges feature into integration with --no-ff by default', async () => {
@@ -413,7 +429,6 @@ describe('rsct_request_merge — failure surfaces', () => {
     expect(out.status).toBe('mutation_failed')
     expect(out.reason).toContain('CONFLICT')
 
-    // Retry with same approval after conflict resolution — should NOT be 'reused'.
     const out2 = (await requestMergeHandler(
       {
         project_root: tmpRoot,
@@ -458,19 +473,9 @@ describe('rsct_request_merge — schema', () => {
     const ackProp = schema.properties.pre_merge_ack
     expect(ackProp).toBeDefined()
     expect(ackProp.additionalProperties).toBe(false)
-    // DERIVED from the Zod shape, never a hardcoded list. This test was named
-    // "parity with the Zod schema" while iterating four literal key names, so
-    // adding a key to preMergeAckSchema and forgetting preMergeAckJsonSchema
-    // passed green — and because the exposed schema is additionalProperties:false,
-    // the agent could then never supply that key, evaluatePreMergeAck would push
-    // it into `failing` on every call, and EVERY merge, protected push and rebase
-    // would be permanently blocked by a fully green suite. typecheck cannot catch
-    // it: the JSON mirror is an unrelated object literal.
-    // Breaks on: adding a field to preMergeAckSchema without mirroring it.
     const zodKeys = Object.keys(preMergeAckSchema.shape)
     expect(zodKeys.length).toBeGreaterThan(0)
     expect(Object.keys(ackProp.properties ?? {}).sort()).toEqual([...zodKeys].sort())
-    // parity: neither the outer key nor any inner key is required
     expect(schema.required ?? []).not.toContain('pre_merge_ack')
     expect(ackProp.required).toBeUndefined()
   })
@@ -560,10 +565,6 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
     now: FIXED_NOW,
   })
 
-  // plan-lifecycle-v2 (Bloco 2.3): the cleanup trigger moved from the plan
-  // FILE's Status field to the plan_complete ACK (a merge only reaches
-  // post-success when the ack passed), and the hint now comes from
-  // planCleanupReport + points at rsct_plan_dispose (advisory-only).
   it('surfaces the artifact-cleanup advisory (suggest delete) after a merge when progress is all-closed', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     writeFileSync(join(tmpRoot, 'plan_foo.md'), '# Plan\n\n| Branch | feat/foo |\n| Status | completed |\n')
@@ -577,9 +578,6 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
     expect(out.hints.some((h) => h.includes('looks complete'))).toBe(true)
   })
 
-  // plan-lifecycle-v2 (Bloco 2.2): a plan_complete:true attestation that
-  // contradicts visible open `- [ ]` items in the plan's progress is now
-  // rejected mechanically, BEFORE the OS dialog.
   it('REJECTS the merge when plan_complete is attested but the plan progress has open items', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     writeFileSync(join(tmpRoot, 'plan_foo.md'), '# Plan\n\n| Branch | feat/foo |\n| Status | in progress |\n')
@@ -739,7 +737,6 @@ describe('rsct_request_merge — PH-5 pre_merge_ack hygiene gate', () => {
     )) as RequestMergeOutput
     expect(out1.status).toBe('rejected')
     expect(out1.reject_kind).toBe('pre_merge_ack_missing')
-    // retry with the SAME approval + a valid ack — must NOT be 'reused'
     const out2 = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: appr, pre_merge_ack: ack() },
       okInternal(),
@@ -796,8 +793,6 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
   })
 
   it('carries the advisory when the merge is REJECTED before the dialog', async () => {
-    // Missing pre_merge_ack rejects in chat without popping the dialog. That
-    // return path must still drain the advisory.
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval() },
@@ -840,12 +835,6 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
     )
     expect(seen).toContain('Approve merge')
     expect(seen).toContain('RSCT enforcement is NOT running')
-    // The old assertion was `split('\n')` length 2 — i.e. the whole message. The
-    // guarantee it was protecting is that the drift advisory contributes exactly
-    // ONE line, and that still holds; the message itself grew because #92 defect
-    // F now names the repository the merge lands in. Asserting the advisory's own
-    // line count keeps the original guarantee and stops the test from pinning
-    // unrelated message content.
     const advisoryLines = seen
       .split('\n')
       .filter((l) => l.includes('RSCT enforcement is NOT running'))
@@ -854,9 +843,6 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
 })
 
 describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
-  // A READER spy, not a path list. Only a reader can assert WHICH range was
-  // asked for, and a swapped base/head is a real defect class here — each of the
-  // four ranges in #62 points a different way.
   function rangeSpy(result: RangePathsResult): {
     fn: NonNullable<RequestMergeInternal['rangeReader']>
     seen: Array<[string, string]>
@@ -879,10 +865,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
       { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
     )
 
-  // 'HEAD' literal, not targetBranch: this runs BEFORE the detached-HEAD reject,
-  // and rev-parse --abbrev-ref returns the string 'HEAD' when detached, so the
-  // branch name is not the reliable spelling at this point.
-  // Breaks on: swapping the arguments, or passing targetBranch as the base.
   it('reads the range as HEAD...<source_branch>', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const spy = rangeSpy({ status: 'ok', paths: [] })
@@ -893,8 +875,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(spy.seen).toEqual([['HEAD', 'feat/foo']])
   })
 
-  // Breaks on: dropping carriedPaths from the evaluator call — the merge would
-  // land with an ack that never mentioned the file it carries.
   it('rejects when a carried path was never attested in files_swept', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const prompt = countingPrompt()
@@ -907,13 +887,9 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('pre_merge_ack_incomplete')
     expect(out.reason).toContain('src/b.ts')
-    // The ack gate is a PRE-gate: no OS dialog, so no §C approval is spent.
     expect(prompt.calls()).toBe(0)
   })
 
-  // VACUITY control. A version that rejected every merge would pass the test
-  // above and every other reject test in this file.
-  // Breaks on: making the cross-check reject regardless of coverage.
   it('merges when every carried path was attested', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
@@ -924,9 +900,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(out.status).toBe('merged')
   })
 
-  // The chat message caps the list; the AUDIT must carry the whole gap, or a
-  // 400-file merge leaves no record of what was actually missed.
-  // Breaks on: omitting files_unswept, or sourcing it from the capped string.
   it('records the FULL unswept list on the audit entry', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const paths = Array.from({ length: 14 }, (_, i) => `src/f${i}.ts`)
@@ -942,12 +915,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(entry.path_crosscheck).toBe('enforced')
   })
 
-  // FAIL-CLOSED. Measured: git diff HEAD...<orphan> is rc=128 while
-  // git merge --no-ff --allow-unrelated-histories <orphan> is rc=0 and LANDS, and
-  // allow_unrelated_histories is an agent input — so fail-open would skip the
-  // check on exactly the shape most likely to carry unswept residue.
-  // Breaks on: letting an unreadable range pass (the tempting "it was green
-  // before" repair).
   it('fails CLOSED when the range cannot be read, without popping the dialog', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const prompt = countingPrompt()
@@ -966,7 +933,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(entry.path_crosscheck).toBe('degraded')
   })
 
-  // Breaks on: collapsing rejected_revision into degraded in the audit.
   it('audits a refused revision as rejected_revision, not degraded', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const spy = rangeSpy({ status: 'unsafe_revision', revision: '--exec=touch PWNED' })
@@ -983,9 +949,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(entry.path_crosscheck).toBe('rejected_revision')
   })
 
-  // Auditing the check only on rejects would leave the path that matters most
-  // forensically — the merge that LANDED — silent about whether anything ran.
-  // Breaks on: dropping path_crosscheck from the request_merge.done entry.
   it('audits path_crosscheck on the merge that LANDED', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const spy = rangeSpy({ status: 'ok', paths: ['src/a.ts'] })
@@ -999,9 +962,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(done.carried_paths).toBe(1)
   })
 
-  // A missing ack is the actionable failure and the one the agent can fix without
-  // touching refs, so it must be reported ahead of an unreadable range.
-  // Breaks on: ordering the range reject before the ack evaluation.
   it('reports a MISSING ack ahead of an unreadable range', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const spy = rangeSpy({ status: 'unavailable' })
@@ -1012,14 +972,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(out.reject_kind).toBe('pre_merge_ack_missing')
   })
 
-  // Rv-B. The measurement that JUSTIFIES fail-closed is the same one that made
-  // this input dead: `git diff HEAD...<orphan>` is rc=128 because unrelated
-  // histories have NO MERGE BASE, so for the exact case the flag exists to serve
-  // the range read can never succeed. Before the exemption, every
-  // allow_unrelated_histories merge returned hygiene_range_unreadable — with
-  // advice ("fetch the refs involved") that no fetch can satisfy.
-  // Breaks on: dropping the `!unreadableIsInherent` guard from the fail-closed
-  // condition, which restores the permanent rejection.
   it('Rv-B: allow_unrelated_histories reaches the merge despite an unreadable range', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(
@@ -1043,8 +995,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     )) as RequestMergeOutput
 
     expect(out.status).toBe('merged')
-    // The skip must be SAID, not silent — D7 forbids the quiet version.
-    // Breaks on: dropping the hint from the merged path.
     expect(out.hints.some((h) => h.includes('coverage check SKIPPED'))).toBe(true)
     const degraded = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
       .trim().split('\n').map((l) => JSON.parse(l))
@@ -1052,11 +1002,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(degraded.path_crosscheck).toBe('degraded')
   })
 
-  // The exemption is scoped to `unavailable` ONLY. If it covered
-  // `unsafe_revision` too, declaring unrelated histories would become a way to
-  // launder a crafted revision past isSafeRevisionToken — trading one dead input
-  // for a live bypass.
-  // Breaks on: widening the exemption to `range.status !== 'ok'`.
   it('Rv-B: the exemption does NOT cover a refused revision', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(
@@ -1081,10 +1026,6 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     expect(out.reason).toContain('--exec=touch PWNED')
   })
 
-  // VACUITY CONTROL for the exemption: WITHOUT the flag, an unreadable range
-  // must still fail closed. A version that exempted everything would pass both
-  // tests above.
-  // Breaks on: making the exemption unconditional.
   it('Rv-B: an unreadable range without the flag still fails CLOSED', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(

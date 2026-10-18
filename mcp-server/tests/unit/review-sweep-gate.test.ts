@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -576,7 +576,7 @@ describe('rsct_request_commit — REVIEW gate', () => {
 })
 
 describe('rsct_request_commit — REVIEW gate on the other authorization paths', () => {
-  it('the plan-token path is gated, and its token re-arm keeps a recorded drift', async () => {
+  it('the plan-token path is gated, and its token bookkeeping keeps a recorded drift (an older token shape)', async () => {
     write('src/a.ts', 'export const a = 1\n')
     expect((await completeReview()).status).toBe('completed')
     write('plan_t3.md', '# Plan\n\n| Status | in progress |\n')
@@ -599,6 +599,11 @@ describe('rsct_request_commit — REVIEW gate on the other authorization paths',
           approval_ref: { action_scope: 'plan_authorize:t3', timestamp: new Date(now - 60_000).toISOString() },
         },
       }),
+    )
+    appendFileSync(
+      join(root, '.rsct', 'audit.log'),
+      `${JSON.stringify({ ts: new Date(now - 60_000).toISOString(), event: 'plan_authorize.authorized', plan_slug: 't3', branch: 'feat/sweep', authorized_at: new Date(now - 60_000).toISOString(), expires_at: new Date(now + 10 * 60_000).toISOString(), max_actions: 5, approval_action_scope: 'plan_authorize:t3', approval_timestamp: new Date(now - 60_000).toISOString() })}\n`,
+      'utf8',
     )
     write('src/unreviewed.ts', 'export const u = 1\n')
     git(root, 'add', 'src/unreviewed.ts')

@@ -11,7 +11,8 @@ import {
   type StoredFinding,
 } from '../lib/findings.js'
 import { readWorktreeInfo, type WorktreeInfo } from '../lib/git.js'
-import { readToken } from '../lib/plan-authorization.js'
+import { readToken, tokenExpiryMs } from '../lib/plan-authorization.js'
+import { isTokenMintRecorded } from '../lib/plan-token-record.js'
 import {
   RSCT_PHASES,
   nextPhase,
@@ -181,16 +182,23 @@ export async function phaseStatusHandler(
   const token = readToken(state)
   let planAuth: PhaseStatusPlanAuthSummary | null = null
   if (token) {
+    const checkedAt = new Date()
+    const expiryMs = tokenExpiryMs(token, checkedAt)
+    const expired = expiryMs === null || expiryMs <= checkedAt.getTime()
+    const recorded = !expired && isTokenMintRecorded(resolution.root, resolution.config?.audit, token)
+    const expiresAt = expiryMs === null ? token.expires_at : new Date(expiryMs).toISOString()
     planAuth = {
       plan_slug: token.plan_slug,
       branch: token.branch,
       covers: token.covers,
-      expires_at: token.expires_at,
+      expires_at: expiresAt,
       max_actions: token.max_actions,
       actions_used: token.actions_used,
     }
     hints.push(
-      `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`,
+      expired || !recorded
+        ? `Plan-scoped batch token for '${token.plan_slug}' on '${token.branch}' is NOT usable (${expired ? 'expired' : 'no matching plan_authorize.authorized line in the audit log'}): rsct_request_commit needs a per-action dev_approval, or the developer authorizes again with rsct_plan_authorize.`
+        : `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${expiresAt}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`,
     )
   }
   const runAlone = readRunAlone(state)

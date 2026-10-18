@@ -164,21 +164,25 @@ This is the same for every tier — there is no dialog-free lane.
 For longer plan runs, the dev may grant a **plan-scoped batch token** so you
 don't have to stop for an OK on every single commit:
 
-- `mcp__rsct__rsct_plan_authorize` — the dev approves **once** (full §C gate +
-  OS dialog). That single approval then covers up to a bounded number of
-  **commits** (default 20), within the **active plan** and the **current branch**,
-  until it expires. The expiry is a **sliding window** (plan-lifecycle-v2) — it
-  re-arms on each successful commit (default ~8h) under an immutable absolute cap
-  (~24h), so an actively-worked plan never expires mid-flight while a stale grant
-  still self-expires. After minting, `rsct_request_commit` no longer needs a
-  per-commit `dev_approval`.
+- `mcp__rsct__rsct_plan_authorize({ dev_approval, plan_slug })` — the dev approves
+  **once**, in a dialog that cannot be skipped (no dialog channel = no token). It is
+  only for a **multi-phase** plan: `plan_<slug>.md` must list at least two phases in
+  its `## Phases` table. The dialog names the plan, its phases, the number of
+  **commits** (default 20) and the expiry: **8 hours at most from the approval,
+  never extended** — a commit does not push it back. It covers the **current
+  branch** only. After minting, `rsct_request_commit` no longer needs a per-commit
+  `dev_approval`.
 - `mcp__rsct__rsct_plan_revoke` — ends the batch token early (no approval needed
   — revoking only tightens). The token also **auto-revokes** when you switch
-  branches, when the plan is marked complete or its `plan_`/`spec_` file is
-  deleted, when it expires, or when its commit budget is exhausted.
+  branches, when the plan is marked complete or its `plan_` file is deleted, when
+  it expires, or when its commit budget is exhausted.
 
-The batch token is **commit-only by design**. **push and merge ALWAYS require a
-fresh per-action `dev_approval`** — they are outward-facing / hard to reverse.
+This token is the **only** way a commit goes through with no dialog: a commit
+with a `dev_approval` always shows the dialog, and `trust_allowed_for` does not
+apply to commits. The batch token is **commit-only by design**. **push, merge and
+rebase ALWAYS require their own dialog** — they are outward-facing / hard to
+reverse. From the terminal, a `git pull` that is not `--ff-only` is refused (the
+developer runs it), like `git commit`, `merge` and `rebase`.
 The token **never** bypasses §D branch protection or §E secret scanning: a
 token-authorized commit on a protected branch, or one whose diff trips the
 secret scan, still rejects — fall back to a per-action `dev_approval` carrying
@@ -193,8 +197,8 @@ approve a **multi-phase** plan (§B marks it Recommended for multi-phase runs).
 "Reset per new planning" needs no extra mechanism — it is already mechanical: a
 new plan normally means a new branch (`1 plan = 1 branch`) which auto-revokes the
 token via `branch_mismatch`, and marking the prior plan complete revokes it too;
-the sliding-window TTL (re-arms ~8h per commit, ~24h absolute cap) bounds any
-stale grant and the budget caps the commits.
+the fixed lifetime (8 hours at most from the approval) bounds any stale grant and
+the budget caps the commits.
 Note the token is **disk-persisted** in `.rsct/phase-state.json`, so it does **not**
 clear just because the session restarts — end it explicitly with `rsct_plan_revoke`
 (or let it expire) if you want it gone sooner. Don't offer it for a single-phase

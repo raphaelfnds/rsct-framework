@@ -186,13 +186,20 @@ or Monitor tool. The message names the reason:
   hand, run it yourself in your own terminal: the guard sees only the agent's
   tools. `--abort`, `--quit`, `--continue` and `--skip` of merge, rebase,
   cherry-pick, revert and am pass when nothing else follows the verb
-  (`git merge -m --abort x` is a merge, and is refused).
-- **"a command name built from a variable or a substitution …"** — the guard
-  cannot tell which program `"$G" commit` runs; write the program name out.
-  **"a command run from an unquoted variable or substitution …"** — the shell
-  splits `$C` into a whole command line; write the program name out, or quote
-  the variable when it holds only a program path (`"$PY" script.py`).
-  **"a git subcommand built from …"**, **"a gh subcommand built from …"**,
+  (`git merge -m --abort x` is a merge, and is refused). Since 2.17.0 the guard
+  also refuses `git commit-tree`, `filter-branch`, `fast-import`, `quiltimport`
+  and `replay`, and every `git pull` except `git pull --ff-only` with plain
+  options (`-q`, `-v`, `--prune`, `--tags`…), every word written out, from a
+  repository not spelled as a path (`.`, `../x`, `/x`, `C:…`, `file:`);
+  `git fetch` passes. A pull that would merge or rebase is yours to run.
+- **"a command name built from a variable, a substitution or a brace or glob
+  pattern …"** — the guard cannot tell which program `"$G" commit` runs; write
+  the program name out. **"a command run from an unquoted variable,
+  substitution or brace or glob pattern …"** — the shell splits `$C` or
+  `{git,commit}` into a whole command line; write the program name out, or
+  quote the variable when it holds only a program path (`"$PY" script.py`).
+  **"a git subcommand built from …"**, **"a gh subcommand built from …"**
+  (also `git co$X`, `git {commit,}`, `git [c]ommit`),
   **"Invoke-Expression with code built from a variable …"**, **"a PowerShell
   command built from a variable …"** and **"code passed to … from a variable
   or a substitution …"** — the same: the guard cannot read what will run;
@@ -296,6 +303,29 @@ If your project genuinely wants longer messages, set a number in `.rsct.json`:
 Note the value is a **number**, not a string — `"30"` in quotes is rejected by
 the config schema.
 
+## A commit, push, merge or rebase is refused with `force_dialog_no_channel`
+
+Since 2.17.0 these four always need you in the OS dialog, and so does minting a
+batch token (`rsct_plan_authorize`). On a machine where no dialog can open — CI, a
+headless session, Linux without `/usr/bin/zenity` — they are refused, whatever
+`approval_modes.trust_allowed_for` lists: those names still load and have no effect.
+Run the command yourself in your own terminal.
+
+## The batch token is refused or does not count
+
+- **`not_multi_phase`** — the token is only for a plan with two or more phases:
+  list them in the `## Phases & parallelization` table of `plan_<slug>.md` (a row
+  needs a Phase and a Goal that are filled in, not `<TODO>`). A single-phase plan
+  commits with a dialog each time.
+- **`no_active_plan`** — no `plan_<slug>.md` at the project root (a `spec_` file
+  is not taken as the plan), or `plan_slug` names a file that is not there.
+- **`plan_token_invalid` … expired** — a token lives 8 hours at most from your
+  approval and a commit never extends it; a token an older version minted is held
+  to the same 8 hours. Authorize again.
+- **`plan_token_invalid` … no `plan_authorize.authorized` line** — the audit log
+  does not show the approval that minted this token (it was written by hand, or the
+  log was edited). Authorize again.
+
 ## ".rsct/phase-state.json could not be read … nothing was overwritten"
 
 The file that holds the active phase, the REVIEW ledger, the plan token and the
@@ -341,8 +371,7 @@ The first commit that lands after upgrading from an older version does the first
 cut, which can remove months at once. When a cut reaches entries more than 20 days
 old, the approval dialog says how many lines are due before you answer; a log that
 does not go back that far is cut without that line. No dialog is shown for a commit
-under a plan token, or for an approval trusted with no dialog channel, so nothing
-warns beforehand there either. Afterwards the
+under a plan token, so nothing warns beforehand there either. Afterwards the
 tool's hints report the cut, and an `audit.pruned` entry carries the count, the cutoff
 and a running total. Want the old history? Copy the file before that commit. A
 refused or declined commit removes nothing.

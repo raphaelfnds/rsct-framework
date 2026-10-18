@@ -50,6 +50,8 @@ describe('audit-log readers and the retention rule name the same events (#93)', 
     expect([...compared.keys()].sort()).toEqual([
       'approval.consumed',
       'classify.verdict',
+      'plan_authorize.authorized',
+      'plan_revoke.revoked',
       'review.dead_code_kept',
       'review.public_api_approved',
       'review.unverified_decision',

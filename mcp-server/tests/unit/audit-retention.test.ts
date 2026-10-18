@@ -130,6 +130,8 @@ const EXPECTED_PINNED = [
   'review.public_api_approved',
   'review.commit_drift',
   'approval.consumed',
+  'plan_authorize.authorized',
+  'plan_revoke.revoked',
   'tutor.step',
   'free_commit.committed',
   'free_commit.locked',

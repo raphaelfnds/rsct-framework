@@ -23393,9 +23393,7 @@ var RsctApprovalModesSchema = external_exports.object({
   fabrication_signal_threshold_ms: external_exports.number().int().min(100).max(5e3).optional(),
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
-  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
-  plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
+  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional()
 }).strip();
 var RsctAuditConfigSchema = external_exports.object({
   enabled: external_exports.literal(true).optional(),
@@ -24453,7 +24451,7 @@ var OPTOUT_NOTICE = `RSCT's update check is OFF on this machine, so new releases
 var POSTURE_NOTICE = 'RSCT now checks GitHub about once a day for a newer release, unless turned off. It is an unauthenticated GET of the latest-release tag: no project data, no code and no telemetry are sent \u2014 GitHub sees the IP, the time, and a User-Agent naming rsct-mcp and its version. To turn it off, call rsct_status with update_check:"off", or set RSCT_UPDATE_CHECK=off in the environment.';
 function updateHint(tag) {
   const clean = normalizeTag(tag);
-  return `A newer RSCT release (v${clean}) is available \u2014 you have ${RSCT_MCP_VERSION}. Update the framework (git pull + reinstall) then run /rsct-setup to apply it. (suggestion only) If the dev declines THIS release, call rsct_status with decline_update:"v${clean}" \u2014 only the release named here is accepted, it will not be raised again, and a newer one will ask once.`;
+  return `A newer RSCT release (v${clean}) is available \u2014 you have ${RSCT_MCP_VERSION}. Update the framework (git pull --ff-only + reinstall) then run /rsct-setup to apply it. (suggestion only) If the dev declines THIS release, call rsct_status with decline_update:"v${clean}" \u2014 only the release named here is accepted, it will not be raised again, and a newer one will ask once.`;
 }
 function emitNotice(home, data, key, text2) {
   const count = noticeCount(data, key);
@@ -25221,11 +25219,6 @@ function extractPlanMetadata(path2) {
     status: extractTableField(head, "Status"),
     branch: extractTableField(head, "Branch"),
     created: extractTableField(head, "Created"),
-    // #57: the template writes these two rows
-    // (`doc-templates/plan_slug.md.template:12` and `:16`) and nothing read them
-    // — a metadata table with dead rows. Surfaced through `listPlans` only; the
-    // `ActivePlan` shape the resolvers return is deliberately unchanged, so no
-    // existing tool's output moves.
     declared_slug: extractTableField(head, "Slug"),
     last_update: extractTableField(head, "Last update")
   };
@@ -25235,6 +25228,110 @@ function extractTableField(text2, field) {
   const match = text2.match(regex);
   if (!match || !match[1]) return null;
   return match[1].trim().replace(/`/g, "");
+}
+var SAFE_PLAN_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function isSafePlanSlug(slug) {
+  return SAFE_PLAN_SLUG.test(slug) && !slug.includes("..");
+}
+function findPlanFileBySlug(projectRoot, slug) {
+  if (!isSafePlanSlug(slug)) return null;
+  const name2 = `plan_${slug}.md`;
+  let entries;
+  try {
+    entries = readdirSync(projectRoot);
+  } catch {
+    return null;
+  }
+  if (!entries.includes(name2)) return null;
+  const path2 = join(projectRoot, name2);
+  if (safeMtime(path2) === null) return null;
+  const metadata2 = extractPlanMetadata(path2);
+  const progressPath = join(projectRoot, `progress_${slug}.md`);
+  return {
+    slug,
+    plan_path: path2,
+    progress_path: safeMtime(progressPath) !== null ? progressPath : null,
+    status: metadata2.status,
+    branch: metadata2.branch,
+    created: metadata2.created
+  };
+}
+function findNewestPlanFile(projectRoot) {
+  let entries;
+  try {
+    entries = readdirSync(projectRoot);
+  } catch {
+    return null;
+  }
+  const newest = entries.filter((name2) => /^plan_.+\.md$/.test(name2)).map((name2) => ({ slug: name2.slice("plan_".length, -".md".length), mtime: safeMtime(join(projectRoot, name2)) })).filter((entry) => entry.mtime !== null && isSafePlanSlug(entry.slug)).sort((a, b) => b.mtime - a.mtime)[0];
+  return newest ? findPlanFileBySlug(projectRoot, newest.slug) : null;
+}
+var FENCE = /^\s*(```|~~~)/;
+var PHASES_HEADING = /^#{2,6}\s+Phases\b/i;
+var ANY_HEADING = /^#{1,6}\s/;
+var TABLE_ROW = /^\s*\|/;
+var SEPARATOR_ROW = /^\s*\|?\s*:?-{3,}/;
+var PLACEHOLDER = /^(?:<[^>]*>|tbd|todo|n\/a|—|–|-)?$/i;
+var ESCAPED_PIPE = String.fromCharCode(92, 124);
+var PIPE_MARK = String.fromCharCode(0);
+function tableCells(line2) {
+  const cells = line2.split(ESCAPED_PIPE).join(PIPE_MARK).split("|").map((cell) => cell.split(PIPE_MARK).join("|").trim());
+  if (cells.length > 0 && cells[0] === "") cells.shift();
+  if (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
+  return cells;
+}
+function filledCell(cell) {
+  return cell !== void 0 && !PLACEHOLDER.test(cell.replace(/`/g, "").trim());
+}
+function readPlanPhases(text2) {
+  const lines = text2.replace(/\r\n?/g, "\n").split("\n");
+  let inFence = false;
+  let at = -1;
+  for (let i2 = 0; i2 < lines.length; i2++) {
+    const line2 = lines[i2];
+    if (FENCE.test(line2)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && PHASES_HEADING.test(line2)) {
+      at = i2 + 1;
+      break;
+    }
+  }
+  if (at < 0) return [];
+  const table = [];
+  for (let i2 = at; i2 < lines.length; i2++) {
+    const line2 = lines[i2];
+    if (FENCE.test(line2)) {
+      inFence = !inFence;
+      if (table.length > 0) break;
+      continue;
+    }
+    if (inFence) continue;
+    if (ANY_HEADING.test(line2)) break;
+    if (TABLE_ROW.test(line2)) table.push(line2);
+    else if (table.length > 0) break;
+  }
+  if (table.length < 3 || !SEPARATOR_ROW.test(table[1])) return [];
+  const header = tableCells(table[0]).map((cell) => cell.toLowerCase());
+  const idColumn = header.indexOf("phase");
+  const goalColumn = header.indexOf("goal");
+  if (idColumn < 0 || goalColumn < 0) return [];
+  const phases = [];
+  for (const row of table.slice(2)) {
+    const cells = tableCells(row);
+    const id = cells[idColumn];
+    const goal = cells[goalColumn];
+    if (filledCell(id) && filledCell(goal)) phases.push({ id, goal });
+  }
+  return phases;
+}
+function readPlanFilePhases(path2) {
+  try {
+    return readPlanPhases(readFileSync(path2, "utf8"));
+  } catch {
+    return [];
+  }
 }
 
 // src/lib/decisions.ts
@@ -44220,6 +44317,8 @@ var PINNED_EVENTS = /* @__PURE__ */ new Set([
   "review.public_api_approved",
   "review.commit_drift",
   "approval.consumed",
+  "plan_authorize.authorized",
+  "plan_revoke.revoked",
   "tutor.step",
   "free_commit.committed",
   "free_commit.locked",
@@ -45533,10 +45632,11 @@ ${internal.dialogDetail}` : ""}`
 // src/lib/run-alone.ts
 var SPEC_LABEL_LIMIT = 200;
 var LINE_BREAKS = new RegExp(`[${String.fromCharCode(10, 11, 12, 13, 133, 8232, 8233)}]+`, "g");
+var INVISIBLE = new RegExp(`[${String.fromCharCode(1564, 8203, 8204, 8205, 8206, 8207, 8288, 8289, 8290, 8291, 8292, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297, 65279)}]`, "g");
 var PHASE_LABEL = { code: "code", test: "tests" };
-function specLabel(spec) {
-  const flat = spec.replace(LINE_BREAKS, " ");
-  return flat.length > SPEC_LABEL_LIMIT ? `${flat.slice(0, SPEC_LABEL_LIMIT - 1)}\u2026` : flat;
+function specLabel(spec, limit = SPEC_LABEL_LIMIT) {
+  const flat = spec.replace(INVISIBLE, "").replace(LINE_BREAKS, " ");
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}\u2026` : flat;
 }
 function isPendingEntry(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -45829,73 +45929,84 @@ function closeRunAlone(args2) {
   return w.ok ? "Run alone finished: every phase is approved. Commits go through rsct_request_commit as usual." : `\u26A0 the review is approved, but the run-alone record could not be cleared (${w.reason}) \u2014 rsct_request_commit keeps refusing until a REVIEW completes with it cleared.`;
 }
 
+// src/lib/plan-token-record.ts
+init_esm_shims();
+var PLAN_AUTHORIZED_EVENT = "plan_authorize.authorized";
+var PLAN_REVOKED_EVENT = "plan_revoke.revoked";
+function sameGrant(entry, token) {
+  return entry["plan_slug"] === token.plan_slug && entry["branch"] === token.branch && entry["authorized_at"] === token.authorized_at;
+}
+function isTokenMintRecorded(projectRoot, auditConfig, token) {
+  let minted = false;
+  try {
+    const path2 = decideAuditPath(projectRoot, auditConfig).path;
+    if (!existsSync(path2)) return false;
+    for (const line2 of readFileSync(path2, "utf8").split("\n")) {
+      if (!line2.includes(PLAN_AUTHORIZED_EVENT) && !line2.includes(PLAN_REVOKED_EVENT)) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line2);
+      } catch {
+        continue;
+      }
+      if (!sameGrant(entry, token)) continue;
+      if (entry["event"] === PLAN_REVOKED_EVENT) return false;
+      if (entry["event"] === PLAN_AUTHORIZED_EVENT && entry["max_actions"] === token.max_actions && entry["expires_at"] === token.expires_at && entry["approval_action_scope"] === token.approval_ref?.action_scope && entry["approval_timestamp"] === token.approval_ref?.timestamp) {
+        minted = true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return minted;
+}
+
 // src/lib/plan-authorization.ts
 init_esm_shims();
 var PLAN_TOKEN_COVERS = ["commit"];
-var PLAN_TOKEN_TTL_DEFAULT_MIN = 120;
+var PLAN_TOKEN_TTL_DEFAULT_MIN = 480;
 var PLAN_TOKEN_TTL_MIN = 5;
 var PLAN_TOKEN_TTL_MAX = 480;
 var PLAN_TOKEN_MAX_ACTIONS_DEFAULT = 20;
 var PLAN_TOKEN_MAX_ACTIONS_MIN = 1;
 var PLAN_TOKEN_MAX_ACTIONS_MAX = 100;
-var PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN = 480;
-var PLAN_TOKEN_TTL_SLIDE_MIN = 5;
-var PLAN_TOKEN_TTL_SLIDE_MAX = 1440;
-var PLAN_TOKEN_TTL_ABS_DEFAULT_MIN = 1440;
-var PLAN_TOKEN_TTL_ABS_MIN = 5;
-var PLAN_TOKEN_TTL_ABS_MAX = 10080;
+var PLAN_TOKEN_CLOCK_AHEAD_MS = 5 * 6e4;
 function emitToken(args2) {
-  const nowMs = args2.now.getTime();
-  const windowMin = args2.slideMinutes ?? args2.ttlMinutes;
-  let expiresMs = nowMs + windowMin * 6e4;
-  let absMs = null;
-  if (args2.absTtlMinutes !== void 0) {
-    absMs = nowMs + args2.absTtlMinutes * 6e4;
-    if (expiresMs > absMs) expiresMs = absMs;
-  }
   const block = {
     plan_slug: args2.planSlug,
     branch: args2.branch,
     covers: [...PLAN_TOKEN_COVERS],
     authorized_at: args2.now.toISOString(),
-    expires_at: new Date(expiresMs).toISOString(),
+    expires_at: new Date(args2.now.getTime() + args2.ttlMinutes * 6e4).toISOString(),
     max_actions: args2.maxActions,
     actions_used: 0,
     approval_ref: args2.approvalRef
   };
   if (args2.sessionId !== void 0) block.session_id = args2.sessionId;
-  if (args2.slideMinutes !== void 0) block.slide_minutes = args2.slideMinutes;
-  if (absMs !== null) block.absolute_expires_at = new Date(absMs).toISOString();
   return block;
 }
-function rearmToken(token, now) {
-  if (token.slide_minutes === void 0 || !Number.isFinite(token.slide_minutes)) {
-    return token;
-  }
-  let nextMs = now.getTime() + token.slide_minutes * 6e4;
+function tokenExpiryMs(token, now) {
+  const authorizedMs = new Date(token.authorized_at).getTime();
+  const expiresMs = new Date(token.expires_at).getTime();
+  if (!Number.isFinite(authorizedMs) || !Number.isFinite(expiresMs)) return null;
+  if (authorizedMs > now.getTime() + PLAN_TOKEN_CLOCK_AHEAD_MS) return null;
+  let ms = Math.min(expiresMs, authorizedMs + PLAN_TOKEN_TTL_MAX * 6e4);
   if (token.absolute_expires_at) {
     const absMs = new Date(token.absolute_expires_at).getTime();
-    if (Number.isFinite(absMs)) nextMs = Math.min(nextMs, absMs);
+    if (Number.isFinite(absMs)) ms = Math.min(ms, absMs);
   }
-  const currentMs = new Date(token.expires_at).getTime();
-  if (Number.isFinite(currentMs) && nextMs <= currentMs) return token;
-  return { ...token, expires_at: new Date(nextMs).toISOString() };
+  return ms;
 }
 function validateToken(token, ctx) {
   if (!token) return { valid: false, reason: "absent" };
   if (!Array.isArray(token.covers) || !token.covers.includes(ctx.action)) {
     return { valid: false, reason: "not_covered" };
   }
-  const expiresMs = new Date(token.expires_at).getTime();
-  if (Number.isNaN(expiresMs) || ctx.now.getTime() >= expiresMs) {
+  const expiryMs = tokenExpiryMs(token, ctx.now);
+  if (expiryMs === null || ctx.now.getTime() >= expiryMs) {
     return { valid: false, reason: "expired" };
   }
-  if (token.absolute_expires_at) {
-    const absMs = new Date(token.absolute_expires_at).getTime();
-    if (!Number.isNaN(absMs) && ctx.now.getTime() >= absMs) {
-      return { valid: false, reason: "expired" };
-    }
-  }
+  if (!ctx.mintRecorded) return { valid: false, reason: "unrecorded" };
   if (ctx.branch !== token.branch) return { valid: false, reason: "branch_mismatch" };
   if (!ctx.tokenPlan) return { valid: false, reason: "plan_gone" };
   if (isPlanComplete(ctx.tokenPlan.status)) return { valid: false, reason: "plan_complete" };
@@ -45926,16 +46037,6 @@ function resolveMaxActions(input, configDefault) {
     Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v)
   );
 }
-function resolveSlideMinutes(input, configDefault) {
-  const v = input ?? configDefault ?? PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
-  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_SLIDE_DEFAULT_MIN;
-  return Math.min(PLAN_TOKEN_TTL_SLIDE_MAX, Math.max(PLAN_TOKEN_TTL_SLIDE_MIN, v));
-}
-function resolveAbsTtlMinutes(input, configDefault) {
-  const v = configDefault ?? PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
-  if (!Number.isFinite(v)) return PLAN_TOKEN_TTL_ABS_DEFAULT_MIN;
-  return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v));
-}
 
 // src/tools/request-commit.ts
 var requestCommitInputSchema = external_exports.object({
@@ -45955,7 +46056,7 @@ function runRetention(prune, projectRoot, config2, now) {
 }
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -45987,12 +46088,17 @@ function planTokenRejectReason(reason) {
     case "branch_mismatch":
       return "the plan token was minted for a different branch (tokens auto-revoke on branch switch) \u2014 re-authorize on this branch or pass a per-action dev_approval";
     case "plan_gone":
-      return "the plan token's plan_/spec_ file no longer exists \u2014 re-authorize with rsct_plan_authorize";
+      return "the plan token's plan_<slug>.md file no longer exists \u2014 re-authorize with rsct_plan_authorize";
     case "plan_complete":
       return "the plan token's plan is marked complete \u2014 re-authorize if work continues";
     case "exhausted":
       return "the plan token reached its max_actions budget \u2014 mint a fresh token with rsct_plan_authorize";
+    case "unrecorded":
+      return "the audit log holds no plan_authorize.authorized line for this plan token, so it was not minted by an approved rsct_plan_authorize \u2014 commit with a per-action dev_approval, or ask the developer to authorize again";
   }
+}
+function sameToken(a, b) {
+  return a !== null && a.plan_slug === b.plan_slug && a.branch === b.branch && a.authorized_at === b.authorized_at && a.actions_used === b.actions_used;
 }
 async function requestCommitHandler(rawInput, internal = {}) {
   const input = requestCommitInputSchema.parse(rawInput ?? {});
@@ -46222,6 +46328,8 @@ async function requestCommitHandler(rawInput, internal = {}) {
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
       approval: input.dev_approval,
+      forceDialog: true,
+      forceDialogReason: "every commit needs the developer in the OS dialog, or a batch token they approved in one (rsct_plan_authorize); with no dialog channel, the developer commits by hand in their own terminal",
       dialog: {
         title: "RSCT \u2014 commit approval",
         message: [
@@ -46279,12 +46387,13 @@ async function requestCommitHandler(rawInput, internal = {}) {
   } else {
     const existing = readPhaseState(projectRoot);
     const token = readToken(existing.state);
-    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null;
+    const tokenPlan = token ? findPlanFileBySlug(projectRoot, token.plan_slug) : null;
     const verdict = validateToken(token, {
       now,
       branch: gitState.branch,
       tokenPlan,
-      action: "commit"
+      action: "commit",
+      mintRecorded: token !== null && isTokenMintRecorded(projectRoot, config2?.audit, token)
     });
     if (!verdict.valid) {
       const reason = planTokenRejectReason(verdict.reason);
@@ -46323,7 +46432,7 @@ async function requestCommitHandler(rawInput, internal = {}) {
     }
     channel = "plan_token";
     authorizedVia = "plan_token";
-    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} };
+    tokenCtx = { token: verdict.token };
   }
   const overrideBranch = approval?.override_protected_branch;
   const overrideSecrets = approval?.override_secrets_check;
@@ -46520,12 +46629,14 @@ async function requestCommitHandler(rawInput, internal = {}) {
   let reservedToken = null;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
-    const reserve = writePhaseState(projectRoot, {
-      ...tokenCtx.baseState,
+    const fresh = readPhaseState(projectRoot);
+    const unchanged = fresh.parse_error === void 0 && sameToken(readToken(fresh.state), tokenCtx.token);
+    const reserve = unchanged ? writePhaseState(projectRoot, {
+      ...fresh.state,
       plan_authorization: reservedToken
-    });
-    if (!reserve.ok) {
-      const detail = reserve.reason === "locked" ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)` : reserve.error;
+    }) : null;
+    if (reserve === null || !reserve.ok) {
+      const detail = reserve === null ? fresh.parse_error !== void 0 ? "phase-state.json could not be read while this commit was being checked" : "the plan token changed while this commit was being checked (revoked, used or re-minted)" : reserve.reason === "locked" ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)` : reserve.error;
       const reason = `could not reserve a plan-token action (${detail}) \u2014 retry, or commit with a per-action dev_approval`;
       const audit2 = appendAudit(
         projectRoot,
@@ -46570,11 +46681,13 @@ async function requestCommitHandler(rawInput, internal = {}) {
     const reason = commit.error ?? commit.stderr ?? "git commit failed";
     let refundNote = "";
     if (tokenCtx) {
-      const refund = writePhaseState(projectRoot, {
-        ...tokenCtx.baseState,
+      const fresh = readPhaseState(projectRoot);
+      const stillReserved = fresh.parse_error === void 0 && sameToken(readToken(fresh.state), reservedToken);
+      const refund = stillReserved ? writePhaseState(projectRoot, {
+        ...fresh.state,
         plan_authorization: tokenCtx.token
-      });
-      refundNote = refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
+      }) : null;
+      refundNote = refund === null ? fresh.parse_error !== void 0 ? " phase-state.json could not be read after the commit failed; nothing was refunded." : " The plan token changed during the commit (revoked or re-minted); nothing was refunded." : refund.ok ? " The reserved token action was refunded." : " \u26A0 the reserved token action could NOT be refunded (phase-state write failed) \u2014 one action was forfeited (fail-safe).";
     }
     const audit2 = appendAudit(
       projectRoot,
@@ -46687,26 +46800,13 @@ async function requestCommitHandler(rawInput, internal = {}) {
     }
   } else {
     antiReplayPersisted = true;
+    const expiryMs = tokenExpiryMs(reservedToken, now);
     tokenSummary = {
       plan_slug: reservedToken.plan_slug,
       actions_used: reservedToken.actions_used,
       max_actions: reservedToken.max_actions,
-      expires_at: reservedToken.expires_at
+      expires_at: new Date(expiryMs).toISOString()
     };
-    const rearmed = rearmToken(reservedToken, now);
-    if (rearmed !== reservedToken) {
-      const w = writePhaseState(projectRoot, {
-        ...readPhaseState(projectRoot).state ?? tokenCtx.baseState,
-        plan_authorization: rearmed
-      });
-      if (w.ok) {
-        tokenSummary.expires_at = rearmed.expires_at;
-      } else {
-        bookkeepingHints.push(
-          "\u26A0 token sliding-window re-arm did not persist \u2014 the token keeps its current expiry (fail-safe)."
-        );
-      }
-    }
   }
   const audit = appendAudit(
     projectRoot,
@@ -47202,12 +47302,10 @@ async function requestPushHandler(rawInput, internal = {}) {
   const gate = await gateRequest({
     toolName: "rsct_request_push",
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: "a push needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal",
     dialog: {
       title: "RSCT \u2014 push approval",
-      // The dialog is the one channel the agent cannot rewrite or summarize
-      // away, which is why the security line belongs here and not only in
-      // hints[]. One line, deliberately: this is a decision surface, and a wall
-      // of text trains the dev to dismiss it unread.
       message: [
         `Approve push of '${branchLabel}' to '${remote}'?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
@@ -47363,10 +47461,6 @@ async function requestPushHandler(rawInput, internal = {}) {
       remote,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check did on the push that LANDED. Omitted
-      // entirely (rather than sent as a placeholder) when the push was not to a
-      // protected branch — the check does not apply there, and an absent field
-      // says that without claiming a result.
       ...crossCheck !== null && { path_crosscheck: crossCheck }
     },
     config2?.audit
@@ -47596,6 +47690,8 @@ async function requestMergeHandler(rawInput, internal = {}) {
   const gate = await gateRequest({
     toolName: "rsct_request_merge",
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: "a merge needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal",
     dialog: {
       title: "RSCT \u2014 merge approval",
       message: [
@@ -47908,13 +48004,18 @@ async function requestMergeHandler(rawInput, internal = {}) {
 
 // src/tools/plan-authorize.ts
 init_esm_shims();
+var MIN_PHASES = 2;
+var PHASES_SHOWN = 8;
 var planAuthorizeInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   dev_approval: external_exports.unknown().describe(
     'The dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:" (INV-2.2 scope_mismatch). Validated via the full \xA7C gate (schema/skew/anti-reuse/fabrication + OS dialog). This single approval mints a batch token covering up to max_actions commits.'
   ),
+  plan_slug: external_exports.string().optional().describe(
+    'The plan to authorize, as the <slug> of plan_<slug>.md at the project root (letters, digits, ".", "_", "-"). Omitted: the newest plan_*.md. The plan must list at least two phases in its "## Phases" table.'
+  ),
   ttl_minutes: external_exports.number().int().min(PLAN_TOKEN_TTL_MIN).max(PLAN_TOKEN_TTL_MAX).optional().describe(
-    `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}). Precedence: this input > .rsct.json approval_modes.plan_token_ttl_minutes > 120.`
+    `Token lifetime in minutes from this approval (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}; never extended). Precedence: this input > .rsct.json approval_modes.plan_token_ttl_minutes > ${PLAN_TOKEN_TTL_DEFAULT_MIN}.`
   ),
   max_actions: external_exports.number().int().min(PLAN_TOKEN_MAX_ACTIONS_MIN).max(PLAN_TOKEN_MAX_ACTIONS_MAX).optional().describe(
     `Max commits the token covers (${PLAN_TOKEN_MAX_ACTIONS_MIN}\u2013${PLAN_TOKEN_MAX_ACTIONS_MAX}). Precedence: this input > approval_modes.plan_token_max_actions > 20.`
@@ -47922,7 +48023,7 @@ var planAuthorizeInputSchema = external_exports.object({
 }).strict();
 var planAuthorizeTool = {
   name: "rsct_plan_authorize",
-  description: 'T3 \xA7C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full \xA7C gate \u2014 schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY \u2014 push/merge keep per-action \xA7C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status="state_write_failed"): no token is minted, the approval is not consumed and the file is left untouched.',
+  description: 'T3 \xA7C-gated plan execution mode \u2014 the ONLY way commits go through with no dialog. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval, answered by the developer in a FORCED OS dialog (trust_allowed_for is ignored; no dialog channel = refused), authorizes up to max_actions COMMITS on the current branch for a MULTI-PHASE plan \u2014 a plan_<slug>.md (named by plan_slug, else the newest) whose "## Phases" table lists at least two phases \u2014 for at most 8 hours from the approval, never extended. The dialog names the plan, its phases, the commit count and the expiry. COMMIT ONLY \u2014 push, merge and rebase keep their own dialog. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires a NON-protected branch. A token counts only while the audit log holds the plan_authorize.authorized line it was minted with. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status="state_write_failed"): no token is minted, the approval is not consumed and the file is left untouched.',
   inputSchema: {
     type: "object",
     required: ["dev_approval"],
@@ -47935,9 +48036,13 @@ var planAuthorizeTool = {
         type: "object",
         description: 'dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:".'
       },
+      plan_slug: {
+        type: "string",
+        description: 'The <slug> of plan_<slug>.md to authorize (letters, digits, ".", "_", "-"); omitted: the newest plan_*.md. It must list at least two phases in its "## Phases" table.'
+      },
       ttl_minutes: {
         type: "number",
-        description: `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}; default 120).`
+        description: `Token lifetime in minutes from this approval (${PLAN_TOKEN_TTL_MIN}\u2013${PLAN_TOKEN_TTL_MAX}; default ${PLAN_TOKEN_TTL_DEFAULT_MIN}; never extended).`
       },
       max_actions: {
         type: "number",
@@ -47968,15 +48073,124 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
     auditWriter: appendAudit
   });
   const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : [];
+  const refuse = (reject_kind, reason) => {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_authorize.rejected",
+        tool: "rsct_plan_authorize",
+        reject_kind,
+        reason,
+        branch
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      channel: null,
+      reject_kind,
+      reason,
+      fabrication_signals: [],
+      plan_slug: null,
+      branch,
+      expires_at: null,
+      max_actions: null,
+      covers: [],
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [...anchorHints(projectRoot, config2?.audit), ...advisoryHints, `${reason} No dialog was shown.`]
+    };
+  };
+  if (branch === null) {
+    return refuse(
+      "no_branch",
+      "no branch resolved (detached HEAD or not in a git worktree) \u2014 a batch token must be scoped to a named branch"
+    );
+  }
+  const { list: protectedList } = effectiveProtectedList(config2);
+  if (isProtectedBranch(branch, protectedList)) {
+    return refuse(
+      "protected_branch",
+      `branch '${branchLabel}' is protected \u2014 batch tokens are only granted on derived branches (create one: git checkout -b <slug>). Protected-branch commits still require a per-action dev_approval with override_protected_branch.`
+    );
+  }
+  if (input.plan_slug !== void 0 && !isSafePlanSlug(input.plan_slug)) {
+    return refuse(
+      "invalid_plan_slug",
+      `plan_slug '${specLabel(input.plan_slug, 80)}' is not a plan name: use the <slug> of plan_<slug>.md at the project root (letters, digits, ".", "_", "-", no "..")`
+    );
+  }
+  const plan = input.plan_slug !== void 0 ? findPlanFileBySlug(projectRoot, input.plan_slug) : findNewestPlanFile(projectRoot);
+  if (!plan) {
+    return refuse(
+      "no_active_plan",
+      input.plan_slug !== void 0 ? `no plan_${input.plan_slug}.md at the project root \u2014 a batch token is scoped to a plan file` : "no plan_<slug>.md at the project root \u2014 a batch token is scoped to a plan file. Create the plan first."
+    );
+  }
+  const phases = readPlanFilePhases(plan.plan_path);
+  if (phases.length < MIN_PHASES) {
+    return refuse(
+      "not_multi_phase",
+      `a batch token is only for a plan with ${MIN_PHASES} or more phases: plan_${plan.slug}.md lists ${phases.length} in its "## Phases" table (a row needs a Phase and a Goal that are filled in). Each commit of this plan shows its own dialog.`
+    );
+  }
+  const ttlMinutes = resolveTtlMinutes(
+    input.ttl_minutes,
+    config2?.approval_modes?.plan_token_ttl_minutes
+  );
+  const maxActions = resolveMaxActions(
+    input.max_actions,
+    config2?.approval_modes?.plan_token_max_actions
+  );
+  const expiresPreview = new Date(now.getTime() + ttlMinutes * 6e4).toISOString();
+  const unreadableBefore = refuseUnreadableState(projectRoot, readPhaseState(projectRoot));
+  if (unreadableBefore && !unreadableBefore.ok && unreadableBefore.reason === "unreadable_state") {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "plan_authorize.state_write_failed",
+        tool: "rsct_plan_authorize",
+        reason: unreadableBefore.error,
+        branch,
+        plan_slug: plan.slug,
+        channel: null
+      },
+      config2?.audit
+    );
+    return {
+      status: "state_write_failed",
+      channel: null,
+      reject_kind: null,
+      reason: unreadableBefore.error,
+      fabrication_signals: [],
+      plan_slug: plan.slug,
+      branch,
+      expires_at: null,
+      max_actions: maxActions,
+      covers: [...PLAN_TOKEN_COVERS],
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [...anchorHints(projectRoot, config2?.audit), `\u26A0 token NOT minted \u2014 ${unreadableBefore.error} dev_approval NOT consumed. No dialog was shown.`]
+    };
+  }
   const gate = await gateRequest({
     toolName: "rsct_plan_authorize",
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: "a batch token is granted only by the developer, in this dialog",
     dialog: {
-      title: "RSCT \u2014 authorize batch plan execution",
-      message: `Authorize batch commits for this plan on '${branchLabel}'?` + (installAdvisory.dialogLine ? `
-${installAdvisory.dialogLine}` : "") + `
-
-This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 limited to this plan and branch, until it expires, runs out, or is revoked.` + gateDialogFooter(projectRoot, config2)
+      title: "RSCT \u2014 authorize batch commits",
+      message: mintDialogMessage({
+        maxActions,
+        expiresAt: expiresPreview,
+        branch: branchLabel,
+        warningLine: installAdvisory.dialogLine,
+        footer: gateDialogFooter(projectRoot, config2),
+        planSlug: plan.slug,
+        phases
+      })
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -48014,74 +48228,8 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       hints: [...anchorHints(projectRoot, config2?.audit), ...advisoryHints, `Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
-  const reject2 = (reject_kind, reason) => {
-    const audit2 = appendAudit(
-      projectRoot,
-      {
-        event: "plan_authorize.rejected",
-        tool: "rsct_plan_authorize",
-        reject_kind,
-        reason,
-        branch,
-        channel: gate.channel
-      },
-      config2?.audit
-    );
-    return {
-      status: "rejected",
-      channel: gate.channel,
-      reject_kind,
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      plan_slug: null,
-      branch,
-      expires_at: null,
-      max_actions: null,
-      covers: [],
-      ...auditFields(audit2),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config2?.audit), reason]
-    };
-  };
-  if (branch === null) {
-    return reject2(
-      "no_branch",
-      "no branch resolved (detached HEAD or not in a git worktree) \u2014 a batch token must be scoped to a named branch"
-    );
-  }
-  const { list: protectedList } = effectiveProtectedList(config2);
-  if (isProtectedBranch(branch, protectedList)) {
-    return reject2(
-      "protected_branch",
-      `branch '${branchLabel}' is protected \u2014 batch tokens are only granted on derived branches (create one: git checkout -b <slug>). Protected-branch commits still require a per-action dev_approval with override_protected_branch.`
-    );
-  }
-  const activePlan = findActivePlan(projectRoot);
-  if (!activePlan) {
-    return reject2(
-      "no_active_plan",
-      "no active plan_<slug>.md / spec_<slug>.md at the project root \u2014 a batch token must be scoped to a plan. Create the plan/spec first."
-    );
-  }
-  const ttlMinutes = resolveTtlMinutes(
-    input.ttl_minutes,
-    config2?.approval_modes?.plan_token_ttl_minutes
-  );
-  const maxActions = resolveMaxActions(
-    input.max_actions,
-    config2?.approval_modes?.plan_token_max_actions
-  );
-  const slideMinutes = resolveSlideMinutes(
-    input.ttl_minutes,
-    config2?.approval_modes?.plan_token_ttl_slide_minutes
-  );
-  const absTtlMinutes = resolveAbsTtlMinutes(
-    void 0,
-    config2?.approval_modes?.plan_token_ttl_abs_minutes
-  );
   const token = emitToken({
-    planSlug: activePlan.slug,
+    planSlug: plan.slug,
     branch,
     ttlMinutes,
     maxActions,
@@ -48089,17 +48237,9 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       action_scope: gate.approval.action_scope,
       timestamp: gate.approval.timestamp
     },
-    now,
-    slideMinutes,
-    absTtlMinutes
+    now
   });
-  const existing = readPhaseState(projectRoot);
-  const baseState = existing.state ?? {};
-  const newState = { ...baseState, plan_authorization: token };
-  const writeResult = refuseUnreadableState(projectRoot, existing) ?? writePhaseState(projectRoot, newState);
-  if (!writeResult.ok) {
-    const unreadable = writeResult.reason === "unreadable_state";
-    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : unreadable ? writeResult.error : `phase-state.json write failed: ${writeResult.error}`;
+  const notMinted = (reason, unreadable) => {
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -48107,7 +48247,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
         tool: "rsct_plan_authorize",
         reason,
         branch,
-        plan_slug: activePlan.slug,
+        plan_slug: plan.slug,
         channel: gate.channel
       },
       config2?.audit
@@ -48118,7 +48258,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       reject_kind: null,
       reason,
       fabrication_signals: gate.fabrication_signals,
-      plan_slug: activePlan.slug,
+      plan_slug: plan.slug,
       branch,
       expires_at: null,
       max_actions: maxActions,
@@ -48131,36 +48271,51 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
         unreadable ? `\u26A0 token NOT minted \u2014 ${reason} dev_approval NOT consumed.` : `\u26A0 token NOT minted \u2014 ${reason}. dev_approval NOT consumed; retry.`
       ]
     };
+  };
+  const existing = readPhaseState(projectRoot);
+  const unreadableState = refuseUnreadableState(projectRoot, existing);
+  if (unreadableState && !unreadableState.ok && unreadableState.reason === "unreadable_state") {
+    return notMinted(unreadableState.error, true);
   }
-  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const audit = appendAudit(
     projectRoot,
     {
-      event: "plan_authorize.authorized",
+      event: PLAN_AUTHORIZED_EVENT,
       tool: "rsct_plan_authorize",
       branch,
-      plan_slug: activePlan.slug,
+      plan_slug: plan.slug,
+      phases: phases.length,
+      authorized_at: token.authorized_at,
       expires_at: token.expires_at,
       max_actions: maxActions,
       covers: token.covers,
+      approval_action_scope: token.approval_ref.action_scope,
+      approval_timestamp: token.approval_ref.timestamp,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals
     },
     config2?.audit
   );
   const afields = auditFields(audit);
+  if (afields.audit_error !== null) {
+    return notMinted(`the audit log could not record the authorization (${afields.audit_error}) \u2014 a token counts only while that line exists`, false);
+  }
+  const baseState = existing.state ?? {};
+  const writeResult = writePhaseState(projectRoot, { ...baseState, plan_authorization: token });
+  if (!writeResult.ok) {
+    const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? "unknown"}) \u2014 wait and retry` : writeResult.reason === "unreadable_state" ? writeResult.error : `phase-state.json write failed: ${writeResult.error}`;
+    return notMinted(reason, writeResult.reason === "unreadable_state");
+  }
+  const record2 = recordApproval(gate.approval, { projectRoot, now, auditConfig: config2?.audit });
   const hints = [
     ...anchorHints(projectRoot, config2?.audit),
     ...advisoryHints,
-    `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`
+    `Batch authorization granted for '${plan.slug}' (${phases.length} phases) on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}, never extended. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push, merge and rebase still need their own dialog.`
   ];
   if (!record2.ok) {
     hints.push(
       `\u26A0 authorization granted, but I could not record the approval as used: ${record2.error}. The dev_approval that granted it could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
     );
-  }
-  if (afields.audit_error !== null) {
-    hints.push(`\u26A0 token minted but audit log write failed: ${afields.audit_error}.`);
   }
   return {
     status: "authorized",
@@ -48168,7 +48323,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
     reject_kind: null,
     reason: null,
     fabrication_signals: gate.fabrication_signals,
-    plan_slug: activePlan.slug,
+    plan_slug: plan.slug,
     branch,
     expires_at: token.expires_at,
     max_actions: maxActions,
@@ -48178,6 +48333,18 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
     anti_replay_error: record2.ok ? null : record2.error ?? null,
     hints
   };
+}
+function mintDialogMessage(args2) {
+  const shown = args2.phases.slice(0, PHASES_SHOWN).map((p) => `\u2022 ${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`);
+  const more = args2.phases.length > PHASES_SHOWN ? [`\u2026 and ${args2.phases.length - PHASES_SHOWN} more`] : [];
+  return [
+    `Authorize up to ${args2.maxActions} commits with NO dialog, until ${args2.expiresAt} UTC (8 h at most, never extended), on branch '${specLabel(args2.branch, 80)}'?`,
+    ...args2.warningLine ? [args2.warningLine] : [],
+    "",
+    "Commit only: merge, rebase and push keep their own dialog. Revoke early with rsct_plan_revoke."
+  ].join("\n") + args2.footer + `
+Plan: '${specLabel(args2.planSlug, 80)}' \u2014 ${args2.phases.length} phases:
+` + [...shown, ...more].join("\n");
 }
 
 // src/tools/plan-revoke.ts
@@ -48214,7 +48381,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
   const existing = readPhaseState(projectRoot);
   const refusal = refuseUnreadableState(projectRoot, existing);
   if (refusal && !refusal.ok && refusal.reason === "unreadable_state") {
-    const audit2 = appendAudit(
+    const audit = appendAudit(
       projectRoot,
       {
         event: "plan_revoke.state_write_failed",
@@ -48227,7 +48394,7 @@ async function planRevokeHandler(rawInput, internal = {}) {
     return {
       status: "state_write_failed",
       revoked_plan_slug: null,
-      ...auditFields(audit2),
+      ...auditFields(audit),
       hints: [`\u26A0 ${refusal.error} No token was revoked.`]
     };
   }
@@ -48243,12 +48410,30 @@ async function planRevokeHandler(rawInput, internal = {}) {
       ]
     };
   }
+  const revokeAudit = auditFields(
+    appendAudit(
+      projectRoot,
+      {
+        event: PLAN_REVOKED_EVENT,
+        tool: "rsct_plan_revoke",
+        plan_slug: token.plan_slug,
+        branch: token.branch,
+        authorized_at: token.authorized_at,
+        actions_used: token.actions_used,
+        max_actions: token.max_actions,
+        reason: input.reason ?? null,
+        revoked_at: now.toISOString()
+      },
+      config2?.audit
+    )
+  );
+  const recorded = revokeAudit.audit_error === null;
   const baseState = existing.state ?? {};
   const newState = clearTokenFromState(baseState);
   const writeResult = writePhaseState(projectRoot, newState);
   if (!writeResult.ok) {
     const reason = writeResult.reason === "locked" ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago) \u2014 wait and retry` : `phase-state.json write failed: ${writeResult.error}`;
-    const audit2 = appendAudit(
+    const audit = appendAudit(
       projectRoot,
       {
         event: "plan_revoke.state_write_failed",
@@ -48261,30 +48446,19 @@ async function planRevokeHandler(rawInput, internal = {}) {
     return {
       status: "state_write_failed",
       revoked_plan_slug: token.plan_slug,
-      ...auditFields(audit2),
-      hints: [`\u26A0 token still active \u2014 ${reason}.`]
+      ...auditFields(audit),
+      hints: [
+        recorded ? `\u26A0 the revoke is recorded in the audit log, so the token no longer counts, but phase-state.json still holds it \u2014 ${reason}.` : `\u26A0 token still active \u2014 ${reason}; the audit log could not record the revoke either (${revokeAudit.audit_error}).`
+      ]
     };
   }
-  const audit = appendAudit(
-    projectRoot,
-    {
-      event: "plan_revoke.revoked",
-      tool: "rsct_plan_revoke",
-      plan_slug: token.plan_slug,
-      branch: token.branch,
-      actions_used: token.actions_used,
-      max_actions: token.max_actions,
-      reason: input.reason ?? null,
-      revoked_at: now.toISOString()
-    },
-    config2?.audit
-  );
   return {
     status: "revoked",
     revoked_plan_slug: token.plan_slug,
-    ...auditFields(audit),
+    ...revokeAudit,
     hints: [
-      `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`
+      `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`,
+      ...recorded ? [] : [`\u26A0 the audit log could not record the revoke (${revokeAudit.audit_error}): the token is gone from phase-state.json, but a copy written back into it would count again until it expires.`]
     ]
   };
 }
@@ -48507,6 +48681,8 @@ async function requestRebaseHandler(rawInput, internal = {}) {
   const gate = await gateRequest({
     toolName: "rsct_request_rebase",
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: "a rebase or squash needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal",
     dialog: {
       title: "RSCT \u2014 rebase approval",
       message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)` + (installAdvisory.dialogLine ? `
@@ -50302,16 +50478,21 @@ async function phaseStatusHandler(rawInput) {
   const token = readToken(state);
   let planAuth = null;
   if (token) {
+    const checkedAt = /* @__PURE__ */ new Date();
+    const expiryMs = tokenExpiryMs(token, checkedAt);
+    const expired = expiryMs === null || expiryMs <= checkedAt.getTime();
+    const recorded = !expired && isTokenMintRecorded(resolution.root, resolution.config?.audit, token);
+    const expiresAt = expiryMs === null ? token.expires_at : new Date(expiryMs).toISOString();
     planAuth = {
       plan_slug: token.plan_slug,
       branch: token.branch,
       covers: token.covers,
-      expires_at: token.expires_at,
+      expires_at: expiresAt,
       max_actions: token.max_actions,
       actions_used: token.actions_used
     };
     hints.push(
-      `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`
+      expired || !recorded ? `Plan-scoped batch token for '${token.plan_slug}' on '${token.branch}' is NOT usable (${expired ? "expired" : "no matching plan_authorize.authorized line in the audit log"}): rsct_request_commit needs a per-action dev_approval, or the developer authorizes again with rsct_plan_authorize.` : `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${expiresAt}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`
     );
   }
   const runAlone = readRunAlone(state);

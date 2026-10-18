@@ -301,6 +301,8 @@ export async function requestMergeHandler(
   const gate = await gateRequest({
     toolName: 'rsct_request_merge',
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: 'a merge needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — merge approval',
       message: [

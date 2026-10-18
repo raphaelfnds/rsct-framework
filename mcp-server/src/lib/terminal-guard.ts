@@ -24,6 +24,12 @@ const BLOCKED_GIT_VERBS: ReadonlyMap<string, string> = new Map([
   ['cherry-pick', 'rsct_request_commit'],
   ['revert', 'rsct_request_commit'],
   ['am', 'rsct_request_commit'],
+  ['commit-tree', 'rsct_request_commit'],
+  ['filter-branch', 'rsct_request_commit'],
+  ['fast-import', 'rsct_request_commit'],
+  ['quiltimport', 'rsct_request_commit'],
+  ['replay', 'rsct_request_rebase'],
+  ['pull', 'rsct_request_merge'],
 ])
 
 const RECOVERY_VERBS = new Set(['merge', 'rebase', 'cherry-pick', 'revert', 'am'])
@@ -111,7 +117,7 @@ const SU_COMMAND_FLAG: CodeFlag = {
 const ENV_SPLIT_FLAG: CodeFlag = { separate: /^(-[a-zA-Z0]*S|--split-string)$/, attached: /^(?:-[a-zA-Z0]*?S|--split-string=)(.+)$/s }
 const STDIN_SCRIPTS = new Set(['-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'])
 
-const VERBS_PATTERN = 'commit|push|merge|rebase|cherry-pick|revert|am'
+const VERBS_PATTERN = 'commit-tree|commit|push|merge|rebase|cherry-pick|revert|am|pull|filter-branch|fast-import|quiltimport|replay'
 const VALUE_OPTIONS_PATTERN = ['-C', ...GIT_VALUE_OPTIONS].join('|')
 const CODE_GIT_TEXT = new RegExp(
   `\\bgit(?:\\.exe)?\\s+(?:(?:${VALUE_OPTIONS_PATTERN})\\s+(?:"[^"]*"|'[^']*'|\\S+)\\s+|-{1,2}[\\w.=:/-]+\\s+)*(${VERBS_PATTERN})(?![\\w-])`,
@@ -135,7 +141,7 @@ const MAX_ALIAS_DEPTH = 5
 const DEFAULT_ALIAS_BUDGET_MS = 3000
 
 type Token =
-  | { kind: 'word'; value: string; expansion: boolean; quoted?: true; listed?: true; redirect?: true }
+  | { kind: 'word'; value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true; redirect?: true }
   | { kind: 'sep' }
   | { kind: 'body'; text: string; via: 'heredoc' | 'herestring' }
 
@@ -329,11 +335,16 @@ function lex(text: string, dialect: ShellDialect): Lexed {
   let quoted = false
   let redirectTarget = false
   let afterComma = false
+  let bare = ''
+  let spliced = false
   let i = 0
 
   const endWord = (): void => {
     if (inWord) {
-      const token: Extract<Token, { kind: 'word' }> = { kind: 'word', value: word, expansion: expansion && word.length > 0 }
+      const pattern = shellPattern(bare, dialect)
+      const token: Extract<Token, { kind: 'word' }> = { kind: 'word', value: word, expansion: pattern !== null || (expansion && word.length > 0) }
+      if (pattern === 'glob') token.glob = true
+      if (spliced) token.spliced = true
       if (quoted) token.quoted = true
       if (afterComma) token.listed = true
       if (redirectTarget) token.redirect = true
@@ -342,6 +353,8 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       afterComma = false
     }
     word = ''
+    bare = ''
+    spliced = false
     inWord = false
     expansion = true
     quoted = false
@@ -356,6 +369,15 @@ function lex(text: string, dialect: ShellDialect): Lexed {
     word += s
     inWord = true
     if (s.length > 0) expansion = false
+  }
+  const bareChar = (c: string): void => {
+    literal(c)
+    bare += c
+  }
+  const splice = (s: string): void => {
+    word += s
+    inWord = true
+    spliced = true
   }
   const readHeredocBodies = (): void => {
     while (pendingHeredocs.length > 0) {
@@ -484,6 +506,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
         if (!/^\$(@|\{[^}]*\[@\]\})$/.test(rawInner)) quoted = true
       } else {
         literal(value)
+        if (substitutions > 0 || /\$[\w{(@*#?!$-]/.test(rawInner)) spliced = true
       }
       i = j + 1
       continue
@@ -509,8 +532,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       }
       const { inner, end } = readBacktick(text, i + 1)
       nested.push({ text: inner, dialect })
-      word += inner
-      inWord = true
+      splice(inner)
       i = end
       continue
     }
@@ -525,8 +547,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
         }
         const { inner, end } = readBalanced(text, i + 2, '(', ')')
         nested.push({ text: inner, dialect })
-        word += inner
-        inWord = true
+        splice(inner)
         i = end
         continue
       }
@@ -534,15 +555,13 @@ function lex(text: string, dialect: ShellDialect): Lexed {
         const close = text.indexOf('}', i + 2)
         const end = close === -1 ? text.length : close + 1
         for (const s of substitutionsIn(text.slice(i + 2, end), dialect)) nested.push({ text: s, dialect })
-        word += text.slice(i, end)
-        inWord = true
+        splice(text.slice(i, end))
         i = end
         continue
       }
       const m = /^\$(?:[A-Za-z_]\w*(?::\w+)?|[@*#?$!0-9-])/.exec(text.slice(i))
       if (m) {
-        word += m[0]
-        inWord = true
+        splice(m[0])
         i += m[0].length
         continue
       }
@@ -594,6 +613,8 @@ function lex(text: string, dialect: ShellDialect): Lexed {
     if (c === '<' || c === '>') {
       if (inWord && (/^\d+$/.test(word) || (dialect === 'powershell' && word === '*'))) {
         word = ''
+        bare = ''
+        spliced = false
         inWord = false
         expansion = true
       } else {
@@ -652,6 +673,11 @@ function lex(text: string, dialect: ShellDialect): Lexed {
         continue
       }
     }
+    if (dialect === 'bash' && (c === '{' || c === '}') && (inWord || (next !== undefined && !(c === '{' ? /\s/ : /[\s;|&)<>]/).test(next)))) {
+      bareChar(c)
+      i++
+      continue
+    }
     if (c === ';' || c === '|' || c === '&' || c === '(' || c === ')' || c === '{' || c === '}') {
       sep()
       i++
@@ -669,12 +695,17 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       i += m[0].length
       continue
     }
-    literal(c)
+    bareChar(c)
     i++
   }
   endWord()
   readHeredocBodies()
   return { tokens, nested }
+}
+
+function shellPattern(bare: string, dialect: ShellDialect): 'brace' | 'glob' | null {
+  if (dialect === 'bash' && /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) return 'brace'
+  return /[*?]/.test(bare) || /\[[^\]]+\]/.test(bare) ? 'glob' : null
 }
 
 function splitCommands(tokens: Token[]): Token[][] {
@@ -689,10 +720,14 @@ function splitCommands(tokens: Token[]): Token[][] {
   return commands.filter((c) => c.length > 0)
 }
 
-type Word = { value: string; expansion: boolean; quoted?: true; listed?: true }
+type Word = { value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true }
 
 function isVariable(w: Word): boolean {
   return w.expansion && w.value.startsWith('$')
+}
+
+function isDynamicWord(w: Word): boolean {
+  return w.expansion || w.spliced === true
 }
 
 function wordsOf(command: Token[]): Word[] {
@@ -726,11 +761,11 @@ function judgeDynamicProgram(after: Word[]): TerminalVerdict {
   const verb = args[at]?.toLowerCase()
   const alias = verb === undefined ? undefined : scanGitOptions(args).aliases[verb]?.replace(/^\s*!/, '')
   const viaAlias = alias !== undefined && (BLOCKED_GIT_VERBS.has(alias.trim().split(/\s+/)[0]!.toLowerCase()) || CODE_GIT_TEXT.test(alias))
-  const gitVerb = viaAlias || (verb !== undefined && BLOCKED_GIT_VERBS.has(verb) && !isRecovery(verb, args.slice(at + 1)))
+  const gitVerb = viaAlias || (verb !== undefined && BLOCKED_GIT_VERBS.has(verb) && !isAllowedForm(verb, args.slice(0, at), args.slice(at + 1), after.slice(at + 1).map(isDynamicWord)))
   const ghFirst = args.find((a, k) => !a.startsWith('-') && !GH_VALUE_OPTIONS.has(args[k - 1] ?? ''))
-  const ghMerge = ghFirst?.toLowerCase() === 'pr' && isDeny(judgeGh(args, after.map((w) => w.expansion)))
+  const ghMerge = ghFirst?.toLowerCase() === 'pr' && isDeny(judgeGh(args, after.map(isDynamicWord)))
   if (!gitVerb && !ghMerge) return ALLOW
-  return deny(`a command name built from a variable or a substitution is followed by '${gitVerb ? args[at] : 'pr merge'}'; the guard cannot read which program that is, so the command was refused — write the program name out`)
+  return deny(`a command name built from a variable, a substitution or a brace or glob pattern is followed by '${gitVerb ? args[at] : 'pr merge'}'; the guard cannot read which program that is, so the command was refused — write the program name out`)
 }
 
 function startProcessParam(word: string): { kind: 'program' | 'arguments' | 'value' | 'switch'; attached: string | null } | null {
@@ -771,7 +806,7 @@ function judgeStartProcess(after: Word[], ctx: Ctx): TerminalVerdict {
     else program = w
   }
   if (program === null) return ALLOW
-  const line = [program, ...splitJoined(args)].map((x): Token => ({ kind: 'word', value: x.value, expansion: x.expansion }))
+  const line = [program, ...splitJoined(args)].map((x): Token => ({ kind: 'word', value: x.value, expansion: x.expansion, ...(x.spliced ? { spliced: true as const } : {}) }))
   return judgeCommandWords(line, 'powershell', ctx)
 }
 
@@ -812,8 +847,8 @@ function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx): T
     const name = programName(w.value)
     const rest = words.slice(i + 1).map((x) => x.value)
 
-    if (dialect === 'bash' && w.expansion && !w.quoted && runsHere(i)) {
-      return deny(`a command run from an unquoted variable or substitution ('${w.value}') cannot be read: the shell splits it into a whole command line, so the command was refused — write the program name out (or quote the variable when it holds only a program path)`)
+    if (dialect === 'bash' && w.expansion && !w.quoted && w.glob !== true && runsHere(i)) {
+      return deny(`a command run from an unquoted variable, substitution or brace or glob pattern ('${w.value}') cannot be read: the shell splits it into a whole command line, so the command was refused — write the program name out (or quote the variable when it holds only a program path)`)
     }
     if (w.expansion && rest.length > 0) {
       const v = judgeDynamicProgram(words.slice(i + 1))
@@ -822,9 +857,9 @@ function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx): T
 
     let v: TerminalVerdict = ALLOW
     const dashed = w.value.includes('://') ? undefined : /^git-(.+)$/.exec(name)?.[1]
-    if (name === 'git') v = judgeGit(rest, ctx, {}, words.slice(i + 1).map((x) => x.expansion))
-    else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isRecovery(dashed, rest) ? ALLOW : denyGit(dashed)
-    else if (name === 'gh') v = judgeGh(rest, words.slice(i + 1).map((x) => x.expansion))
+    if (name === 'git') v = judgeGit(rest, ctx, {}, words.slice(i + 1).map(isDynamicWord))
+    else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest, words.slice(i + 1).map(isDynamicWord)) ? ALLOW : denyGit(dashed)
+    else if (name === 'gh') v = judgeGh(rest, words.slice(i + 1).map(isDynamicWord))
     else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest, bodies, ctx)
     else if (POWERSHELLS.has(name)) v = judgePowerShellRunner(rest, words.slice(i + 1).map(isVariable), bodies, ctx, name !== 'pwsh')
     else if (dialect === 'powershell' && START_PROCESS.has(name)) v = judgeStartProcess(words.slice(i + 1), { ...ctx, depth: ctx.depth + 1 })
@@ -926,6 +961,9 @@ function judgeCode(code: string): TerminalVerdict {
 }
 
 function denyGit(verb: string): TerminalVerdict {
+  if (verb === 'pull') {
+    return deny('`git pull` from the terminal is refused unless it is fast-forward only: a pull that merges or rebases creates commits only the developer approves. Run `git pull --ff-only` or `git fetch`; if the branches diverged, ask the developer')
+  }
   const tool = BLOCKED_GIT_VERBS.get(verb) ?? 'the RSCT tools'
   const how =
     tool === 'rsct_request_commit' && verb !== 'commit'
@@ -938,8 +976,35 @@ function denyGhMerge(): TerminalVerdict {
   return deny('`gh pr merge` from the terminal is refused: the developer merges the pull request on GitHub or in their own terminal')
 }
 
-function isRecovery(verb: string, rest: string[]): boolean {
+function isAllowedForm(verb: string, globals: string[], rest: string[], restDynamic: boolean[] = []): boolean {
+  if (verb === 'pull') return isSafePull(globals, rest, restDynamic)
   return RECOVERY_VERBS.has(verb) && rest.length > 0 && rest.every((r) => RECOVERY_FLAGS.has(r))
+}
+
+const PULL_SAFE_FLAGS = new Set(['--ff-only', '-q', '--quiet', '-v', '--verbose', '--prune', '-p', '--no-rebase', '--rebase=false', '--tags', '--no-tags', '--stat', '--no-stat', '-n'])
+const PULL_CONFIG = /^(?:pull|branch|rebase)\./i
+
+function isSafePull(globals: string[], rest: string[], restDynamic: boolean[]): boolean {
+  for (let k = 0; k < globals.length; k++) {
+    const g = globals[k]!
+    if (g === '-c' && PULL_CONFIG.test(globals[k + 1] ?? '')) return false
+    if (g.startsWith('-c') && g.length > 2 && PULL_CONFIG.test(g.slice(2))) return false
+  }
+  if (restDynamic.some(Boolean) || !rest.includes('--ff-only')) return false
+  let positional = 0
+  for (const r of rest) {
+    if (r.startsWith('-')) {
+      if (!PULL_SAFE_FLAGS.has(r)) return false
+      continue
+    }
+    positional += 1
+    if (positional === 1 && isLocalRepository(r)) return false
+  }
+  return true
+}
+
+function isLocalRepository(r: string): boolean {
+  return r === '.' || r === '..' || /^\.{1,2}[\\/]/.test(r) || /^[\\/]/.test(r) || /^[A-Za-z]:/.test(r) || /^file:/i.test(r)
 }
 
 function scanGitOptions(args: string[]): { verbIndex: number; gitDir: string | null; aliases: Record<string, string> } {
@@ -980,13 +1045,13 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   const verbWord = args[j]
   if (verbWord === undefined) return ALLOW
   if (flags[j]) {
-    return deny(`a git subcommand built from a variable or a substitution ('${verbWord}') cannot be read, so the command was refused — write the subcommand out`)
+    return deny(`a git subcommand built from a variable, a substitution or a brace or glob pattern ('${verbWord}') cannot be read, so the command was refused — write the subcommand out`)
   }
   const verb = verbWord.toLowerCase()
   const rest = args.slice(j + 1)
 
   if (BLOCKED_GIT_VERBS.has(verb)) {
-    if (isRecovery(verb, rest)) return ALLOW
+    if (isAllowedForm(verb, args.slice(0, j), rest, flags.slice(j + 1))) return ALLOW
     return denyGit(verb)
   }
   if (verb === 'submodule' && rest[0] === 'foreach') return judgeText(rest.slice(1).filter((r) => !r.startsWith('--')).join(' '), 'bash', ctx)
@@ -1006,7 +1071,7 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   const deeper: Ctx = { ...ctx, aliasDepth: ctx.aliasDepth + 1 }
   if (value.trimStart().startsWith('!')) return judgeText(value.trimStart().slice(1), 'bash', deeper)
   const expanded = wordsOf(lex(value, 'bash').tokens).map((w) => w.value)
-  return judgeGit([...expanded, ...rest], deeper, aliases, [...expanded.map(() => false), ...flags.slice(j + 1)])
+  return judgeGit([...args.slice(0, j), ...expanded, ...rest], deeper, aliases, [...flags.slice(0, j), ...expanded.map(() => false), ...flags.slice(j + 1)])
 }
 
 function judgeGh(args: string[], dynamic: boolean[] = []): TerminalVerdict {
@@ -1020,7 +1085,7 @@ function judgeGh(args: string[], dynamic: boolean[] = []): TerminalVerdict {
     }
     if (a.startsWith('-')) continue
     if (flags[j] && (positional.length === 0 || positional[0] === 'pr')) {
-      return deny(`a gh subcommand built from a variable or a substitution ('${a}') cannot be read, so the command was refused — write the subcommand out`)
+      return deny(`a gh subcommand built from a variable, a substitution or a brace or glob pattern ('${a}') cannot be read, so the command was refused — write the subcommand out`)
     }
     positional.push(a.toLowerCase())
     if (positional.length === 2) {
