@@ -154,6 +154,31 @@ gate checks; `override_plan_tracking=true` bypasses, and like every other
 `trivial`/`small` skip it when a classify verdict backs the tier. A well-behaved §B flow creates these files at planning, so it
 never trips the gate.
 
+**Run alone (2.16.0, ADR-029)** — `rsct_phase_code_start` with `run_alone=true`
+and a `dev_approval`, at the root of the repository or worktree only
+(`run_alone_not_at_root` elsewhere), asks the developer, in a forced OS dialog shown
+after every other gate passed (`trust_allowed_for` ignored, no channel = refused),
+whether the agent may run code → tests → review on its own and stop before the
+commit. On Yes,
+`.rsct/phase-state.json` gets a `run_alone` record and `rsct_phase_code_complete`
+/ `rsct_phase_test_complete` close with no dialog (`status: "deferred"`), after the
+same precheck and `dev_approval` validation as before; each phase waits in
+`run_alone.pending`. `rsct_phase_review_complete` first shows one forced dialog per
+pending phase, in order, before any sweep or file change, whatever spec the REVIEW
+was started under; a Yes is kept even if a later dialog fails. A No sends the work
+back to that phase (`run_alone_rejected`): that entry and every later one are
+dropped, the mode ends, and `phase`, `scope_globs` and `started_at` are cleared. A No
+to the REVIEW's own dialog, once nothing is pending, keeps the mode on: what is
+redone closes again with no dialog and is asked again before any commit. `rsct_request_commit`
+refuses (`run_alone_pending`), before any dialog and before a batch token is read,
+while a record exists at the named folder or at its repository root — also after a
+No — and a REVIEW named from a folder below that root is refused the same way. The
+record ends when a REVIEW is approved with nothing pending, or with
+`rsct_phase_abandon` while a phase is active; abandon forces its dialog while
+phases are pending and names them first. `rsct_phase_status` reports the record
+only when there is one. Research, spec, verification and REVIEW completions are
+never deferred.
+
 ## Status
 
 | Milestone | State |

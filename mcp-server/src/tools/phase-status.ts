@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
-import { readPhaseState } from '../lib/phase-scope.js'
+import { readPhaseState, type RunAloneBlock } from '../lib/phase-scope.js'
+import { describePending, readRunAlone } from '../lib/run-alone.js'
 import {
   readFindingsBaseline,
   summarizeEvidence,
@@ -63,6 +64,7 @@ export interface PhaseStatusOutput {
   verification: PhaseStatusVerificationSummary | null
   review: PhaseStatusReviewSummary | null
   plan_authorization: PhaseStatusPlanAuthSummary | null
+  run_alone?: RunAloneBlock
   worktree: WorktreeInfo
   next_recommended_phase: RsctPhase | null
   rsct_phase_order: readonly RsctPhase[]
@@ -72,7 +74,7 @@ export interface PhaseStatusOutput {
 export const phaseStatusTool: Tool = {
   name: 'rsct_phase_status',
   description:
-    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, and the next recommended phase per the canonical R→S→V→C→T→REVIEW order. Use to check where the task is mid-session before starting a new phase.',
+    'Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, a run_alone record (present only when the developer chose run alone: the phases closed with no dialog that wait for the developer), and the next recommended phase per the canonical R→S→V→C→T→REVIEW order. Use to check where the task is mid-session before starting a new phase.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -191,6 +193,14 @@ export async function phaseStatusHandler(
       `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`,
     )
   }
+  const runAlone = readRunAlone(state)
+  if (runAlone) {
+    hints.push(
+      runAlone.pending.length > 0
+        ? `Run alone for '${runAlone.spec_slug}': waiting for the developer — ${describePending(runAlone.pending)}. They are approved, in order, at rsct_phase_review_complete; commits are refused until that REVIEW is approved.`
+        : `Run alone for '${runAlone.spec_slug}'${runAlone.active ? '' : ' (ended by a No)'}: commits are refused until a REVIEW is approved.`,
+    )
+  }
   if (worktree.is_worktree) {
     hints.push(
       `Linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — this phase-state + token are isolated to THIS worktree.`,
@@ -207,6 +217,7 @@ export async function phaseStatusHandler(
     verification,
     review,
     plan_authorization: planAuth,
+    ...(runAlone && { run_alone: runAlone }),
     worktree,
     next_recommended_phase: recommended,
     rsct_phase_order: RSCT_PHASES,

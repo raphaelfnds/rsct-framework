@@ -140,7 +140,10 @@ The Code phase (§B-approved plan moving into execution) is wrapped by:
    `rsct_phase_review_start` → review code and tests, remove every comment
    from the touched files → `rsct_phase_review_complete`. At every tier,
    `rsct_request_commit` refuses staged code no completed REVIEW covers.
-   The cycle is R→S→V→C→T→REVIEW.
+   The cycle is R→S→V→C→T→REVIEW. When the developer chose run alone at
+   step 1 (§0), steps 3 and 4 close code and tests with no dialog; stop
+   after the review work and call `rsct_phase_review_complete` only once
+   the developer is back.
 
 The branch derivation step above is INDEPENDENT of and PRECEDES the
 phase machine: derive `feat/<slug>` (or equivalent) FIRST, then open

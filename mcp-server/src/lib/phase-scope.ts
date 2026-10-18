@@ -182,6 +182,18 @@ export interface ContextStaleBlock {
   reason: 'plan_closed' | 'pivot'
 }
 
+export interface RunAlonePendingEntry {
+  phase: 'code' | 'test'
+  completed_at: string
+}
+
+export interface RunAloneBlock {
+  spec_slug: string
+  approved_at: string
+  active: boolean
+  pending: RunAlonePendingEntry[]
+}
+
 export interface PhaseState {
   spec_slug?: string
   phase?: string
@@ -198,6 +210,7 @@ export interface PhaseState {
   disposition?: PlanDispositionBlock
   context_stale?: ContextStaleBlock
   bootstrap_at?: string
+  run_alone?: RunAloneBlock
 }
 
 export function headStaleness(
@@ -442,7 +455,7 @@ export function refuseUnreadableState(
     path,
     reason: 'unreadable_state',
     parse_error: read.parse_error,
-    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`,
+    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. Repair or delete that file; deleting it is a safe recovery. Deleting it also drops a run_alone record and the phases waiting in it for the developer.`,
   }
 }
 

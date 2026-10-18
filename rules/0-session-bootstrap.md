@@ -148,6 +148,19 @@ Before any `Edit` / `Write` to executable behavior files
   the tool forces an OS dialog and the override is audit-logged. Also pass
   `spec_tier` only after `rsct_classify_task` has run: a `trivial`/`small`
   tier with no verdict on record is refused.
+- **Run alone — only when the developer asks for it.** Pass
+  `run_alone: true` with a `dev_approval` to `rsct_phase_code_start`, from
+  the root of the repository or worktree; a
+  forced OS dialog asks the developer whether you may run code → tests →
+  review on your own and stop before the commit. Never pass it on your own
+  initiative. On Yes, `rsct_phase_code_complete` and
+  `rsct_phase_test_complete` close with no dialog (`status: 'deferred'`).
+  Do the review work, then STOP and tell the developer; call
+  `rsct_phase_review_complete` only when they say they are back — it first
+  asks for each phase closed on its own, in order, then the REVIEW. A No
+  sends the work back to that phase (`run_alone_rejected`): start it again
+  and redo every later phase, each with its dialog. Commits are refused
+  (`run_alone_pending`) until that REVIEW is approved.
 - Before each `Edit` call:
   `mcp__rsct__rsct_check_edit_scope({ file_path })` — returns
   `in_scope` / `out_of_scope` / `unknown` / `stale_context`. If

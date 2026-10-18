@@ -55,6 +55,11 @@ After step 3, branch on the returned tier:
 - complex: same chain as standard; V phase is mandatory (skipping
   requires override_verification_skip=true PLUS a dev_approval and an
   OS dialog).
+- run alone (only when the developer asks for it):
+  rsct_phase_code_start({ ..., run_alone: true, dev_approval }) → forced
+  OS dialog → code and test close with no dialog → after the review work,
+  STOP and tell the developer → rsct_phase_review_complete once they are
+  back (it asks for each phase closed on its own, then the REVIEW).
 
 The full cycle is R→S→V→C→T→REVIEW (REVIEW audits code and tests together
 on a green suite, V audits the spec).

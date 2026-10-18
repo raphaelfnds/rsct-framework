@@ -294,6 +294,7 @@ export interface CompletePhaseInput {
 
 export type CompletePhaseStatus =
   | 'completed'
+  | 'deferred'
   | 'rejected'
   | 'state_write_failed'
   | 'no_active_phase'
@@ -303,6 +304,9 @@ export type CompletePhaseRejectKind =
   | 'spec_ref_mismatch'
   | 'phase_mismatch'
   | 'block_actions_present'
+  | 'run_alone_rejected'
+  | 'run_alone_state_write_failed'
+  | 'run_alone_pending'
   | FindingsGateRejectKind
 
 export interface CompletePhaseResult {
