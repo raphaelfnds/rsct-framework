@@ -7,6 +7,7 @@ import {
   type CompletePhaseInternal,
   type CompletePhaseResult,
 } from '../lib/phase-machine.js'
+import { deferPhaseComplete } from '../lib/run-alone.js'
 
 export const phaseCodeCompleteInputSchema = z
   .object({
@@ -24,7 +25,7 @@ export type PhaseCodeCompleteOutput = CompletePhaseResult
 export const phaseCodeCompleteTool: Tool = {
   name: 'rsct_phase_code_complete',
   description:
-    '§C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: test — then the mandatory REVIEW over code and tests together (cycle R→S→V→C→T→REVIEW).',
+    '§C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. When the developer chose run alone at rsct_phase_code_start, it closes with NO dialog (status "deferred"): the phase waits in run_alone.pending for the developer, who approves it in its own dialog at rsct_phase_review_complete, before any commit. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: test — then the mandatory REVIEW over code and tests together (cycle R→S→V→C→T→REVIEW).',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -43,14 +44,11 @@ export async function phaseCodeCompleteHandler(
 ): Promise<PhaseCodeCompleteOutput> {
   const input = phaseCodeCompleteInputSchema.parse(rawInput ?? {})
   const resolution = resolveProjectRoot(input.project_root)
-  return gatePhaseComplete(
-    {
-      projectRoot: resolution.root,
-      phase: 'code',
-      specRef: input.spec_ref,
-      devApproval: input.dev_approval,
-    },
-    resolution.config,
-    internal,
-  )
+  const args = {
+    projectRoot: resolution.root,
+    phase: 'code' as const,
+    specRef: input.spec_ref,
+    devApproval: input.dev_approval,
+  }
+  return deferPhaseComplete(args, resolution.config, internal) ?? gatePhaseComplete(args, resolution.config, internal)
 }

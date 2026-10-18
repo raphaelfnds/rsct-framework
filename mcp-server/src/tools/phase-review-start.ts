@@ -20,6 +20,7 @@ import {
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { getHeadShaFull } from '../lib/git.js'
 import { computeWorkingSweep } from '../lib/comment-sweep/review.js'
+import { readRunAlone, stopPointHint } from '../lib/run-alone.js'
 import {
   readPhaseState,
   type PhaseFindingsBlock,
@@ -231,6 +232,9 @@ export async function phaseReviewStartHandler(
     const remaining = comment_sweep!.files.filter((f) => f.kind === 'comments_present').length
     const removed = comment_sweep!.files.reduce((n, f) => n + f.removed.length, 0)
     result.hints.push(`Comment sweep: ${comment_sweep!.files.length} touched code file(s), ${remaining} still with comments, ${removed} comment(s) removed so far (each needs a disposition at _complete).`)
+  }
+  if (persisted && readRunAlone(readPhaseState(resolution.root).state)?.active === true) {
+    result.hints.push(stopPointHint())
   }
   return {
     ...result,

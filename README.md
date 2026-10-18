@@ -619,6 +619,13 @@ The full cycle is **R → S → V → C → T → REVIEW**:
 | REVIEW | Review of code and tests on a green suite — correctness / security / regression, plus a mechanical sweep that removes every comment from the touched files | §G (testing); mandatory at every tier, enforced at every commit |
 | — | Commit + Push | §C, §D, §E (leak review) |
 
+**Run alone (optional).** When you want to step away, ask the agent to start the
+code phase with `run_alone`: an OS dialog asks you whether the agent may run code →
+tests → review on its own and stop before the commit. Code and tests then close with
+no dialog. When you are back, `rsct_phase_review_complete` asks you to approve each of
+them, in order, then the REVIEW; nothing is committed before that. A No sends the work
+back to that phase. See ADR-029.
+
 ## Versioning
 
 RSCT carries **two distinct version axes** — keep them separate:
