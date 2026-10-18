@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-10-18
+
 ### Security
 
 - **The terminal guard reads brace patterns and globs like variables.** A git or gh subcommand
