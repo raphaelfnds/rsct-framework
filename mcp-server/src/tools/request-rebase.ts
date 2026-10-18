@@ -64,7 +64,6 @@ export type RequestRebaseRejectKind =
   | 'same_ref'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
-  /** #62: the carried-path read failed, and rebase/squash fails CLOSED on that. */
   | 'hygiene_range_unreadable'
 
 export interface RequestRebaseOutput {
@@ -94,7 +93,6 @@ export interface RequestRebaseInternal {
   gitStateOverride?: GitState
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
-  /** Test-only seam — see `RequestMergeInternal.rangeReader`. */
   rangeReader?: typeof getRangePaths
 }
 
@@ -151,27 +149,11 @@ export async function requestRebaseHandler(
     anti_replay_persisted: null,
     anti_replay_error: null,
     ...over,
-    // #92 — the anchor facts ride EVERY return path, including the rejects.
-    // Spreading `over` first and then rebuilding `hints` is deliberate: a caller
-    // that passes its own hints must not drop the relocation notice, and a
-    // headless run has no dialog to carry it instead.
     hints: [...anchorHints(projectRoot, config?.audit), ...(over.hints ?? [])],
   })
 
-  // PH-5 ack gate (BEFORE the §C dialog). A rebase/squash rewrites history — an
-  // integration event — so the ack is always required. HOLE A: feed the LIGHT
-  // plan_complete check the boolean for the plan on the current branch.
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null
   const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : undefined
-  // #62: the paths this integration CARRIES. The two modes move in OPPOSITE
-  // directions and the range must follow, or the check reads the wrong side:
-  //   rebase — replays THIS branch's commits onto `ref`, so `ref`...HEAD;
-  //   squash — stages `ref`'s changes into THIS branch, so HEAD...`ref`.
-  // `ref` is agent-controlled and LEADS the composed token in the rebase case —
-  // the only one of the four ranges in #62 where that is true, since the other
-  // three are disarmed by a `HEAD`/`<remote>/` prefix. `getRangePaths` runs
-  // `isSafeRevisionToken` on both endpoints BEFORE composing the range string,
-  // which is what makes that safe; do not inline the composition here.
   const range =
     mode === 'rebase'
       ? (internal.rangeReader ?? getRangePaths)(projectRoot, input.ref, 'HEAD')
@@ -181,13 +163,6 @@ export async function requestRebaseHandler(
     progressHasOpenItems: progressOpen,
     carriedPaths: range.status === 'ok' ? range.paths : null,
   })
-  // FAIL-CLOSED, for the same measured reason as merge: the mutation can succeed
-  // where the range read cannot. `git diff HEAD...<orphan>` is rc=128 while an
-  // unrelated-histories integration is rc=0 and lands, so fail-open would skip
-  // the check on exactly the shape most likely to carry unswept residue.
-  // Ordered AFTER the ack evaluation so an agent that supplied no ack at all is
-  // told THAT first — it is the actionable failure, and it is the one the agent
-  // can fix without touching the repository's refs.
   if (ackDecision.ok && range.status !== 'ok') {
     const reason = crossCheckBlockedReason(range, mode)
     const audit = appendAudit(
@@ -306,7 +281,6 @@ export async function requestRebaseHandler(
     return base({ channel: gate.channel, reject_kind: 'same_ref', reason, fabrication_signals: gate.fabrication_signals, ...auditFields(audit), hints: [reason] })
   }
 
-  // INV-5: rewriting a PROTECTED branch's history requires an explicit override.
   const { list: protectedList } = effectiveProtectedList(config)
   const currentProtected = isProtectedBranch(currentBranch, protectedList)
   if (currentProtected && !overrideBranch) {
@@ -361,9 +335,6 @@ export async function requestRebaseHandler(
       sha_before: result.sha_before,
       sha_after: result.sha_after,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check did on the rewrite that LANDED. Auditing it
-      // only on rejects would leave the successful path — the one that matters
-      // forensically — silent about whether anything was checked at all.
       path_crosscheck: crossCheck,
       ...(range.status === 'ok' && { carried_paths: range.paths.length }),
     },
@@ -382,7 +353,6 @@ export async function requestRebaseHandler(
     hints.push(`⚠ ${mode} landed but the approval could not be recorded as used: ${record.error}.`)
   }
 
-  // Advisory cleanup (Fork 2/A) for the plan on the current branch.
   const donePlan = currentPlan ?? findActivePlan(projectRoot)
   if (donePlan) {
     const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)

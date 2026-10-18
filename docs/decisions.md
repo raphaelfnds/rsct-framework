@@ -1998,6 +1998,48 @@ those files. Keyed by module and symbol; restatements of what the code says were
   empty range; merge and rebase fail closed on an unreadable range (measured: unrelated
   histories, rebase onto an orphan ref), push fails open.
 
+### `tools/request-merge.ts`, `tools/request-rebase.ts` (migrated in the #91 REVIEW)
+
+- The pre-merge ack is checked before the approval dialog: a missing ack is refused in chat
+  without a dialog, and the approval is neither validated nor consumed on that path. A merge, a
+  rebase and a squash are always integration events, so the ack is always required.
+- The carried paths are read from git, never supplied by the caller. Merge reads
+  `HEAD...<source>` — `HEAD`, not the branch name, because this runs before the detached-HEAD
+  refusal, where `rev-parse --abbrev-ref HEAD` returns the literal `HEAD`. Rebase replays this
+  branch onto `ref`, so `ref...HEAD`; squash stages `ref`'s changes here, so `HEAD...ref`. In the
+  rebase range `ref` is agent-controlled and leads the token, the only one of the four ranges
+  where that holds, so `getRangePaths` checks both endpoints with `isSafeRevisionToken` before it
+  composes the range; composing it in the tool would skip that check.
+- Both fail closed on an unreadable range, MEASURED: `git diff HEAD...<orphan>` exits 128 while
+  `git merge --no-ff --allow-unrelated-histories <orphan>` exits 0 and lands. The range is read
+  after the ack is evaluated, so a call with no ack is told that first.
+- One exemption, on merge: `allow_unrelated_histories` with an `unavailable` range. Unrelated
+  histories have no merge base, so for exactly the input that flag serves the read can never
+  succeed. It is not a hole the agent can drive: the flag is refused without
+  `dev_approval.override_protected_branch`; a merge of related histories reads fine and never
+  reaches the exemption; an `unsafe_revision` result still fails closed. A merge that lands under
+  the exemption says that the coverage check did not run.
+- The coverage result is audited on the integration that landed, not only on refusals.
+- The install-drift line goes into the OS dialog, the channel the agent cannot rewrite, as well as
+  `hints[]`, and is drained on every return path. The #92 relocation notice rides every return
+  too; a caller's own hints cannot drop it, and a headless run has no dialog to carry it.
+- The carried-path reader is a test seam that takes a reader, not a path list, so a test can
+  assert the base and head that were passed; it is not an MCP input.
+- After a completed plan the cleanup is suggested, never performed (`rsct_plan_dispose`).
+
+### `lib/install-advisory.ts` (migrated in the #91 REVIEW)
+
+- One helper for every §C-gated mutating tool (#25): the severity check, the audit payload and the
+  message live in one place, because copies drift and this is a security claim. Before it the
+  warning reached only `hints[]`, which the agent relays at its discretion, and push and merge —
+  the outward-facing, hard-to-reverse calls — carried none.
+- The dialog line is one short line on purpose: the dialog is a decision surface, and a wall of
+  text there trains the developer to dismiss it unread.
+- The audit entry is written at evaluation time: it records that a mutation was attempted under
+  degraded enforcement, whether or not the attempt then succeeded.
+- It never blocks and never throws: a drift check that could fail a push would be a worse bug than
+  the drift it reports.
+
 ### `lib/reverse-dep-walk.ts`
 
 - An empty importer set means either "nothing depends on this" or "the walk could not look" (#54).

@@ -46838,8 +46838,6 @@ async function requestMergeHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 merge approval",
-      // The dialog is the one channel the agent cannot rewrite or summarize
-      // away, which is why the security line belongs here and not only in hints[].
       message: [
         `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
@@ -47080,9 +47078,6 @@ async function requestMergeHandler(rawInput, internal = {}) {
       no_ff,
       allow_unrelated_histories,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check actually did on the merge that LANDED.
-      // Auditing it only on rejects would leave the successful path — the one
-      // that matters forensically — silent about whether anything was checked.
       path_crosscheck: crossCheck,
       ...range.status === "ok" && { carried_paths: range.paths.length }
     },
@@ -47687,10 +47682,6 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     anti_replay_persisted: null,
     anti_replay_error: null,
     ...over,
-    // #92 — the anchor facts ride EVERY return path, including the rejects.
-    // Spreading `over` first and then rebuilding `hints` is deliberate: a caller
-    // that passes its own hints must not drop the relocation notice, and a
-    // headless run has no dialog to carry it instead.
     hints: [...anchorHints(projectRoot, config2?.audit), ...over.hints ?? []]
   });
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null;
@@ -47861,9 +47852,6 @@ ${installAdvisory.dialogLine}` : "") + gateDialogFooter(projectRoot, config2)
       sha_before: result.sha_before,
       sha_after: result.sha_after,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check did on the rewrite that LANDED. Auditing it
-      // only on rejects would leave the successful path — the one that matters
-      // forensically — silent about whether anything was checked at all.
       path_crosscheck: crossCheck,
       ...range.status === "ok" && { carried_paths: range.paths.length }
     },

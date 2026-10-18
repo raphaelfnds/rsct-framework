@@ -86,7 +86,6 @@ function writeConfig(root: string, body: Record<string, unknown>): void {
   writeFileSync(join(root, '.rsct.json'), JSON.stringify(body), 'utf8')
 }
 
-// Minimal staged diff that triggers a value-shape (sk-) finding.
 function dirtyDiff(): string {
   return [
     'diff --git a/app.env b/app.env',
@@ -109,11 +108,6 @@ function cleanDiff(): string {
 
 const COMMIT_OK: GitExecResult = { ok: true, stdout: '', stderr: '', exitCode: 0 }
 
-// A2 (INV-6 hardening): `staged_diff_override` is no longer a PUBLIC MCP input —
-// the staged-diff test seam now lives on `internal.stagedDiffOverride`. This
-// adapter keeps the existing call-sites readable by lifting a `staged_diff_override`
-// key from the input object into the internal seam. Tests that assert the PUBLIC
-// input is now rejected call `requestCommitHandler` DIRECTLY (see the A2 test below).
 function callCommit(
   input: Record<string, unknown>,
   internal: RequestCommitInternal = {},
@@ -156,7 +150,6 @@ describe('rsct_request_commit — happy path', () => {
     expect(out.audit_path).toBeTruthy()
     expect(existsSync(join(tmpRoot, '.rsct', 'audit.log'))).toBe(true)
 
-    // Approval consumed: a second call with the same approval must reject as 'reused'.
     const out2 = (await callCommit(
       {
         project_root: tmpRoot,
@@ -236,7 +229,6 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
     expect(out.bootstrap_marker).toBeDefined()
     expect(out.bootstrap_marker?.status).toBe('missing')
     expect(out.hints.some((h) => h.includes('bootstrap not detected'))).toBe(true)
-    // DX-2b regression fence: no user-facing hint leaks a bare section symbol (§).
     expect(out.hints.join(' ')).not.toContain('§')
 
     const auditLines = require('node:fs')
@@ -255,7 +247,6 @@ describe('rsct_request_commit — CAP-33 bootstrap visibility', () => {
 
   it('no bootstrap warning when bootstrap_at is fresh', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    // Pre-stamp a fresh bootstrap_at
     const fresh = new Date(FIXED_NOW.getTime() - 60 * 1000).toISOString()
     require('node:fs').mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
     require('node:fs').writeFileSync(
@@ -441,8 +432,6 @@ describe('rsct_request_commit — mutation_failed preserves approval', () => {
     expect(out.status).toBe('mutation_failed')
     expect(out.reason).toContain('nothing to commit')
 
-    // Retry with the SAME approval should NOT be 'reused' — mutation_failed
-    // does not burn the approval. (We swap the executor to a success path.)
     const out2 = (await callCommit(
       {
         project_root: tmpRoot,
@@ -606,10 +595,6 @@ describe('rsct_request_commit — post-mutation write failures (HIGH-2 / HIGH-3)
   })
 })
 
-// ---------------------------------------------------------------------------
-// T3 — plan-token authorization path (dev_approval omitted)
-// ---------------------------------------------------------------------------
-
 function tokenBlock(over: Partial<PlanAuthorizationBlock> = {}): PlanAuthorizationBlock {
   return {
     plan_slug: 't3',
@@ -677,7 +662,6 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     expect(out.channel).toBe('plan_token')
     expect(out.plan_token?.actions_used).toBe(1)
     expect(out.plan_token?.max_actions).toBe(5)
-    // debit-first persisted the increment
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
   })
 
@@ -746,7 +730,6 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
 
   it('rejects when the token plan_/spec_ file is gone (plan_gone)', async () => {
     writeConfig(tmpRoot, rsctConfig())
-    // no plan_t3.md written
     seedState({ plan_authorization: tokenBlock() })
     const out = (await callCommit(
       { project_root: tmpRoot, message: 'feat: x' },
@@ -766,15 +749,10 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     )) as RequestCommitOutput
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('protected_branch')
-    // token not debited on an INV-5 reject
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
   })
 
   it('A2: staged_diff_override is no longer a PUBLIC input (zod strict rejects it)', async () => {
-    // The fabricated-diff INV-6 bypass is closed: the diff seam moved to the
-    // test-only internal arg, so passing staged_diff_override as MCP input is now
-    // an unknown key. Call the handler DIRECTLY (bypass the callCommit adapter,
-    // which would strip the key) to prove the raw input is rejected.
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock() })
@@ -790,7 +768,6 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writeConfig(tmpRoot, rsctConfig())
     writePlanFile()
     seedState({ plan_authorization: tokenBlock() })
-    // real git repo with a staged secret so getStagedDiff returns it
     execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' })
     execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: tmpRoot, stdio: 'ignore' })
     execFileSync('git', ['config', 'user.name', 't'], { cwd: tmpRoot, stdio: 'ignore' })
@@ -803,7 +780,6 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     )) as RequestCommitOutput
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('secrets')
-    // token not debited on an INV-6 reject
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(0)
   })
 
@@ -821,7 +797,6 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
       }),
     )) as RequestCommitOutput
     expect(out.status).toBe('mutation_failed')
-    // reserved action refunded → counter back to 2
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(2)
   })
 
@@ -841,14 +816,9 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     expect(out.status).toBe('committed')
     expect(out.authorized_via).toBe('dev_approval')
     expect(out.channel).toBe('windows')
-    // token counter NOT touched by the per-action path
     expect(readPhaseState()?.plan_authorization?.actions_used).toBe(1)
   })
 })
-
-// ---------------------------------------------------------------------------
-// T2 — INV-7 contract-surface gate (multi-repo only)
-// ---------------------------------------------------------------------------
 
 const UNIVERSE_FX = join(__dirname, '..', 'fixtures', 'sample-universe')
 
@@ -862,9 +832,6 @@ function multiRepoCfg(over: Record<string, unknown> = {}) {
   }
 }
 
-// INV-7 gate internal: a clean staged diff (passes INV-6) + an injected staged
-// path list (the gate's real input is git diff --cached --name-only; the override
-// is a test-only seam, same posture as stagedDiffOverride).
 function gateInternal(
   stagedPaths: string[],
   over: Partial<RequestCommitInternal> = {},
@@ -951,8 +918,6 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
     )) as RequestCommitOutput
     expect(out.status).toBe('rejected')
     expect(out.reject_kind).toBe('contract_surface')
-    // DX-2: the reason is reworded plain-language, but the actionable override field
-    // name is an API contract the agent must emit — it must survive the reword.
     expect(out.reason).toMatch(/override_contract_surface/)
   })
 
@@ -998,15 +963,11 @@ describe('rsct_request_commit — INV-7 contract-surface gate (T2)', () => {
       gateInternal(['src/api/orders.ts'], { gitStateOverride: gitState('main') }),
     )) as RequestCommitOutput
     expect(out.status).toBe('rejected')
-    expect(out.reject_kind).toBe('protected_branch') // INV-5 runs before the INV-7 gate
+    expect(out.reject_kind).toBe('protected_branch')
   })
 })
 
 describe('rsct_request_commit — install-drift advisory (#16)', () => {
-  // tmpRoot has a .rsct.json but no .rsct/scripts, so both enforcement scripts
-  // read as absent → severity 'security'. That is the realistic shape of a
-  // project set up before the MCP companion existed, and absence is the only
-  // state the check will call a security matter.
   const SECURITY = /SECURITY: RSCT enforcement is not running/
 
   function driftInternal(branch: string): RequestCommitInternal {
@@ -1037,7 +998,6 @@ describe('rsct_request_commit — install-drift advisory (#16)', () => {
     )) as RequestCommitOutput
 
     expect(out.status).toBe('committed')
-    // Prepended: it must outrank the routine hint tail, not trail behind it.
     expect(out.hints[0]).toMatch(SECURITY)
     const log = readFileSync(join(tmpRoot, '.rsct', 'audit.log'), 'utf8')
     const entry = log
@@ -1056,8 +1016,6 @@ describe('rsct_request_commit — install-drift advisory (#16)', () => {
   })
 
   it('still carries the advisory when the commit is REJECTED', async () => {
-    // The whole point of the advisory drain: a rejected commit must not swallow
-    // a warning about the enforcement surface being degraded.
     writeConfig(tmpRoot, rsctConfig({ protected_branches: ['main'] }))
     const out = (await callCommit(
       {
