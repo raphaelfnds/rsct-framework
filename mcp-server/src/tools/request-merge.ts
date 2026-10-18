@@ -101,7 +101,6 @@ export type RequestMergeRejectKind =
   | 'unrelated_histories_without_override'
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
-  /** #62: the carried-path read failed, and merge fails CLOSED on that. */
   | 'hygiene_range_unreadable'
 
 export interface RequestMergeOutput {
@@ -118,14 +117,10 @@ export interface RequestMergeOutput {
     protected: boolean
     override_used: boolean
   }
-  /** CAP-33: §0 bootstrap visibility — null when not evaluated (reject paths). */
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
-  /** See `RequestCommitOutput.audit_error` for semantics. */
   audit_error: string | null
-  /** See `RequestCommitOutput.anti_replay_persisted` for semantics. */
   anti_replay_persisted: boolean | null
-  /** See `RequestCommitOutput.anti_replay_error` for semantics. */
   anti_replay_error: string | null
   hints: string[]
 }
@@ -135,27 +130,15 @@ export interface RequestMergeInternal {
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
   gitStateOverride?: GitState
-  /** Test-only seam — see `RequestCommitInternal.auditWriter`. */
   auditWriter?: typeof appendAuditEntry
-  /** Test-only seam — see `RequestCommitInternal.approvalRecorder`. */
   approvalRecorder?: typeof recordConsumedApproval
-  /**
-   * Test-only seam: substitute the carried-path READER (`lib/git.getRangePaths`)
-   * so the #62 coverage cross-check can be exercised without a real repo. NOT an
-   * MCP input — the dispatch calls the handler with no `internal`, so a caller
-   * can never substitute the real range (the A2/INV-6 lesson).
-   *
-   * A READER, not a path list, on purpose: only a reader lets a test assert the
-   * base and head that were actually passed, and a swapped range is a real
-   * defect class here — every tool composes a different one.
-   */
   rangeReader?: typeof getRangePaths
 }
 
 export const requestMergeTool: Tool = {
   name: 'rsct_request_merge',
   description:
-    "§C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase via `gh pr merge --merge|--squash|--rebase`) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see §D).",
+    "§C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase, done by the developer on GitHub) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see §D).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -206,14 +189,6 @@ export async function requestMergeHandler(
   const appendAudit = internal.auditWriter ?? appendAuditEntry
   const recordApproval = internal.approvalRecorder ?? recordConsumedApproval
 
-  // PH-5: pre-integration hygiene gate. Checked BEFORE gateRequest so a missing
-  // ack rejects in chat WITHOUT popping the §C OS dialog (V-P1·PH-5). A reject
-  // here returns before the gate, so the dev_approval is never validated or
-  // consumed. A merge is always an integration event ⇒ the ack is always required.
-  // #25. Merge is outward-facing and hard to reverse, so degraded enforcement
-  // matters MORE here than at commit — and this is exactly where the warning used
-  // to be silent. Evaluated before the pre-gate ack check so it reaches the dev on
-  // rejected attempts too, and drained through `withAdvisories` on every return path.
   const advisories: string[] = []
   advisories.push(...anchorHints(projectRoot, config?.audit))
   const withAdvisories = (hints: string[]): string[] => [...advisories, ...hints]
@@ -227,52 +202,16 @@ export async function requestMergeHandler(
   })
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
 
-  // plan-lifecycle-v2 (Bloco 2.2, HOLE A): resolve the plan being integrated by
-  // the SOURCE branch (not the mtime-winner findActivePlan) and, when found,
-  // feed the LIGHT plan_complete cross-check the boolean — does that plan's
-  // progress file still have open `- [ ]` items? A `plan_complete:true`
-  // attestation that contradicts visible open items is rejected mechanically.
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch)
   const progressOpen = integratingPlan
     ? progressHasOpenItems(projectRoot, integratingPlan.slug)
     : undefined
-  // #62: the paths this merge CARRIES, read from git and never caller-supplied.
-  // `HEAD` rather than `targetBranch`: this runs before the detached-HEAD reject,
-  // and `rev-parse --abbrev-ref HEAD` returns the literal string 'HEAD' when
-  // detached, so `targetBranch` is not the reliable spelling here.
   const range = (internal.rangeReader ?? getRangePaths)(projectRoot, 'HEAD', input.source_branch)
   const crossCheck = describeCrossCheck(range)
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
     progressHasOpenItems: progressOpen,
     carriedPaths: range.status === 'ok' ? range.paths : null,
   })
-  // FAIL-CLOSED on merge. The rationale that fail-open was safe here — "the merge
-  // cannot succeed if the range is unreadable" — is FALSE, measured:
-  // `git diff HEAD...<orphan>` is rc=128 while
-  // `git merge --no-ff --allow-unrelated-histories <orphan>` is rc=0 and lands.
-  // `allow_unrelated_histories` is an agent input, so the merge shape most likely
-  // to carry unswept residue was the one shape that skipped the check. The near
-  // precedents both fail closed for the same reason: `gitIsTracked` ("a real git
-  // failure can never green-light deleting something") and `gitBranchMerged`
-  // ("never falsely claims merged").
-  //
-  // Rv-B — ONE exemption, and the same measurement that justifies fail-closed is
-  // what forces it. `git diff HEAD...<orphan>` is rc=128 because unrelated
-  // histories have NO MERGE BASE, not because anything is unfetched. So for the
-  // exact input `allow_unrelated_histories` exists to serve, the read can never
-  // succeed: without this exemption the flag was permanently unusable, rejected
-  // with advice ("fetch the refs involved") that no fetch can satisfy.
-  //
-  // Why this is not a hole an agent can drive:
-  //  - the flag is force-like and is REFUSED below without
-  //    `dev_approval.override_protected_branch`, so reaching for it to skip the
-  //    coverage check costs a dev-approved override — a §C decision, not an
-  //    agent one;
-  //  - on a merge whose histories ARE related the read succeeds, so the
-  //    exemption never fires and the check runs exactly as before;
-  //  - it is scoped to `unavailable`. A `unsafe_revision` result still fails
-  //    CLOSED whatever the flag says — otherwise declaring unrelated histories
-  //    would become a way to launder a crafted revision past the predicate.
   const unreadableIsInherent =
     allow_unrelated_histories && range.status === 'unavailable'
   if (unreadableIsInherent && ackDecision.ok) {
@@ -364,8 +303,6 @@ export async function requestMergeHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — merge approval',
-      // The dialog is the one channel the agent cannot rewrite or summarize
-      // away, which is why the security line belongs here and not only in hints[].
       message: [
         `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
@@ -617,9 +554,6 @@ export async function requestMergeHandler(
       no_ff,
       allow_unrelated_histories,
       fabrication_signals: gate.fabrication_signals,
-      // #62: what the coverage check actually did on the merge that LANDED.
-      // Auditing it only on rejects would leave the successful path — the one
-      // that matters forensically — silent about whether anything was checked.
       path_crosscheck: crossCheck,
       ...(range.status === 'ok' && { carried_paths: range.paths.length }),
     },
@@ -629,9 +563,6 @@ export async function requestMergeHandler(
   const hints: string[] = [
     `Merged '${input.source_branch}' into '${targetLabel}' (${merge.sha_after ?? '<unknown sha>'}).`,
   ]
-  // Rv-B: say out loud that the coverage check did not run. The exemption is
-  // legitimate and the merge landed, but files_swept was never verified against
-  // what was actually carried, and a silent skip is the thing D7 forbids.
   if (unreadableIsInherent) {
     hints.push(
       '⚠ pre_merge_ack coverage check SKIPPED: unrelated histories have no merge base, so the ' +
@@ -652,7 +583,6 @@ export async function requestMergeHandler(
     )
   }
 
-  // CAP-33: bootstrap visibility on merge (mirror of request_commit/_push).
   const bootstrap = evaluateBootstrapMarker({ projectRoot, now })
   if (bootstrap.status !== 'fresh') {
     if (bootstrap.hint) hints.push(bootstrap.hint)
@@ -672,25 +602,11 @@ export async function requestMergeHandler(
     )
   }
 
-  // CAP-53/55: when the task's plan is marked complete, SUGGEST (advisory —
-  // never auto-perform) the post-merge cleanup: (1) delete the merged working
-  // branch, and (2) delete the branch-local plan_/progress_/spec_ files before
-  // they reach a protected branch (they must never be tracked on main/test).
-  // The same cleanup applies after a GitHub PR merge by ANY strategy (merge
-  // commit / squash / rebase) — those run via `gh pr merge` / the web UI, not
-  // this tool, so recall it from §D / the plan-tracking memory there. The dev
-  // decides; nothing is automated.
-  // plan-lifecycle-v2 (Bloco 2.3, Fork 2/A — ADVISORY-ONLY): the ack that let
-  // this merge proceed attested plan_complete, so surface the artifact-cleanup
-  // advisory for the plan on the merged branch (resolved by branch — HOLE A —
-  // falling back to the active plan). Never auto-deletes; points at
-  // rsct_plan_dispose. The same cleanup applies after a GitHub PR merge (merge
-  // commit / squash / rebase), which run via `gh pr merge`, not this tool.
   const donePlan = integratingPlan ?? findActivePlan(projectRoot)
   if (donePlan) {
     const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)
     hints.push(
-      `ℹ Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself — RSCT never auto-deletes.`,
+      `ℹ Merged '${input.source_branch}'. ${report.hint} Suggest deleting the merged working branch to the developer, with their OK: local with git branch -d, remote with rsct_request_push and branch ":<name>". Record keep|delete with rsct_plan_dispose, or remove the loose files yourself — RSCT never auto-deletes.`,
     )
   }
 

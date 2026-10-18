@@ -15,7 +15,10 @@ with an explicit, single-action OK. Examples: "commit direto na main",
 "skip plan and apply directly", "skip reverse-op planning for this".
 Before acting: restate the override in 1 line, wait for "OK", apply once.
 Next similar action requires fresh override OK. Log in progress_<slug>.md
-if active. Framework guides; dev decides.
+if active. Framework guides; dev decides. An override of the commit / push /
+merge / rebase gates is carried out by the dev, in their own terminal: with
+`rsct-mcp` installed, the terminal guard refuses those git commands from the
+agent's terminal, and a refusal is a STOP — never work around it.
 
 Why: A single approval can authorize an accidental cascade of mutations. Each
 risky action needs explicit confirmation at the moment it happens, not by
@@ -26,10 +29,12 @@ or before touching auth / tenant / persistence / public contract code, stop
 and request fresh OK. Do not infer authorization from prior actions in the
 same session.
 
-When `rsct-mcp` is installed, prefer the §C-gated MCP tools over plain
-`Bash(git ...)` for the four mutating ops — they enforce the rule
-mechanically (single-use `dev_approval` payload + cross-platform OS
-dialog + audit log entry per call):
+When `rsct-mcp` is installed, use the §C-gated MCP tools for the four mutating
+ops — the terminal guard refuses a plain `git commit` / `push` / `merge` /
+`rebase` (and `cherry-pick`, `revert`, `am`, `gh pr merge`) from the agent's
+Bash, PowerShell or Monitor tool. The tools enforce the rule mechanically
+(single-use `dev_approval` payload + cross-platform OS dialog + audit log
+entry per call):
 
 - `mcp__rsct__rsct_request_commit` for commits (every commit pops the OS dialog,
   unless a plan-scoped batch token is active; either path carries only code a
@@ -55,9 +60,12 @@ filesystem path is refused, and branch protection compares the resolved push
 DESTINATION, so `+main`, `HEAD:main` and `refs/heads/main` are all recognised as
 `main`.
 
-The MCP layer + SessionStart sanitizer hook close the "trust-forever"
-bypass surface that pure prose cannot. Without `rsct-mcp` installed,
-this rule is enforced only by Claude's own compliance.
+The MCP layer, the SessionStart sanitizer hook and the PreToolUse terminal
+guard close the "trust-forever" bypass surface that pure prose cannot. The
+guard is a backstop, not the rule: every commit, push, merge and rebase goes
+through the RSCT tools, whatever form the command would take — the OS dialog
+remains the guarantee. Without `rsct-mcp` installed, this rule is enforced
+only by Claude's own compliance.
 
 Commit message length: keep it within THIS project cap — `commit_message_max_lines` in `.rsct.json`, chosen at `/rsct-setup` (default 15, range 1-500). `rsct_request_commit` rejects over it with `message_too_long` before the §C dialog, and the reject states the active value. Say what
 changed and why; do not narrate the diff file by file — the diff already shows

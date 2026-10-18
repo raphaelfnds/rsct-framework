@@ -57,15 +57,32 @@ and preserves your answers.
 
 The scripts under `.rsct/scripts/` are what actually enforce things:
 `sanitize-permissions.js` strips permission entries that would let the agent
-commit without asking you, and `edit-scope-guard.js` blocks edits outside the
-current task's scope. This message means one of them is not doing its job. It
-never blocks anything.
+commit without asking you, `edit-scope-guard.js` blocks edits outside the
+current task's scope, and `terminal-guard.js` refuses a `git commit`, `push`,
+`merge`, `rebase`, `cherry-pick`, `revert`, `am` or `gh pr merge` the agent runs
+in its own terminal. This message means one
+of them is not doing its job. It never blocks anything.
 
-The message says which of the three failure modes it found:
+The message says which failure mode it found:
+
+- **"every Claude Code hook is switched off ("disableAllHooks": true in …)"** —
+  a settings file turns every hook off, the three RSCT ones included. Claude Code
+  reads `.claude/settings.local.json` first, then `.claude/settings.json`, then
+  `~/.claude/settings.json` (RSCT does not read a user folder moved with
+  `CLAUDE_CONFIG_DIR`); the message names the file whose value wins. Remove
+  the setting yourself and restart the IDE.
+- **"`X` is installed, but its hook entry is not in the form this rsct-mcp
+  installs"** — the entry exists but its matcher or command differs from the one
+  `/rsct-setup` writes. Every project set up with 2.13.0 to 2.14.1 shows this for
+  `edit-scope-guard.js` until `/rsct-setup` runs again, because the command
+  gained `NODE_OPTIONS=` and `|| exit 2`; any other time it means the entry was
+  edited.
 
 - **"`X` is not installed"** — the file is not under `.rsct/scripts/`. Usually
   the project was set up before that script existed, or before the `rsct-mcp`
-  companion was installed.
+  companion was installed. If a guard's hook entry is still there, every edit or
+  every terminal command it covers is refused — see "Every terminal command, or
+  every edit, is refused" below.
 - **"`X` is installed, but no `<event>` entry pointing at it was found"** — the
   file is there, but nothing runs it. A script without its hook enforces exactly
   nothing, which is why this ranks the same as a missing file. Usually a
@@ -77,12 +94,12 @@ The message says which of the three failure modes it found:
   guard never refused an edit in any project set up with them. Every project
   installed before the fix shows this until `/rsct-setup` is run again.
 
-Fix, for all three:
+Fix, for all but the first:
 
 1. Run `/rsct-setup` — it installs the scripts and registers their hooks. It
-   also rewrites the hook command older setups registered without quotes: in a
-   project whose path contains a space that command was split by the shell and
-   neither hook ran.
+   also replaces a guard entry in any other form with the one it installs (the
+   commands older setups registered without quotes were split by the shell in a
+   project whose path contains a space, and no hook ran there).
 2. **Fully restart the IDE.** The running server compares against the copy it
    ships; until it restarts you may still see the old message.
 3. Confirm with `rsct_status` that the message is gone.
@@ -90,20 +107,24 @@ Fix, for all three:
 If it survives that:
 
 - `ls .rsct/scripts/` should list `sanitize-permissions.js`,
-  `edit-scope-guard.js` and a small `package.json`. If they are missing,
+  `edit-scope-guard.js`, `terminal-guard.js` and a small `package.json`. If they are missing,
   `/rsct-setup` could not find the `rsct-mcp` package to copy them from — it
   looks in `npm root -g`, so a server registered by absolute path or via `npx`
   will not be found. Install it with the installer (`bash scripts/install.sh`)
   and re-run.
 - If the message is about registration, `.claude/settings.json` should hold a
   `hooks.SessionStart` entry whose command contains
-  `.rsct/scripts/sanitize-permissions.js`, and a `hooks.PreToolUse` entry
-  containing `.rsct/scripts/edit-scope-guard.js`. Either one may live in
-  `.claude/settings.local.json` instead — RSCT accepts both.
+  `.rsct/scripts/sanitize-permissions.js`, and two `hooks.PreToolUse` entries:
+  matcher `^(Edit|Write|MultiEdit|NotebookEdit)$` with
+  `NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js" || exit 2`,
+  and matcher `^(Bash|PowerShell|Monitor)$` with the same command for
+  `terminal-guard.js`. Any of them may live in `.claude/settings.local.json`
+  instead — RSCT accepts both.
 
-**While the message is up** the commit, push and merge dialogs carry a warning
-line, and each of those calls — and each `rsct_load_context` — adds one
-`install.drift_detected` line to the audit log. Nothing is refused.
+**While the message is up** the commit, push, merge, rebase and
+batch-authorization dialogs carry a warning line, and each of those calls — and
+each `rsct_load_context` — adds one `install.drift_detected` line to the audit
+log. Nothing is refused.
 
 **What the edit guard does once it runs.** Two refusals, for `Edit`, `Write`,
 `MultiEdit` and `NotebookEdit`:
@@ -125,8 +146,13 @@ line, and each of those calls — and each `rsct_load_context` — adds one
 
 It does not watch the terminal: a shell command that writes a file is not seen.
 In a project the framework does not manage — no `.rsct.json`, or one it
-rejected — the guard lets everything through, while `rsct_check_edit_scope`
-still answers from the recorded list.
+rejected — the guard lets scope through, while `rsct_check_edit_scope` still
+answers from the recorded list. Two refusals hold everywhere: a Claude Code
+settings write that would switch every hook off, change or remove an RSCT hook entry, leave such a file unparseable, or set
+an env key such as `NODE_OPTIONS`, `PATH` or `BASH_ENV` (`claude_settings` — make that edit yourself),
+and a fault inside the guard (`guard_failed` — the edit did not run; make it
+yourself, and if every edit is refused see "Every terminal command, or every
+edit, is refused" below).
 
 One refusal can surprise on Windows: a network-style path (`\\server\share\…`)
 on a different host than the project is refused while a list is active, because
@@ -142,9 +168,84 @@ by the server. So a project whose last plan was closed keeps refusing edits when
 
 - You still use the framework: install or reconnect `rsct-mcp` (run the
   installer, restart the IDE) and let the session call `rsct_load_context`.
-- You do not: remove the two entries whose command contains `.rsct/scripts/`
+- You do not: remove the entries whose command contains `.rsct/scripts/`
   from `hooks` in `.claude/settings.json` (and `.claude/settings.local.json`, if
-  they are there), then delete `.rsct/scripts/`.
+  they are there), then delete `.rsct/scripts/` — in that order: a guard entry
+  left without its script refuses every edit, or every terminal command.
+
+## "[rsct] Terminal command blocked"
+
+The terminal guard refused a command the agent ran through its Bash, PowerShell
+or Monitor tool. The message names the reason:
+
+- **A git or GitHub command that goes around an approval** — `git commit`,
+  `push`, `merge`, `rebase`, `cherry-pick`, `revert`, `am`, `gh pr merge`,
+  however it was written (`env git`, `git -C`, `bash -c "…"`, `wsl …`, an alias,
+  a `node -e` that calls git). The agent should call the RSCT tool the message
+  names, which shows you the approval dialog. If you want the command done by
+  hand, run it yourself in your own terminal: the guard sees only the agent's
+  tools. `--abort`, `--quit`, `--continue` and `--skip` of merge, rebase,
+  cherry-pick, revert and am pass when nothing else follows the verb
+  (`git merge -m --abort x` is a merge, and is refused).
+- **"a command name built from a variable or a substitution …"** — the guard
+  cannot tell which program `"$G" commit` runs; write the program name out.
+  **"a command run from an unquoted variable or substitution …"** — the shell
+  splits `$C` into a whole command line; write the program name out, or quote
+  the variable when it holds only a program path (`"$PY" script.py`).
+  **"a git subcommand built from …"**, **"a gh subcommand built from …"**,
+  **"Invoke-Expression with code built from a variable …"**, **"a PowerShell
+  command built from a variable …"** and **"code passed to … from a variable
+  or a substitution …"** — the same: the guard cannot read what will run;
+  write the command out.
+- **"a gh alias that runs `gh pr merge` or a refused git verb is refused"** —
+  the alias would merge or commit outside the approval; the developer merges
+  on GitHub or in their own terminal.
+- **"the git alias '…' could not be resolved"** — the guard asks git what the
+  alias means and git failed or did not answer in 3 seconds; **"… expands
+  through too many other aliases"** — the alias is one of a chain of more than
+  five. Either way, use the full command.
+- **"a command that mentions disableAllHooks"** — switching Claude Code hooks
+  off is your edit, not the agent's.
+- **"the command nests shells or substitutions too deeply to be read"** — more
+  than eight levels of shells, substitutions or `Start-Process`; write it out
+  plainly. **"could not read the tool call"**, **"names no tool"**, **"carries
+  no command text"** — the call itself was malformed; nothing ran.
+- **"the terminal guard failed (…), so nothing ran"** — the guard itself broke
+  on that command. Run what you need in your own terminal; if every command is
+  refused, see below.
+
+**Every terminal command, or every edit, is refused.** A guard that cannot run
+blocks rather than lets everything through: its entry ends in `|| exit 2` on
+purpose. The usual causes are a script missing from `.rsct/scripts/` (deleted,
+or cleaned away before it was committed), a machine where `node` is not on the
+PATH Claude Code gives its hooks (a teammate who has Claude Code but not Node),
+or a guard that breaks on every call (`guard_failed`, "the terminal guard
+failed"). When the script or Node is missing, the message is Node's or the
+shell's own error, not an `[rsct]` line.
+
+The agent cannot repair this: its commands go through the same guard, and the
+edit guard refuses a settings edit that changes or removes an RSCT hook. Repair it
+yourself:
+
+1. In your own editor, remove the `hooks.PreToolUse` entries whose command
+   contains `.rsct/scripts/` from `.claude/settings.json` (and
+   `.claude/settings.local.json`, if they are there). If only the scripts are
+   missing and they are committed, `git checkout -- .rsct/scripts` in your own
+   terminal restores them instead.
+2. Run `/rsct-setup` again. It installs the scripts and registers the entries.
+
+If the guard breaks on every call even after that, `/rsct-setup` has put the
+same build back: leave the entry out, update `rsct-mcp` with the installer, and
+report it as an issue. On a machine without Node, install Node: the guards
+need it to run. When
+removing RSCT from a project, take the entries out first, then delete
+`.rsct/scripts/`.
+
+**Windows without Git Bash.** Claude Code then runs hook commands in
+PowerShell (from the documentation; not measured). Windows PowerShell 5.1 cannot
+parse `NODE_OPTIONS= node … || exit 2`, so the guards would not run and
+`rsct_status` cannot tell; PowerShell 7 runs it as an unknown command, so every
+edit and every terminal command would be refused. Install Git for Windows.
 
 **One blind spot worth knowing.** RSCT only reads this project's
 `.claude/settings.json` and `.claude/settings.local.json`. A hook you registered

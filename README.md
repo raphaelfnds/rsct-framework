@@ -179,7 +179,7 @@ records** on any later run (#71), so re-installing never silently resets a
 | Step | When |
 |---|---|
 | **Restart IDE / Claude Code** | After install, **and** after any `claude mcp add/remove`. Slash commands + MCP registrations load at IDE startup. |
-| **`/rsct-setup` inside each project** | Once per project, to write `CLAUDE.md`, `documentation/`, memory entries, and the enforcement hooks (SessionStart sanitizer + PreToolUse edit-scope guard). |
+| **`/rsct-setup` inside each project** | Once per project, to write `CLAUDE.md`, `documentation/`, memory entries, and the enforcement hooks (SessionStart sanitizer + PreToolUse edit-scope and terminal guards). |
 
 For the typical solo-dev path: `bash scripts/install.sh` → choose User
 scope → restart Claude Code → run `/rsct-setup` in each project.
@@ -469,12 +469,17 @@ step doesn't behave as described, that's a bug worth filing.
      written.
    - Created: `CLAUDE.md`, `documentation/`, memory entries under
      `.claude/projects/.../memory/`, `.rsct.json`, and
-     `.claude/settings.json` with the SessionStart sanitizer hook and the
-     PreToolUse edit-scope guard wired up (if you opted in to `rsct-mcp`
-     during setup — recommended).
+     `.claude/settings.json` with the SessionStart sanitizer hook, the
+     PreToolUse edit-scope guard and the PreToolUse terminal guard wired up
+     (if you opted in to `rsct-mcp` during setup — recommended).
 4. **Ask Claude to commit** something. Expected behavior:
-   - Plain `Bash(git commit ...)` will be refused or surface a §C
-     reauthorization request (per the rules in `CLAUDE.md`).
+   - A `git commit` (or `push`, `merge`, `rebase`, `cherry-pick`, `revert`,
+     `am`, `gh pr merge`) run from Claude's terminal — the Bash, PowerShell or
+     Monitor tool — is refused by the terminal guard, which names the RSCT
+     tool to call instead (a PR you merge yourself, on GitHub). You can still
+     run any of them yourself, in your own
+     terminal. Without `rsct-mcp`, the rules in `CLAUDE.md` ask Claude for a
+     §C reauthorization instead.
    - With `rsct-mcp` installed: Claude proposes
      `mcp__rsct__rsct_request_commit` instead. Every commit pops a native OS
      dialog to confirm out-of-band before it lands, unless the dev has minted a
@@ -787,9 +792,10 @@ whether to commit `.mcp.json`, how to verify, and how to undo.
 
 Quick smoke (once registered): in any project, ask Claude to call
 `rsct_status` — you should see `rsct_installed`, the active branch,
-the effective protected list, and a warning if either enforcement hook
-is missing from `.claude/settings.json` (or `settings.local.json` —
-either file counts). From there `rsct_load_context`
+the effective protected list, and a warning if any of the three
+enforcement hooks is missing from `.claude/settings.json` (or
+`settings.local.json` — either file counts), if a guard entry is not in
+the form setup writes, or if every hook is switched off. From there `rsct_load_context`
 gives Claude the curated read of the project at session start
 (including `active_phase` when a phase is in flight). For
 **non-trivial tasks** the canonical entry point is
@@ -802,7 +808,7 @@ walk the surface end-to-end:
 - **M1 — Recall:** 7 read-only tools + 5 resources.
 - **M2 — Enforcement:** 7 tools — 3 pure-query checks + 4 §C-gated mutating ops
   (commit / push / merge + `rsct_request_rebase`) + SessionStart sanitizer +
-  the PreToolUse edit-scope guard + cross-platform OS dialog + audit log.
+  the PreToolUse edit-scope and terminal guards + cross-platform OS dialog + audit log.
 - **M3 — Phase machine + V phase + personas + Tutor + issue capture:**
   17 tools across the RSCT cycle.
 - **Post-M3 — multi-repo, onboarding, REVIEW & plan-lifecycle-v2 (T1c/T2/T3 + DX):**

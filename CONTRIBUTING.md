@@ -158,7 +158,7 @@ files, so without it a **newly added** artifact (a new `tsup` entry, say) would
 pass the check while never being committed — CI green, users installing without
 the file.
 
-The three bundles are tracked with mode `100755`. They carry a shebang and are
+The four bundles are tracked with mode `100755`. They carry a shebang and are
 what `package.json` `bin` points at, so executable is the correct mode — and it
 has to be recorded in the index, because `git diff` compares mode as well as
 content: `tsup` on Linux sets the execute bit, Windows git does not track it, and

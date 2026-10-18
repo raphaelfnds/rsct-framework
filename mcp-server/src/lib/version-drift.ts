@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,9 +13,25 @@ import { RSCT_MCP_VERSION } from './version.js'
 
 type HookEvent = 'SessionStart' | 'PreToolUse'
 
+interface CanonicalHook {
+  matcher: string
+  command: string
+}
+
 interface EnforcementScript {
   event: HookEvent
   marker: string
+  canonical?: CanonicalHook
+}
+
+export const EDIT_GUARD_HOOK: CanonicalHook = {
+  matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$',
+  command: 'NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js" || exit 2',
+}
+
+export const TERMINAL_GUARD_HOOK: CanonicalHook = {
+  matcher: '^(Bash|PowerShell|Monitor)$',
+  command: 'NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/terminal-guard.js" || exit 2',
 }
 
 const ENFORCEMENT_SCRIPTS: ReadonlyMap<string, EnforcementScript> = new Map([
@@ -22,7 +39,8 @@ const ENFORCEMENT_SCRIPTS: ReadonlyMap<string, EnforcementScript> = new Map([
     'sanitize-permissions.js',
     { event: 'SessionStart', marker: '.rsct/scripts/sanitize-permissions.js' },
   ],
-  ['edit-scope-guard.js', { event: 'PreToolUse', marker: '.rsct/scripts/edit-scope-guard.js' }],
+  ['edit-scope-guard.js', { event: 'PreToolUse', marker: '.rsct/scripts/edit-scope-guard.js', canonical: EDIT_GUARD_HOOK }],
+  ['terminal-guard.js', { event: 'PreToolUse', marker: '.rsct/scripts/terminal-guard.js', canonical: TERMINAL_GUARD_HOOK }],
 ])
 
 export const STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/
@@ -36,7 +54,7 @@ export type ScriptState = 'current' | 'stale' | 'inert' | 'absent' | 'unreadable
 const INERT_GUARD_NAME = 'edit-scope-guard.js'
 const INERT_GUARD_LINE = 'if (isCliEntry()) {'
 
-export type RegistrationState = 'registered' | 'unregistered' | 'unknown'
+export type RegistrationState = 'registered' | 'altered' | 'unregistered' | 'unknown'
 
 export interface ScriptEvidence {
   name: string
@@ -53,10 +71,15 @@ export interface AffectedComponent {
   registration: RegistrationState
 }
 
+export interface HooksDisabled {
+  file: string
+}
+
 export interface InstallDriftNotice {
   hint: string | null
   severity: DriftSeverity
   affected_components: AffectedComponent[]
+  hooks_disabled?: HooksDisabled
 }
 
 function shippedScriptsDir(): string | null {
@@ -136,40 +159,68 @@ function stampOf(text: string): string | null {
   return m ? (m[1] ?? null) : null
 }
 
-function hookCommands(data: unknown, event: HookEvent): string[] {
+function hookEntries(data: unknown, event: HookEvent): Array<{ matcher: unknown; command: string }> {
   const asRecord = (v: unknown): Record<string, unknown> | null =>
     typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : null
 
   const groups = asRecord(asRecord(data)?.hooks)?.[event]
   if (!Array.isArray(groups)) return []
 
-  const commands: string[] = []
+  const entries: Array<{ matcher: unknown; command: string }> = []
   for (const group of groups) {
-    const inner = asRecord(group)?.hooks
+    const g = asRecord(group)
+    const inner = g?.hooks
     if (!Array.isArray(inner)) continue
     for (const entry of inner) {
       const command = asRecord(entry)?.command
-      if (typeof command === 'string') commands.push(command)
+      if (typeof command === 'string') entries.push({ matcher: g?.matcher, command })
     }
   }
-  return commands
+  return entries
 }
 
 function readRegistration(settings: SettingsFile[], script: EnforcementScript): RegistrationState {
   if (settings.length === 0) return 'unknown'
 
   let complete = true
+  let altered = false
   for (const file of settings) {
     if (file.status === 'absent') continue
     if (file.status !== 'ok') {
       complete = false
       continue
     }
-    for (const command of hookCommands(file.data, script.event)) {
-      if (command.replace(/\\/g, '/').includes(script.marker)) return 'registered'
+    for (const entry of hookEntries(file.data, script.event)) {
+      if (!entry.command.replace(/\\/g, '/').includes(script.marker)) continue
+      if (!script.canonical) return 'registered'
+      if (entry.matcher === script.canonical.matcher && entry.command === script.canonical.command) return 'registered'
+      altered = true
     }
   }
+  if (altered) return 'altered'
   return complete ? 'unregistered' : 'unknown'
+}
+
+export function readHooksDisabled(projectRoot: string, home: string = homedir()): HooksDisabled | null {
+  const candidates = [
+    { path: join(projectRoot, '.claude', 'settings.local.json'), label: '.claude/settings.local.json' },
+    { path: join(projectRoot, '.claude', 'settings.json'), label: '.claude/settings.json' },
+    { path: join(home, '.claude', 'settings.json'), label: '~/.claude/settings.json' },
+  ]
+  for (const c of candidates) {
+    const raw = readNormalized(c.path)
+    if (raw === null) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw.replace(/^﻿/, ''))
+    } catch {
+      continue
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+    const value = (parsed as Record<string, unknown>).disableAllHooks
+    if (typeof value === 'boolean') return value ? { file: c.label } : null
+  }
+  return null
 }
 
 export function readScriptRegistration(projectRoot: string, name: string): RegistrationState {
@@ -256,6 +307,12 @@ function describeNotRunning(c: AffectedComponent): string {
       `(every rsct-mcp from 2.2.0 to 2.12.3 shipped it that way)`
     )
   }
+  if (c.registration === 'altered') {
+    return (
+      `${c.name} is installed, but its hook entry is not in the form this rsct-mcp installs ` +
+      `(an older /rsct-setup, or an edit of the matcher or the command)`
+    )
+  }
   const event = ENFORCEMENT_SCRIPTS.get(c.name)?.event
   const searched = PROJECT_SETTINGS_FILES.map((f) => `.claude/${f}`).join(' or ')
   return (
@@ -271,7 +328,7 @@ function describeStale(c: AffectedComponent): string {
 
 function isNotRunning(e: ScriptEvidence): boolean {
   if (e.state === 'absent' || e.state === 'inert') return true
-  if (e.state === 'current' || e.state === 'stale') return e.registration === 'unregistered'
+  if (e.state === 'current' || e.state === 'stale') return e.registration === 'unregistered' || e.registration === 'altered'
   return false
 }
 
@@ -280,9 +337,11 @@ export function getInstallDriftNotice(args: {
   projectVersion: string | null | undefined
   mcpVersion: string
   evidence?: ScriptEvidence[]
+  hooksDisabled?: HooksDisabled | null
 }): InstallDriftNotice {
   const { projectRoot, projectVersion, mcpVersion } = args
   const evidence = args.evidence ?? readScriptEvidence(projectRoot)
+  const hooksDisabled = args.hooksDisabled === undefined ? readHooksDisabled(projectRoot) : args.hooksDisabled
 
   const toComponent = (e: ScriptEvidence): AffectedComponent => ({
     name: e.name,
@@ -298,6 +357,21 @@ export function getInstallDriftNotice(args: {
     .map(toComponent)
 
   const m = mcpVersion.replace(/^v/, '')
+
+  if (hooksDisabled) {
+    const rest = notRunning.length > 0 ? `; ${notRunning.map(describeNotRunning).join('; ')}` : ''
+    const repair = notRunning.length > 0 ? ', run /rsct-setup to repair the rest' : ''
+    return {
+      severity: 'security',
+      affected_components,
+      hooks_disabled: hooksDisabled,
+      hint:
+        `⚠ SECURITY: RSCT enforcement is not running in this project — every Claude Code hook is ` +
+        `switched off ("disableAllHooks": true in ${hooksDisabled.file})${rest}. ` +
+        `Remove that setting yourself${repair}, then restart the IDE. ` +
+        `See docs/troubleshooting.md. (never blocks)`,
+    }
+  }
 
   if (notRunning.length > 0) {
     return {

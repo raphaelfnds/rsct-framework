@@ -94,9 +94,14 @@ is written to the audit log. **Soft signal — never rejects the
 mutation.** Run `rsct_status` + `rsct_load_context` at session start
 (per CLAUDE.md §0) to keep the marker fresh and the warnings silent.
 
-Use these tools by default for commit / push / merge / rebase / squash. If
-`rsct-mcp` is not installed, the §C prose contract above is the only
-enforcement — follow it strictly.
+Use these tools for commit / push / merge / rebase / squash. With `rsct-mcp`
+installed, the terminal guard refuses `git commit`, `push`, `merge`, `rebase`,
+`cherry-pick`, `revert`, `am` and `gh pr merge` from the agent's terminal (the
+Bash, PowerShell and Monitor tools). A refusal is a STOP: call the RSCT tool it
+names, or ask the developer to run the command in their own terminal — never
+work around it. If `rsct-mcp` is not
+installed, the §C prose contract above is the only enforcement — follow it
+strictly.
 
 **Pre-integration hygiene — `pre_merge_ack` (PH-5):** `rsct_request_merge`
 (always), `rsct_request_rebase` (always) and `rsct_request_push` (**only when

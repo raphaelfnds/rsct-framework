@@ -125,8 +125,8 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   (`dist/`, `build/`, `coverage/` directly under a package root), vendored
   code, files the developer allowed without a mechanical check, and touched
   files in other languages are reported as not checked. Types are not judged.
-- The two scripts `/rsct-setup` installs (`.rsct/scripts/sanitize-permissions.js`,
-  `.rsct/scripts/edit-scope-guard.js`) need no REVIEW when their bytes are exactly
+- The three scripts `/rsct-setup` installs (`.rsct/scripts/sanitize-permissions.js`,
+  `.rsct/scripts/edit-scope-guard.js`, `.rsct/scripts/terminal-guard.js`) need no REVIEW when their bytes are exactly
   the copy this `rsct-mcp` ships — shebang, the version stamp of this server, the
   shipped body; CRLF tolerated, nothing else. Any other content, path or version
   takes the path above (2.11.1).
@@ -183,9 +183,9 @@ never trips the gate.
 | review-binding — the V and REVIEW phases stop being completable by answering nothing (#40): every finding raised needs an action, ids are validated against the stored baseline, duplicates and stale answer sets are rejected, and `rsct_phase_review_start` gains a declared `findings[]` so REVIEW has a baseline at all · rejections return `open_findings` (and `rsct_phase_status` lists them) so a resumed session can answer without re-running `_start` · the test gate treats "a completed review has no pending findings" as an invariant, which also catches a downgraded binary stamping `completed_at` without the check | ✅ ships in **v2.6.0** (39 tools, unchanged) |
 | update-check-default — the GitHub release check flips opt-IN → **opt-OUT** (#38): consent absent now means consult, so a dev who never answered stops being silent about security patches · declines become **per release** (`decline_update`), and only the release actually on offer is accepted · `RSCT_UPDATE_CHECK` env kill switch · `/rsct-setup` Phase 4.9 becomes echo-only (no question, no write) · fixes a retry storm and a future-timestamp freeze that were live for consenting users | ✅ shipped to `main`; ships in **v2.6.0** (39 tools, unchanged) |
 
-**40 tools · 5 resources · tsc strict · ESM ~1.89 MB
-(server) + ~17 KB (sanitize-permissions hook) + ~140 KB (edit-scope guard) +
-~5.3 MB (tree-sitter grammars, `grammars/`) ·
+**40 tools · 5 resources · tsc strict · ESM ~1.90 MB
+(server) + ~17 KB (sanitize-permissions hook) + ~151 KB (edit-scope guard) +
+~31 KB (terminal guard) + ~5.3 MB (tree-sitter grammars, `grammars/`) ·
 cross-platform (Windows / macOS / Linux)**
 
 ---
@@ -730,7 +730,10 @@ Compares a file path against the active spec phase's scope globs in
 The answer comes from the same function the PreToolUse edit-scope guard runs, so
 the tool and the hook agree on an absolute path in a managed project whose root
 is the one holding `.rsct.json`. (Without a usable `.rsct.json` the hook lets
-everything through; the tool still answers from the recorded list. For a
+every scope through — it still refuses a Claude Code settings write that
+switches hooks off, changes or removes an RSCT hook entry or sets `env.NODE_OPTIONS` /
+`env.PATH`, and still exits 2 on a fault of its own; the tool still answers
+from the recorded list. For a
 relative path, or a root that is a subfolder, the tool walks up to the
 `.rsct.json` while the hook takes the root it is given.) In order:
 `stale_context` while the re-bootstrap flag
@@ -826,7 +829,7 @@ no overrides, so a protected branch or a secret finding still rejects.
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
-  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); in each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push` and `rsct_request_merge`, and each of the three also appends one line to the OS dialog body — the one channel the agent cannot summarize away. A commit authorized by an active batch token (`rsct_plan_authorize`) lands with no dialog, so the dialog that mints a token does not carry the line — relay the `hints[]` line to the dev.
+  1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it or with a guard entry in another form than `/rsct-setup` writes, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); or `"disableAllHooks": true` in the local, project or user settings switches every hook off. In each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge`, `rsct_request_rebase` and `rsct_plan_authorize`, and each of them also adds one line to its OS dialog — the one channel the agent cannot summarize away. A commit authorized by an active batch token lands with no dialog; the line was in the dialog that minted the token.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
 
 Approval consumption rule: never burn the approval on pre-mutation
@@ -946,8 +949,8 @@ entries from `permissions.allow[]` in both `.claude/settings.json` and
   skip the commit gate) in every shape above, and `gh pr merge` (direct or path-prefixed — it
   merges the PR). Recovery forms (`git rebase --abort`) are stripped too, as `git merge --abort`
   already was. NOT stripped: a broad `Bash(gh pr:*)` / `Bash(gh:*)` grant (it also authorises
-  read-only `gh pr view` / `gh issue` / `gh api`) — it still authorises the merge, which is why the
-  real Bash-side guard is tracked in #84; and read-only `gh pr view` / `gh pr list`.
+  read-only `gh pr view` / `gh issue` / `gh api`) — the PreToolUse terminal guard below refuses the
+  merge itself whatever the grant says; and read-only `gh pr view` / `gh pr list`.
 - `Bash(git*)` / `Bash(git:*)`
 - Path-prefixed forms (MED-12): `Bash(/usr/bin/git commit)`, `Bash(./bin/git push)`, `Bash(C:/Program Files/Git/bin/git merge)`. Allows spaces in the path; pins basename to `git` so a different binary like `Bash(/usr/bin/git-credential-store)` is NOT stripped.
 - Shell-wrapped forms (MED-12): `Bash(sh -c "git commit ...")`, `Bash(bash -c 'git push origin')` and the other POSIX shell variants (`zsh`, `dash`, `fish`, `ksh`, `csh`).
@@ -989,18 +992,101 @@ installed by the same `/rsct-setup` phase and registered as a
 exits 2 — the exit code the client treats as a refusal; 1 is not — when the
 judgement above is `out_of_scope` or `stale_context` for a path the payload
 carries (`file_path` and `notebook_path` are both judged when both are there).
-Every other outcome exits 0: an unmanaged project, an unreadable phase-state,
-a payload with no path, any fault. It does not watch the terminal: a shell
-command that writes a file is not seen.
+An unmanaged project, an unreadable phase-state and a payload with no path exit
+0. A fault inside the guard exits 2 with "STOP and tell the developer" (2.15.0;
+it exited 0 before). It does not watch the terminal: a shell command that writes
+a file is not seen.
+
+In any project, managed or not, it also refuses (`claude_settings`) an `Edit`,
+`Write` or `MultiEdit` of a Claude Code settings file — `settings.json` or
+`settings.local.json` in a folder named `.claude` (the project's or `~/.claude`) — whose
+resulting text would set `"disableAllHooks": true`, change or remove an entry for
+one of the three RSCT hooks (its event, matcher or any field of the hook), leave a
+settings file that holds RSCT hooks unparseable, or set or change
+an env key that changes how a hook shell or node starts (`NODE_OPTIONS`, `PATH`,
+`BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `CLAUDE_PROJECT_DIR`, every `LD_*` and
+`DYLD_*` loader key, `BASH_FUNC_*`),
+or add one of those keys to a result that does not parse. Any other edit of those
+files passes.
 
 It needs no server, which cuts both ways: it enforces in a session where
 `rsct-mcp` is not connected, and there it cannot be told the context was
 reloaded — see `docs/troubleshooting.md` for a project left in that state.
 
-Both hooks are registered as `node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js"`.
+### PreToolUse terminal guard (#91)
+
+A third standalone Node CLI, `dist/scripts/terminal-guard.js`, installed by
+`/rsct-setup` (Phase 4.V.e) and registered with the matcher
+`^(Bash|PowerShell|Monitor)$` — the three tools that run commands. It refuses
+(exit 2) a `git commit`, `push`, `merge`, `rebase`, `cherry-pick`, `revert` or
+`am`, naming the RSCT tool to call, and a `gh pr merge`, which it leaves to the
+developer on GitHub. It reads the
+command text the way a shell would: any word whose program name is `git`
+(`env git`, `git.exe`, a full path, `git -C dir`, `git -c k=v`, letter case
+ignored), commands joined with `;`, `&&`, `|` or a newline, `$(…)`, backticks
+and `<(…)`, a heredoc fed to a shell that reads commands from it (not to one that names a script file other than `/dev/stdin`), and the text handed to `sh|bash|zsh -c`,
+`eval`, `env -S`, `su -c`, `script -c`, `cmd /c`, `powershell|pwsh -Command`
+(and `-EncodedCommand`, and Windows PowerShell's bare argument),
+`Invoke-Expression`, `wsl`, a WSL distro launcher's `run`, `ssh host …`,
+`git submodule foreach` and `git bisect run`, with their own options in
+between (`bash -o pipefail -c`, `su -lc`). A verb that is not
+one of git's own commands is looked up as an alias (`-c alias.x=…` first, then
+`git config --get alias.x` in the folder the command runs in, 3 s budget); an
+alias it cannot resolve is refused. Code passed to `node -e`, `tsx -e`, `python -c`,
+`perl -e`, `ruby -e`, `php -r`, `deno eval` or `bun -e`, or fed to an
+interpreter as a heredoc when it names no script or a stdin name (`-`,
+`/dev/stdin`, `/dev/fd/0`) — flags in clusters such as `perl -lne`, or glued to
+the flag as in `python3 -c"…"` and `node --eval=…`; every code flag on the line
+is read, so a script's own `-c`/`-e` argument that calls git is refused — is
+searched for a git call or `gh pr merge`, as text or as an argument list.
+Refused as well: a word that is a whole variable or substitution, followed —
+past git's global options — by a blocked verb (`"$G" commit`); in bash, a
+command run from an unquoted variable or substitution (`$C`, `sudo -E $C`,
+`do $C`), which the shell splits into a whole command line; a git or gh
+subcommand that is a whole variable (`git $V`, `git "$@"`); `Invoke-Expression`
+or `pwsh -c` of a variable; interpreter code that is a whole variable in a code
+flag before the script (a script's own `-p "$PORT"` passes); a `gh
+alias set` whose definition runs `pr merge` or a refused git verb; git's own
+`git-<verb>` binaries; and any command text that mentions `disableAllHooks`. A subcommand
+passed together with its arguments in one string (`Start-Process git
+-ArgumentList 'commit -m x'`) is split and judged, and `Start-Process` is read
+as the command line it starts, whatever the order of its parameters. Array
+assignments, arithmetic and `find -exec … {}` are not mistaken for commands.
+Recovery forms pass when nothing else follows
+the verb: `--abort`, `--quit`, `--continue` and `--skip` of merge, rebase,
+cherry-pick, revert and am. Text a program only prints or searches
+(`echo "git push"`, `grep "git commit"`) passes.
+
+It fails **closed**: a payload it cannot read, a terminal call with no command
+text and a fault inside it exit 2. A `Monitor` call that watches a WebSocket
+(`ws`) runs no command and passes. It enforces whenever its hook runs, whether
+or not `.rsct.json` is present or valid. It writes nothing.
+
+What it does not see: a script file the agent writes or downloads and then runs
+(`./x.sh`, `npm run …`, `make`), git called from a program it does not read,
+git's plumbing commands, `git pull`, `gh api`, aliases set through
+`GIT_CONFIG_*` variables, gh aliases apart from a `gh alias set` in the command itself,
+external `git-<name>` commands such as `git flow`,
+command text assembled at run time from data it reads as text, a Claude Code
+settings change made other than through the editor tools (a terminal command
+that mentions `disableAllHooks` is refused), a command line carried in a
+variable through a program it does not read or past a wrapper's option value, a program or subcommand name
+assembled from parts of variables, and other MCP
+servers' tools. The OS dialog of the RSCT tools remains the guarantee; the guard
+closes the front door. The developer runs any of these commands in their own
+terminal — the guard sees only the agent's tools. Subagent tool calls and the developer's own `!` commands were not measured.
+
+The two PreToolUse guards are registered as
+`NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/<name>.js" || exit 2`,
+the SessionStart sanitizer as `node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js"`.
 The quotes are load-bearing: without them a project path containing a space is
-split by the shell and the hook exits 1, which the client does not treat as a
-refusal. `/rsct-setup` rewrites the unquoted command older setups wrote.
+split by the shell: the sanitizer then exits 1 without running, and a guard
+entry would refuse every call. The guard starts with `NODE_OPTIONS` cleared, and `|| exit 2` turns a guard that cannot
+start into a refusal — Claude Code lets the call through on any exit other than
+2 (MEASURED on 2.1.173; its `onFailure` setting had no effect there). `/rsct-setup`
+replaces any other form of a guard entry; `rsct_status` reports a guard entry in
+any other form, and `"disableAllHooks": true` in the local, project or user
+settings, as enforcement not running.
 
 **Releases 2.2.0 to 2.12.3 shipped a guard that never refused an edit** (#114):
 the bundle carried the sanitizer's entry block ahead of the guard's own code,
@@ -1284,10 +1370,11 @@ src/
 │   └── request-merge.ts     # rsct_request_merge (§C)    (F2.5.5c)
 └── scripts/
     ├── sanitize-permissions.ts  # launcher: SessionStart hook → lib/sanitize-permissions.ts
-    └── edit-scope-guard.ts      # launcher: PreToolUse hook → lib/edit-scope-hook.ts
+    ├── edit-scope-guard.ts      # launcher: PreToolUse hook → lib/edit-scope-hook.ts
+    └── terminal-guard.ts        # launcher: PreToolUse hook → lib/terminal-guard-hook.ts
 ```
 
-The two files under `scripts/` are launchers: they read their input, call one
+The three files under `scripts/` are launchers: they read their input, call one
 function from `lib/` and exit with its code. They export nothing and nothing
 imports them (`tests/unit/script-entries.test.ts`), so a bundle can never carry
 a second program's entry block again.
@@ -1301,14 +1388,16 @@ stdio transport, so importing it from a test would boot a server;
 tool count and the boot-log tool list above against the live one. Update those
 docs in the same change — the test will tell you which.
 
-`tsup` builds three ESM entry points:
+`tsup` builds four ESM entry points:
 - `dist/index.js` — the MCP server (registered via `bin: { "rsct-mcp": ... }`).
 - `dist/scripts/sanitize-permissions.js` — the SessionStart hook CLI; copied to
   consuming projects' `.rsct/scripts/` by `/rsct-setup` Phase 4.V.
 - `dist/scripts/edit-scope-guard.js` — the PreToolUse edit-scope guard CLI, copied
   to the same place by the same phase.
+- `dist/scripts/terminal-guard.js` — the PreToolUse terminal guard CLI, copied to
+  the same place by Phase 4.V.e.
 
-All three are **tracked** in git (`dist/` ships prebuilt so the install needs no
+All four are **tracked** in git (`dist/` ships prebuilt so the install needs no
 build toolchain) and are mode `100755` — a new bundle needs
 `git update-index --chmod=+x` or `verify:dist` fails on the Linux CI cell.
 
