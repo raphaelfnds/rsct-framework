@@ -14,6 +14,33 @@ function verdictOf(command: string, dialect: ShellDialect = 'bash', resolveAlias
 
 const DENIED_BASH: string[] = [
   'git commit -m "x"',
+  'git pull',
+  'git pull origin main',
+  'git pull --rebase',
+  'git pull -r',
+  'git pull --ff-only --rebase',
+  'git pull --rebase=merges --ff-only',
+  'git pull --ff-only --no-ff',
+  'git -C repo pull',
+  'git pull --no-ff --ff-only',
+  'git pull --ff-only -r',
+  'git pull --ff-only --reb',
+  'X=--no-ff; git pull --ff-only $X',
+  'git pull --ff-only "$FLAG"',
+  'git -c pull.rebase=true pull --ff-only',
+  'git -cpull.ff=false pull --ff-only',
+  'git pull --ff-only . main',
+  'git pull --ff-only ../other main',
+  'git pull --ff-only file:///tmp/repo main',
+  'git commit-tree HEAD^{tree} -m x',
+  'git filter-branch --tree-filter true HEAD',
+  'git fast-import < stream',
+  'git quiltimport --patches p',
+  'git replay --onto main topic',
+  'git-pull origin',
+  `node -e "require('child_process').execSync('git pull --ff-only')"`,
+  `python3 -c "import subprocess; subprocess.run(['git', 'commit-tree', 'x'])"`,
+  "gh alias set sync '!git pull'",
   'git push origin main',
   'git merge feature',
   'git rebase main',
@@ -100,7 +127,11 @@ const ALLOWED_BASH: string[] = [
   'git remote add origin https://example.invalid/x.git',
   'git worktree add ../w',
   'git fetch origin',
-  'git pull',
+  'git pull --ff-only',
+  'git pull --ff-only origin main',
+  'git pull --rebase=false --ff-only',
+  'git pull -q --prune --ff-only origin',
+  'git -C repo pull --ff-only',
   'git add -A',
   'git checkout -b feature',
   'git branch -D old',
@@ -155,6 +186,9 @@ describe('judgeCommand — bash: allowed', () => {
 
 const DENIED_POWERSHELL: string[] = [
   'git commit -m "x"',
+  "$x = '--no-ff'; git pull --ff-only $x",
+  'git pull --% --ff-only',
+  "Start-Process git -ArgumentList 'pull', $remote",
   '& git push',
   "& 'C:\\Program Files\\Git\\cmd\\git.exe' commit -m x",
   'Start-Process git -ArgumentList \'commit\',\'-m\',\'x\'',
@@ -198,8 +232,86 @@ describe('judgeCommand — PowerShell: allowed', () => {
   }
 })
 
+describe('judgeCommand — brace and glob patterns, and words built partly from a variable (REVIEW 2.17.0)', () => {
+  it('refuses a git or gh subcommand, or a program, that a brace or glob pattern makes', () => {
+    for (const c of [
+      'git {commit,} -m x',
+      'git co{mmit,} -m x',
+      'git {push,} origin main',
+      'git [c]ommit -m x',
+      'git c?mmit -m x',
+      'git comm*t -m x',
+      '{git,} commit -m x',
+      '{git,commit,-m,x}',
+      'sudo {git,} commit -m x',
+      'gi[t] commit -m x',
+      'gh pr {merge,} 12',
+    ]) expect(verdictOf(c), c).toBe('deny')
+    for (const c of ['git [c]ommit -m x', 'git c?mmit -m x']) expect(verdictOf(c, 'powershell'), c).toBe('deny')
+  })
+
+  it('refuses a pull whose words a pattern or a variable could turn into another option', () => {
+    for (const c of [
+      'git pull --ff-only {--no-ff,}',
+      'git pull --ff-only [-]-no-ff',
+      'git pull --ff-only origin ma$X',
+      'git pull --ff-only origin ma${X}',
+      'git pull --ff-only origin ma$(echo in)',
+      'git pull --ff-only origin ma`echo in`',
+      'git pull --ff-only origin "ma$X"',
+      'git-pull --ff-only origin ma$X',
+      'G=git; "$G" pull --ff-only "$R"',
+      'G=git; "$G" pull --ff-only origin ma$X',
+      'X=mmit; git co$X -m x',
+      'gh pr mer$X 12',
+    ]) expect(verdictOf(c), c).toBe('deny')
+    for (const c of ['$x = "--no-ff"; & $g pull --ff-only $x', 'git pull --ff-only origin ma$X']) expect(verdictOf(c, 'powershell'), c).toBe('deny')
+  })
+
+  it('still allows patterns and variables where git takes an argument, and the shell forms around them', () => {
+    for (const c of [
+      'git add src/*.ts',
+      'git add {a,b}.ts',
+      'git diff HEAD~1 -- src/*.ts',
+      'git stash apply stash@{0}',
+      'git log HEAD@{1}',
+      'mkdir -p src/{a,b} && cp file{,.bak}',
+      'echo {1..5}',
+      'ls *.md',
+      'for f in src/*.ts; do echo $f; done',
+      '[ -f x ] && echo y',
+      '[[ $x == *.md ]] && echo y',
+      'a[0]=x; echo ${a[0]}',
+      '$HOME/bin/tool --flag',
+      'git -C $DIR log --oneline',
+      'git log origin/$BRANCH..HEAD',
+      'gh pr view $N --comments',
+      'find . -name "*.ts" -exec grep -l x {} +',
+      'git pull --ff-only origin main',
+    ]) expect(verdictOf(c), c).toBe('allow')
+    for (const c of ['Get-ChildItem *.ts | ? { $_.Length -gt 0 }', "[System.IO.File]::ReadAllText('x')", '$a = @(1,2); $a[0]']) {
+      expect(verdictOf(c, 'powershell'), c).toBe('allow')
+    }
+  })
+
+  it('still reads a brace group and a function body as commands', () => {
+    for (const c of ['{ git commit -m x; }', '{ git commit -m x;}', 'f(){ git commit -m x; }; f', 'if true; then { git push; }; fi']) {
+      expect(verdictOf(c), c).toBe('deny')
+    }
+  })
+})
+
 describe('judgeCommand — git aliases', () => {
-  const table: Record<string, string> = { ci: 'commit -v', p: '!git push origin', lg: 'log --oneline', loop: 'loop', up: '!f() { git push; }; f' }
+  const table: Record<string, string> = { ci: 'commit -v', p: '!git push origin', lg: 'log --oneline', loop: 'loop', up: '!f() { git push; }; f', sync: 'pull', ffsync: 'pull --ff-only' }
+
+  it('judges an alias to pull like the pull it runs', () => {
+    expect(verdictOf('git sync', 'bash', resolver)).toBe('deny')
+    expect(verdictOf('git ffsync', 'bash', resolver)).toBe('allow')
+    expect(verdictOf('git -C repo ffsync', 'bash', resolver)).toBe('allow')
+    expect(verdictOf('git -c pull.rebase=true ffsync', 'bash', resolver)).toBe('deny')
+    expect(verdictOf('git -c pull.rebase=true -c alias.p=pull p --ff-only')).toBe('deny')
+    expect(verdictOf('git -c alias.p=pull p --ff-only')).toBe('allow')
+  })
   const resolver: AliasResolver = (name) => (name in table ? { found: true, value: table[name]! } : { found: false })
 
   it('refuses an alias that expands to a refused verb', () => {
@@ -445,7 +557,7 @@ describe('judgeCommand — round 4 (REVIEW #91)', () => {
     ]) {
       expect(verdictOf(c, 'powershell')).toBe('deny')
     }
-    for (const c of ['Start-Process node -ArgumentList $script, $port', "Start-Process git -ArgumentList 'pull', $remote, $branch", 'Start-Process -FilePath $exe -ArgumentList $argList -Wait']) {
+    for (const c of ['Start-Process node -ArgumentList $script, $port', "Start-Process git -ArgumentList 'fetch', $remote, $branch", 'Start-Process -FilePath $exe -ArgumentList $argList -Wait']) {
       expect(verdictOf(c, 'powershell')).toBe('allow')
     }
   })

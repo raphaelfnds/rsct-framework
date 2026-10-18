@@ -42,8 +42,10 @@ function gitState(branch: string | null): GitState {
 function alwaysYes(): (o: DialogOptions) => Promise<DialogResult> {
   return async () => ({ response: 'yes', channel: 'windows' })
 }
-function writePlan(slug = 't3', status = 'in progress'): void {
-  writeFileSync(join(tmpRoot, `plan_${slug}.md`), `# Plan\n\n| Status | ${status} |\n`)
+const PHASES_TABLE = '## Phases & parallelization\n\n| Phase | Goal | File group (scope_globs) | Group | Depends on |\n|---|---|---|---|---|\n| 1 | model | src/model/** | A | — |\n| 2 | api | src/api/** | B | 1 |\n'
+
+function writePlan(slug = 't3', status = 'in progress', phases = PHASES_TABLE): void {
+  writeFileSync(join(tmpRoot, `plan_${slug}.md`), `# Plan\n\n| Status | ${status} |\n\n${phases}`)
 }
 function readState(): PhaseState | null {
   const p = join(tmpRoot, '.rsct/phase-state.json')
@@ -115,7 +117,6 @@ describe('rsct_plan_authorize', () => {
   })
 
   it('rejects when there is no active plan', async () => {
-    // no plan_/spec_ file written
     const out = (await planAuthorizeHandler(
       { project_root: tmpRoot, dev_approval: approval() },
       internal(),
@@ -153,7 +154,6 @@ describe('rsct_plan_authorize', () => {
 
   it('preserves sibling phase-state fields when minting', async () => {
     writePlan()
-    // seed an existing phase block
     mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
     writeFileSync(
       join(tmpRoot, '.rsct/phase-state.json'),

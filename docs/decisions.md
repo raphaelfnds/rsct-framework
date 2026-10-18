@@ -26,8 +26,9 @@ missing config) and forces an `rsct_json.bounds_violation` event into the audit 
 developer can see what happened.
 
 Bounded fields and their ranges live in `mcp-server/src/lib/project-root.ts`:
-`plan_token_ttl_minutes` 5–480, `plan_token_max_actions` 1–100,
-`plan_token_ttl_slide_minutes` 5–1440, `plan_token_ttl_abs_minutes` 5–10080. `sql_dialect`
+`plan_token_ttl_minutes` 5–480, `plan_token_max_actions` 1–100 (`plan_token_ttl_slide_minutes` and
+`plan_token_ttl_abs_minutes` were removed in 2.17.0, ADR-030: `approval_modes` is `.strip()`, so a
+config that still has them loads and they drop). `sql_dialect`
 is a closed enum (`postgresql`, `mysql`, `none`): an unknown dialect would have the REVIEW
 sweep read SQL with the wrong comment syntax.
 
@@ -175,7 +176,7 @@ report. Resolution returns a root even when `.rsct.json` is absent, so the tool 
 degrades to `rsct_installed: false` instead of failing.
 
 ### ADR-010 — Every gated `_complete` tool belongs in `TRUST_ALLOWED_TOOL_NAMES` (2026-09-12)
-**Status**: active
+**Status**: active; since 2.17.0 (ADR-030) the enum still accepts `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge` and `rsct_plan_authorize`, so a config that lists them still loads, but listing them has no effect: those tools always force the dialog
 **Tags**: config, gates, headless
 **Context**: `rsct_phase_review_complete` shipped with DX-4 and was never added to the
 enum, while `rsct_plan_authorize` was added when it shipped — so the list is maintained and
@@ -668,7 +669,7 @@ language other than JavaScript/TypeScript is uncovered — and said so in a hint
 export is reported dead in a repository that holds files in other languages.
 
 ### ADR-019 — Authorize, revoke, abandon and commit refuse an unreadable phase-state, and no commit is made on one (#101)
-**Status**: active
+**Status**: active. Since 2.17.0 (ADR-030): in named limit (2), "the reserve and refund writes start from the state read before authorization" no longer holds — they read the state again just before writing and write only if the stored token is unchanged (a check before the write, not under the lock), and the re-arm is gone; named limit (4) no longer holds — `rsct_plan_authorize` checks its pre-conditions and an unreadable state before its dialog.
 **Tags**: phase-state, gates, commit-gate
 **Context**: ADR-017 named four tools as still unguarded. MEASURED before this change, by driving
 the real handlers on a file cut mid-object: only two of the four wrote. `rsct_plan_authorize`
@@ -1055,7 +1056,7 @@ Named limits:
   the whole file. That is growth proportional to use, left as it was — #93 stays open for it.
 
 ### ADR-025 — The audit log keeps ten days of routine history; what gates read and bypass records stay (#93, 2.14.0)
-**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93.
+**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93. Since 2.17.0 (ADR-030) `plan_authorize.authorized` and `plan_revoke.revoked` are pinned too: the commit gate reads them to decide whether a batch token counts.
 **Tags**: audit-log, retention, growth, cross-os
 
 **Context**: `.rsct/audit.log` is the only copy of what it holds and had no bound. MEASURED on 19
@@ -1428,7 +1429,7 @@ Not measured: the two channels on one machine, a registry install over a link, t
 `"private": true`, and anything on macOS, pnpm, yarn or bun.
 
 ### ADR-027 — The approval dialog gets its text as data, runs by full path, and has no test override (2.14.1)
-**Status**: active.
+**Status**: active. Since 2.17.0 (ADR-030) the named limit "a dialog program that starts and then fails, or is stopped, still counts as no channel, so where the tool is listed in `trust_allowed_for` the call is trusted" no longer holds for commit, push, merge, rebase and `rsct_plan_authorize`, which always force the dialog.
 **Tags**: security, dialog, cross-os
 
 **Context**: every approval the framework treats as human goes through `lib/os-dialog.ts`
@@ -1500,7 +1501,13 @@ MessageBox, and zenity other than 4.0.1.
 left alone" in `/rsct-setup` for the PreToolUse guards (the sanitizer's 4.V.c still leaves an
 edited command alone), and the named limits "a command the developer edited by hand is never
 rewritten" and "the dialog that mints it does not carry the warning line". It also replaces the
-edit guard's fail-open on an internal fault, its behaviour before 2.15.0.
+edit guard's fail-open on an internal fault, its behaviour before 2.15.0. Since 2.17.0 (ADR-030)
+the guard also refuses `git commit-tree` and a `git pull` that is not `--ff-only`, which narrows
+two named limits below ("git plumbing (`commit-tree` + `update-ref`)" and "`git pull`") and
+supersedes the alternative "Refusing `git pull` — breaks a daily command"; it reads brace and glob
+patterns like variables and refuses a git or gh subcommand built partly from a variable, which
+narrows the named limit "a program or subcommand name assembled from parts of variables" to the
+program name.
 **Tags**: gates, hooks, terminal, cross-os
 
 **Context**: every commit, push, merge and rebase gate lives inside an RSCT tool; the agent's
@@ -1721,6 +1728,125 @@ commit refusal, abandon, status, and the unchanged flow without a record). A pro
 chooses it sees no change apart from the longer unreadable-state message: every new behaviour is
 keyed on the record, and the existing tests of every touched tool pass unedited. Run alone is not
 available in a monorepo package or a nested project whose root is below the repository root.
+
+### ADR-030 — Commits go through the developer's dialog; the only exception is a batch token for a multi-phase plan, 8 hours at most (2.17.0)
+**Status**: active.
+**Tags**: gates, commit, plan-token, dialog, terminal
+
+**Context**: the maintainer's rule (2026-10-18): every commit is locked by the framework and needs
+the developer's OS dialog; the one exception is a batch token the developer approves for a plan
+with several phases, valid at most 8 hours from that approval; merge, rebase and push are never
+automatic. MEASURED on `main` @ `90f3015` (2.16.0), reading the code: `trust_allowed_for` accepted
+`rsct_request_commit`, `rsct_request_push`, `rsct_request_merge` and `rsct_plan_authorize`, so with
+no dialog channel — or a dialog that starts and fails (ADR-027) — those calls passed with no human;
+none of those gates was forced; the token re-armed on every commit (8 h slide by default, up to
+24 h, under an absolute cap of 24 h by default and 7 days by config), so it outlived its approval;
+`plan_token_ttl_minutes` had no effect; the mint dialog said "this plan" without naming it, and the
+plan was the newest `plan_`/`spec_` file by mtime (#86); rule §B said not to offer a token for a
+single-phase plan, and nothing enforced it; the token was plain JSON in `.rsct/phase-state.json`.
+
+**Decision**:
+- `rsct_request_commit` with a `dev_approval`, `rsct_request_push`, `rsct_request_merge`,
+  `rsct_request_rebase` and `rsct_plan_authorize` force the dialog: `trust_allowed_for` is ignored
+  and no channel is a refusal (`force_dialog_no_channel`). The four listable names stay in the enum,
+  so a config that lists them still loads (removing them would reject the config and switch the
+  guards off — ADR-010, ADR-022); they have no effect.
+- The token lives `ttl_minutes` (or `plan_token_ttl_minutes`, else 480) from the approval, 5–480,
+  and nothing extends it. `tokenExpiryMs` is the one expiry everything reads (validation, the
+  commit output, `rsct_phase_status`): min(`expires_at`, `absolute_expires_at`, `authorized_at` +
+  480 min); a missing or unreadable `authorized_at`, or one more than 5 minutes ahead of the clock,
+  is expired — so a token an older server wrote is held to the same 8 hours.
+  `plan_token_ttl_slide_minutes` and `plan_token_ttl_abs_minutes` leave the schema (`.strip()`).
+- The token is for a multi-phase plan: a `plan_<slug>.md` — named by `plan_slug`
+  (`^[A-Za-z0-9][A-Za-z0-9._-]*$`, no `..`, present in the root's listing) or else the newest
+  `plan_*.md`, never a `spec_` file — whose first table after a `## Phases…` heading outside code
+  fences, read by its `Phase` and `Goal` columns, has at least two rows with both cells filled
+  (`<…>`, `TBD`, `todo`, `n/a`, `—`, `-` are placeholders). The branch, plan and phase checks run
+  before the dialog. The dialog, framework lines first, names the number of commits, the expiry,
+  the branch, "commit only: merge, rebase and push keep their own dialog", the warning line, the
+  repository; then the plan and up to eight phases, one line each, capped.
+- The mint writes `plan_authorize.authorized` — plan, branch, `authorized_at`, `expires_at`,
+  `max_actions`, the approval's scope and time, the phase count — before the token, and mints
+  nothing when that write fails; an unreadable state is refused before the dialog. A token counts
+  only while the log holds that line with the plan, branch, `authorized_at`, `expires_at`,
+  `max_actions` and the approval's scope and time equal to the token's (so the count and the expiry
+  the developer saw cannot be raised in the state file), and no `plan_revoke.revoked` line names it
+  (plan, branch, `authorized_at` — the revoke line carries it since 2.17.0), so a revoked token
+  written back does not count. The revoke writes its line before it clears the token, so a revoke
+  whose state write fails still ends the token, and a revoke the log could not record says that a
+  copy written back would count. Both events are pinned by the retention rule (ADR-025). At commit
+  the token's plan is looked up as `plan_<slug>.md` only. `rsct_phase_status` says "NOT usable"
+  for a token that is expired or unrecorded; a token the commit refuses for another reason (branch,
+  plan, count) still reads as active there.
+- The commit's reserve and refund read the state again just before they write, and write only if
+  the stored token is still the one they read (same plan, branch, `authorized_at`,
+  `actions_used`), so a token revoked or re-minted meanwhile is not brought back. The check runs
+  before the write, not under the state lock.
+- The terminal guard (ADR-028) also refuses `git commit-tree`, `filter-branch`, `fast-import`,
+  `quiltimport` and `replay`, and every `git pull` except a closed form: every word after the verb
+  written out (no variable, substitution, or brace or glob pattern, whole or inside a word, quoted
+  or not), `--ff-only` among them, every option in a short list (`--ff-only`, `-q`/`--quiet`,
+  `-v`/`--verbose`, `--prune`/`-p`, `--no-rebase`, `--rebase=false`, `--tags`/`--no-tags`,
+  `--stat`/`--no-stat`/`-n` — so `--no-ff`, `-r`, `--reb` and PowerShell's `--%` are refused), no
+  `-c pull.*`, `branch.*` or `rebase.*` before the verb (an alias keeps the options written before
+  it), and a repository not spelled as a path (`.`, `..`, `./x`, `../x`, `/x`, `C:…`, `file:`).
+  Those verbs are also read in code passed to `node -e`, `python -c` and the like, and in `gh alias
+  set`: there a `git pull` is refused in any form, since the flags inside code are not read.
+- The terminal guard reads a brace pattern (`{a,b}`, `{1..3}`, bash only) and a glob (`*`, `?`,
+  `[…]`) like a variable: a word it cannot know before the shell runs. As a git or gh subcommand it
+  is refused (`git {commit,} -m x`, `git [c]ommit -m x`); a brace pattern run as the command is
+  refused, and a glob run as the command is refused when a refused verb follows (a `case` pattern
+  such as `*"$X"*)` is not a command). In bash a `{` or `}` separates commands only as a word of its
+  own, so `co{mmit,}` is one word. A git or gh subcommand built partly from a variable (`git co$X`,
+  `git "co$X"`) is refused too.
+- Dialog texts: `specLabel` also removes zero-width, bidirectional and other invisible format
+  characters (U+061C, U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+2069, U+FEFF); the mint
+  dialog's expiry says UTC.
+
+**Direction**: stricter on every path. Given up, by design: a machine with no dialog channel cannot
+commit, push, merge, rebase or mint a token through RSCT; a single-phase plan gets no token; a
+`git pull` that would merge or rebase is the developer's to run. The default lifetime grows from
+the documented 120 minutes to 480, and shrinks from what really ran (24 hours or more).
+
+**Alternatives considered**:
+- Removing the four names from the trust enum — rejected: the config would be rejected whole and
+  the project would become unmanaged, guards off.
+- Requiring a code phase to have started before the token counts — dropped by the maintainer: the
+  token counts from its approval.
+- Taking "multi-phase" from per-phase `spec_` files, or from `spec_slug` ≠ `plan_slug` — rejected:
+  three definitions were in use (template "3+", rule §B "each with its own `spec_`", ADR-003); the
+  plan's own table is the one the developer reads, and the dialog lists it.
+- Refusing a token commit while a merge is in progress (`MERGE_HEAD`) — not taken: that merge had
+  its own dialog, and refusing would break the approved conflict flow.
+
+**What is given up, by name**: the token, the plan file and the audit log are files a same-user
+agent can write — a forged token needs a forged audit line too (the bar of ADR-011 and ADR-018);
+editing `actions_used` in the state file still resets the count of a genuine token within its
+8 hours and its granted `max_actions` per reset (no per-commit record is checked), and a plan file
+can claim phases it does not have, which is why the dialog lists them; the terminal guard does
+not refuse commands that move refs without creating a commit (`git reset --hard`, `git branch
+-f`, `git update-ref`, `git fetch . a:b`, a fast-forward `git pull --ff-only` from a URL or from a
+local repository not spelled as a path — `.git`, `~/x`, a bare folder name), `git hash-object -w
+-t commit`, hooks the agent writes, a script file the agent runs, or other MCP servers (ADR-028);
+a program name built partly from a variable stays given up (ADR-028); on git older than 2.34 a
+repository config `pull.rebase=true` can make `git pull --ff-only` rebase (not measured), and so
+can `--config-env`, `-c include.path` and `GIT_CONFIG_*`, which the guard does not read (`-c
+pull.*`, `branch.*` and `rebase.*` are refused); a server older than 2.17.0 — a session opened
+before the upgrade — keeps trust and the sliding window until it restarts; the reserve's check
+before the write is not covered by a test (the window between the token check and the reserve has
+no seam a test can reach).
+
+**Consequences**: `tests/unit/commit-lock.test.ts` (the phases reader, the mint dialog and its
+checks, the forced dialog, the audit line, the token path: unrecorded, `spec_` plans, the 8-hour cap,
+the refund, the revoke order), `tests/unit/plan-authorization-lifetime.test.ts` (replaces the
+sliding-window tests), forced-dialog cases in the push, merge and rebase tests, and the terminal
+guard lists, with the brace, glob and partial-variable cases and the forms that must still pass.
+`tests/unit/terminal-guard-prompts.test.ts` caught the first draft refusing the prompts' own `case`
+patterns. Edited
+tests, each with the guarantee it still holds: the token fixtures gained the audit line an approved
+mint writes; the mint fixtures gained a two-phase table; "cuts when the approval was trusted with
+no dialog channel" became "refuses … and cuts nothing"; `git pull` moved to the refused list with
+`--ff-only` forms allowed; a Start-Process example passes a variable to `fetch` instead of `pull`.
 
 ---
 
@@ -2164,8 +2290,9 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - #17: `.claude/settings.json` drift is reported, never staged or discarded; the audit keeps a
   redacted excerpt only.
 - Token path: the action is debited before the commit and refunded on failure; if the refund
-  write fails the action stays spent (tightens, never loosens). The sliding window re-arms on
-  success only.
+  write fails the action stays spent (tightens, never loosens). Since 2.17.0 (ADR-030) the reserve
+  and the refund re-read the state and write only while the stored token is the one they read, and
+  nothing re-arms the token.
 - INV-7 contract gate diverges only on a confirmed multi-repo topology, and a confirmed
   multi-repo commit where it could not enforce says so at commit time (RV3).
 - CAP-33 bootstrap and CAP-53 plan-tracking notices are advisory, never rejections.
@@ -2196,15 +2323,17 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### `tools/plan-authorize.ts` (migrated in the #101 REVIEW)
 
-- The pre-conditions (no branch, protected branch, no active plan) are checked AFTER the gate, so
-  the approval gates everything; a pre-condition failure does not consume the approval, and the
-  developer fixes and retries with the same payload.
+- Since 2.17.0 (ADR-030) the pre-conditions (no branch, protected branch, an unsafe `plan_slug`, no
+  `plan_` file, fewer than two phases) are checked BEFORE the gate, so the dialog can name the
+  plan, its phases, the count and the expiry; a refusal there shows no dialog and consumes
+  nothing. Up to 2.16.0 they ran after the gate.
 - FV4: the emitting approval is consumed only once the token is persisted. A failed persist leaves
-  it unconsumed.
-- Sliding window (plan-lifecycle-v2, block 1.4): the token re-arms `expires_at` on each successful
-  commit, so an actively worked plan never expires mid-flight, and never lives past the absolute
-  cap. An explicit `ttl_minutes` IS the sliding width; the configured slide and the built-in default
-  apply only when it is absent.
+  it unconsumed. Since 2.17.0 the `plan_authorize.authorized` audit line is written before the
+  token, and a failed audit write mints nothing.
+- The sliding window of plan-lifecycle-v2 (block 1.4) — a re-arm of `expires_at` on each
+  successful commit, under an absolute cap of 24 h by default and 7 days at most — is removed in
+  2.17.0 (ADR-030): the lifetime is fixed from the approval, 8 hours at most, and
+  `tokenExpiryMs` caps a token an older server wrote.
 
 ### `tools/phase-abandon.ts` (migrated in the #101 REVIEW)
 
@@ -2544,6 +2673,134 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **The premise-check findings show `score N, shared: …` (#79)** — the match carries them and the
   developer needs them to triage by strength; display-only, the gate baseline never reads `detail`.
 
+### `lib/plan-authorization.ts`, `lib/plan.ts` (migrated in the 2.17.0 REVIEW)
+
+- The token functions are pure: they never throw and never touch the file system; the tools own
+  the reads and writes through the locked `writePhaseState`. The token carries no overrides, so it
+  never passes INV-5 or INV-6.
+- `validateToken` returns the first failing reason in a fixed order — absent, not covered,
+  expired, unrecorded, branch, plan gone, plan complete, exhausted — so the caller can name the
+  cause. A hand-edited token without `covers` reads as not covered instead of throwing. The caller
+  hands it the token's own plan, found by its `plan_slug`, never the newest plan by mtime (FV1):
+  touching an unrelated plan file mid-session must not change what the token is checked against.
+- TTL and `max_actions` resolve as tool input, then the config default, then the built-in default.
+  Both inputs are bounds-checked upstream (zod, `RsctApprovalModesSchema`); the token clamps again
+  so no later caller can mint an out-of-range window, and a non-finite value takes the default.
+- `findPlanBySlug` takes `plan_<slug>.md` first and `spec_<slug>.md` as the fallback;
+  `findPlanFileBySlug` (2.17.0) takes `plan_` only, and only a name the directory listing returns.
+  `phaseSpecExists` checks the `spec_` form only — one spec per phase in a multi-phase plan (PH-1).
+  The active-plan lookup accepts `spec_` as an alias of `plan_`, as rules/B does (CAP-53).
+- `findPlanByBranch` keys the integration gate's plan-complete check on the plan whose `Branch` row
+  is the branch being integrated, so touching an unrelated completed plan to win the mtime race
+  cannot pass the check (plan-lifecycle-v2, HOLE A).
+- `isPlanComplete` reads the plan's `Status` row with English and pt-BR completion words, starting
+  on a word boundary so "incomplete" is not "complete"; a plan it reads as finished ends that
+  plan's batch token (`plan_complete`). Its only caller is `validateToken`.
+- Progress checkboxes inside fenced code are ignored; CRLF is normalised; indented items and `*`/`+`
+  markers count. `progressHasOpenItems` is lenient — an absent file has no open items; it only
+  refuses a `plan_complete: true` that visible open items contradict. The destructive cleanup uses
+  `progressCompletionState`, where only `all_closed` (at least one closed item, none open) counts:
+  the absence of open items never clears an unfinished plan for deletion.
+- `listPlans` (#55) orders by the plan file's mtime only. The table's `Last update` row is reported
+  and never sorts: two recency sources disagree as soon as someone forgets to edit the row. `slug`
+  comes from the file name and is the resolution identity; the `Slug` row is reported as
+  `declared_slug` and never resolves a plan (#57). `slug` is not unique in the list — `plan_x.md`
+  and `spec_x.md` can coexist and share `progress_x.md`. `findActivePlan` and `findPlanByBranch`
+  keep their own walk; moving them onto the shared enumerator wants characterisation tests first.
+- Metadata rows are read from a markdown table within the first 60 lines.
+
+### `lib/update-check.ts` (migrated in the 2.17.0 REVIEW)
+
+- Consult by default (#38). "May I ask GitHub" (opt-out) and "do you want this release" (per tag,
+  `declined_tags`) are separate decisions; a decline silences that release only.
+- Cached in `~/.rsct/update-check.json` for 24 h, fail-silent and suggest-only: it never downloads
+  or updates anything. `rsct_status` reads only the cache; a stale cache fires a background refresh
+  whose result lands for the next call, so the status adds no network latency.
+- Off switches, in precedence order: `RSCT_UPDATE_CHECK=off` (the only one reachable before a
+  session exists — CI, headless, a machine that must never send the request), `rsct_status` with
+  `update_check: "off"`, and the cache's `consent` field. Any present `consent` other than `"yes"`
+  is off: testing for the literal `"no"` would fail open on every hand-edit variant (`"No"`,
+  `false`, `0`, `null`), and hand-editing was the only opt-out older versions had. The refresh
+  never writes `consent` — recording a "yes" nobody gave erases what the opt-out notice depends on.
+  The variable outranks the file, so a caller reports `isUpdateCheckKilled` instead of promising an
+  effect. Turning the check off spends the opt-out notice; turning it on restores it.
+- A one-shot notice is a count, not a flag: a hint may never be relayed, and a flag burned when the
+  hint is generated is spent unread. A notice is emitted only when its increment persisted — on a
+  read-only home a counter that never lands would nag on every call.
+- The cache is shared by every project and every installed version, so every field is optional and
+  unknown fields are kept: writes spread the fresh read instead of listing fields, and the write
+  after the network await reads again first, so a decline or an opt-out recorded during the request
+  is not erased.
+- Unreadable is not absent. An unreadable file fails closed and is never overwritten: a transient
+  OneDrive or antivirus lock, or a root-owned `~/.rsct`, would otherwise send a request the
+  developer opted out of and overwrite the recorded choice. Only `ENOENT` means absent. A BOM is
+  tolerated, or a file saved by a Windows editor would silence the check for good. Writes go
+  through a pid-suffixed temp file (two processes share one global binary) and report whether they
+  landed.
+- Staleness is measured from the last attempt, not the last success: a failing network never
+  advances `last_checked`, and measuring success would send a request on every call. An in-process
+  memo keyed by home bounds the attempts when the disk write never lands, and is stamped before the
+  request so the calls inside one request window do not each start their own. A stamp in the future
+  (wrong clock, VM restore) is stale, never fresh for ever; an unparseable `last_attempt` falls
+  through to `last_checked`.
+- Tags are normalised (`v`/`V`, whitespace) on the offer and the decline path alike — one capital
+  letter in a hand-made tag would otherwise silence that release. An unparseable version is never
+  a false "update available".
+- A decline must name the release being offered (cached, newer than the running version, not
+  declined), which refuses a mistyped tag, a release never offered and a release that does not
+  exist yet. Accepting a tag that is not newer than the running version lets a decline swallow a
+  real future release: decline v2.6.0 on a 3.0.0 branch, go back to 2.5.1, and v2.6.0 is silenced.
+
+### `tools/request-push.ts` (migrated in the 2.17.0 REVIEW)
+
+- The install-drift advisory is evaluated before every pre-gate check and prepended on every return
+  path (#25): a push is outward-facing and hard to reverse, so degraded enforcement matters more
+  here than at commit.
+- The remote must be a configured remote of the repository (#62 B5). MEASURED: `git push
+  <bare-path> main` lands the repository in a foreign one, `git push -- <path> main` is still rc 0,
+  and `git push --mirror -- origin` is rc 0 and deletes remote branches, so the `--` sentinel is
+  not enough on its own. Strict by decision: only an unreadable list (outside a repository) skips
+  the check; an empty list refuses, because a repository with no remotes is the shape a path remote
+  exploits. Pushing to a URL or a path stopped working on purpose; the schema always documented
+  the field as a remote name.
+- The destination is resolved before the protection check (#62 B5). `isProtectedBranch` is an exact
+  compare, and `+main`, `HEAD:main`, `refs/heads/main`, `heads/main` and `@` all landed on the
+  remote's `main` with no ack and no override (measured, git 2.45.1). Option-shaped, glob and empty
+  destinations are refused; a glob force-updated a protected `main` while the plain push of the
+  same state was refused (measured).
+- The ref store's answer is added to the string candidates, never put in their place: it answers
+  for the local ref store while the push writes the remote, and a clone with no local `main` still
+  moves the remote's `main` with `HEAD:refs/heads/main`. It is trusted only when the output starts
+  with `refs/`, never on the exit code. MEASURED: `rev-parse --symbolic-full-name` is rc 0 with
+  empty output for `HEAD@{0}`, echoes `HEAD` on a detached HEAD, and on failure still echoes its
+  argument; taking that into the set can make a branch protected that is not, a hard stop with no
+  override.
+- That `rev-parse` call has no `--`, and that is load-bearing (Rv-A). With `--` it echoes the
+  operands (`--`, then `main`), the arm was dead, and `git push origin HEAD` from a protected branch
+  skipped the ack, the coverage check and the override while the audit recorded `protected: false`.
+  The refspec parse makes this safe: it refuses a destination starting with `-` before the call. A
+  "refuse multi-line output" guard is not a second barrier — `rev-parse --symbolic-full-name --all`
+  returns one line in a repository with one ref.
+- The coverage range is `<remote>/<destination>...<source>`: what is on the remote, and what is
+  sent. Using the raw branch for both composed `origin/feat/x:main`, git's `<rev>:<path>` tree
+  syntax. Two shapes name no range and degrade: a delete refspec (`:main` carries no files, and
+  `origin/main...` would be another range) and a destination still spelled `HEAD` (`<remote>/HEAD`
+  is the remote's default-branch symref — confidently wrong). They get different advice: a named
+  range that does not read is a fetch problem, an unnameable one is not; the audit tells them apart
+  by `range_base: null`.
+- Push fails open on an unreadable range, the only one of the three. MEASURED: `git push origin
+  main` succeeds with `origin/main` never fetched, so the range is rc 128 on an ordinary first push
+  of a `--single-branch` clone. The push is protected by the remote allow-list, the refspec parse,
+  INV-5 on the resolved destination and `override_protected_branch`; a readable range is still
+  checked.
+- The pre-integration ack is required only for a protected destination (MCP-P1-D): a feature push
+  to trigger CI must not force a dishonest attestation. It is checked before the dialog, so a
+  missing ack refuses in chat and spends no approval. On a push that is not protected,
+  `path_crosscheck` is left out rather than labelled — the check did not apply.
+- The cleanup advisory after a completed plan appears only on a protected push, the only push that
+  carries the plan-complete ack; the plan is found by branch, then the active plan. It is
+  suggested, never performed.
+
 ### Tests and build
 
 - `verification-checklist.test.ts`: the clean-pass suppression is scoped to the corpus MISS, not to
@@ -2615,6 +2872,24 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - `hook-registration.test.ts` (#114) runs the registered command LITERALLY through `bash -c` in a
   project whose path has a space; asserting the string alone would pass with the quotes in the
   wrong place.
+- `request-merge.test.ts`, `request-push.test.ts`, `request-rebase.test.ts` (migrated in the 2.17.0
+  REVIEW): `tmpRoot` is not a repository, so the default range reader returns an empty but
+  readable range (`ok`, never `unavailable`); the fail-closed path has its own test. The reader is
+  a spy, so a test can assert which range was asked for — a swapped base and head is a real defect
+  class, and rebase and squash move in opposite directions. The ack schema parity tests derive the
+  keys from the Zod shape: a hard-coded key list stayed green while a field missing from the JSON
+  mirror (`additionalProperties: false`) would block every merge, protected push and rebase. Each
+  refusal case has a control that an always-refuse version cannot pass (an ordinary ref, a
+  configured non-default remote, an overridden protected push). The drift-advisory tests count the
+  advisory's own lines, not the whole message, which #92 grew by naming the repository.
+- `request-push.test.ts`: where the argv is under test, the git fake throws on an argv it does not
+  model — the permissive one let 21 of 22 argv sites go stale. A block runs a real repository and
+  the real executor, with only `push` intercepted, because a stub had fed the `rev-parse` arm output
+  real git cannot produce for that argv, and the arm's mutant died against a wrong fixture.
+- `request-rebase.test.ts`: the unsafe-revision test asserts that the token appears in the reject
+  text. The earlier "git was never invoked" assertion was vacuous, measured by deleting
+  `isSafeRevisionToken` with the test still green: the real reader runs through another seam. The
+  exec-side barrier is pinned against a real repository in `git.test.ts`.
 
 ### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
 

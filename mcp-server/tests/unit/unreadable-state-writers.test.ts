@@ -211,7 +211,7 @@ describe('four tools refuse an unreadable phase-state and say so (#101)', () => 
   it('rsct_plan_authorize mints nothing and leaves the corrupt file byte-identical', async () => {
     const { planAuthorizeHandler } = await import('../../src/tools/plan-authorize.js')
     install()
-    writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n')
+    writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n\n## Phases\n\n| Phase | Goal |\n|---|---|\n| 1 | model |\n| 2 | api |\n')
     writeFileSync(statePath(), CORRUPT, 'utf8')
     const input = { project_root: root, dev_approval: approval('plan_authorize:t3'), ttl_minutes: 120, max_actions: 5 }
     const internal = { gitStateOverride: branchState('feat/t3'), promptFn: promptSpy().fn }
@@ -237,7 +237,7 @@ describe('four tools refuse an unreadable phase-state and say so (#101)', () => 
   it('rsct_plan_authorize still mints over an empty phase-state, which is not corruption', async () => {
     const { planAuthorizeHandler } = await import('../../src/tools/plan-authorize.js')
     install()
-    writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n')
+    writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n\n## Phases\n\n| Phase | Goal |\n|---|---|\n| 1 | model |\n| 2 | api |\n')
     writeFileSync(statePath(), '', 'utf8')
     const out = (await planAuthorizeHandler(
       { project_root: root, dev_approval: approval('plan_authorize:t3'), ttl_minutes: 120, max_actions: 5 },

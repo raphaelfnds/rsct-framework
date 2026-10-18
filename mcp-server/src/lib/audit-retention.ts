@@ -55,6 +55,8 @@ export const PINNED_EVENTS: ReadonlySet<string> = new Set([
   'review.public_api_approved',
   'review.commit_drift',
   'approval.consumed',
+  'plan_authorize.authorized',
+  'plan_revoke.revoked',
   'tutor.step',
   'free_commit.committed',
   'free_commit.locked',

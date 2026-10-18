@@ -126,7 +126,6 @@ export interface PlanAuthorizationBlock {
   approval_ref: { action_scope: string; timestamp: string }
   session_id?: string
   absolute_expires_at?: string
-  slide_minutes?: number
 }
 
 export interface PhaseReviewBlock {

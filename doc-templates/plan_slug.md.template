@@ -80,8 +80,10 @@
 ## Phases & parallelization (multi-phase plans only)
 
 > Single-phase plan? Skip this — "Plan steps" above is enough.
-> Multi-phase plan (3+ phases)? List each phase and the **file group** it
-> mutates. Phases whose groups DON'T overlap can run in parallel in separate
+> Multi-phase plan (2+ phases)? List each phase and the **file group** it
+> mutates — a batch-commit token (`rsct_plan_authorize`) is granted only for a plan
+> whose table lists at least two filled phases. In a plan of 3+ phases, phases
+> whose groups DON'T overlap can run in parallel in separate
 > `git worktree`s (RSCT phase-state + any batch token + the anti-reuse store are
 > isolated per worktree — see §C "Parallel work via git worktrees"). Phases that
 > share a file group must run **serially**. A repo whose build bundle is tracked

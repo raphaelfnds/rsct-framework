@@ -799,11 +799,13 @@ old wide match now answers `out_of_scope`).
 
 There are **four** §C-gated mutating ops: `rsct_request_commit`,
 `rsct_request_push`, `rsct_request_merge` and `rsct_request_rebase`. All four pop
-an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel). Where no
-dialog channel exists, commit, push and merge are accepted if the tool's own name
-is listed in `approval_modes.trust_allowed_for[]` (e.g. `["rsct_request_commit"]`);
-`rsct_request_rebase` cannot be listed. Fabrication signals (INV-2.2) auto-elevate
-to forced-dialog mode regardless of trust.
+an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel), and since
+2.17.0 the dialog is FORCED on all four (ADR-030): `trust_allowed_for[]` does not
+apply to them, and where no dialog channel exists they are refused
+(`force_dialog_no_channel`) — the developer commits, pushes, merges or rebases by
+hand. The one exception is a commit under a batch token the developer approved
+(`rsct_plan_authorize`, below). Fabrication signals (INV-2.2) force the dialog as
+before.
 
 **Three of them require a `dev_approval` payload on every call** (INV-2
 anti-reuse): push, merge and rebase. `rsct_request_commit` is the exception — its
@@ -927,18 +929,32 @@ runs if it would be read as an option rather than a name.
 #### `rsct_plan_authorize` (T3 — plan execution mode: batch)
 
 Mints a **plan-scoped batch token**: one strong `dev_approval` (full §C gate +
-OS dialog) authorizes up to `max_actions` **commits** within the active plan +
-current branch + a time window, so `rsct_request_commit` no longer needs a fresh
-approval per commit. **Commit only** — push/merge keep per-action §C. Requires an
-active `plan_`/`spec_` at the project root and a **non-protected** branch. The
+forced OS dialog) authorizes up to `max_actions` **commits** of one multi-phase
+plan, on the current branch, for at most 8 hours, so `rsct_request_commit` no
+longer needs a fresh approval per commit. **Commit only** — push, merge and rebase
+keep their own dialog. Requires a `plan_<slug>.md` with two or more phases at the
+project root and a **non-protected** branch. The
 token never bypasses INV-5/INV-6 (no overrides on the token path). The emitting
 approval is consumed (cannot re-mint). Auto-revokes on branch switch, plan
-completion/deletion, expiry, or exhaustion. An unreadable `phase-state.json` is
-refused (`status: 'state_write_failed'`): no token is minted, the approval is
+completion/deletion, expiry, or exhaustion. An unreadable `phase-state.json`, or an
+audit log that cannot record the mint, is refused (`status: 'state_write_failed'`): no token is minted, the approval is
 not consumed and the file is left untouched.
 
-- Input: `project_root?`, `dev_approval`, `ttl_minutes?` (5–480, default 120), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
-- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `protected_branch` / `no_branch`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
+Since 2.17.0 (ADR-030): the dialog is FORCED (`trust_allowed_for` ignored, no
+channel = refused); the token is for a MULTI-PHASE plan only — a `plan_<slug>.md`
+whose `## Phases` table lists at least two filled phases (a `spec_` file is never
+taken as the plan); its lifetime is fixed from the approval, 8 hours at most, and a
+commit never extends it. Before the dialog the tool checks the branch, the plan and
+its phases; the dialog then names the number of commits, the expiry, the branch,
+the plan and its phases (framework text first, plan and phases last, one line
+each). The mint writes its `plan_authorize.authorized` audit line before the token,
+and `rsct_request_commit` honours a token only while that line exists with the same
+plan, branch, time, approval, expiry and number of commits, and no
+`plan_revoke.revoked` line names it (the revoke writes that line before it clears
+the token).
+
+- Input: `project_root?`, `dev_approval`, `plan_slug?` (the `<slug>` of `plan_<slug>.md`; letters, digits, `.`, `_`, `-`; default the newest `plan_*.md`), `ttl_minutes?` (5–480, default 480), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
+- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `not_multi_phase` / `invalid_plan_slug` / `protected_branch` / `no_branch` / `force_dialog_no_channel`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
 
 #### `rsct_plan_revoke` (T3)
 
@@ -1068,7 +1084,10 @@ Refused as well: a word that is a whole variable or substitution, followed —
 past git's global options — by a blocked verb (`"$G" commit`); in bash, a
 command run from an unquoted variable or substitution (`$C`, `sudo -E $C`,
 `do $C`), which the shell splits into a whole command line; a git or gh
-subcommand that is a whole variable (`git $V`, `git "$@"`); `Invoke-Expression`
+subcommand that is a variable or holds one (`git $V`, `git "$@"`, `git co$X`);
+a brace pattern or a glob read like a variable since 2.17.0 — as a git or gh
+subcommand (`git {commit,}`, `git [c]ommit`), as the command when it is a brace
+pattern, and as the command before a blocked verb when it is a glob; `Invoke-Expression`
 or `pwsh -c` of a variable; interpreter code that is a whole variable in a code
 flag before the script (a script's own `-p "$PORT"` passes); a `gh
 alias set` whose definition runs `pr merge` or a refused git verb; git's own
@@ -1089,7 +1108,13 @@ or not `.rsct.json` is present or valid. It writes nothing.
 
 What it does not see: a script file the agent writes or downloads and then runs
 (`./x.sh`, `npm run …`, `make`), git called from a program it does not read,
-git's plumbing commands, `git pull`, `gh api`, aliases set through
+git's plumbing commands other than `git commit-tree` (refused since 2.17.0, as are
+`filter-branch`, `fast-import`, `quiltimport`, `replay`, and every `git pull` but a
+`--ff-only` one with plain options, every word written out, from a repository not
+spelled as a path — ADR-030), commands that move refs without creating a commit
+(`git reset --hard`, `git branch -f`, `git update-ref`, `git fetch . a:b`, a
+fast-forward pull from a URL or a local repository written as a name), hooks the
+agent writes, `gh api`, aliases set through
 `GIT_CONFIG_*` variables, gh aliases apart from a `gh alias set` in the command itself,
 external `git-<name>` commands such as `git flow`,
 command text assembled at run time from data it reads as text, a Claude Code
@@ -1168,7 +1193,7 @@ whatever their age:
 
 | kept | which entries |
 |---|---|
-| every entry a gate or a reader can still use | `classify.verdict`, `review.unverified_decision`, `review.dead_code_kept`, `review.public_api_approved`, `review.commit_drift`, `approval.consumed`, `tutor.step`, and the `free_commit.*` entries older servers still read |
+| every entry a gate or a reader can still use | `classify.verdict`, `review.unverified_decision`, `review.dead_code_kept`, `review.public_api_approved`, `review.commit_drift`, `approval.consumed`, `plan_authorize.authorized` and `plan_revoke.revoked` (since 2.17.0: a batch token counts only while its mint line exists and no revoke line names it), `tutor.step`, and the `free_commit.*` entries older servers still read |
 | every entry named as an override, a skip, a degraded check or a bypass | any event whose name contains `override`, `skip`, `degraded` or `bypass`; also `sanitize.stripped` and `audit_log.migrated` |
 | only the **newest** of each repeating state record | `settings.baseline`, `rsct_json.malformed`, `rsct_json.bounds_violation`, `install.drift_detected`, `sanitize.malformed`, `sanitize.migration_skipped`, `settings.drift_detected`, `audit.pruned` |
 
@@ -1177,7 +1202,7 @@ So after ten days the log still shows THAT a config was rejected, or that enforc
 was not running, and when it last was — not for how long.
 
 Everything else — phase starts and completions, findings, commits, pushes, merges,
-plan authorizations, bootstrap warnings and **refusals** — goes after 10 days. An
+refused or failed plan authorizations, bootstrap warnings and **refusals** — goes after 10 days. An
 entry that cannot be parsed or carries no ISO timestamp is never removed. Kept
 entries are never rewritten: the file is handled as bytes. A kept entry can point at
 one that is gone — an `approval.consumed` whose commit entry was dropped.
@@ -1191,8 +1216,8 @@ Who is told, and how:
   the first cut after an upgrade, in a log that old; a cut after weeks without a
   commit. The test is the age of the oldest entry to go, not how many go. The daily
   cut is not forecast. The line is a forecast, counted before the commit.
-- **No dialog, no forecast**: a commit under a plan token, and an approval trusted
-  with no dialog channel (`trust_allowed_for`), cut with the hint and the entry alone.
+- **No dialog, no forecast**: a commit under a plan token cuts with the hint and the
+  entry alone.
 
 There is no setting for it. `audit` is a strict block, so a new key would make every
 older server reject the whole config, and `.rsct.json` is a file an agent can edit.
@@ -1243,9 +1268,12 @@ tool's name is on the list, accept silently; otherwise reject. The list
 accepts `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge`,
 `rsct_plan_authorize`, `rsct_capture_issue`, `rsct_phase_abandon` and the
 six `rsct_phase_*_complete` tools. A call that forces the dialog ignores
-the list. The match is by tool name — not by `dev_approval.action_scope`
-— so an entry like `["rsct_request_commit"]` trusts every commit
-request in headless mode, independent of the specific scope value.
+the list — and since 2.17.0 commit, push, merge, rebase and
+`rsct_plan_authorize` always force it (ADR-030): their four names stay
+accepted, so a config that lists them still loads, and have no effect.
+The match is by tool name — not by `dev_approval.action_scope` — so an entry
+like `["rsct_phase_code_complete"]` trusts every code completion in headless
+mode, independent of the specific scope value.
 
 ### `.rsct.json` bounds + tamper defense
 
@@ -1498,7 +1526,7 @@ expected tool and the response matches the docs above.
 |---|---|---|
 | Windows | PowerShell MessageBox | Dialog appears with project name + action_scope. Yes → tool proceeds; No → tool rejects with `reject_kind: 'dialog_no'`. |
 | macOS | `/usr/bin/osascript` (JavaScript `displayDialog`) | Same. Run only on the CI macOS cells so far (ADR-027). |
-| Linux | `/usr/bin/zenity --question` | Same. Requires `zenity` at `/usr/bin/zenity`; if absent, `trust_allowed_for[]` is the documented fallback. |
+| Linux | `/usr/bin/zenity --question` | Same. Requires `zenity` at `/usr/bin/zenity`; if absent, `trust_allowed_for[]` is the documented fallback for the tools it still applies to — never commit, push, merge, rebase or `rsct_plan_authorize` (ADR-030). |
 
 If only one platform is available, document the rest as "untested on
 target platform" in the M2 sign-off — does NOT block the gate.

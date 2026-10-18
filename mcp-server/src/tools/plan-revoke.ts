@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { PLAN_REVOKED_EVENT } from '../lib/plan-token-record.js'
 import {
   readPhaseState,
   refuseUnreadableState,
@@ -107,6 +108,25 @@ export async function planRevokeHandler(
     }
   }
 
+  const revokeAudit = auditFields(
+    appendAudit(
+      projectRoot,
+      {
+        event: PLAN_REVOKED_EVENT,
+        tool: 'rsct_plan_revoke',
+        plan_slug: token.plan_slug,
+        branch: token.branch,
+        authorized_at: token.authorized_at,
+        actions_used: token.actions_used,
+        max_actions: token.max_actions,
+        reason: input.reason ?? null,
+        revoked_at: now.toISOString(),
+      },
+      config?.audit,
+    ),
+  )
+  const recorded = revokeAudit.audit_error === null
+
   const baseState: PhaseState = existing.state ?? {}
   const newState = clearTokenFromState(baseState)
   const writeResult = writePhaseState(projectRoot, newState)
@@ -130,31 +150,23 @@ export async function planRevokeHandler(
       status: 'state_write_failed',
       revoked_plan_slug: token.plan_slug,
       ...auditFields(audit),
-      hints: [`⚠ token still active — ${reason}.`],
+      hints: [
+        recorded
+          ? `⚠ the revoke is recorded in the audit log, so the token no longer counts, but phase-state.json still holds it — ${reason}.`
+          : `⚠ token still active — ${reason}; the audit log could not record the revoke either (${revokeAudit.audit_error}).`,
+      ],
     }
   }
-
-  const audit = appendAudit(
-    projectRoot,
-    {
-      event: 'plan_revoke.revoked',
-      tool: 'rsct_plan_revoke',
-      plan_slug: token.plan_slug,
-      branch: token.branch,
-      actions_used: token.actions_used,
-      max_actions: token.max_actions,
-      reason: input.reason ?? null,
-      revoked_at: now.toISOString(),
-    },
-    config?.audit,
-  )
 
   return {
     status: 'revoked',
     revoked_plan_slug: token.plan_slug,
-    ...auditFields(audit),
+    ...revokeAudit,
     hints: [
       `Plan token for '${token.plan_slug}' revoked (used ${token.actions_used}/${token.max_actions}). rsct_request_commit now requires a per-action dev_approval again.`,
+      ...(recorded
+        ? []
+        : [`⚠ the audit log could not record the revoke (${revokeAudit.audit_error}): the token is gone from phase-state.json, but a copy written back into it would count again until it expires.`]),
     ],
   }
 }

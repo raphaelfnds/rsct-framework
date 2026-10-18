@@ -4519,9 +4519,7 @@ var RsctApprovalModesSchema = external_exports.object({
   fabrication_signal_threshold_ms: external_exports.number().int().min(100).max(5e3).optional(),
   trust_allowed_for: external_exports.array(external_exports.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
   plan_token_ttl_minutes: external_exports.number().int().min(5).max(480).optional(),
-  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional(),
-  plan_token_ttl_slide_minutes: external_exports.number().int().min(5).max(1440).optional(),
-  plan_token_ttl_abs_minutes: external_exports.number().int().min(5).max(10080).optional()
+  plan_token_max_actions: external_exports.number().int().min(1).max(100).optional()
 }).strip();
 var RsctAuditConfigSchema = external_exports.object({
   enabled: external_exports.literal(true).optional(),

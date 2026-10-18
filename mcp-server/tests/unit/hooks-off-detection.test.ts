@@ -170,7 +170,7 @@ async function rebaseDialog(root: string): Promise<string[]> {
 }
 
 async function authorizeDialog(root: string): Promise<string[]> {
-  writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n')
+  writeFileSync(join(root, 'plan_t3.md'), '# Plan\n\n| Status | in progress |\n\n## Phases\n\n| Phase | Goal |\n|---|---|\n| 1 | model |\n| 2 | api |\n')
   const dialogs: string[] = []
   ;(await planAuthorizeHandler(
     { project_root: root, dev_approval: { timestamp: TS, action_scope: 'plan_authorize:t3', reason: 'authorize a batch of commits for the t3 plan run' } },

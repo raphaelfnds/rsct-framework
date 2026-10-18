@@ -49,6 +49,7 @@ const ctxOK = {
   branch: 'feat/t3',
   tokenPlan: plan('in progress'),
   action: 'commit',
+  mintRecorded: true,
 }
 
 describe('lib/plan-authorization — emitToken', () => {
@@ -167,7 +168,7 @@ describe('lib/plan-authorization — consume / read / clear', () => {
     const t = baseToken({ actions_used: 5 })
     const c = consumeTokenAction(t)
     expect(c.actions_used).toBe(6)
-    expect(t.actions_used).toBe(5) // original untouched
+    expect(t.actions_used).toBe(5)
   })
 
   it('readToken returns the token or null', () => {
@@ -189,7 +190,7 @@ describe('lib/plan-authorization — consume / read / clear', () => {
     expect(cleared.phase).toBe('code')
     expect(cleared.spec_slug).toBe('t3')
     expect(cleared.bootstrap_at).toBe(NOW.toISOString())
-    expect(state.plan_authorization).toBeDefined() // original untouched
+    expect(state.plan_authorization).toBeDefined()
   })
 })
 
@@ -198,8 +199,8 @@ describe('lib/plan-authorization — bounds resolution (RV5 clamp)', () => {
     expect(resolveTtlMinutes(60, 200)).toBe(60)
     expect(resolveTtlMinutes(undefined, 200)).toBe(200)
     expect(resolveTtlMinutes(undefined, undefined)).toBe(PLAN_TOKEN_TTL_DEFAULT_MIN)
-    expect(resolveTtlMinutes(1, undefined)).toBe(PLAN_TOKEN_TTL_MIN) // clamp up
-    expect(resolveTtlMinutes(99999, undefined)).toBe(PLAN_TOKEN_TTL_MAX) // clamp down
+    expect(resolveTtlMinutes(1, undefined)).toBe(PLAN_TOKEN_TTL_MIN)
+    expect(resolveTtlMinutes(99999, undefined)).toBe(PLAN_TOKEN_TTL_MAX)
     expect(resolveTtlMinutes(Number.NaN, undefined)).toBe(PLAN_TOKEN_TTL_DEFAULT_MIN)
   })
 
@@ -207,8 +208,8 @@ describe('lib/plan-authorization — bounds resolution (RV5 clamp)', () => {
     expect(resolveMaxActions(10, 50)).toBe(10)
     expect(resolveMaxActions(undefined, 50)).toBe(50)
     expect(resolveMaxActions(undefined, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_DEFAULT)
-    expect(resolveMaxActions(0, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_MIN) // clamp up
-    expect(resolveMaxActions(1000, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_MAX) // clamp down
+    expect(resolveMaxActions(0, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_MIN)
+    expect(resolveMaxActions(1000, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_MAX)
     expect(resolveMaxActions(Number.NaN, undefined)).toBe(PLAN_TOKEN_MAX_ACTIONS_DEFAULT)
   })
 })

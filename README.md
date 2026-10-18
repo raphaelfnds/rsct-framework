@@ -482,9 +482,11 @@ step doesn't behave as described, that's a bug worth filing.
      §C reauthorization instead.
    - With `rsct-mcp` installed: Claude proposes
      `mcp__rsct__rsct_request_commit` instead. Every commit pops a native OS
-     dialog to confirm out-of-band before it lands, unless the dev has minted a
-     plan-scoped batch token (`rsct_plan_authorize`). Audit trail goes to
-     `.rsct/audit.log`.
+     dialog to confirm out-of-band before it lands — with no dialog channel the
+     commit is refused — unless the dev has minted a plan-scoped batch token
+     (`rsct_plan_authorize`) for a plan with two or more phases, valid 8 hours at
+     most from that approval. Push, merge and rebase always show their own
+     dialog. Audit trail goes to `.rsct/audit.log`.
 5. **Reverse it.** `/rsct-uninstall` cleanly removes everything the
    framework added to *this project* (markers + SHA256 detect any
    developer edits and protect them). Then

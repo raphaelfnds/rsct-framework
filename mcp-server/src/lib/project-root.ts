@@ -10,8 +10,6 @@ export interface RsctApprovalModes {
   trust_allowed_for?: string[]
   plan_token_ttl_minutes?: number
   plan_token_max_actions?: number
-  plan_token_ttl_slide_minutes?: number
-  plan_token_ttl_abs_minutes?: number
 }
 
 export interface RsctAuditConfig {
@@ -84,8 +82,6 @@ const RsctApprovalModesSchema = z
     trust_allowed_for: z.array(z.enum(TRUST_ALLOWED_TOOL_NAMES)).optional(),
     plan_token_ttl_minutes: z.number().int().min(5).max(480).optional(),
     plan_token_max_actions: z.number().int().min(1).max(100).optional(),
-    plan_token_ttl_slide_minutes: z.number().int().min(5).max(1440).optional(),
-    plan_token_ttl_abs_minutes: z.number().int().min(5).max(10080).optional(),
   })
   .strip()
 

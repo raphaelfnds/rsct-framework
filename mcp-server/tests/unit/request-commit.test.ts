@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -8,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { mintLine } from '../plan-token-fixture.js'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { PhaseState, PlanAuthorizationBlock } from '../../src/lib/phase-scope.js'
@@ -609,9 +611,13 @@ function tokenBlock(over: Partial<PlanAuthorizationBlock> = {}): PlanAuthorizati
   }
 }
 
-function seedState(state: PhaseState): void {
+function seedState(state: PhaseState, recordMint = true): void {
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
   writeFileSync(join(tmpRoot, '.rsct/phase-state.json'), JSON.stringify(state), 'utf8')
+  const t = state.plan_authorization
+  if (t && recordMint) {
+    appendFileSync(join(tmpRoot, '.rsct/audit.log'), `${mintLine(t)}\n`, 'utf8')
+  }
 }
 
 function readPhaseState(): PhaseState | null {
