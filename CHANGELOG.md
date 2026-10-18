@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-10-17
+
 ### Added
 
 - **A terminal guard (#91).** A third hook, `.rsct/scripts/terminal-guard.js`, installed by
