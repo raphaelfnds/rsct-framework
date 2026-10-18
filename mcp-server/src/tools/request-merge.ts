@@ -155,7 +155,7 @@ export interface RequestMergeInternal {
 export const requestMergeTool: Tool = {
   name: 'rsct_request_merge',
   description:
-    "§C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase via `gh pr merge --merge|--squash|--rebase`) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see §D).",
+    "§C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase, done by the developer on GitHub) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see §D).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -690,7 +690,7 @@ export async function requestMergeHandler(
   if (donePlan) {
     const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)
     hints.push(
-      `ℹ Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself — RSCT never auto-deletes.`,
+      `ℹ Merged '${input.source_branch}'. ${report.hint} Suggest deleting the merged working branch to the developer, with their OK: local with git branch -d, remote with rsct_request_push and branch ":<name>". Record keep|delete with rsct_plan_dispose, or remove the loose files yourself — RSCT never auto-deletes.`,
     )
   }
 

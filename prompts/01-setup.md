@@ -3607,18 +3607,19 @@ The script is invoked as `node <path>` from the hook, so a `// comment`
 between the shebang and the imports is parsed away by Node without
 behavioral change.
 
-> **Line-2 stamp — authoritative format (issue #16).** The two `echo`
-> lines below (here and in Phase 4.V.d) are the sole writers of
+> **Line-2 stamp — authoritative format (issue #16).** The `echo`
+> lines below (here, in Phase 4.V.d and in Phase 4.V.e) are the sole writers of
 > `// rsct-mcp v=<version> — installed by /rsct-setup`, and
 > `mcp-server/src/lib/version-drift.ts` is the reader: it parses the
 > version for display with `/^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/`, and —
 > more load-bearing — it drops exactly **lines 1-2** of the installed file
 > to recover the shipped body for its content comparison. So the layout is
 > fixed at *shebang on line 1, stamp on line 2, source body from line 3*.
-> Changing either `echo` must be done together with that reader. Both
-> blocks are pinned by `tests/bash/block-smoke.test.ts` (anchors
-> `Phase 4.V.b` / `Phase 4.V.d`), which asserts the produced line 2
-> verbatim.
+> Changing any of these `echo` lines must be done together with that reader.
+> The 4.V.b and 4.V.d blocks are pinned by `tests/bash/block-smoke.test.ts`
+> (anchors `Phase 4.V.b` / `Phase 4.V.d`), which asserts the produced line 2
+> verbatim; 4.V.e by `tests/bash/hook-registration.test.ts`, which reads the
+> copy back as `current`.
 
 ```bash
 echo "  CHECKPOINT: Phase 4.V.b executing canonical sanitizer script copy"
@@ -3815,10 +3816,17 @@ The `edit-scope-guard.js` script ships in the SAME `rsct-mcp`
 hook matched on the four editor tools, it BLOCKS an `Edit`/`Write`/
 `MultiEdit`/`NotebookEdit` (exit code 2) when the RSCT context is stale (a
 plan closed) or the target is out of the active spec scope — the mechanical
-half of the re-bootstrap gate (item 5). It fails **open** on any infra fault
-(missing/corrupt state, unmanaged project) so a broken guard never bricks
-editing. Gate the whole phase on `[ -n "$SANITIZER_SRC" ]` (rsct-mcp
-available, from 4.V.a) — the guard ships in the same package.
+half of the re-bootstrap gate (item 5). A project state it cannot use
+(missing/corrupt state, unmanaged project) lets the edit through, as before.
+A guard that cannot start — the copy missing or crashing — now blocks the
+edit: the command ends in `|| exit 2` and starts the guard with `NODE_OPTIONS`
+cleared (ADR-028). It also refuses, in any project, a write to a Claude Code
+settings file that would switch every hook off, change or remove an RSCT hook
+entry, leave such a file unparseable, or set an env key that changes how a hook starts (`NODE_OPTIONS`, `PATH`,
+`BASH_ENV` and the like).
+Gate the whole
+phase on `[ -n "$SANITIZER_SRC" ]` (rsct-mcp available, from 4.V.a) — the
+guard ships in the same package.
 
 ```bash
 echo "  CHECKPOINT: Phase 4.V.d executing canonical edit-scope guard install"
@@ -3860,9 +3868,9 @@ if [ -n "$SANITIZER_SRC" ]; then
       const target = process.argv[1];
       const MARKER = ".rsct/scripts/edit-scope-guard.js";
       const QUOTE = String.fromCharCode(34);
-      const LEGACY_CMD = "node ${CLAUDE_PROJECT_DIR}/" + MARKER;
-      const HOOK_CMD = "node " + QUOTE + "${CLAUDE_PROJECT_DIR}/" + MARKER + QUOTE;
+      const HOOK_CMD = "NODE_OPTIONS= node " + QUOTE + "${CLAUDE_PROJECT_DIR}/" + MARKER + QUOTE + " || exit 2";
       const MATCHER = "^(Edit|Write|MultiEdit|NotebookEdit)$";
+      const LABEL = "RSCT PreToolUse edit-scope guard hook";
       let settings = {};
       if (fs.existsSync(target)) {
         try {
@@ -3877,47 +3885,142 @@ if [ -n "$SANITIZER_SRC" ]; then
       }
       settings.hooks = settings.hooks || {};
       settings.hooks.PreToolUse = settings.hooks.PreToolUse || [];
-      let already = false;
-      let requoted = 0;
+      let canonical = false;
+      let replaced = 0;
+      const emptied = new Set();
       settings.hooks.PreToolUse.forEach(group => {
         if (!group || !Array.isArray(group.hooks)) return;
-        group.hooks.forEach(h => {
-          if (!h || typeof h.command !== "string" || h.command.indexOf(MARKER) === -1) return;
-          already = true;
-          if (h.command === LEGACY_CMD) {
-            h.command = HOOK_CMD;
-            requoted += 1;
-          }
+        const before = group.hooks.length;
+        group.hooks = group.hooks.filter(h => {
+          if (!h || typeof h.command !== "string" || h.command.indexOf(MARKER) === -1) return true;
+          if (!canonical && h.command === HOOK_CMD && group.matcher === MATCHER) { canonical = true; return true; }
+          replaced += 1;
+          return false;
         });
+        if (before > 0 && group.hooks.length === 0) emptied.add(group);
       });
-      if (requoted > 0) {
-        fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
-        console.log("Rewrote the RSCT PreToolUse edit-scope guard hook command with the path quoted in " + target);
-      } else if (already) {
-        console.log("RSCT PreToolUse edit-scope guard hook already present — no change.");
+      settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(group => !emptied.has(group));
+      if (!canonical) settings.hooks.PreToolUse.push({ matcher: MATCHER, hooks: [{ type: "command", command: HOOK_CMD }] });
+      if (canonical && replaced === 0) {
+        console.log(LABEL + " already present — no change.");
       } else {
-        settings.hooks.PreToolUse.push({
-          matcher: MATCHER,
-          hooks: [{ type: "command", command: HOOK_CMD }]
-        });
         fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
-        console.log("Installed RSCT PreToolUse edit-scope guard hook in " + target);
+        if (replaced > 0) console.log("Re-registered the " + LABEL + " in the form this rsct-mcp installs (" + replaced + " older or changed entry/entries replaced) in " + target);
+        else console.log("Installed " + LABEL + " in " + target);
       }
     ' "$SETTINGS_PATH"
   fi
 fi
 ```
 
-Re-running `/rsct-setup` refreshes the copied guard and is idempotent on
-the hook entry (keyed off the `.rsct/scripts/edit-scope-guard.js`
-substring), with the same one exception as 4.V.c: the exact unquoted
-command that setups before #114 wrote is rewritten with the path quoted.
-Devs should NOT hand-edit `.rsct/scripts/`.
+Re-running `/rsct-setup` refreshes the copied guard and leaves exactly one
+hook entry carrying the `.rsct/scripts/edit-scope-guard.js` marker, in the
+form this rsct-mcp installs: matcher `^(Edit|Write|MultiEdit|NotebookEdit)$`
+and the command `NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js" || exit 2`.
+Any other entry carrying the marker — the forms older setups wrote, or an
+edited one — is replaced; entries without the marker are not touched.
+`rsct_status` reports a guard entry in any other form as enforcement not
+running (ADR-028). Devs should NOT hand-edit `.rsct/scripts/`.
 
 **On the first run after #114 the guard goes live here.** A hook that was
 already registered runs the file this step just wrote, with no restart, so a
 later `Write` in this run can be refused with `stale_context` — rule 6 says
 what to do. On any later run the guard was live from the first step.
+
+**4.V.e — Install the PreToolUse terminal guard (#91)**
+
+The `terminal-guard.js` script ships in the same `dist/scripts/` directory.
+Registered as a **PreToolUse** hook on the three tools that run commands —
+`Bash`, `PowerShell` and `Monitor` — it refuses (exit code 2) a `git commit`,
+`push`, `merge`, `rebase`, `cherry-pick`, `revert` or `am`, and a
+`gh pr merge` (`env git …`, `git -C dir …`, `sh -c "…"`, `cmd /c …`,
+`powershell -Command …`, `wsl …`, `ssh host …`, an alias, a `node -e` that
+calls git), and names the RSCT tool to call instead (for `gh pr merge`, the
+developer merges on GitHub). Recovery forms (`--abort`,
+`--quit`, `--continue`, `--skip`) pass when nothing else follows the verb. The
+developer runs anything else they want by hand in their own terminal; the
+guard only sees the agent's tools. It fails **closed**: the command clears
+`NODE_OPTIONS` and ends in `|| exit 2`, so a guard that cannot start blocks
+the command. The entry is registered only when the copy landed.
+
+```bash
+echo "  CHECKPOINT: Phase 4.V.e executing canonical terminal guard install"
+if [ -n "$SANITIZER_SRC" ]; then
+  TERMINAL_SRC="$(dirname "$SANITIZER_SRC")/terminal-guard.js"
+  if [ ! -f "$TERMINAL_SRC" ]; then
+    echo "  ⚠ terminal-guard.js not found beside the sanitizer (older rsct-mcp?) — terminal guard NOT installed and NOT registered; upgrade rsct-mcp and re-run /rsct-setup." >&2
+  else
+    mkdir -p ".rsct/scripts" || { echo "  ⚠ ERROR: cannot create .rsct/scripts" >&2; exit 1; }
+    TERMINAL_TARGET="$(pwd)/.rsct/scripts/terminal-guard.js"
+    TERMINAL_DESIRED=$(
+      echo "#!/usr/bin/env node"
+      echo "// rsct-mcp v=$RSCT_MCP_VERSION — installed by /rsct-setup"
+      tail -n +2 "$TERMINAL_SRC"
+    )
+    if [ -f "$TERMINAL_TARGET" ] && [ "$(tr -d '\r' < "$TERMINAL_TARGET")" = "$(printf '%s' "$TERMINAL_DESIRED" | tr -d '\r')" ]; then
+      echo "  terminal guard already current (rsct-mcp v$RSCT_MCP_VERSION) — no rewrite needed"
+    else
+      printf '%s\n' "$TERMINAL_DESIRED" > "$TERMINAL_TARGET" \
+        || { echo "  ⚠ ERROR: write failed for .rsct/scripts/terminal-guard.js" >&2; exit 1; }
+      [ -f "$TERMINAL_TARGET" ] || { echo "  ⚠ ERROR: terminal-guard.js not created — aborting" >&2; exit 1; }
+      echo "  installed terminal guard (rsct-mcp v$RSCT_MCP_VERSION)"
+    fi
+
+    SETTINGS_PATH="$(pwd)/.claude/settings.json"
+    mkdir -p ".claude" || { echo "  ⚠ ERROR: cannot create .claude" >&2; exit 1; }
+    node -e '
+      const fs = require("fs");
+      const target = process.argv[1];
+      const MARKER = ".rsct/scripts/terminal-guard.js";
+      const QUOTE = String.fromCharCode(34);
+      const HOOK_CMD = "NODE_OPTIONS= node " + QUOTE + "${CLAUDE_PROJECT_DIR}/" + MARKER + QUOTE + " || exit 2";
+      const MATCHER = "^(Bash|PowerShell|Monitor)$";
+      const LABEL = "RSCT PreToolUse terminal guard hook";
+      let settings = {};
+      if (fs.existsSync(target)) {
+        try {
+          var raw = fs.readFileSync(target, "utf8");
+          if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
+          settings = JSON.parse(raw);
+        } catch (e) {
+          console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
+          process.exit(1);
+        }
+      }
+      settings.hooks = settings.hooks || {};
+      settings.hooks.PreToolUse = settings.hooks.PreToolUse || [];
+      let canonical = false;
+      let replaced = 0;
+      const emptied = new Set();
+      settings.hooks.PreToolUse.forEach(group => {
+        if (!group || !Array.isArray(group.hooks)) return;
+        const before = group.hooks.length;
+        group.hooks = group.hooks.filter(h => {
+          if (!h || typeof h.command !== "string" || h.command.indexOf(MARKER) === -1) return true;
+          if (!canonical && h.command === HOOK_CMD && group.matcher === MATCHER) { canonical = true; return true; }
+          replaced += 1;
+          return false;
+        });
+        if (before > 0 && group.hooks.length === 0) emptied.add(group);
+      });
+      settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(group => !emptied.has(group));
+      if (!canonical) settings.hooks.PreToolUse.push({ matcher: MATCHER, hooks: [{ type: "command", command: HOOK_CMD }] });
+      if (canonical && replaced === 0) {
+        console.log(LABEL + " already present — no change.");
+      } else {
+        fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf8");
+        if (replaced > 0) console.log("Re-registered the " + LABEL + " in the form this rsct-mcp installs (" + replaced + " older or changed entry/entries replaced) in " + target);
+        else console.log("Installed " + LABEL + " in " + target);
+      }
+    ' "$SETTINGS_PATH"
+  fi
+fi
+```
+
+**The terminal guard is live from the moment it is registered** — the next
+`Bash`, `PowerShell` or `Monitor` call in this same run goes through it. Every bash block of
+this prompt passes it (pinned by `tests/unit/terminal-guard-prompts.test.ts`);
+the commit at the end of setup goes through `rsct_request_commit`.
 
 **4.V.c2 — Register project-scope MCP (committable `.mcp.json`) (CAP-48)**
 
@@ -4121,7 +4224,7 @@ scope has no `.mcp.json` in any project to approve in the first place. The
 installer says so on screen and lists the projects that need it. Do not describe
 the switch as fully automatic for existing projects — it is not.
 
-**4.V.d — Verify**
+**4.V.f — Verify**
 
 After `/rsct-setup` completes, restart Claude Code so the hook is
 loaded. Next session boot will:
@@ -4194,7 +4297,12 @@ session boot.
    ```
    chore: apply RSCT v1.0.0 [migrated: §X §Y] [added: §Z] + docs
    ```
-6. **Wait for updated OK** before `git add` / `commit` / `push`.
+6. **Wait for updated OK** before `git add` / `commit` / `push`. Commit through
+   `rsct_request_commit` and push through `rsct_request_push` — once 4.V.e has
+   run, the terminal guard refuses a `git commit` or `git push` from the agent's
+   terminal. When those tools are not available in this session — `rsct-mcp` not
+   installed, or not loaded until the IDE restarts (step 8) — the developer
+   commits and pushes in their own terminal.
 7. If on protected branch: require explicit reconfirmed OK.
 8. **Fresh-install pointer (DX-1):** if `rsct-mcp` was NOT installed/loaded during THIS run
    (so Phase 1.9b was skipped — typically the first `/rsct-setup`, before the IDE restart

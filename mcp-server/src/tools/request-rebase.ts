@@ -32,6 +32,7 @@ import {
   crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 
 export const requestRebaseInputSchema = z
   .object({
@@ -232,12 +233,25 @@ export async function requestRebaseHandler(
     return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields(audit), hints: [hint] })
   }
 
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_request_rebase',
+    auditWriter: appendAudit,
+  })
+  const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : []
+
   const gate = await gateRequest({
     toolName: 'rsct_request_rebase',
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — rebase approval',
-      message: `Approve ${mode} of '${currentLabel}' ${mode === 'rebase' ? 'onto' : 'from'} '${input.ref}'? (history-rewriting)` + gateDialogFooter(projectRoot, config),
+      message:
+        `Approve ${mode} of '${currentLabel}' ${mode === 'rebase' ? 'onto' : 'from'} '${input.ref}'? (history-rewriting)` +
+        (installAdvisory.dialogLine ? `\n${installAdvisory.dialogLine}` : '') +
+        gateDialogFooter(projectRoot, config),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -265,7 +279,7 @@ export async function requestRebaseHandler(
       reason: gate.reason,
       fabrication_signals: gate.fabrication_signals,
       ...auditFields(audit),
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [...advisoryHints, `Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     })
   }
 
@@ -357,6 +371,7 @@ export async function requestRebaseHandler(
   )
 
   const hints: string[] = [
+    ...advisoryHints,
     mode === 'rebase'
       ? `Rebased '${currentLabel}' onto '${input.ref}' (${result.sha_before ?? '?'} → ${result.sha_after ?? '?'}).`
       : `Squash-staged '${input.ref}' into '${currentLabel}' — NOT committed. Commit the squashed change via rsct_request_commit.`,

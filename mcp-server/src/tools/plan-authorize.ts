@@ -41,6 +41,7 @@ import {
   PLAN_TOKEN_MAX_ACTIONS_MAX,
 } from '../lib/plan-authorization.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 
 export const planAuthorizeInputSchema = z
   .object({
@@ -156,12 +157,26 @@ export async function planAuthorizeHandler(
   const branch = gitState.branch
   const branchLabel = branch ?? '<no-branch>'
 
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config?.rsct_version ?? null,
+    auditConfig: config?.audit,
+    tool: 'rsct_plan_authorize',
+    auditWriter: appendAudit,
+  })
+  const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : []
+
   const gate = await gateRequest({
     toolName: 'rsct_plan_authorize',
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — authorize batch plan execution',
-      message: `Authorize batch commits for this plan on '${branchLabel}'?\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.` + gateDialogFooter(projectRoot, config),
+      message:
+        `Authorize batch commits for this plan on '${branchLabel}'?` +
+        (installAdvisory.dialogLine ? `\n${installAdvisory.dialogLine}` : '') +
+        `\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.` +
+        gateDialogFooter(projectRoot, config),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -197,7 +212,7 @@ export async function planAuthorizeHandler(
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config?.audit), `Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+      hints: [...anchorHints(projectRoot, config?.audit), ...advisoryHints, `Approval rejected (${gate.reject_kind}): ${gate.reason}`],
     }
   }
 
@@ -355,7 +370,7 @@ export async function planAuthorizeHandler(
   )
   const afields = auditFields(audit)
 
-  const hints: string[] = [...anchorHints(projectRoot, config?.audit),
+  const hints: string[] = [...anchorHints(projectRoot, config?.audit), ...advisoryHints,
     `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`,
   ]
   if (!record.ok) {

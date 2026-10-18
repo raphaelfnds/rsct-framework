@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, it, expect, afterEach } from 'vitest'
 import {
+  EDIT_GUARD_HOOK,
+  TERMINAL_GUARD_HOOK,
   getInstallDriftNotice,
   readScriptEvidence,
   readScriptRegistration,
@@ -427,7 +429,7 @@ describe('readScriptEvidence', () => {
     const root = mkdtempSync(join(tmpdir(), 'rsct-drift-'))
     dirs.push(root)
     const ev = readScriptEvidence(root, null)
-    expect(ev).toHaveLength(2)
+    expect(ev.map((e) => e.name)).toEqual(['edit-scope-guard.js', 'sanitize-permissions.js', 'terminal-guard.js'])
     expect(ev.every((e) => e.state === 'absent')).toBe(true)
   })
 
@@ -506,12 +508,37 @@ describe('readScriptRegistration — file-backed (#24)', () => {
 
   const GUARD_CMD = 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js'
   const SANITIZE_CMD = 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js'
+  const canonicalGuard = (hook = EDIT_GUARD_HOOK): string => withHook('PreToolUse', hook.command, { matcher: hook.matcher })
 
   it('recognizes the hook entry setup writes', () => {
-    const root = project({
-      settings: withHook('PreToolUse', GUARD_CMD, { matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$' }),
+    expect(readScriptRegistration(project({ settings: canonicalGuard() }), 'edit-scope-guard.js')).toBe('registered')
+    expect(readScriptRegistration(project({ settings: canonicalGuard(TERMINAL_GUARD_HOOK) }), 'terminal-guard.js')).toBe('registered')
+  })
+
+  it('reports a guard entry in any other form as altered — an older setup, or an edit', () => {
+    const forms = [
+      withHook('PreToolUse', GUARD_CMD, { matcher: EDIT_GUARD_HOOK.matcher }),
+      withHook('PreToolUse', 'node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js"', { matcher: EDIT_GUARD_HOOK.matcher }),
+      withHook('PreToolUse', EDIT_GUARD_HOOK.command.replace(' || exit 2', ''), { matcher: EDIT_GUARD_HOOK.matcher }),
+      withHook('PreToolUse', EDIT_GUARD_HOOK.command + '; exit 0', { matcher: EDIT_GUARD_HOOK.matcher }),
+      withHook('PreToolUse', EDIT_GUARD_HOOK.command, { matcher: '^Write$' }),
+      withHook('PreToolUse', EDIT_GUARD_HOOK.command),
+    ]
+    for (const settings of forms) expect(readScriptRegistration(project({ settings }), 'edit-scope-guard.js')).toBe('altered')
+    const terminal = withHook('PreToolUse', TERMINAL_GUARD_HOOK.command, { matcher: 'Bash' })
+    expect(readScriptRegistration(project({ settings: terminal }), 'terminal-guard.js')).toBe('altered')
+  })
+
+  it('takes the canonical entry when an altered one sits beside it', () => {
+    const both = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [{ type: 'command', command: 'node .rsct/scripts/terminal-guard.js' }] },
+          { matcher: TERMINAL_GUARD_HOOK.matcher, hooks: [{ type: 'command', command: TERMINAL_GUARD_HOOK.command }] },
+        ],
+      },
     })
-    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+    expect(readScriptRegistration(project({ settings: both }), 'terminal-guard.js')).toBe('registered')
   })
 
   it('reports unregistered when the file parses but holds no matching entry', () => {
@@ -535,13 +562,15 @@ describe('readScriptRegistration — file-backed (#24)', () => {
     expect(readScriptRegistration(root, 'sanitize-permissions.js')).toBe('registered')
   })
 
-  it('tolerates backslash separators — a hand-written Windows path still runs', () => {
+  it('folds backslash separators: a hand-written Windows sanitizer path counts, a guard entry in that form is altered', () => {
     // Written as JSON text with escaped backslashes, exactly as the file holds
     // them. Without folding, this is a false SECURITY claim about a live hook.
     const root = project({
-      settings: withHook('PreToolUse', 'node C:\\proj\\.rsct\\scripts\\edit-scope-guard.js'),
+      settings: withHook('SessionStart', 'node C:\\proj\\.rsct\\scripts\\sanitize-permissions.js'),
     })
-    expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
+    expect(readScriptRegistration(root, 'sanitize-permissions.js')).toBe('registered')
+    const guard = project({ settings: withHook('PreToolUse', 'node C:\\proj\\.rsct\\scripts\\edit-scope-guard.js') })
+    expect(readScriptRegistration(guard, 'edit-scope-guard.js')).toBe('altered')
   })
 
   it('sees through a UTF-8 BOM now that every RSCT reader does (#12)', () => {
@@ -550,7 +579,7 @@ describe('readScriptRegistration — file-backed (#24)', () => {
     // sanitizer aborted, enforcement genuinely was not running, and a lenient
     // read would have found the hook and reported healthy. #12 fixed all eleven
     // parse sites, so the hook this finds really does run.
-    const root = project({ settings: '\uFEFF' + withHook('PreToolUse', GUARD_CMD) })
+    const root = project({ settings: '\uFEFF' + canonicalGuard() })
     expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
   })
 
@@ -558,7 +587,7 @@ describe('readScriptRegistration — file-backed (#24)', () => {
     // Documentation, not coverage: JSON forbids a literal CR inside a string, so
     // the carriage return never reaches the command value and no code here is
     // CRLF-sensitive. Kept so nobody bolts a readNormalized onto this path.
-    const root = project({ settings: withHook('PreToolUse', GUARD_CMD).replace(/\n/g, '\r\n') })
+    const root = project({ settings: canonicalGuard().replace(/\n/g, '\r\n') })
     expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
   })
 
@@ -576,7 +605,7 @@ describe('readScriptRegistration — file-backed (#24)', () => {
   })
 
   it('still finds the hook when settings.json is malformed but the local file carries it', () => {
-    const root = project({ settings: '{ broken', local: withHook('PreToolUse', GUARD_CMD) })
+    const root = project({ settings: '{ broken', local: canonicalGuard() })
     expect(readScriptRegistration(root, 'edit-scope-guard.js')).toBe('registered')
   })
 
@@ -646,10 +675,8 @@ describe('readScriptEvidence — against the real dist/scripts artifacts', () =>
               { hooks: [{ type: 'command', command: 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js' }] },
             ],
             PreToolUse: [
-              {
-                matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$',
-                hooks: [{ type: 'command', command: 'node ${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js' }],
-              },
+              { matcher: EDIT_GUARD_HOOK.matcher, hooks: [{ type: 'command', command: EDIT_GUARD_HOOK.command }] },
+              { matcher: TERMINAL_GUARD_HOOK.matcher, hooks: [{ type: 'command', command: TERMINAL_GUARD_HOOK.command }] },
             ],
           },
         },
@@ -658,7 +685,7 @@ describe('readScriptEvidence — against the real dist/scripts artifacts', () =>
       ) + '\n',
     )
 
-    for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
+    for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js', 'terminal-guard.js']) {
       const shippedText = readFileSync(join(DIST, name), 'utf8')
       // Phase 4.V.b: shebang, stamp, then `tail -n +2` of the source — built in
       // `$( … )` (strips trailing newlines) and written with `printf '%s\n'`.

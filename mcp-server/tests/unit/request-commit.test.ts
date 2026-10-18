@@ -1048,7 +1048,11 @@ describe('rsct_request_commit — install-drift advisory (#16)', () => {
     expect(entry).toBeDefined()
     expect(entry?.severity).toBe('security')
     expect(entry?.tool).toBe('rsct_request_commit')
-    expect((entry?.affected_components as unknown[]).length).toBe(2)
+    expect((entry?.affected_components as Array<{ name: string }>).map((c) => c.name)).toEqual([
+      'edit-scope-guard.js',
+      'sanitize-permissions.js',
+      'terminal-guard.js',
+    ])
   })
 
   it('still carries the advisory when the commit is REJECTED', async () => {

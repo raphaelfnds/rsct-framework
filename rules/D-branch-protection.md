@@ -25,19 +25,19 @@ Without explicit reconfirmed authorization for the current action:
   and open a PR.
 
 **"Merge" = any of GitHub's three PR methods.** Wherever this framework says
-"merge" (the §C `rsct_request_merge`, or a PR), it covers **merge commit**
-(`gh pr merge --merge`), **squash and merge** (`--squash`), and **rebase and
-merge** (`--rebase`) — there is no fourth method. After a merge/PR completes by
+"merge" (the §C `rsct_request_merge`, or a PR), it covers **merge commit**,
+**squash and merge** and **rebase and merge** — there is no fourth method. A PR
+is merged by the developer, on GitHub or in their own terminal. After a merge/PR completes by
 ANY of them, **and once the task's plan/progress/spec work is done**, proactively
 **suggest** (optional, the dev's OK, never automatic): delete the **working
-branch** (local + remote — `git branch -d` / `git push origin --delete`, GitHub's
-"Delete branch", or `gh pr merge --delete-branch`) and the
+branch** (local + remote — `git branch -d`, then `rsct_request_push` with
+`branch: ":<branch>"` or GitHub's "Delete branch") and the
 `plan_/progress_/spec_<slug>.md` tracking files. When `rsct-mcp` is installed,
 record the keep|delete decision with `rsct_plan_dispose` (plan-lifecycle-v2) —
 it prints an **advisory** cleanup report and **never auto-deletes**, and it works
 for the GitHub-PR-merge terminal too (where neither `rsct_request_merge` nor
-`_push` runs). A PR-level squash/rebase runs via `gh` / the web UI, so raising the
-suggestion is on you. (In `plan_file_retention: documented` mode, `spec_<slug>.md`
+`_push` runs). A PR-level merge happens on GitHub, so raising the suggestion is
+on you. (In `plan_file_retention: documented` mode, `spec_<slug>.md`
 is kept — tracked as durable design docs.)
 
 **Pre-integration hygiene checklist (before any outward integration):**
@@ -80,9 +80,9 @@ operation: merge → `HEAD...<source_branch>` · rebase → `<ref>...HEAD` ·
 squash → `HEAD...<ref>` · push → `<remote>/<dest_branch>...<source_ref>`. It checks
 **coverage** — that the carried paths were claimed as swept — not that a sweep
 happened or found anything. **A local rebase/squash now has a §C-gated tool**
-(`rsct_request_rebase`, which requires its own `pre_merge_ack`); **only PR merges
-via `gh`/the web UI still have no MCP tool** — there the checklist is **yours to
-run as prose** before the outward-facing action. A push to a non-protected
+(`rsct_request_rebase`, which requires its own `pre_merge_ack`); **only PR merges,
+which the developer does on GitHub, have no MCP tool** — there the checklist is
+**yours to run as prose** before you hand the PR over. A push to a non-protected
 feature/WIP branch is not an integration and does not need the checklist.
 
 Even if the user authorized a push on a protected branch in the same session,

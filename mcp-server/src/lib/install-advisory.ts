@@ -78,6 +78,7 @@ export function evaluateInstallAdvisory(args: {
       mcp_version: RSCT_MCP_VERSION,
       severity: drift.severity,
       affected_components: drift.affected_components,
+      ...(drift.hooks_disabled && { hooks_disabled: drift.hooks_disabled }),
     },
     args.auditConfig,
   )

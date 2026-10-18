@@ -14,6 +14,7 @@ const ROOT = repoRoot(join(__dirname, '..', 'bash'))
 const BASH = bashAvailable()
 const SANITIZER = 'sanitize-permissions.js'
 const GUARD = 'edit-scope-guard.js'
+const TERMINAL = 'terminal-guard.js'
 const DIST_BODY = "// node_modules/zod/v3/external.js\nexport const s = 1 // bundled comment\n"
 const DIST_FILE = `#!/usr/bin/env node\n${DIST_BODY}`
 
@@ -27,6 +28,7 @@ beforeEach(() => {
   dist = mkdtempSync(join(tmpdir(), 'rsct-shipped-dist-'))
   writeFileSync(join(dist, SANITIZER), DIST_FILE)
   writeFileSync(join(dist, GUARD), DIST_FILE.replace('s = 1', 'g = 2'))
+  writeFileSync(join(dist, TERMINAL), DIST_FILE.replace('s = 1', 't = 3'))
   initSweepRepo(root)
   write('.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } }))
   write('README.md', 'fixture\n')
@@ -85,11 +87,13 @@ describe.skipIf(!BASH)('shipped scripts — the copies /rsct-setup writes commit
     const seedFiles = {
       [`fake-dist/${SANITIZER}`]: readFileSync(join(dist, SANITIZER), 'utf8'),
       [`fake-dist/${GUARD}`]: readFileSync(join(dist, GUARD), 'utf8'),
+      [`fake-dist/${TERMINAL}`]: readFileSync(join(dist, TERMINAL), 'utf8'),
     }
     const b = runBlock(ROOT, { promptBasename: '01-setup.md', anchor: 'CHECKPOINT: Phase 4.V.b executing canonical sanitizer script copy', preamble, seedFiles })
     const d = runBlock(ROOT, { promptBasename: '01-setup.md', anchor: 'CHECKPOINT: Phase 4.V.d executing canonical edit-scope guard install', preamble, seedFiles })
-    cleanup.push(b.dir, d.dir)
-    for (const [dir, name] of [[b.dir, SANITIZER], [d.dir, GUARD]] as const) {
+    const e = runBlock(ROOT, { promptBasename: '01-setup.md', anchor: 'CHECKPOINT: Phase 4.V.e executing canonical terminal guard install', preamble, seedFiles })
+    cleanup.push(b.dir, d.dir, e.dir)
+    for (const [dir, name] of [[b.dir, SANITIZER], [d.dir, GUARD], [e.dir, TERMINAL]] as const) {
       stageScript(`.rsct/scripts/${name}`, readFileSync(join(dir, '.rsct', 'scripts', name)))
     }
     write('CLAUDE.md', '# project\n')

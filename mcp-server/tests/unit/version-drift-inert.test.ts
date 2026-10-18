@@ -6,13 +6,14 @@ import type { AuditEntry } from '../../src/lib/audit-log.js'
 import type { GitExecutor } from '../../src/lib/git.js'
 import { evaluateInstallAdvisory } from '../../src/lib/install-advisory.js'
 import type { DialogOptions } from '../../src/lib/os-dialog.js'
-import { getInstallDriftNotice, readScriptEvidence } from '../../src/lib/version-drift.js'
+import { EDIT_GUARD_HOOK, TERMINAL_GUARD_HOOK, getInstallDriftNotice, readScriptEvidence } from '../../src/lib/version-drift.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import { statusHandler } from '../../src/tools/status.js'
 
 const DIST = resolve(__dirname, '..', '..', 'dist', 'scripts')
 const GUARD = 'edit-scope-guard.js'
 const SANITIZER = 'sanitize-permissions.js'
+const TERMINAL = 'terminal-guard.js'
 const INERT_LINE = 'if (isCliEntry()) {'
 
 const RELEASED_2_12_3_GUARD_FRAGMENT = [
@@ -47,10 +48,8 @@ const HOOKS =
           { hooks: [{ type: 'command', command: 'node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/sanitize-permissions.js"' }] },
         ],
         PreToolUse: [
-          {
-            matcher: '^(Edit|Write|MultiEdit|NotebookEdit)$',
-            hooks: [{ type: 'command', command: 'node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js"' }],
-          },
+          { matcher: EDIT_GUARD_HOOK.matcher, hooks: [{ type: 'command', command: EDIT_GUARD_HOOK.command }] },
+          { matcher: TERMINAL_GUARD_HOOK.matcher, hooks: [{ type: 'command', command: TERMINAL_GUARD_HOOK.command }] },
         ],
       },
     },
@@ -84,6 +83,7 @@ function project(guard: string, opts: { registered?: boolean; sanitizer?: string
   writeFileSync(join(root, '.claude', 'settings.json'), opts.registered === false ? '{}\n' : HOOKS)
   writeFileSync(join(root, '.rsct', 'scripts', GUARD), guard)
   writeFileSync(join(root, '.rsct', 'scripts', SANITIZER), opts.sanitizer ?? stamped(builtBody(SANITIZER)))
+  writeFileSync(join(root, '.rsct', 'scripts', TERMINAL), stamped(builtBody(TERMINAL)))
   return root
 }
 

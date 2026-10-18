@@ -70,9 +70,9 @@ updates what changed.
 | `documentation/` | Architecture, decisions, knowledge, and impact templates you fill over time. |
 | `.rsct.json` | Project config — protected branches, topology, the `install` block (the uninstall marker). |
 | Memory entries | Under `.claude/projects/.../memory/` — durable facts for the agent. |
-| `.claude/settings.json` | The SessionStart sanitizer hook and the PreToolUse edit-scope guard (only if you opted into `rsct-mcp`). |
+| `.claude/settings.json` | The SessionStart sanitizer hook and the two PreToolUse guards — edit scope and terminal (only if you opted into `rsct-mcp`). |
 | `.gitignore` | A marker-wrapped block for the branch-local plan-tracking files. |
-| `.rsct/scripts/` | The two enforcement scripts the hooks above point at. |
+| `.rsct/scripts/` | The three enforcement scripts the hooks above point at. |
 | `.mcp.json` | Only when you chose the project registration scope at install time. Setup also approves it for you, in `.claude/settings.local.json` — a `.mcp.json` does not spawn until approved. |
 | `CONVENTIONS.md` | Optional, and only if you say yes — the standing code conventions. |
 
@@ -120,8 +120,10 @@ misbehaves, that's a bug worth filing.
    nested inside another repository, or a linked worktree. When it differs, the
    approval dialog says so. Routine entries stay there for 10 days; the entries a
    gate can still use and the override and skip records stay for good (see "Audit
-   log" in `mcp-server/README.md`). Without the companion, a plain `git commit` is refused or
-   triggers a reauthorization request per the `CLAUDE.md` rules.
+   log" in `mcp-server/README.md`). A plain `git commit` from Claude's terminal is
+   refused by the terminal guard, which names the RSCT tool to call; you can still run
+   it yourself in your own terminal. Without the companion, a commit triggers a
+   reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
    project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
    the framework from the machine. It asks about the companion separately: keep

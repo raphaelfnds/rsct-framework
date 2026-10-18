@@ -24577,12 +24577,21 @@ function readClaudeSettings(projectRoot) {
 }
 
 // src/lib/version-drift.ts
+var EDIT_GUARD_HOOK = {
+  matcher: "^(Edit|Write|MultiEdit|NotebookEdit)$",
+  command: 'NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/edit-scope-guard.js" || exit 2'
+};
+var TERMINAL_GUARD_HOOK = {
+  matcher: "^(Bash|PowerShell|Monitor)$",
+  command: 'NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/scripts/terminal-guard.js" || exit 2'
+};
 var ENFORCEMENT_SCRIPTS = /* @__PURE__ */ new Map([
   [
     "sanitize-permissions.js",
     { event: "SessionStart", marker: ".rsct/scripts/sanitize-permissions.js" }
   ],
-  ["edit-scope-guard.js", { event: "PreToolUse", marker: ".rsct/scripts/edit-scope-guard.js" }]
+  ["edit-scope-guard.js", { event: "PreToolUse", marker: ".rsct/scripts/edit-scope-guard.js", canonical: EDIT_GUARD_HOOK }],
+  ["terminal-guard.js", { event: "PreToolUse", marker: ".rsct/scripts/terminal-guard.js", canonical: TERMINAL_GUARD_HOOK }]
 ]);
 var STAMP_RE = /^\s*\/\/\s*rsct-mcp\s+v=([0-9]\S*)/;
 var STAMP_LINE_RE = /^\s*\/\/\s*rsct-mcp\s+v=/;
@@ -24654,35 +24663,62 @@ function stampOf(text2) {
   const m = STAMP_RE.exec(line2);
   return m ? m[1] ?? null : null;
 }
-function hookCommands(data, event) {
+function hookEntries(data, event) {
   const asRecord = (v) => typeof v === "object" && v !== null ? v : null;
   const groups = asRecord(asRecord(data)?.hooks)?.[event];
   if (!Array.isArray(groups)) return [];
-  const commands = [];
+  const entries = [];
   for (const group of groups) {
-    const inner = asRecord(group)?.hooks;
+    const g = asRecord(group);
+    const inner = g?.hooks;
     if (!Array.isArray(inner)) continue;
     for (const entry of inner) {
       const command = asRecord(entry)?.command;
-      if (typeof command === "string") commands.push(command);
+      if (typeof command === "string") entries.push({ matcher: g?.matcher, command });
     }
   }
-  return commands;
+  return entries;
 }
 function readRegistration(settings, script) {
   if (settings.length === 0) return "unknown";
   let complete = true;
+  let altered = false;
   for (const file of settings) {
     if (file.status === "absent") continue;
     if (file.status !== "ok") {
       complete = false;
       continue;
     }
-    for (const command of hookCommands(file.data, script.event)) {
-      if (command.replace(/\\/g, "/").includes(script.marker)) return "registered";
+    for (const entry of hookEntries(file.data, script.event)) {
+      if (!entry.command.replace(/\\/g, "/").includes(script.marker)) continue;
+      if (!script.canonical) return "registered";
+      if (entry.matcher === script.canonical.matcher && entry.command === script.canonical.command) return "registered";
+      altered = true;
     }
   }
+  if (altered) return "altered";
   return complete ? "unregistered" : "unknown";
+}
+function readHooksDisabled(projectRoot, home = homedir()) {
+  const candidates = [
+    { path: join(projectRoot, ".claude", "settings.local.json"), label: ".claude/settings.local.json" },
+    { path: join(projectRoot, ".claude", "settings.json"), label: ".claude/settings.json" },
+    { path: join(home, ".claude", "settings.json"), label: "~/.claude/settings.json" }
+  ];
+  for (const c of candidates) {
+    const raw = readNormalized(c.path);
+    if (raw === null) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(raw.replace(/^﻿/, ""));
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    const value = parsed.disableAllHooks;
+    if (typeof value === "boolean") return value ? { file: c.label } : null;
+  }
+  return null;
 }
 function readScriptEvidence(projectRoot, shippedDir = shippedScriptsDir()) {
   if (typeof projectRoot !== "string" || projectRoot.length === 0) return [];
@@ -24747,6 +24783,9 @@ function describeNotRunning(c) {
   if (c.state === "inert") {
     return `${c.name} is installed, but it is a build that cannot block an edit (every rsct-mcp from 2.2.0 to 2.12.3 shipped it that way)`;
   }
+  if (c.registration === "altered") {
+    return `${c.name} is installed, but its hook entry is not in the form this rsct-mcp installs (an older /rsct-setup, or an edit of the matcher or the command)`;
+  }
   const event = ENFORCEMENT_SCRIPTS.get(c.name)?.event;
   const searched = PROJECT_SETTINGS_FILES.map((f) => `.claude/${f}`).join(" or ");
   return `${c.name} is installed, but no ${event ?? "hook"} entry pointing at it was found in this project's ${searched}`;
@@ -24757,12 +24796,13 @@ function describeStale(c) {
 }
 function isNotRunning(e) {
   if (e.state === "absent" || e.state === "inert") return true;
-  if (e.state === "current" || e.state === "stale") return e.registration === "unregistered";
+  if (e.state === "current" || e.state === "stale") return e.registration === "unregistered" || e.registration === "altered";
   return false;
 }
 function getInstallDriftNotice(args2) {
   const { projectRoot, projectVersion, mcpVersion } = args2;
   const evidence = args2.evidence ?? readScriptEvidence(projectRoot);
+  const hooksDisabled = args2.hooksDisabled === void 0 ? readHooksDisabled(projectRoot) : args2.hooksDisabled;
   const toComponent = (e) => ({
     name: e.name,
     state: e.state,
@@ -24773,6 +24813,16 @@ function getInstallDriftNotice(args2) {
   const notRunning = relevant.filter(isNotRunning).map(toComponent);
   const affected_components = relevant.filter((e) => isNotRunning(e) || e.state === "stale").map(toComponent);
   const m = mcpVersion.replace(/^v/, "");
+  if (hooksDisabled) {
+    const rest = notRunning.length > 0 ? `; ${notRunning.map(describeNotRunning).join("; ")}` : "";
+    const repair = notRunning.length > 0 ? ", run /rsct-setup to repair the rest" : "";
+    return {
+      severity: "security",
+      affected_components,
+      hooks_disabled: hooksDisabled,
+      hint: `\u26A0 SECURITY: RSCT enforcement is not running in this project \u2014 every Claude Code hook is switched off ("disableAllHooks": true in ${hooksDisabled.file})${rest}. Remove that setting yourself${repair}, then restart the IDE. See docs/troubleshooting.md. (never blocks)`
+    };
+  }
   if (notRunning.length > 0) {
     return {
       severity: "security",
@@ -44129,7 +44179,8 @@ function evaluateInstallAdvisory(args2) {
       project_version: args2.projectVersion ?? null,
       mcp_version: RSCT_MCP_VERSION,
       severity: drift.severity,
-      affected_components: drift.affected_components
+      affected_components: drift.affected_components,
+      ...drift.hooks_disabled && { hooks_disabled: drift.hooks_disabled }
     },
     args2.auditConfig
   );
@@ -46634,7 +46685,7 @@ var requestMergeInputSchema = external_exports.object({
 }).strict();
 var requestMergeTool = {
   name: "rsct_request_merge",
-  description: "\xA7C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase via `gh pr merge --merge|--squash|--rebase`) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see \xA7D).",
+  description: "\xA7C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase, done by the developer on GitHub) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see \xA7D).",
   inputSchema: {
     type: "object",
     properties: {
@@ -47078,7 +47129,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
   if (donePlan) {
     const report = planCleanupReport(projectRoot, donePlan.slug, config2 ?? null);
     hints.push(
-      `\u2139 Merged '${input.source_branch}'. ${report.hint} Delete the merged working branch (local + remote) if done. Record keep|delete with rsct_plan_dispose, or remove the loose files yourself \u2014 RSCT never auto-deletes.`
+      `\u2139 Merged '${input.source_branch}'. ${report.hint} Suggest deleting the merged working branch to the developer, with their OK: local with git branch -d, remote with rsct_request_push and branch ":<name>". Record keep|delete with rsct_plan_dispose, or remove the loose files yourself \u2014 RSCT never auto-deletes.`
     );
   }
   return {
@@ -47153,12 +47204,22 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
   const gitState = internal.gitStateOverride ?? readGitState(projectRoot);
   const branch = gitState.branch;
   const branchLabel = branch ?? "<no-branch>";
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_plan_authorize",
+    auditWriter: appendAudit
+  });
+  const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : [];
   const gate = await gateRequest({
     toolName: "rsct_plan_authorize",
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 authorize batch plan execution",
-      message: `Authorize batch commits for this plan on '${branchLabel}'?
+      message: `Authorize batch commits for this plan on '${branchLabel}'?` + (installAdvisory.dialogLine ? `
+${installAdvisory.dialogLine}` : "") + `
 
 This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 limited to this plan and branch, until it expires, runs out, or is revoked.` + gateDialogFooter(projectRoot, config2)
     },
@@ -47195,7 +47256,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
       ...auditFields(audit2),
       anti_replay_persisted: null,
       anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config2?.audit), `Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [...anchorHints(projectRoot, config2?.audit), ...advisoryHints, `Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     };
   }
   const reject2 = (reject_kind, reason) => {
@@ -47335,6 +47396,7 @@ This lets rsct_request_commit commit WITHOUT a fresh approval each time \u2014 l
   const afields = auditFields(audit);
   const hints = [
     ...anchorHints(projectRoot, config2?.audit),
+    ...advisoryHints,
     `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`
   ];
   if (!record2.ok) {
@@ -47682,12 +47744,22 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     );
     return base({ reject_kind: ackDecision.kind, reason: hint, ...auditFields(audit2), hints: [hint] });
   }
+  const installAdvisory = evaluateInstallAdvisory({
+    projectRoot,
+    rsctInstalled: resolution.rsct_installed,
+    projectVersion: config2?.rsct_version ?? null,
+    auditConfig: config2?.audit,
+    tool: "rsct_request_rebase",
+    auditWriter: appendAudit
+  });
+  const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : [];
   const gate = await gateRequest({
     toolName: "rsct_request_rebase",
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 rebase approval",
-      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)` + gateDialogFooter(projectRoot, config2)
+      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)` + (installAdvisory.dialogLine ? `
+${installAdvisory.dialogLine}` : "") + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -47714,7 +47786,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       reason: gate.reason,
       fabrication_signals: gate.fabrication_signals,
       ...auditFields(audit2),
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+      hints: [...advisoryHints, `Approval rejected (${gate.reject_kind}): ${gate.reason}`]
     });
   }
   const approval = gate.approval;
@@ -47798,6 +47870,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     config2?.audit
   );
   const hints = [
+    ...advisoryHints,
     mode === "rebase" ? `Rebased '${currentLabel}' onto '${input.ref}' (${result.sha_before ?? "?"} \u2192 ${result.sha_after ?? "?"}).` : `Squash-staged '${input.ref}' into '${currentLabel}' \u2014 NOT committed. Commit the squashed change via rsct_request_commit.`
   ];
   const bootstrap = evaluateBootstrapMarker({ projectRoot, now });

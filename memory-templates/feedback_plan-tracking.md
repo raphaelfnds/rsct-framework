@@ -33,8 +33,8 @@ Before any `git push` or merge to main/test:
 After a COMPLETED merge or PR — proactively SUGGEST cleanup (optional, the
 dev's OK, never automatic, and only once the plan/progress/spec work is done):
 1. Delete the **working branch** (local + remote):
-   `git branch -d <branch>` + `git push origin --delete <branch>`, or GitHub's
-   "Delete branch" button, or `gh pr merge --delete-branch`.
+   `git branch -d <branch>`, then `rsct_request_push` with `branch: ":<branch>"`
+   or GitHub's "Delete branch" button.
 2. Delete the branch-local `plan_/progress_/spec_<slug>.md` files (they must
    never be tracked on a protected branch anyway). When `rsct-mcp` is installed,
    record the keep|delete decision with `rsct_plan_dispose` (plan-lifecycle-v2)
@@ -44,8 +44,8 @@ dev's OK, never automatic, and only once the plan/progress/spec work is done):
 
 This applies to **every** merge strategy — "merge" in this framework means any
 of GitHub's three PR methods, and the cleanup is identical for all:
-**merge commit** (`gh pr merge --merge`), **squash and merge** (`--squash`),
-and **rebase and merge** (`--rebase`) — as well as a local `git merge` /
+**merge commit**, **squash and merge** and **rebase and merge**, which the
+developer does on GitHub — as well as a local merge through
 `rsct_request_merge`. If the dev declines, proceed without a pending item.
 
 Naming alias: `spec_<slug>.md` is an accepted synonym of `plan_<slug>.md`
