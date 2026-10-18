@@ -788,7 +788,7 @@ pins it. The scripts are bash, not sh: measured with dash, the previous installe
 measured locally; one test drives a real npm on the CI matrix.
 
 ### ADR-022 — The hook programs are launchers, and the edit-scope guard judges resolved paths (#114)
-**Status**: active; the dialog-free-lane-suspension consequence is superseded by ADR-023 (#80, 2.13.4), and the named limit "each edit there now writes one `rsct_json.*` audit line" is bounded to about one per hour by ADR-024 (#93, 2.13.5), once `/rsct-setup` has refreshed the guard copy
+**Status**: active; the dialog-free-lane-suspension consequence is superseded by ADR-023 (#80, 2.13.4), and the named limit "each edit there now writes one `rsct_json.*` audit line" is bounded to about one per hour by ADR-024 (#93, 2.13.5), once `/rsct-setup` has refreshed the guard copy; for the PreToolUse guards, ADR-028 (#91, 2.15.0) replaces the edit guard's fail-open on an internal fault (its behaviour before 2.15.0) and supersedes "any other command carrying the marker is … left alone", and the named limits "a command the developer edited by hand is never rewritten" and "the dialog that mints it does not carry the warning line"
 **Tags**: hooks, edit-scope, setup, install-drift, cross-os
 **Context**: from 2.2.0 to 2.12.3 the installed `edit-scope-guard.js` never refused an edit. Three
 causes, each MEASURED. (1) `src/scripts/edit-scope-guard.ts` imported one helper from
@@ -1495,6 +1495,146 @@ refused when the tool is listed and when the dialog is forced.
 Not measured: macOS outside the CI macOS cells, `--no-markup` on screen, a NUL on a real
 MessageBox, and zenity other than 4.0.1.
 
+### ADR-028 — A terminal guard refuses git's gated verbs from the agent's tools; the PreToolUse guards fail closed (#91, 2.15.0)
+**Status**: active. Supersedes, from ADR-022 (#114): "any other command carrying the marker is …
+left alone" in `/rsct-setup` for the PreToolUse guards (the sanitizer's 4.V.c still leaves an
+edited command alone), and the named limits "a command the developer edited by hand is never
+rewritten" and "the dialog that mints it does not carry the warning line". It also replaces the
+edit guard's fail-open on an internal fault, its behaviour before 2.15.0.
+**Tags**: gates, hooks, terminal, cross-os
+
+**Context**: every commit, push, merge and rebase gate lives inside an RSCT tool; the agent's
+terminal was watched by nothing but a session-start cleanup of standing permissions. MEASURED
+2026-10-17 (Claude Code 2.1.173, Windows, Git Bash hook shell, throwaway projects, `claude -p`):
+a `PreToolUse` hook that exits 2 refuses the call under `bypassPermissions` and
+`--dangerously-skip-permissions` too, and its stderr reaches the model; three tools run commands —
+`Bash`, `PowerShell` and `Monitor` (a hook matched on `Bash` alone missed the other two: the commit
+landed, the hook was never called); the hook receives `tool_input.command` exactly as written,
+multi-line included; any hook exit other than 2 — a missing or crashing script — lets the call
+through, and the documented `onFailure: "block"` changed nothing on that version; a hook entry
+written to the settings mid-session runs from the next call on.
+
+**Decision**:
+- A third hook, `terminal-guard.js`, matcher `^(Bash|PowerShell|Monitor)$`. It refuses `git
+  commit|push|merge|rebase|cherry-pick|revert|am` and `gh pr merge`, naming the RSCT tool. It judges
+  dequoted words, not command positions: any word whose last path segment, lower-cased and without
+  `.exe`, `.cmd`, `.bat` or `.com`, is `git` is followed past its options to the verb (and one that is `git-<verb>`, git's own binary for a refused verb, is that verb), so wrappers need no table. It re-reads
+  nested code — substitutions, heredocs fed to a shell, the text handed to `sh -c`, `eval`, `env
+  -S`, `su -c`, `cmd /c`, `powershell -Command` and `-EncodedCommand`, `Invoke-Expression`, `wsl`,
+  distro launchers' `run`, `ssh`, `git submodule foreach`, `git bisect run` — joined as each
+  program joins it (re-parsed text for shells; argv kept for `wsl -e` and `bisect run`).
+  Runner options are read too: `bash -o pipefail -c`, `script -qc`, `su -lc`, `cmd //c` (Git
+  Bash's spelling of `/c`), Windows PowerShell's bare argument (`powershell "…"` is a command;
+  `pwsh`'s is a file), and `Start-Process` is rebuilt as the command line it starts — its program
+  and argument list in any parameter order, its own parameters dropped. Interpreter code (`node
+  -e`, `tsx -e`, `python -c`, `perl -e`, `ruby -e`, `php -r`, `deno eval`, `bun -e`, and a heredoc fed to an
+  interpreter that names no script or a stdin name — `-`, `/dev/stdin`, `/dev/fd/0`,
+  `/proc/self/fd/0`; flags in clusters such as `perl -lne` or `python3 -Bc`, and code glued to its
+  flag as in `python3 -c"…"` or `node --eval=…`; every code flag on the line is read, so a script's
+  own `-c`/`-e` argument that calls git is refused, by choice) is searched for a git call or `gh pr
+  merge`, as text or as an argument list; `su -c`, `script -c` and `env -S` read the glued form
+  too. A shell that names a script file (other than `/dev/stdin`, `/dev/fd/0` or `/proc/self/fd/0`) runs
+  that file, so its heredoc is data, and a heredoc inside
+  `$(…)` is read as a heredoc (an apostrophe in its body hides nothing after it). Aliases: inline `-c alias.x=` first, else `git config --get alias.x`
+  in the call's folder, only for verbs that are not git's own commands, 3 s budget, refused when
+  unresolved. `--abort|--quit|--continue|--skip` of merge/rebase/cherry-pick/revert/am pass when
+  every word after the verb is one of them (`git merge -m --abort x` merges, MEASURED on git 2.45.1):
+  the operation was approved, and `rsct_request_rebase`'s conflict path tells the agent to run them.
+  A word that is a whole variable or substitution, quoted or not, followed — past git's own global
+  options only, so `find "$D" -name commit` and PowerShell's `$s -match 'rebase'` pass — by a
+  refused verb that is not a recovery form, or by `pr merge`; in bash, an unquoted whole variable
+  or substitution run as the command or right after `sudo`, `doas`, `env`, `command`, `exec`,
+  `nohup`, `time`, `nice`, `xargs` or `builtin` (the shell splits it into a whole command line:
+  `C="git commit"; $C`); a git or gh subcommand that is itself a variable, a substitution or a
+  PowerShell splat, also once an alias is expanded or a Start-Process argument string is split into words;
+  `Invoke-Expression` (at a command position in PowerShell, also after `&` or `.`) or `-Command` of a
+  variable; interpreter code that is a whole variable, separate or glued, in a code flag before the
+  script (`python3 -c "$CODE"`, while `node server.js -p "$PORT"` is the script's own option),
+  `node --eval="$CODE"`, `deno eval "$CODE"`); a program from a variable whose verb is an inline
+  `-c alias.x=…` that runs a refused verb; a `gh alias set` whose
+  definition runs `pr merge` or a refused git verb; and any
+  text that mentions `disableAllHooks`, are refused. The command position skips assignments and
+  shell keywords (`do $C`, `then eval …`), and a wrapper may carry options written as one word starting with `-` (`sudo -E $C`), except
+  `command -v`/`-V`, which only looks the name up;
+  a wrapper name used as an argument (`docker exec $CID`) is not a wrapper. `$@`, `$1` and the other
+  special parameters are variables, `"$@"` and `"${a[@]}"` split like unquoted words, array
+  assignments (`files=($(…))`) and arithmetic (`(( $n > 0 ))`) are not commands, a substitution
+  inside `${…}` or `$((…))` is judged, and in PowerShell a parenthesised argument (`git ('push')`)
+  is a substitution. A
+  subcommand passed with its arguments in one string (`Start-Process git -ArgumentList 'commit -m
+  x'`, the same for `gh`) is split and judged, and a variable program or argument-list item after
+  `Start-Process` is read against the command line Start-Process joins (MEASURED: `Start-Process git -ArgumentList
+  " -C .", $v` commits, Windows PowerShell 5.1); a redirect target is not
+  read as an argument (`git >out commit` commits, MEASURED in Git Bash); ANSI-C quoting is decoded (`\xHH`, octal,
+  `\u`). Interpreter code is matched in its text form and its argument-list forms (`'git', ['push']`,
+  `['git', 'push']`, `'git', { args: ['push'] }`), past `-C`/`-c` and their values. Comments, quotes
+  left open and PowerShell's backtick are read, not refused.
+  It enforces whenever its hook runs; it imports Node built-ins only.
+- Both PreToolUse guards are registered as `NODE_OPTIONS= node "${CLAUDE_PROJECT_DIR}/.rsct/
+  scripts/<name>.js" || exit 2`, and both exit 2 on an internal fault. `version-drift` counts a guard
+  entry only in that exact form with its matcher (`altered` otherwise, enforcement not running);
+  `/rsct-setup` replaces any other entry carrying the marker and leaves other hooks alone.
+- The edit guard refuses, before any scope check and in any project, an Edit/Write/MultiEdit of a
+  `settings.json` / `settings.local.json` in a folder named `.claude` whose
+  resulting text sets `disableAllHooks: true`, changes or drops an RSCT hook entry, or sets or
+  changes an env key that changes how a hook shell or node starts (`NODE_OPTIONS`, `PATH`, `BASH_ENV`,
+  `ENV`, `SHELLOPTS`, `BASHOPTS`, `CLAUDE_PROJECT_DIR`, every `LD_*` and `DYLD_*` loader key,
+  `BASH_FUNC_*`; the keys past the first two are a
+  defensive list from the shell and loader documentation, not measured). When the file parses, each RSCT entry — event,
+  matcher and the whole hook object, key order ignored — must survive unchanged, so narrowing the
+  matcher, wrapping the command or adding a `timeout` is refused while the marker text stays; a
+  write that leaves such a file unparseable is refused; an unparseable file falls back to the
+  marker text. Line endings are compared as LF (the editor matches LF text against a CRLF file),
+  a `::$DATA` suffix names the same file on Windows, an empty matcher equals a missing one, and
+  any of those env keys added to a file that does not parse is refused.
+- `disableAllHooks: true` — first boolean in `.claude/settings.local.json`, `.claude/settings.json`,
+  then `~/.claude/settings.json` — is enforcement not running, with its own sentence and a
+  `hooks_disabled` field; the dialog line reaches the rebase and batch-authorization dialogs as
+  well. The server names no host-config variable (the #73 boundary, pinned by
+  `tests/bash/script-install.test.ts`), so a user folder moved with `CLAUDE_CONFIG_DIR` is not read.
+
+**Direction**: stricter. Today's prompt blocks all pass the guard (pinned); recovery commands and
+quoted text a program only prints or searches (`echo "git push"`, `grep "git commit"`) pass; the
+same words unquoted (`echo git push`) are refused.
+
+**Alternatives considered**:
+- Settings `permissions.deny` rules — they see chains and leading assignments but not `sh -c`, a
+  path, `git -C` or `git -c` (REPORTED from the docs), and the agent can edit them.
+- A table of wrapper programs for finding git — misses every wrapper not in it; the word scan
+  needs none. (The unquoted-variable rule does use a short list: there is no git word to find.)
+- Refusing every verb that is not git's own command instead of resolving aliases — breaks `git lfs`.
+- Refusing `git pull` — breaks a daily command; named below.
+- Refusing every agent edit of the settings files — breaks permission edits the developer asks for.
+
+**What is given up, by name**: a script file the agent writes or downloads and runs; other
+interpreters' files; a command line carried in a variable through a program the guard does not
+read or past a wrapper's option value; a program or subcommand name assembled from parts of
+variables; git plumbing (`commit-tree` + `update-ref`); `git pull`; external `git-<name>`
+commands such as `git flow`; `gh api`; aliases through `GIT_CONFIG_*`; gh aliases, apart
+from a `gh alias set` in the command itself; other MCP servers' tools;
+command text assembled at run time from data the guard reads as text; a
+settings change made other than through the editor tools is not refused (a terminal command that
+mentions `disableAllHooks` is), and `rsct_status`
+reports the cases it can detect; Windows without Git Bash, where hooks run in PowerShell — Windows
+PowerShell 5.1 cannot parse the command, so the guards would not run, and PowerShell 7 runs it as
+an unknown command, so every call would be blocked (from the docs; not measured); a machine
+where `node` is not on the PATH Claude Code gives its hooks — a teammate with Claude Code and no
+Node, or Claude Code inside WSL without Node — where both guards refuse every call, since the
+repository's settings file carries them to every session; subagent tool calls and the developer's
+own `!` commands were not measured.
+
+**Consequences**: `tests/unit/terminal-guard.test.ts` (both dialects, every runner, aliases,
+recovery flags, false-positive cases), `tests/unit/terminal-guard-prompts.test.ts` (every bash
+block of `prompts/` judged allow), `tests/unit/terminal-guard-hook.test.ts`,
+`tests/integration/compiled-hooks.test.ts` (the installed program), `tests/bash/
+hook-registration.test.ts` (4.V.d, 4.V.e, the fail-closed command, the uninstall scrub),
+`tests/unit/settings-write-guard.test.ts`, `tests/unit/hooks-off-detection.test.ts`,
+`tests/unit/version-drift.test.ts` (`altered`). A project set up with 2.13.0–2.14.1 shows the
+security notice until `/rsct-setup` runs again (an older one shows its inert or not-installed
+sentence first). `/rsct-uninstall` removes both guard entries whenever it removes the
+enforcement state, from `settings.json` and `settings.local.json`, before
+`.rsct/scripts/`: a guard entry whose script is gone refuses every call it matches.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -1689,6 +1829,22 @@ runs, and exports nothing that could tempt an import.
   with an empty `scope_globs`, and 316 of them left `progress_<slug>.md` out of the list. The
   sanitizer riding on every edit wrote 9,938 `settings.baseline` lines out of 30,644 audit lines,
   up to 430 in one day. Of 663 commits, none used the dialog-free lane.
+- **How Claude Code runs a PreToolUse hook** (ADR-028, 2026-10-17, Claude Code 2.1.173, Windows,
+  hooks in Git Bash, `claude -p` with haiku in throwaway projects). Exit 2 refuses the call and the
+  model reads the stderr, under `--permission-mode bypassPermissions` and
+  `--dangerously-skip-permissions` too (control without the hook: the commit landed). Exit 1, a
+  missing script and a crashing script let the call run, with or without `onFailure: "block"`;
+  `node "<script>" || exit 2` refused all three. `Bash`, `PowerShell` and `Monitor` each run
+  commands and each carries `tool_input.command`; a matcher on `Bash` alone let the other two
+  commit with the hook never called. The command text arrives verbatim, multi-line. A hook entry
+  written to `.claude/settings.json` mid-session runs from the next call on. The same command under
+  WSL Ubuntu's `/bin/sh` (dash, node 22.14), WSL combination 1 (project in `/tmp` on the Linux
+  disk): `git commit` 2, `git status` 0, a missing script 2.
+  WSL combination 3 (the registered commands run by Git Bash with `CLAUDE_PROJECT_DIR` under
+  `//wsl.localhost/Ubuntu/…`, in both the `//` and the `\\` spelling; not through the client):
+  `git commit` 2, `git status` 0, an edit outside the list 2 and inside it 0. Windows git treats
+  that repository as unsafe until the share is a `safe.directory`: before, an alias in its local
+  config is unknown to git and to the guard alike; after, the guard resolves it (`alias=commit` 2).
 - **Which `powershell.exe` Node runs on Windows** (ADR-027, 2026-10-16, Node 22.14). A copy of
   another program named `powershell.exe` in the working directory was not run by
   `execFileSync('powershell.exe', …)`; the same copy in a folder placed first in `PATH` was (exit 1,
@@ -1842,6 +1998,48 @@ those files. Keyed by module and symbol; restatements of what the code says were
   empty range; merge and rebase fail closed on an unreadable range (measured: unrelated
   histories, rebase onto an orphan ref), push fails open.
 
+### `tools/request-merge.ts`, `tools/request-rebase.ts` (migrated in the #91 REVIEW)
+
+- The pre-merge ack is checked before the approval dialog: a missing ack is refused in chat
+  without a dialog, and the approval is neither validated nor consumed on that path. A merge, a
+  rebase and a squash are always integration events, so the ack is always required.
+- The carried paths are read from git, never supplied by the caller. Merge reads
+  `HEAD...<source>` — `HEAD`, not the branch name, because this runs before the detached-HEAD
+  refusal, where `rev-parse --abbrev-ref HEAD` returns the literal `HEAD`. Rebase replays this
+  branch onto `ref`, so `ref...HEAD`; squash stages `ref`'s changes here, so `HEAD...ref`. In the
+  rebase range `ref` is agent-controlled and leads the token, the only one of the four ranges
+  where that holds, so `getRangePaths` checks both endpoints with `isSafeRevisionToken` before it
+  composes the range; composing it in the tool would skip that check.
+- Both fail closed on an unreadable range, MEASURED: `git diff HEAD...<orphan>` exits 128 while
+  `git merge --no-ff --allow-unrelated-histories <orphan>` exits 0 and lands. The range is read
+  after the ack is evaluated, so a call with no ack is told that first.
+- One exemption, on merge: `allow_unrelated_histories` with an `unavailable` range. Unrelated
+  histories have no merge base, so for exactly the input that flag serves the read can never
+  succeed. It is not a hole the agent can drive: the flag is refused without
+  `dev_approval.override_protected_branch`; a merge of related histories reads fine and never
+  reaches the exemption; an `unsafe_revision` result still fails closed. A merge that lands under
+  the exemption says that the coverage check did not run.
+- The coverage result is audited on the integration that landed, not only on refusals.
+- The install-drift line goes into the OS dialog, the channel the agent cannot rewrite, as well as
+  `hints[]`, and is drained on every return path. The #92 relocation notice rides every return
+  too; a caller's own hints cannot drop it, and a headless run has no dialog to carry it.
+- The carried-path reader is a test seam that takes a reader, not a path list, so a test can
+  assert the base and head that were passed; it is not an MCP input.
+- After a completed plan the cleanup is suggested, never performed (`rsct_plan_dispose`).
+
+### `lib/install-advisory.ts` (migrated in the #91 REVIEW)
+
+- One helper for every §C-gated mutating tool (#25): the severity check, the audit payload and the
+  message live in one place, because copies drift and this is a security claim. Before it the
+  warning reached only `hints[]`, which the agent relays at its discretion, and push and merge —
+  the outward-facing, hard-to-reverse calls — carried none.
+- The dialog line is one short line on purpose: the dialog is a decision surface, and a wall of
+  text there trains the developer to dismiss it unread.
+- The audit entry is written at evaluation time: it records that a mutation was attempted under
+  degraded enforcement, whether or not the attempt then succeeded.
+- It never blocks and never throws: a drift check that could fail a push would be a worse bug than
+  the drift it reports.
+
 ### `lib/reverse-dep-walk.ts`
 
 - An empty importer set means either "nothing depends on this" or "the walk could not look" (#54).
@@ -1992,10 +2190,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
   alone, so without it nothing would run the production reader.
 - A refusal for a file the list does not cover carries `judged_as`, the path below the root in
   the spelling that was matched — the only clue when the list and the disk differ in letter case.
-- **Fail-open on machinery, fail-closed on policy.** The hook exits 2 only for `out_of_scope` and
-  `stale_context`. Empty or malformed stdin, a payload with no `file_path` / `notebook_path`, an
-  unmanaged project (no `.rsct.json`), an unreadable phase-state (`infra_error`) and any thrown
-  fault exit 0 — a broken guard must never stop all editing.
+- **What exits 2.** The hook exits 2 for `out_of_scope`, `stale_context`, `claude_settings` and
+  `guard_failed` (the last two since 2.15.0, ADR-028). Empty or malformed stdin, a payload with no
+  `file_path` / `notebook_path`, an unmanaged project (no `.rsct.json`) and an unreadable
+  phase-state (`infra_error`) exit 0.
 - `phase_state_override` of `rsct_check_edit_scope` carries `context_stale` so a what-if call can
   ask about a stale context.
 
@@ -2010,7 +2208,7 @@ those files. Keyed by module and symbol; restatements of what the code says were
   path-prefixed), plus the wildcards that cover them; every other entry is preserved. Recovery
   forms (`git rebase --abort`) are stripped too, consistent with the existing `git merge --abort`
   strip (MEASURED: the sanitizer stripped `git merge --abort`/`--continue` before #91). Left on
-  purpose (named limits, the real Bash guard is #84): a broad `Bash(gh pr:*)` / `Bash(gh:*)` grant
+  purpose (named limits; the terminal guard, ADR-028, refuses the merge itself): a broad `Bash(gh pr:*)` / `Bash(gh:*)` grant
   is NOT stripped — mirroring git's `git:*` catch-all would over-strip read-only `gh pr view` /
   `gh issue` / `gh api`; and the Hole-1 user-scope settings file and Hole-3 wrapper forms
   (`env git`, `git.exe`, shell-wrapped `gh`) are untouched.
@@ -2089,10 +2287,11 @@ those files. Keyed by module and symbol; restatements of what the code says were
   ends at its sourceMappingURL with none. An empty body on either side is never `current` — two
   empty bodies would compare equal, a fail-open in the very case the check exists for.
 - **Registration.** `registered` on a marker match under the canonical event in any project
-  settings file; `unregistered` only when every candidate was parsed or is provably absent (an
-  absent file holds no hook — the fresh-clone case of #24); `unknown` otherwise, and when there is
-  no candidate at all. Three states, because `null` would have to mean both "could not read" and
-  "no canonical event". The event is required: a sanitizer wired under `PreToolUse` does not run
+  settings file — for the two PreToolUse guards only in the canonical form, matcher and command
+  (ADR-028), and `altered` when the marker is there in any other form; `unregistered` only when
+  every candidate was parsed or is provably absent (an absent file holds no hook — the fresh-clone
+  case of #24); `unknown` otherwise, and when there is no candidate at all. Four states, because
+  `null` would have to mean both "could not read" and "no canonical event". The event is required: a sanitizer wired under `PreToolUse` does not run
   at session start. Backslashes are folded on the parsed command — setup writes forward slashes,
   so this matters only for a hand-edited Windows path, where a miss would be a false security
   claim; the bash side does not fold and must not be "fixed" to. The marker is stored literally,
@@ -2119,10 +2318,12 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### `prompts/01-setup.md`
 
-- **Hook registration (#114).** The quote character is built with `String.fromCharCode(34)`
-  inside `node -e`, for the reason the backslash is (MSYS rewrites escapes). The rewrite is keyed on
-  the exact legacy command, not on the marker: the marker also matches a command the developer
-  edited, and that one is not ours to change.
+- **Hook registration (#114, #91).** The quote character is built with `String.fromCharCode(34)`
+  inside `node -e`, for the reason the backslash is (MSYS rewrites escapes). For the SessionStart
+  sanitizer (4.V.c) the rewrite is keyed on the exact legacy command, not on the marker: the marker
+  also matches a command the developer edited. For the two PreToolUse guards (4.V.d, 4.V.e) any
+  entry carrying the marker that is not the canonical one is replaced (ADR-028): a guard entry in
+  another form is reported as enforcement not running.
 - The `.rsct/reports/` backfill (#62) follows the #73 clause: whole-file exact-line guard,
   block-scoped splice right after `.rsct/phase-state.lock` (the CAP-25 clause just before it
   guarantees that line exists), LF out, and a sanity check inside the markers.

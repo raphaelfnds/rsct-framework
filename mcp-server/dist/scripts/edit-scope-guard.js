@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
 import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, copyFileSync } from 'fs';
-import { isAbsolute, resolve, join, dirname, sep, relative, basename } from 'path';
+import { isAbsolute, resolve, dirname, sep, relative, basename, join } from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
@@ -4708,9 +4708,208 @@ function readTail(path, maxBytes) {
     closeSync(fd);
   }
 }
+var GIT_VALUE_OPTIONS = /* @__PURE__ */ new Set(["-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--list-cmds", "--attr-source"]);
+new Set(
+  "add am annotate apply archive backfill bisect blame branch bugreport bundle cat-file check-attr check-ignore check-mailmap check-ref-format checkout checkout-index cherry cherry-pick citool clean clone column commit commit-graph commit-tree config count-objects credential credential-cache credential-store describe diagnose diff diff-files diff-index diff-pairs diff-tree difftool fast-export fast-import fetch fetch-pack filter-branch fmt-merge-msg for-each-ref for-each-repo format-patch fsck fsck-objects gc get-tar-commit-id grep gui hash-object help hook http-backend http-fetch http-push imap-send index-pack init init-db instaweb interpret-trailers last-modified log ls-files ls-remote ls-tree mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-one-file merge-tree mergetool mktag mktree multi-pack-index mv name-rev notes pack-objects pack-redundant pack-refs patch-id prune prune-packed pull push quiltimport range-diff read-tree rebase receive-pack reflog refs remote repack replace replay repo request-pull rerere reset restore rev-list rev-parse revert rm scalar send-email send-pack sh-i18n sh-setup shortlog show show-branch show-index show-ref sparse-checkout stage stash status stripspace submodule switch symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive upload-pack var verify-commit verify-pack verify-tag version whatchanged worktree write-tree".split(" ")
+);
+["-C", ...GIT_VALUE_OPTIONS].join("|");
+function decodeUnicodeEscapes(text) {
+  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+// src/lib/settings-write-guard.ts
+var RSCT_HOOK_MARKERS = [
+  ".rsct/scripts/sanitize-permissions.js",
+  ".rsct/scripts/edit-scope-guard.js",
+  ".rsct/scripts/terminal-guard.js"
+];
+var GUARDED_ENV_KEYS = /* @__PURE__ */ new Set([
+  "NODE_OPTIONS",
+  "PATH",
+  "BASH_ENV",
+  "ENV",
+  "SHELLOPTS",
+  "BASHOPTS",
+  "CLAUDE_PROJECT_DIR",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH"
+]);
+function isGuardedEnvKey(key) {
+  const k = key.toUpperCase();
+  return GUARDED_ENV_KEYS.has(k) || /^(BASH_FUNC_|LD_|DYLD_)/.test(k);
+}
+var PASS = { block: false };
+function readOrNull(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function bare(name) {
+  return name.replace(/::\$data$/i, "").replace(/[. ]+$/, "").toLowerCase();
+}
+function realOrNull(path) {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return null;
+  }
+}
+function namesSettingsFile(path) {
+  const name = bare(basename(path));
+  return (name === "settings.json" || name === "settings.local.json") && bare(basename(dirname(path))) === ".claude";
+}
+function isClaudeSettingsFile(filePath) {
+  const lexical = resolve(filePath);
+  const realDir = realOrNull(dirname(lexical));
+  const candidates = [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))];
+  return candidates.some((c) => c !== null && namesSettingsFile(c));
+}
+function applyEdit(text, edit) {
+  if (!edit || typeof edit !== "object") return text;
+  const e = edit;
+  if (typeof e.old_string !== "string" || typeof e.new_string !== "string") return text;
+  const from = lf(e.old_string);
+  const to = lf(e.new_string);
+  if (from === "") return text === "" ? to : text;
+  if (!text.includes(from)) return text;
+  return e.replace_all === true ? text.split(from).join(to) : text.replace(from, () => to);
+}
+function lf(text) {
+  return text.replace(/\r\n/g, "\n");
+}
+function resultingText(toolName, input, current) {
+  if (toolName === "Write") return typeof input.content === "string" ? input.content : null;
+  if (toolName === "Edit") return applyEdit(current, input);
+  if (toolName === "MultiEdit") {
+    if (!Array.isArray(input.edits)) return null;
+    return input.edits.reduce((text, edit) => applyEdit(text, edit), current);
+  }
+  return null;
+}
+function parseObject(text) {
+  try {
+    const parsed = JSON.parse(text.replace(/^﻿/, ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function guardedEnv(json) {
+  const env = json?.env;
+  const found = /* @__PURE__ */ new Map();
+  if (!env || typeof env !== "object" || Array.isArray(env)) return found;
+  for (const [k, v] of Object.entries(env)) if (isGuardedEnvKey(k)) found.set(k.toUpperCase(), JSON.stringify(v));
+  return found;
+}
+function markersIn(text) {
+  return decodeUnicodeEscapes(text).replace(/\\\\/g, "/").replace(/\\/g, "/");
+}
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") {
+    const o = value;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stable(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+function rsctEntries(json) {
+  const hooks = json.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return [];
+  const found = [];
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!group || typeof group !== "object") continue;
+      const g = group;
+      if (!Array.isArray(g.hooks)) continue;
+      for (const hook of g.hooks) {
+        const command = hook && typeof hook === "object" ? hook.command : void 0;
+        if (typeof command !== "string") continue;
+        const marker = RSCT_HOOK_MARKERS.find((m) => markersIn(command).includes(m));
+        if (marker !== void 0) found.push({ key: stable([event, g.matcher === void 0 || g.matcher === "" ? null : g.matcher, hook]), marker });
+      }
+    }
+  }
+  return found;
+}
+function changedRsctEntry(before, after) {
+  const remaining = rsctEntries(after).map((e) => e.key);
+  for (const entry of rsctEntries(before)) {
+    const at = remaining.indexOf(entry.key);
+    if (at === -1) return entry.marker;
+    remaining.splice(at, 1);
+  }
+  return null;
+}
+function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
+  if (toolName !== "Write" && toolName !== "Edit" && toolName !== "MultiEdit") return PASS;
+  if (!isClaudeSettingsFile(filePath)) return PASS;
+  const current = lf(read(filePath) ?? "");
+  const after = resultingText(toolName, input, current);
+  if (after === null) return PASS;
+  const afterJson = parseObject(after);
+  const beforeJson = parseObject(current);
+  const decodedAfter = decodeUnicodeEscapes(after);
+  const hooksOff = afterJson ? afterJson.disableAllHooks === true : /"disableAllHooks"\s*:\s*true/i.test(decodedAfter);
+  if (hooksOff) {
+    return { block: true, reason: `this write would switch every Claude Code hook off ("disableAllHooks": true); that is the developer's own edit` };
+  }
+  if (beforeJson && rsctEntries(beforeJson).length > 0) {
+    if (!afterJson) {
+      return {
+        block: true,
+        reason: "this write would leave a Claude Code settings file that holds RSCT hooks unreadable; that is the developer's own edit"
+      };
+    }
+    const changed = changedRsctEntry(beforeJson, afterJson);
+    if (changed !== null) {
+      return {
+        block: true,
+        reason: `this write would change or remove the RSCT hook entry for ${basename(changed)}; that is the developer's own edit, or /rsct-setup and /rsct-uninstall`
+      };
+    }
+  } else {
+    const beforeMarkers = markersIn(current);
+    const afterMarkers = markersIn(after);
+    for (const marker of RSCT_HOOK_MARKERS) {
+      if (beforeMarkers.includes(marker) && !afterMarkers.includes(marker)) {
+        return {
+          block: true,
+          reason: `this write would remove the RSCT hook for ${basename(marker)}; removing an RSCT hook is the developer's own edit, or /rsct-uninstall`
+        };
+      }
+    }
+  }
+  const envBefore = guardedEnv(beforeJson);
+  for (const [key, value] of guardedEnv(afterJson)) {
+    if (envBefore.get(key) !== value) {
+      return { block: true, reason: `this write would set env.${key} in a Claude Code settings file; that is the developer's own edit` };
+    }
+  }
+  if (!afterJson) {
+    const before = decodeUnicodeEscapes(current);
+    const patterns = [
+      ["NODE_OPTIONS", /NODE_OPTIONS/i],
+      ["BASH_FUNC_", /"BASH_FUNC_/i],
+      ["LD_", /"LD_\w+"\s*:/i],
+      ["DYLD_", /"DYLD_\w+"\s*:/i],
+      ...[...GUARDED_ENV_KEYS].filter((k) => k !== "NODE_OPTIONS").map((k) => [k, new RegExp(`"${k}"\\s*:\\s*"`, "i")])
+    ];
+    for (const [key, pattern] of patterns) {
+      if (pattern.test(decodedAfter) && !pattern.test(before)) {
+        return { block: true, reason: `this write would add ${key} to a Claude Code settings file; that is the developer's own edit` };
+      }
+    }
+  }
+  return PASS;
+}
 
 // src/lib/edit-scope-hook.ts
-function decide(rawStdin, env, cwd2) {
+function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
   try {
     const trimmed = rawStdin.trim();
     if (!trimmed) return { exitCode: 0, message: null };
@@ -4728,10 +4927,16 @@ function decide(rawStdin, env, cwd2) {
     );
     if (paths.length === 0) return { exitCode: 0, message: null };
     const cwdForResolve = typeof payload.cwd === "string" && payload.cwd.length > 0 ? payload.cwd : cwd2;
+    const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+    for (const filePath of paths) {
+      const absolute = isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath);
+      const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute);
+      if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` };
+    }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve });
     const resolution = resolveProjectRoot(projectRoot);
     for (const filePath of paths) {
-      const guard = evaluateEditGuard({
+      const guard = evaluate({
         projectRoot: resolution.root,
         rsctInstalled: resolution.rsct_installed,
         filePath,
@@ -4742,8 +4947,12 @@ function decide(rawStdin, env, cwd2) {
       }
     }
     return { exitCode: 0, message: null };
-  } catch {
-    return { exitCode: 0, message: null };
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return {
+      exitCode: 2,
+      message: `[rsct] Edit blocked (guard_failed): the edit-scope guard failed (${why}), so the edit did not run. STOP and tell the developer: they can make the edit themselves. If every edit is refused, they repair the guard: in their own editor, remove the entry that runs edit-scope-guard.js from .claude/settings.json or .claude/settings.local.json, then run /rsct-setup again.`
+    };
   }
 }
 

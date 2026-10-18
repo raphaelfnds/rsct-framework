@@ -5,6 +5,7 @@ export default defineConfig({
     'src/index.ts',
     'src/scripts/sanitize-permissions.ts',
     'src/scripts/edit-scope-guard.ts',
+    'src/scripts/terminal-guard.ts',
   ],
   format: ['esm'],
   target: 'node20',

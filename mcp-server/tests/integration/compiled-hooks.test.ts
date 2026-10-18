@@ -17,7 +17,8 @@ const DIST_SCRIPTS = process.env.RSCT_TEST_HOOK_DIST ?? resolve(__dirname, '..',
 const TSUP_CONFIG = resolve(__dirname, '..', '..', 'tsup.config.ts')
 const GUARD = 'edit-scope-guard.js'
 const SANITIZER = 'sanitize-permissions.js'
-const LAUNCHED = [GUARD, SANITIZER]
+const TERMINAL = 'terminal-guard.js'
+const LAUNCHED = [GUARD, SANITIZER, TERMINAL]
 const POISON_PILL = 'Bash(git commit:*)'
 
 const created: string[] = []
@@ -241,5 +242,61 @@ describe('compiled sanitizer, launched as the installed hook', () => {
     const r = launch(SANITIZER, link, '')
     expect(r.status).toBe(0)
     expect(readFileSync(settings, 'utf8')).not.toContain(POISON_PILL)
+  })
+})
+
+function shellCall(root: string, tool: string, input: Record<string, unknown>): string {
+  return JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, cwd: root })
+}
+
+describe('compiled terminal guard, launched as the installed hook', () => {
+  it('refuses a git commit from the Bash, PowerShell and Monitor tools and names the RSCT tool', () => {
+    const root = newProject(null)
+    for (const tool of ['Bash', 'PowerShell', 'Monitor']) {
+      const r = launch(TERMINAL, root, shellCall(root, tool, { command: 'git commit -m probe' }))
+      expect(r.status).toBe(2)
+      expect(r.stderr).toContain('[rsct] Terminal command blocked')
+      expect(r.stderr).toContain('rsct_request_commit')
+    }
+  })
+
+  it('allows an ordinary command, and any tool that is not a terminal', () => {
+    const root = newProject(null)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git status && ls' })).status).toBe(0)
+    expect(launch(TERMINAL, root, shellCall(root, 'Read', { file_path: join(root, 'x') })).status).toBe(0)
+  })
+
+  it('enforces in a project whose .rsct.json is missing or rejected', () => {
+    const root = newProject(null)
+    rmSync(join(root, '.rsct.json'))
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git push' })).status).toBe(2)
+    writeFileSync(join(root, '.rsct.json'), '{ not json')
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git push' })).status).toBe(2)
+  })
+
+  it('refuses when it cannot read the call', () => {
+    const root = newProject(null)
+    expect(launch(TERMINAL, root, '').status).toBe(2)
+    expect(launch(TERMINAL, root, '{ not json').status).toBe(2)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', {})).status).toBe(2)
+  })
+
+  it('does not write anything into the project', () => {
+    const root = newProject(null)
+    launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git commit -m x' }))
+    expect(existsSync(join(root, '.rsct', 'audit.log'))).toBe(false)
+  })
+
+  it('asks git what an alias means, in the project and in the folder -C names', () => {
+    const root = newProject(null)
+    const other = mkdtempSync(join(tmpdir(), 'rsct-hooks-other-'))
+    created.push(other)
+    for (const dir of [root, other]) expect(spawnSync('git', ['init', '-q', dir]).status).toBe(0)
+    expect(spawnSync('git', ['-C', root, 'config', 'alias.rsctprobeci', 'commit']).status).toBe(0)
+    expect(spawnSync('git', ['-C', other, 'config', 'alias.rsctprobepp', '!git push']).status).toBe(0)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git rsctprobeci -m x' })).status).toBe(2)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: `git -C "${other.replace(/\\/g, '/')}" rsctprobepp` })).status).toBe(2)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git rsctprobepp' })).status).toBe(0)
+    expect(launch(TERMINAL, root, shellCall(root, 'Bash', { command: 'git lfs version' })).status).toBe(0)
   })
 })

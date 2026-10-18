@@ -12,6 +12,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-10-17
+
+### Added
+
+- **A terminal guard (#91).** A third hook, `.rsct/scripts/terminal-guard.js`, installed by
+  `/rsct-setup` (Phase 4.V.e) on the three Claude Code tools that run commands — `Bash`,
+  `PowerShell` and `Monitor`. It refuses `git commit`, `push`, `merge`, `rebase`,
+  `cherry-pick`, `revert` and `am` and names the RSCT tool to call instead, and it refuses
+  `gh pr merge` (the developer merges on GitHub).
+  It reads the command the way a shell would: `env git`, `git.exe` or a full path, `git -C dir`,
+  commands chained with `;` `&&` `|` or a newline, `$(…)`, heredocs fed to a shell that reads them as commands, `sh -c`,
+  `cmd /c`, `powershell -Command`, `wsl …`, `ssh host …`, git aliases, a redirect before the
+  verb (`git >out commit`), and code passed to `node -e` / `python -c` or fed to an interpreter
+  as a heredoc (when no script file is named) that calls git, as text or as an argument list; `Start-Process` is read as the
+  command line it starts, in any parameter order; a subcommand passed in one string
+  (`Start-Process git -ArgumentList 'commit -m x'`) is split, one that is a whole variable is
+  refused, and so is, in bash, a command run from an unquoted variable (`$C`), which the shell splits into
+  a whole command line — quoted (`"$PY" script.py`) it passes unless a refused verb follows it
+  past git's global options (`"$G" commit` is refused). `--abort`, `--quit`, `--continue` and
+  `--skip` pass when nothing else follows the
+  verb (`git merge -m --abort x` is a merge and is refused). Quoted text that a command only
+  prints or searches (`echo "git push"`) passes. It fails closed — a guard that cannot read
+  the call, or cannot start, blocks the command — and it enforces whether or not `.rsct.json` is
+  valid. The developer runs any of these commands by hand in their own terminal; the guard sees
+  only the agent's tools. What it cannot see — a script file the agent writes and runs, other MCP
+  servers' tools, git plumbing — is listed in `mcp-server/README.md`; the approval dialog stays
+  the guarantee. See ADR-028.
+
+### Changed
+
+- **The edit-scope guard fails closed and guards the Claude Code settings files.** Both
+  PreToolUse guards are registered as `NODE_OPTIONS= node "…/<name>.js" || exit 2`: a guard that
+  cannot start blocks the call (Claude Code lets a call through on any other exit), and the guard
+  starts with `NODE_OPTIONS` cleared. A fault inside the edit-scope
+  guard now refuses the edit instead of allowing it. In any project it refuses an `Edit`,
+  `Write` or `MultiEdit` of a Claude Code `settings.json` / `settings.local.json` that would set
+  `"disableAllHooks": true`, change or remove an RSCT hook entry, leave a file that holds RSCT
+  hooks unparseable, or set an env key that changes how a hook shell or node starts
+  (`NODE_OPTIONS`, `PATH`, `BASH_ENV`, the loader keys and the like, also in a result that does
+  not parse); every other edit of those files passes.
+- **"Enforcement is not running" covers two more cases**: every Claude Code hook switched off by
+  `"disableAllHooks": true` in the local, project or user settings (the file whose value wins is
+  named), and a guard hook entry that is not in the form `/rsct-setup` writes. The warning line
+  now also appears in the `rsct_request_rebase` and `rsct_plan_authorize` dialogs.
+- `/rsct-setup` replaces a guard hook entry in any other form with the one it installs; other
+  hooks are not touched. Its last step commits through `rsct_request_commit` (or the developer
+  commits, when the tools are not loaded yet), and `/rsct-universe` hands the universe commit to
+  `rsct_request_commit` with `project_root`, or to the developer. `/rsct-uninstall` removes both
+  guard entries whenever it removes the enforcement state, from `.claude/settings.json` and
+  `.claude/settings.local.json`, before it deletes `.rsct/scripts/`: a guard entry whose script is gone refuses every call it matches, so
+  the staged-uninstall option of keeping the edit-scope guard entry is gone.
+- The rules and the plan-tracking memory template no longer suggest `git push origin --delete`
+  or `gh pr merge --delete-branch` for branch cleanup: the remote branch is deleted with
+  `rsct_request_push` (`branch: ":<name>"`), GitHub's "Delete branch" button, or by the developer.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone, restart the IDE, then **run `/rsct-setup` in every
+  project**: until it runs, `rsct_status` and the approval dialogs report enforcement not running
+  (the terminal guard is missing and the edit-scope guard entry is in the older form).
+- Uninstall a 2.15.0 project with the 2.15.0 `/rsct-uninstall`: an older one removes only the
+  edit-scope guard entry, and the terminal guard entry left behind refuses every terminal command
+  (`docs/troubleshooting.md`, "Every terminal command, or every edit, is refused").
+- The guard entries live in the repository's `.claude/settings.json`, so they reach every Claude
+  Code session in it. A teammate whose machine has no `node` on the hook PATH has every edit and
+  every terminal command refused; install Node. On Windows without Git Bash, Claude Code runs
+  hooks in PowerShell (from the documentation; not measured): PowerShell 7 would refuse every
+  call, and Windows PowerShell 5.1 would not run the guards at all, which `rsct_status` cannot
+  tell; install Git for Windows. Automation that runs Claude Code in the repository and commits
+  with git is refused the same way as the agent.
+
 ## [2.14.1] - 2026-10-16
 
 ### Security

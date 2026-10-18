@@ -268,6 +268,11 @@ git add .
    - `git remote add origin [GITHUB_REMOTE]` (if URL was provided)
    - Any push
 
+   The RSCT terminal guard refuses `git commit` and `git push` from the agent's
+   terminal (#91). Commit through `rsct_request_commit` with `project_root` set
+   to the universe repository; if it refuses or is not available in this
+   session, the developer runs the commit and the push in their own terminal.
+
 Suggested commit message:
 ```
 chore: bootstrap [ORG_SLUG]-universe

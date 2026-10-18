@@ -163,6 +163,14 @@ Before any `Edit` / `Write` to executable behavior files
   project root are always `in_scope`, and a path outside the project is
   `unknown` (on Windows a network-style path on a different host is refused
   instead). List entries are relative to the project root.
+- The PreToolUse **terminal guard** refuses a `git commit`, `push`, `merge`,
+  `rebase`, `cherry-pick`, `revert`, `am` or `gh pr merge` run through the
+  Bash, PowerShell or Monitor tool, and names the RSCT tool to call (for
+  `gh pr merge`, the developer merges on GitHub). A refusal
+  is a STOP: call that tool, or ask the developer to run the command in their
+  own terminal — never work around it. The
+  same holds for a Claude Code settings write the edit guard refuses
+  (`claude_settings`): switching hooks off is the developer's own edit.
 - Never write a comment into code. A decision, a convention or a measured
   fact belongs in `documentation/decisions.md`,
   `documentation/knowledge/anti-decisions.md` or `CONVENTIONS.md`.

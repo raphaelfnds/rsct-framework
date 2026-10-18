@@ -300,9 +300,11 @@ For each Category B item, the dev will choose:
 | Item | Default | Always-on-uninstall | Dev opt-in to override default |
 |---|---|---|---|
 | `hooks.SessionStart[]` entries in `.claude/settings.json` matching the sanitizer marker | **remove** | yes (closes the §C-gated ceiling cleanly) | dev may choose to keep for staged uninstall |
-| `hooks.PreToolUse[]` entries matching the `edit-scope-guard.js` marker | **remove** | yes (4.V.a1) | dev may choose to keep for staged uninstall |
+| `hooks.PreToolUse[]` entries matching the `edit-scope-guard.js` marker, in `.claude/settings.json` and `.claude/settings.local.json` | **remove** | yes (4.V.a1, before the script) | none — kept without its script, it refuses every edit |
+| `hooks.PreToolUse[]` entries matching the `terminal-guard.js` marker, in `.claude/settings.json` and `.claude/settings.local.json` | **remove** | yes (4.V.a1, before the script) | none — kept without its script, it refuses every terminal command |
 | `.rsct/scripts/sanitize-permissions.js` | **remove** | yes | none — pure framework code |
 | `.rsct/scripts/edit-scope-guard.js` | **remove** | yes (with `.rsct/scripts/`) | none — pure framework code |
+| `.rsct/scripts/terminal-guard.js` | **remove** | yes (with `.rsct/scripts/`, after 4.V.a1) | none — pure framework code |
 | `.rsct/audit.log` | **keep** | no | dev may choose to delete for full clean removal |
 | The `rsct` entry in `enabledMcpjsonServers` of `.claude/settings.local.json` (#73) | **remove** | yes (4.V.a3 — by value; the key is dropped when its array empties, and the file only when nothing else remains) | none — a stale approval silently re-grants on the next install |
 | `.rsct/approvals-seen.json` | **remove** | yes (silent — no question raised) | none — internal state with no post-uninstall value |
@@ -366,7 +368,10 @@ Current branch: [CURRENT_BRANCH]
 
 🛡 M2 enforcement state (Category E):
   SessionStart sanitizer hook in .claude/settings.json: [HOOK_MATCHES entries | SETTINGS_NOT_FOUND | SETTINGS_MALFORMED]
+  PreToolUse guard hooks in .claude/settings*.json    : [N entries | none]
   .rsct/scripts/sanitize-permissions.js                : [present | absent]
+  .rsct/scripts/edit-scope-guard.js                    : [present | absent]
+  .rsct/scripts/terminal-guard.js                      : [present | absent]
   .rsct/audit.log                                       : [present (N lines) | absent]
   .rsct/approvals-seen.json                             : [present (M entries) | absent]
   .rsct/phase-state.json                                : [present | absent]
@@ -392,7 +397,7 @@ Current branch: [CURRENT_BRANCH]
 ❓ M2 enforcement state (only asked if Category E is in scope):
   - SessionStart sanitizer hook entry: remove (recommended) | keep
   - .rsct/audit.log forensic record  : keep (recommended) | delete
-  (.rsct/scripts/, .rsct/approvals-seen.json, .rsct/phase-state.json, the .rsct/reports/review-comments-*.md sweep reports and the three audit-prune working files in .rsct/reports/ are removed without a question.)
+  (the two PreToolUse guard hook entries, .rsct/scripts/, .rsct/approvals-seen.json, .rsct/phase-state.json, the .rsct/reports/review-comments-*.md sweep reports and the three audit-prune working files in .rsct/reports/ are removed without a question.)
 
 ❓ Final branch for uninstall commits:
   - chore/rsct-uninstall (recommended — new branch from [CURRENT_BRANCH])
@@ -771,23 +776,29 @@ fi
 The script exits 0 unconditionally (mirrors the install side's never-block
 principle). Re-running scrub on an already-scrubbed file is a no-op.
 
-**4.V.a1 — Scrub the PreToolUse edit-scope guard hook (plan-lifecycle-v2)**
+**4.V.a1 — Scrub the PreToolUse guard hooks (edit-scope guard, terminal guard)**
 
-Symmetric with 4.V.a but for the `hooks.PreToolUse[]` entry installed by
-01-setup.md Phase 4.V.d — removes ONLY entries whose `command` contains the
-marker substring `.rsct/scripts/edit-scope-guard.js` (the guard SCRIPT itself
-is removed with the rest of `.rsct/scripts/`). Preserves every other hook.
+Symmetric with 4.V.a but for the `hooks.PreToolUse[]` entries installed by
+01-setup.md Phases 4.V.d and 4.V.e — removes ONLY entries whose `command`
+contains the marker substring `.rsct/scripts/edit-scope-guard.js` or
+`.rsct/scripts/terminal-guard.js` (the guard SCRIPTS themselves are removed
+with the rest of `.rsct/scripts/`, in a later step). Preserves every other
+hook. The order matters: a registered guard whose script is gone refuses every
+call it matches (it fails closed), so the entries go first and the scripts
+after. Both guard entries go whenever this phase runs, from
+`.claude/settings.json` and from `.claude/settings.local.json` (where a
+developer may have moved them), because 4.V.b removes their scripts.
 
 ```bash
 echo "  CHECKPOINT: Phase 4.V.a1 executing canonical structured-merge PreToolUse guard scrub"
 # EXCEPTION: structured merge required (same justification as 4.V.a — the entry
 # nests in hooks.PreToolUse[].hooks[]).
-SETTINGS_PATH="$(pwd)/.claude/settings.json"
-if [ -f "$SETTINGS_PATH" ]; then
+for SETTINGS_PATH in "$(pwd)/.claude/settings.json" "$(pwd)/.claude/settings.local.json"; do
+  [ -f "$SETTINGS_PATH" ] || continue
   node -e '
     const fs = require("fs");
     const target = process.argv[1];
-    const MARKER = ".rsct/scripts/edit-scope-guard.js";
+    const MARKERS = [".rsct/scripts/edit-scope-guard.js", ".rsct/scripts/terminal-guard.js"];
     let settings;
     try {
       // #12: tolerate a UTF-8 BOM — see Phase 1.9 for the full reasoning.
@@ -810,7 +821,7 @@ if [ -f "$SETTINGS_PATH" ]; then
         continue;
       }
       const keptHooks = group.hooks.filter(h => {
-        if (h && typeof h.command === "string" && h.command.indexOf(MARKER) !== -1) {
+        if (h && typeof h.command === "string" && MARKERS.some(m => h.command.indexOf(m) !== -1)) {
           removed++;
           return false;
         }
@@ -828,6 +839,10 @@ if [ -f "$SETTINGS_PATH" ]; then
     if (Object.keys(settings.hooks).length === 0) {
       delete settings.hooks;
     }
+    if (removed === 0) {
+      console.log("No RSCT PreToolUse guard hook in " + target + " — nothing to scrub.");
+      process.exit(0);
+    }
     if (Object.keys(settings).length === 0) {
       fs.unlinkSync(target);
       console.log("Removed " + target + " (it held only the RSCT PreToolUse guard hook).");
@@ -836,7 +851,7 @@ if [ -f "$SETTINGS_PATH" ]; then
       console.log("Scrubbed " + removed + " RSCT PreToolUse guard hook entr" + (removed === 1 ? "y" : "ies") + " from " + target);
     }
   ' "$SETTINGS_PATH"
-fi
+done
 ```
 
 **4.V.a2 — Scrub project-scope MCP registration from `.mcp.json` (CAP-48)**
@@ -1057,7 +1072,11 @@ safety net against accidentally clobbering preserved state.
    ```
    chore: uninstall RSCT v1.0.0 [scope: full | custom — list items]
    ```
-5. **Wait for updated OK** before `git add` / `commit` / `push`.
+5. **Wait for updated OK** before `git add` / `commit` / `push`. With Category E
+   in scope the terminal guard is gone by now and the commit runs as usual. With
+   Category E out of scope the terminal guard is still registered and refuses a
+   `git commit` from the agent's terminal: commit through `rsct_request_commit`,
+   or the developer commits in their own terminal.
 
 ---
 
