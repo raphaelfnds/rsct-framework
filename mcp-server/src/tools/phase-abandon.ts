@@ -26,6 +26,8 @@ import {
   PHASE_STATE_PRESERVED_ON_ABANDON,
   type PhaseState,
 } from '../lib/phase-scope.js'
+import { describePending, readRunAlone, specLabel } from '../lib/run-alone.js'
+import { gateDialogFooter } from '../lib/gate-dialog.js'
 
 export const phaseAbandonInputSchema = z
   .object({
@@ -170,13 +172,22 @@ export async function phaseAbandonHandler(
   const phase = state.phase ?? ''
   const specSlug = state.spec_slug ?? null
   const hasVerification = state.verification !== undefined
+  const runAlone = readRunAlone(state)
+  const pendingDropped = runAlone?.pending ?? []
 
   const gate = await gateRequest({
     toolName: 'rsct_phase_abandon',
     approval: input.dev_approval,
+    ...(pendingDropped.length > 0 && {
+      forceDialog: true,
+      forceDialogReason: 'abandoning drops phases the agent closed on its own, still waiting for the developer',
+    }),
     dialog: {
       title: 'RSCT — abandon phase',
-      message: `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ''}?\n\nReason: ${input.reason}\n\nThis discards the phase without advancing the RSCT cycle.`,
+      message:
+        pendingDropped.length > 0
+          ? `This also drops what the agent closed on its own, still waiting for your approval: ${describePending(pendingDropped)}.\n\nAbandon phase '${phase}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}\nSpec: '${specLabel(specSlug ?? '')}'\nReason: ${specLabel(input.reason)}`
+          : `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ''}?\n\nReason: ${input.reason}\n\nThis discards the phase without advancing the RSCT cycle.`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {
@@ -241,6 +252,7 @@ export async function phaseAbandonHandler(
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
       preserved_keys: writeResult.ok ? preservedKeys : [],
+      ...(runAlone !== null && { run_alone_dropped: pendingDropped.map((p) => p.phase) }),
     },
     config?.audit,
   )

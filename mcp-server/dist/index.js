@@ -23846,7 +23846,7 @@ function refuseUnreadableState(projectRoot, read) {
     path: path2,
     reason: "unreadable_state",
     parse_error: read.parse_error,
-    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. Repair or delete that file; deleting it is a safe recovery.`
+    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. Repair or delete that file; deleting it is a safe recovery. Deleting it also drops a run_alone record and the phases waiting in it for the developer.`
   };
 }
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
@@ -23976,7 +23976,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.15.0";
+var RSCT_MCP_VERSION = "2.16.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -45079,6 +45079,756 @@ function inferRejectKind(reason) {
   return "schema";
 }
 
+// src/lib/run-alone.ts
+init_esm_shims();
+
+// src/lib/gate-dialog.ts
+init_esm_shims();
+function gateDialogFooter(projectRoot, config2) {
+  const notice = config2 === void 0 ? "" : narrowedProtectionNotice(effectiveProtectedList(config2));
+  return `
+
+${repositoryDialogLine(projectRoot)}${notice ? `
+${notice}` : ""}`;
+}
+function anchorHints(projectRoot, auditConfig) {
+  const hints = [];
+  const anchor = anchorFor(projectRoot);
+  if (anchor.detail !== null && anchor.status !== "not-applicable") {
+    hints.push(`\u2139 ${anchor.detail}`);
+  }
+  const decision = decideAuditPath(projectRoot, auditConfig);
+  if (decision.escaped !== null) {
+    hints.push(
+      `\u26A0 .rsct.json audit.path ("${decision.escaped.replace(/\\/g, "/")}") resolves OUTSIDE the project and was ignored \u2014 the audit log stays at ${decision.path.replace(/\\/g, "/")}. An audit log outside the repository can be swapped for a blank one without touching the project.`
+    );
+  }
+  return hints;
+}
+
+// src/lib/phase-machine.ts
+init_esm_shims();
+var RSCT_PHASES = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "test",
+  "review"
+];
+var PHASE_ORDER = [
+  "research",
+  "spec",
+  "verification",
+  "code",
+  "test",
+  "review"
+];
+function nextPhase(current) {
+  const idx = PHASE_ORDER.indexOf(current);
+  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
+  return PHASE_ORDER[idx + 1];
+}
+function isStaleVerificationLabel(state) {
+  return state.phase === "verification" && state.verification?.completed_at != null;
+}
+function leftoverTaskSlug(state, phase, specRef, specSlug) {
+  if (specSlug !== void 0) return null;
+  const leftover = state.spec_slug;
+  if (!leftover || leftover === specRef) return null;
+  if (state.phase === phase && !isStaleVerificationLabel(state)) return null;
+  return leftover;
+}
+function leftoverTaskHint(phase, leftover, specRef, startedAt) {
+  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ""} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`;
+}
+function startPhaseGeneric(input, config2, internal = {}) {
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const existing = readPhaseState(input.projectRoot);
+  const unreadable = refuseUnreadableState(input.projectRoot, existing);
+  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "state_unreadable"
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "state_write_failed",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: unreadable.path,
+      phase_state_written: false,
+      existing_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [`\u26A0 ${unreadable.error} No phase was started.`]
+    };
+  }
+  const baseState = existing.state ?? {};
+  const existingPhase = baseState.phase;
+  const staleVerificationLabel = isStaleVerificationLabel(baseState);
+  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_already_active",
+        existing_phase: existingPhase
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "phase_already_active",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: baseState.spec_slug ?? null,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: "",
+      phase_state_written: false,
+      existing_phase: existingPhase,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [
+        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
+      ]
+    };
+  }
+  const leftover = leftoverTaskSlug(baseState, input.phase, input.specRef, input.specSlug);
+  if (leftover !== null) {
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.start.rejected`,
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        reject_kind: "previous_task_pending",
+        existing_spec_slug: leftover
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "previous_task_pending",
+      phase: input.phase,
+      spec_ref: input.specRef,
+      spec_slug: leftover,
+      started_at: startedAt,
+      scope_globs: input.scopeGlobs ?? [],
+      requested_persona: input.persona ?? null,
+      phase_state_path: "",
+      phase_state_written: false,
+      existing_phase: existingPhase ?? null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      hints: [leftoverTaskHint(input.phase, leftover, input.specRef, baseState.started_at ?? null)]
+    };
+  }
+  const newState = {
+    ...baseState,
+    phase: input.phase,
+    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
+    started_at: startedAt
+  };
+  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
+  internal.patch?.(newState);
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  if (staleVerificationLabel && existingPhase !== input.phase) {
+    appendAudit(
+      input.projectRoot,
+      {
+        event: "phase.stale_label_cleared",
+        tool: `rsct_phase_${input.phase}_start`,
+        spec_ref: input.specRef,
+        previous_phase: existingPhase,
+        previous_spec_slug: baseState.spec_slug ?? null,
+        verification_spec_ref: baseState.verification?.spec_ref ?? null,
+        verification_completed_at: baseState.verification?.completed_at ?? null,
+        phase_state_written: writeResult.ok
+      },
+      config2?.audit
+    );
+  }
+  const audit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.start`,
+      tool: `rsct_phase_${input.phase}_start`,
+      spec_ref: input.specRef,
+      spec_slug: newState.spec_slug,
+      requested_persona: input.persona ?? null,
+      scope_globs: input.scopeGlobs ?? [],
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(audit);
+  const hints = [];
+  if (writeResult.ok) {
+    hints.push(
+      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
+    );
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
+    );
+  } else {
+    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
+  }
+  return {
+    status: writeResult.ok ? "started" : "state_write_failed",
+    phase: input.phase,
+    spec_ref: input.specRef,
+    spec_slug: newState.spec_slug ?? null,
+    started_at: startedAt,
+    scope_globs: input.scopeGlobs ?? [],
+    requested_persona: input.persona ?? null,
+    phase_state_path: writeResult.path,
+    phase_state_written: writeResult.ok,
+    existing_phase: null,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    hints
+  };
+}
+function precheckPhaseComplete(input, config2, internal = {}) {
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const existing = readPhaseState(input.projectRoot);
+  if (!existing.exists || !existing.state?.phase) {
+    return {
+      status: "no_active_phase",
+      phase: input.phase,
+      channel: null,
+      reject_kind: null,
+      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: null,
+      audit_error: null,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
+      ]
+    };
+  }
+  const state = existing.state;
+  if (state.phase !== input.phase) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "phase_mismatch",
+        active_phase: state.phase
+      },
+      config2?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "phase_mismatch",
+      reason: `active phase is '${state.phase}', not '${input.phase}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
+      ]
+    };
+  }
+  if (state.spec_slug && state.spec_slug !== input.specRef) {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: "spec_ref_mismatch",
+        existing_spec_slug: state.spec_slug
+      },
+      config2?.audit
+    );
+    const fields = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: "spec_ref_mismatch",
+      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
+      fabrication_signals: [],
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields.audit_path,
+      audit_error: fields.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [
+        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
+      ]
+    };
+  }
+  return null;
+}
+async function gatePhaseComplete(input, config2, internal = {}) {
+  const promptFn = internal.promptFn ?? promptYesNo;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const precheck = precheckPhaseComplete(input, config2, internal);
+  if (precheck) return precheck;
+  const state = readPhaseState(input.projectRoot).state;
+  const gate = await gateRequest({
+    toolName: `rsct_phase_${input.phase}_complete`,
+    approval: input.devApproval,
+    ...internal.forceDialog === true && { forceDialog: true },
+    ...internal.forceDialogReason !== void 0 && { forceDialogReason: internal.forceDialogReason },
+    dialog: {
+      title: `RSCT \u2014 ${input.phase} complete`,
+      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${internal.dialogDetail ? `
+
+${internal.dialogDetail}` : ""}`
+    },
+    projectRoot: input.projectRoot,
+    ...config2?.approval_modes !== void 0 && {
+      approvalModes: config2.approval_modes
+    },
+    auditConfig: config2?.audit,
+    promptFn,
+    now
+  });
+  if (gate.status === "rejected") {
+    const audit = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool: `rsct_phase_${input.phase}_complete`,
+        spec_ref: input.specRef,
+        reject_kind: gate.reject_kind,
+        reason: gate.reason,
+        fabrication_signals: gate.fabrication_signals
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      fabrication_signals: gate.fabrication_signals,
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
+    };
+  }
+  const newState = { ...state };
+  delete newState.phase;
+  delete newState.scope_globs;
+  delete newState.started_at;
+  if (nextPhase(input.phase) === null) {
+    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
+  }
+  const writeResult = writePhaseState(input.projectRoot, newState);
+  const record2 = recordApproval(gate.approval, {
+    projectRoot: input.projectRoot,
+    now,
+    auditConfig: config2?.audit
+  });
+  const recommended = nextPhase(input.phase);
+  const completedAt = now.toISOString();
+  const completeAudit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.complete`,
+      tool: `rsct_phase_${input.phase}_complete`,
+      spec_ref: input.specRef,
+      channel: gate.channel,
+      fabrication_signals: gate.fabrication_signals,
+      next_recommended_phase: recommended,
+      completed_at: completedAt,
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(completeAudit);
+  const hints = [];
+  if (writeResult.ok) {
+    if (recommended) {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
+      );
+    } else {
+      hints.push(
+        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
+      );
+    }
+  } else if (writeResult.reason === "locked") {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
+    );
+  } else {
+    hints.push(
+      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
+    );
+  }
+  if (!record2.ok) {
+    hints.push(
+      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
+    );
+  }
+  if (fields.audit_error !== null) {
+    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
+  }
+  return {
+    status: writeResult.ok ? "completed" : "state_write_failed",
+    phase: input.phase,
+    channel: gate.channel,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: gate.fabrication_signals,
+    spec_ref: input.specRef,
+    cleared: writeResult.ok,
+    next_recommended_phase: recommended,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    anti_replay_persisted: record2.ok,
+    anti_replay_error: record2.ok ? null : record2.error ?? null,
+    hints
+  };
+}
+
+// src/lib/run-alone.ts
+var SPEC_LABEL_LIMIT = 200;
+var LINE_BREAKS = new RegExp(`[${String.fromCharCode(10, 11, 12, 13, 133, 8232, 8233)}]+`, "g");
+var PHASE_LABEL = { code: "code", test: "tests" };
+function specLabel(spec) {
+  const flat = spec.replace(LINE_BREAKS, " ");
+  return flat.length > SPEC_LABEL_LIMIT ? `${flat.slice(0, SPEC_LABEL_LIMIT - 1)}\u2026` : flat;
+}
+function isPendingEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value;
+  return (entry.phase === "code" || entry.phase === "test") && typeof entry.completed_at === "string";
+}
+function readRunAlone(state) {
+  const raw = state?.run_alone;
+  if (raw === void 0) return null;
+  const block = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return {
+    spec_slug: typeof block.spec_slug === "string" ? block.spec_slug : "",
+    approved_at: typeof block.approved_at === "string" ? block.approved_at : "",
+    active: block.active === true,
+    pending: Array.isArray(block.pending) ? block.pending.filter(isPendingEntry) : []
+  };
+}
+function describePending(pending) {
+  return pending.map((p) => `${PHASE_LABEL[p.phase]} (done ${p.completed_at})`).join(", ");
+}
+function runAloneHome(projectRoot) {
+  if (anchorFor(projectRoot).status !== "relocated") return null;
+  const info2 = readWorktreeInfo(projectRoot);
+  if (!info2.in_git_repo || info2.toplevel === null || sameDirectory(info2.toplevel, projectRoot)) return null;
+  return info2.toplevel;
+}
+function readHomeRunAlone(projectRoot) {
+  const home = runAloneHome(projectRoot);
+  if (home === null) return null;
+  const block = readRunAlone(readPhaseState(home).state);
+  return block === null ? null : { home, block };
+}
+function startWouldBeRefused(state, specRef, specSlug) {
+  if (state.phase && state.phase !== "code" && !isStaleVerificationLabel(state)) return true;
+  return leftoverTaskSlug(state, "code", specRef, specSlug) !== null;
+}
+function runAloneChoiceDialog(projectRoot, specSlug, warningLine) {
+  return {
+    title: "RSCT \u2014 run alone?",
+    message: "Let the agent run code \u2192 tests \u2192 review on its own and stop before the commit?" + (warningLine ? `
+${warningLine}` : "") + "\n\nCode and tests close with no dialog. When you are back, you approve each phase in its own dialog \u2014 code, tests, review \u2014 before any commit." + gateDialogFooter(projectRoot) + `
+Spec: '${specLabel(specSlug)}'`
+  };
+}
+function pendingDialog(projectRoot, entry, specSlug) {
+  return {
+    title: `RSCT \u2014 approve ${PHASE_LABEL[entry.phase]} done on its own`,
+    message: `Approve the ${PHASE_LABEL[entry.phase]} phase the agent completed on its own at ${entry.completed_at}?
+
+Yes = approve it. No = the work goes back to this phase; it and every later phase are redone, with dialogs.` + gateDialogFooter(projectRoot) + `
+Spec: '${specLabel(specSlug)}'`
+  };
+}
+async function gateRunAloneChoice(args2) {
+  const advisory = evaluateInstallAdvisory({
+    projectRoot: args2.projectRoot,
+    rsctInstalled: args2.rsctInstalled,
+    projectVersion: args2.config?.rsct_version ?? null,
+    auditConfig: args2.config?.audit,
+    tool: "rsct_phase_code_start",
+    ...args2.auditWriter !== void 0 && { auditWriter: args2.auditWriter }
+  });
+  const gate = await gateRequest({
+    toolName: "rsct_phase_code_start",
+    approval: args2.devApproval,
+    forceDialog: true,
+    forceDialogReason: "running code, tests and review with no dialog is the developer's choice alone",
+    dialog: runAloneChoiceDialog(args2.projectRoot, args2.specSlug, advisory.dialogLine),
+    projectRoot: args2.projectRoot,
+    ...args2.config?.approval_modes !== void 0 && { approvalModes: args2.config.approval_modes },
+    auditConfig: args2.config?.audit,
+    ...args2.promptFn !== void 0 && { promptFn: args2.promptFn },
+    ...args2.now !== void 0 && { now: args2.now }
+  });
+  if (gate.status === "rejected") return { status: "rejected", reject_kind: gate.reject_kind, reason: gate.reason };
+  return { status: "approved", approved_at: (args2.now ?? /* @__PURE__ */ new Date()).toISOString() };
+}
+function deferPhaseComplete(input, config2, internal = {}) {
+  const read = readPhaseState(input.projectRoot);
+  const state = read.state;
+  const block = readRunAlone(state);
+  if (!state || !block || !block.active || block.spec_slug !== state.spec_slug) return null;
+  const precheck = precheckPhaseComplete(input, config2, internal);
+  if (precheck) return precheck;
+  const appendAudit = internal.auditWriter ?? appendAuditEntry;
+  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
+  const now = internal.now ?? /* @__PURE__ */ new Date();
+  const tool = `rsct_phase_${input.phase}_complete`;
+  const validation = validateDevApproval(input.devApproval, {
+    projectRoot: input.projectRoot,
+    toolName: tool,
+    now,
+    ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
+    auditConfig: config2?.audit
+  });
+  if (validation.status === "rejected") {
+    const rejectKind = inferRejectKind(validation.reason);
+    const audit2 = appendAudit(
+      input.projectRoot,
+      {
+        event: `${input.phase}.complete.rejected`,
+        tool,
+        spec_ref: input.specRef,
+        reject_kind: rejectKind,
+        reason: validation.reason,
+        fabrication_signals: validation.fabrication_signals,
+        run_alone: true
+      },
+      config2?.audit
+    );
+    const fields2 = auditFields(audit2);
+    return {
+      status: "rejected",
+      phase: input.phase,
+      channel: null,
+      reject_kind: rejectKind,
+      reason: validation.reason,
+      fabrication_signals: validation.fabrication_signals,
+      spec_ref: input.specRef,
+      cleared: false,
+      next_recommended_phase: null,
+      audit_path: fields2.audit_path,
+      audit_error: fields2.audit_error,
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [`Approval rejected (${rejectKind}): ${validation.reason}`]
+    };
+  }
+  const completedAt = now.toISOString();
+  const next = { ...state };
+  delete next.phase;
+  delete next.scope_globs;
+  delete next.started_at;
+  next.run_alone = { ...block, pending: [...block.pending, { phase: input.phase, completed_at: completedAt }] };
+  const writeResult = writePhaseState(input.projectRoot, next);
+  const record2 = writeResult.ok ? recordApproval(validation.approval, { projectRoot: input.projectRoot, now, auditConfig: config2?.audit }) : null;
+  const recommended = nextPhase(input.phase);
+  const audit = appendAudit(
+    input.projectRoot,
+    {
+      event: `${input.phase}.complete.deferred`,
+      tool,
+      spec_ref: input.specRef,
+      completed_at: completedAt,
+      fabrication_signals: validation.fabrication_signals,
+      next_recommended_phase: recommended,
+      phase_state_written: writeResult.ok
+    },
+    config2?.audit
+  );
+  const fields = auditFields(audit);
+  const hints = [];
+  if (writeResult.ok) {
+    hints.push(
+      `${input.phase} closed with no dialog (run alone): the developer approves it in its own dialog when back, before any commit. Next: rsct_phase_${recommended}_start.`
+    );
+    if (input.phase === "test") hints.push(stopPointHint());
+  } else if (writeResult.reason === "locked") {
+    hints.push(`\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). Nothing was closed; retry.`);
+  } else {
+    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}. Nothing was closed.`);
+  }
+  if (record2 !== null && !record2.ok) {
+    hints.push(`\u26A0 I could not record this approval as used: ${record2.error}. Use a fresh dev_approval next time.`);
+  }
+  if (fields.audit_error !== null) hints.push(`\u26A0 ${input.phase}.complete.deferred audit write failed: ${fields.audit_error}.`);
+  return {
+    status: writeResult.ok ? "deferred" : "state_write_failed",
+    phase: input.phase,
+    channel: null,
+    reject_kind: null,
+    reason: null,
+    fabrication_signals: validation.fabrication_signals,
+    spec_ref: input.specRef,
+    cleared: writeResult.ok,
+    next_recommended_phase: recommended,
+    audit_path: fields.audit_path,
+    audit_error: fields.audit_error,
+    anti_replay_persisted: record2 === null ? null : record2.ok,
+    anti_replay_error: record2 === null || record2.ok ? null : record2.error ?? null,
+    hints
+  };
+}
+function stopPointHint() {
+  return "Run alone: when the review work is done, STOP and tell the developer. Do not call rsct_phase_review_complete before the developer says they are back \u2014 its dialogs block every RSCT tool until they are answered, and it first asks for each phase closed on its own.";
+}
+async function approvePendingPhases(args2) {
+  const appendAudit = args2.auditWriter ?? appendAuditEntry;
+  const promptFn = args2.promptFn ?? promptYesNo;
+  const approved = [];
+  const atHome = readHomeRunAlone(args2.projectRoot);
+  if (atHome !== null) {
+    const reason = `a run-alone record waits at the repository root (${atHome.home.replace(/\\/g, "/")}), not at the folder this REVIEW names \u2014 run the REVIEW from that root`;
+    return { ok: false, reject_kind: "run_alone_pending", reason, hints: [reason], approved };
+  }
+  for (; ; ) {
+    const state = readPhaseState(args2.projectRoot).state;
+    const block = readRunAlone(state);
+    if (!state || !block || block.pending.length === 0) return { ok: true, approved };
+    const entry = block.pending[0];
+    const gate = await gateRequest({
+      toolName: "rsct_phase_review_complete",
+      approval: args2.devApproval,
+      forceDialog: true,
+      forceDialogReason: "a phase the agent closed on its own waits for the developer",
+      dialog: pendingDialog(args2.projectRoot, entry, block.spec_slug),
+      projectRoot: args2.projectRoot,
+      ...args2.config?.approval_modes !== void 0 && { approvalModes: args2.config.approval_modes },
+      auditConfig: args2.config?.audit,
+      promptFn,
+      ...args2.now !== void 0 && { now: args2.now }
+    });
+    const fresh = readPhaseState(args2.projectRoot).state ?? {};
+    const freshBlock = readRunAlone(fresh);
+    if (!freshBlock) return { ok: true, approved };
+    const at = freshBlock.pending.findIndex((p) => p.phase === entry.phase && p.completed_at === entry.completed_at);
+    if (at < 0) continue;
+    if (gate.status === "approved") {
+      const next = {
+        ...fresh,
+        run_alone: { ...freshBlock, pending: [...freshBlock.pending.slice(0, at), ...freshBlock.pending.slice(at + 1)] }
+      };
+      const w = writePhaseState(args2.projectRoot, next);
+      appendAudit(
+        args2.projectRoot,
+        { event: "run_alone.pending_approved", tool: "rsct_phase_review_complete", spec_slug: freshBlock.spec_slug, phase: entry.phase, completed_at: entry.completed_at, channel: gate.channel, phase_state_written: w.ok },
+        args2.config?.audit
+      );
+      if (!w.ok) {
+        const reason = `the approval of ${PHASE_LABEL[entry.phase]} could not be saved (${w.reason}) \u2014 call again`;
+        return { ok: false, reject_kind: "run_alone_state_write_failed", reason, hints: [reason], approved };
+      }
+      approved.push(entry);
+      continue;
+    }
+    if (gate.reject_kind === "dialog_no") {
+      const next = { ...fresh, run_alone: { ...freshBlock, active: false, pending: freshBlock.pending.slice(0, at) } };
+      delete next.phase;
+      delete next.scope_globs;
+      delete next.started_at;
+      const w = writePhaseState(args2.projectRoot, next);
+      appendAudit(
+        args2.projectRoot,
+        {
+          event: "run_alone.pending_declined",
+          tool: "rsct_phase_review_complete",
+          spec_slug: freshBlock.spec_slug,
+          phase: entry.phase,
+          dropped: freshBlock.pending.slice(at).map((p) => p.phase),
+          phase_state_written: w.ok
+        },
+        args2.config?.audit
+      );
+      if (!w.ok) {
+        const reason2 = `the developer declined the ${PHASE_LABEL[entry.phase]} done on its own, but that answer could not be saved (${w.reason}) \u2014 nothing changed; call again`;
+        return { ok: false, reject_kind: "run_alone_state_write_failed", reason: reason2, hints: [reason2], approved };
+      }
+      const reason = `the developer did not approve the ${PHASE_LABEL[entry.phase]} done on its own \u2014 the work goes back to that phase`;
+      return {
+        ok: false,
+        reject_kind: "run_alone_rejected",
+        reason,
+        hints: [
+          `${reason}. Run alone is over for this task. Start ${entry.phase} again (rsct_phase_${entry.phase}_start), then the later phases, each closed with its dialog. Commits stay refused until a REVIEW is approved.`
+        ],
+        approved
+      };
+    }
+    return {
+      ok: false,
+      reject_kind: gate.reject_kind,
+      reason: gate.reason,
+      hints: [`The phases closed on its own still wait for the developer (${describePending(freshBlock.pending)}): ${gate.reason}`],
+      approved
+    };
+  }
+}
+function closeRunAlone(args2) {
+  const read = readPhaseState(args2.projectRoot);
+  const block = readRunAlone(read.state);
+  if (!read.state || !block || block.pending.length > 0) return null;
+  const next = { ...read.state };
+  delete next.run_alone;
+  const w = writePhaseState(args2.projectRoot, next);
+  (args2.auditWriter ?? appendAuditEntry)(
+    args2.projectRoot,
+    { event: "run_alone.closed", tool: "rsct_phase_review_complete", spec_ref: args2.specRef, spec_slug: block.spec_slug, phase_state_written: w.ok },
+    args2.config?.audit
+  );
+  return w.ok ? "Run alone finished: every phase is approved. Commits go through rsct_request_commit as usual." : `\u26A0 the review is approved, but the run-alone record could not be cleared (${w.reason}) \u2014 rsct_request_commit keeps refusing until a REVIEW completes with it cleared.`;
+}
+
 // src/lib/plan-authorization.ts
 init_esm_shims();
 var PLAN_TOKEN_COVERS = ["commit"];
@@ -45187,30 +45937,6 @@ function resolveAbsTtlMinutes(input, configDefault) {
   return Math.min(PLAN_TOKEN_TTL_ABS_MAX, Math.max(PLAN_TOKEN_TTL_ABS_MIN, v));
 }
 
-// src/lib/gate-dialog.ts
-init_esm_shims();
-function gateDialogFooter(projectRoot, config2) {
-  const notice = config2 === void 0 ? "" : narrowedProtectionNotice(effectiveProtectedList(config2));
-  return `
-
-${repositoryDialogLine(projectRoot)}${notice ? `
-${notice}` : ""}`;
-}
-function anchorHints(projectRoot, auditConfig) {
-  const hints = [];
-  const anchor = anchorFor(projectRoot);
-  if (anchor.detail !== null && anchor.status !== "not-applicable") {
-    hints.push(`\u2139 ${anchor.detail}`);
-  }
-  const decision = decideAuditPath(projectRoot, auditConfig);
-  if (decision.escaped !== null) {
-    hints.push(
-      `\u26A0 .rsct.json audit.path ("${decision.escaped.replace(/\\/g, "/")}") resolves OUTSIDE the project and was ignored \u2014 the audit log stays at ${decision.path.replace(/\\/g, "/")}. An audit log outside the repository can be swapped for a blank one without touching the project.`
-    );
-  }
-  return hints;
-}
-
 // src/tools/request-commit.ts
 var requestCommitInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
@@ -45229,7 +45955,7 @@ function runRetention(prune, projectRoot, config2, now) {
 }
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -45347,6 +46073,40 @@ async function requestCommitHandler(rawInput, internal = {}) {
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: withAdvisories([messageCheck.reason ?? "commit message too long"])
+    };
+  }
+  const runAlone = readRunAlone(readPhaseState(projectRoot).state) ?? readHomeRunAlone(projectRoot)?.block ?? null;
+  if (runAlone !== null) {
+    const reason = `a task run alone (spec '${runAlone.spec_slug}') is not approved yet${runAlone.pending.length > 0 ? ` \u2014 waiting for the developer: ${describePending(runAlone.pending)}` : ""}. Its REVIEW must be approved first: call rsct_phase_review_complete when the developer is back. No commit was made and no dialog was shown.`;
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.rejected",
+        tool: "rsct_request_commit",
+        reject_kind: "run_alone_pending",
+        reason,
+        branch: gitState.branch,
+        run_alone_pending: runAlone.pending.map((p) => p.phase)
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind: "run_alone_pending",
+      reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason])
     };
   }
   const runSweepCheck = async () => {
@@ -48220,430 +48980,6 @@ ${head}${overflow}`,
   return { findings: classified, stats, hints };
 }
 
-// src/lib/phase-machine.ts
-init_esm_shims();
-var RSCT_PHASES = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "test",
-  "review"
-];
-var PHASE_ORDER = [
-  "research",
-  "spec",
-  "verification",
-  "code",
-  "test",
-  "review"
-];
-function nextPhase(current) {
-  const idx = PHASE_ORDER.indexOf(current);
-  if (idx < 0 || idx >= PHASE_ORDER.length - 1) return null;
-  return PHASE_ORDER[idx + 1];
-}
-function isStaleVerificationLabel(state) {
-  return state.phase === "verification" && state.verification?.completed_at != null;
-}
-function leftoverTaskSlug(state, phase, specRef, specSlug) {
-  if (specSlug !== void 0) return null;
-  const leftover = state.spec_slug;
-  if (!leftover || leftover === specRef) return null;
-  if (state.phase === phase && !isStaleVerificationLabel(state)) return null;
-  return leftover;
-}
-function leftoverTaskHint(phase, leftover, specRef, startedAt) {
-  return `Task '${leftover}'${startedAt ? ` (last phase started ${startedAt})` : ""} is still recorded in phase-state.json, and this start names '${specRef}'. Nothing was started. Ask the developer whether to continue task '${leftover}' or start a new one, then call rsct_phase_${phase}_start again with spec_slug='${leftover}' (continue) or spec_slug='${specRef}' (new task). Keep passing that same spec_slug on every later start of this task, so the question is not asked again.`;
-}
-function startPhaseGeneric(input, config2, internal = {}) {
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const startedAt = (internal.now ?? /* @__PURE__ */ new Date()).toISOString();
-  const existing = readPhaseState(input.projectRoot);
-  const unreadable = refuseUnreadableState(input.projectRoot, existing);
-  if (unreadable && !unreadable.ok && unreadable.reason === "unreadable_state") {
-    const audit2 = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.start.rejected`,
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        reject_kind: "state_unreadable"
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit2);
-    return {
-      status: "state_write_failed",
-      phase: input.phase,
-      spec_ref: input.specRef,
-      spec_slug: null,
-      started_at: startedAt,
-      scope_globs: input.scopeGlobs ?? [],
-      requested_persona: input.persona ?? null,
-      phase_state_path: unreadable.path,
-      phase_state_written: false,
-      existing_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      hints: [`\u26A0 ${unreadable.error} No phase was started.`]
-    };
-  }
-  const baseState = existing.state ?? {};
-  const existingPhase = baseState.phase;
-  const staleVerificationLabel = isStaleVerificationLabel(baseState);
-  if (existingPhase && existingPhase !== input.phase && !staleVerificationLabel) {
-    const audit2 = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.start.rejected`,
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_already_active",
-        existing_phase: existingPhase
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit2);
-    return {
-      status: "phase_already_active",
-      phase: input.phase,
-      spec_ref: input.specRef,
-      spec_slug: baseState.spec_slug ?? null,
-      started_at: startedAt,
-      scope_globs: input.scopeGlobs ?? [],
-      requested_persona: input.persona ?? null,
-      phase_state_path: "",
-      phase_state_written: false,
-      existing_phase: existingPhase,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      hints: [
-        `Phase '${existingPhase}' is already active. Close it with rsct_phase_${existingPhase}_complete, or discard it with rsct_phase_abandon (records a reason in the audit log), before starting a different phase.`
-      ]
-    };
-  }
-  const leftover = leftoverTaskSlug(baseState, input.phase, input.specRef, input.specSlug);
-  if (leftover !== null) {
-    const audit2 = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.start.rejected`,
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        reject_kind: "previous_task_pending",
-        existing_spec_slug: leftover
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit2);
-    return {
-      status: "previous_task_pending",
-      phase: input.phase,
-      spec_ref: input.specRef,
-      spec_slug: leftover,
-      started_at: startedAt,
-      scope_globs: input.scopeGlobs ?? [],
-      requested_persona: input.persona ?? null,
-      phase_state_path: "",
-      phase_state_written: false,
-      existing_phase: existingPhase ?? null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      hints: [leftoverTaskHint(input.phase, leftover, input.specRef, baseState.started_at ?? null)]
-    };
-  }
-  const newState = {
-    ...baseState,
-    phase: input.phase,
-    spec_slug: input.specSlug ?? baseState.spec_slug ?? input.specRef,
-    started_at: startedAt
-  };
-  if (input.scopeGlobs !== void 0) newState.scope_globs = input.scopeGlobs;
-  internal.patch?.(newState);
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  if (staleVerificationLabel && existingPhase !== input.phase) {
-    appendAudit(
-      input.projectRoot,
-      {
-        event: "phase.stale_label_cleared",
-        tool: `rsct_phase_${input.phase}_start`,
-        spec_ref: input.specRef,
-        previous_phase: existingPhase,
-        previous_spec_slug: baseState.spec_slug ?? null,
-        verification_spec_ref: baseState.verification?.spec_ref ?? null,
-        verification_completed_at: baseState.verification?.completed_at ?? null,
-        phase_state_written: writeResult.ok
-      },
-      config2?.audit
-    );
-  }
-  const audit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.start`,
-      tool: `rsct_phase_${input.phase}_start`,
-      spec_ref: input.specRef,
-      spec_slug: newState.spec_slug,
-      requested_persona: input.persona ?? null,
-      scope_globs: input.scopeGlobs ?? [],
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(audit);
-  const hints = [];
-  if (writeResult.ok) {
-    hints.push(
-      `Phase '${input.phase}' started for spec_ref='${input.specRef}'. State at ${writeResult.path}. Call rsct_phase_${input.phase}_complete with dev_approval (action_scope='${input.phase}_complete:spec_ref=${input.specRef}') when ready.`
-    );
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by session ${writeResult.held_by_session ?? "unknown"}). Wait and retry.`
-    );
-  } else {
-    hints.push(`\u26A0 phase-state.json write failed: ${writeResult.error}.`);
-  }
-  return {
-    status: writeResult.ok ? "started" : "state_write_failed",
-    phase: input.phase,
-    spec_ref: input.specRef,
-    spec_slug: newState.spec_slug ?? null,
-    started_at: startedAt,
-    scope_globs: input.scopeGlobs ?? [],
-    requested_persona: input.persona ?? null,
-    phase_state_path: writeResult.path,
-    phase_state_written: writeResult.ok,
-    existing_phase: null,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    hints
-  };
-}
-function precheckPhaseComplete(input, config2, internal = {}) {
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const existing = readPhaseState(input.projectRoot);
-  if (!existing.exists || !existing.state?.phase) {
-    return {
-      status: "no_active_phase",
-      phase: input.phase,
-      channel: null,
-      reject_kind: null,
-      reason: "no active phase in .rsct/phase-state.json \u2014 call rsct_phase_*_start first",
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: null,
-      audit_error: null,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `No active phase in phase-state.json. Run rsct_phase_${input.phase}_start before _complete.`
-      ]
-    };
-  }
-  const state = existing.state;
-  if (state.phase !== input.phase) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "phase_mismatch",
-        active_phase: state.phase
-      },
-      config2?.audit
-    );
-    const fields = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "phase_mismatch",
-      reason: `active phase is '${state.phase}', not '${input.phase}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields.audit_path,
-      audit_error: fields.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `phase-state.json holds phase='${state.phase}', not '${input.phase}'. Call rsct_phase_${state.phase}_complete instead, or discard that phase with rsct_phase_abandon.`
-      ]
-    };
-  }
-  if (state.spec_slug && state.spec_slug !== input.specRef) {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: "spec_ref_mismatch",
-        existing_spec_slug: state.spec_slug
-      },
-      config2?.audit
-    );
-    const fields = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: "spec_ref_mismatch",
-      reason: `phase-state holds spec_slug='${state.spec_slug}' but input spec_ref is '${input.specRef}'`,
-      fabrication_signals: [],
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields.audit_path,
-      audit_error: fields.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [
-        `spec_ref mismatch \u2014 pass spec_ref='${state.spec_slug}' to match the active phase.`
-      ]
-    };
-  }
-  return null;
-}
-async function gatePhaseComplete(input, config2, internal = {}) {
-  const promptFn = internal.promptFn ?? promptYesNo;
-  const now = internal.now ?? /* @__PURE__ */ new Date();
-  const appendAudit = internal.auditWriter ?? appendAuditEntry;
-  const recordApproval = internal.approvalRecorder ?? recordConsumedApproval;
-  const precheck = precheckPhaseComplete(input, config2, internal);
-  if (precheck) return precheck;
-  const state = readPhaseState(input.projectRoot).state;
-  const gate = await gateRequest({
-    toolName: `rsct_phase_${input.phase}_complete`,
-    approval: input.devApproval,
-    ...internal.forceDialog === true && { forceDialog: true },
-    ...internal.forceDialogReason !== void 0 && { forceDialogReason: internal.forceDialogReason },
-    dialog: {
-      title: `RSCT \u2014 ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${internal.dialogDetail ? `
-
-${internal.dialogDetail}` : ""}`
-    },
-    projectRoot: input.projectRoot,
-    ...config2?.approval_modes !== void 0 && {
-      approvalModes: config2.approval_modes
-    },
-    auditConfig: config2?.audit,
-    promptFn,
-    now
-  });
-  if (gate.status === "rejected") {
-    const audit = appendAudit(
-      input.projectRoot,
-      {
-        event: `${input.phase}.complete.rejected`,
-        tool: `rsct_phase_${input.phase}_complete`,
-        spec_ref: input.specRef,
-        reject_kind: gate.reject_kind,
-        reason: gate.reason,
-        fabrication_signals: gate.fabrication_signals
-      },
-      config2?.audit
-    );
-    const fields2 = auditFields(audit);
-    return {
-      status: "rejected",
-      phase: input.phase,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      spec_ref: input.specRef,
-      cleared: false,
-      next_recommended_phase: null,
-      audit_path: fields2.audit_path,
-      audit_error: fields2.audit_error,
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`]
-    };
-  }
-  const newState = { ...state };
-  delete newState.phase;
-  delete newState.scope_globs;
-  delete newState.started_at;
-  if (nextPhase(input.phase) === null) {
-    newState.context_stale = { since: now.toISOString(), reason: "plan_closed" };
-  }
-  const writeResult = writePhaseState(input.projectRoot, newState);
-  const record2 = recordApproval(gate.approval, {
-    projectRoot: input.projectRoot,
-    now,
-    auditConfig: config2?.audit
-  });
-  const recommended = nextPhase(input.phase);
-  const completedAt = now.toISOString();
-  const completeAudit = appendAudit(
-    input.projectRoot,
-    {
-      event: `${input.phase}.complete`,
-      tool: `rsct_phase_${input.phase}_complete`,
-      spec_ref: input.specRef,
-      channel: gate.channel,
-      fabrication_signals: gate.fabrication_signals,
-      next_recommended_phase: recommended,
-      completed_at: completedAt,
-      phase_state_written: writeResult.ok
-    },
-    config2?.audit
-  );
-  const fields = auditFields(completeAudit);
-  const hints = [];
-  if (writeResult.ok) {
-    if (recommended) {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}'. Next recommended phase: '${recommended}' \u2014 call rsct_phase_${recommended}_start when ready.`
-      );
-    } else {
-      hints.push(
-        `${input.phase} complete for '${input.specRef}' \u2014 task cycle finished. spec_slug retained for traceability.`
-      );
-    }
-  } else if (writeResult.reason === "locked") {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago). State may be inconsistent.`
-    );
-  } else {
-    hints.push(
-      `\u26A0 ${input.phase} complete approved but phase-state.json write failed: ${writeResult.error}.`
-    );
-  }
-  if (!record2.ok) {
-    hints.push(
-      `\u26A0 I could not record this approval as used: ${record2.error}. The dev_approval could be accepted again by mistake for a short time \u2014 use a fresh one next time, or repair .rsct/approvals-seen.json.`
-    );
-  }
-  if (fields.audit_error !== null) {
-    hints.push(`\u26A0 ${input.phase}.complete audit write failed: ${fields.audit_error}.`);
-  }
-  return {
-    status: writeResult.ok ? "completed" : "state_write_failed",
-    phase: input.phase,
-    channel: gate.channel,
-    reject_kind: null,
-    reason: null,
-    fabrication_signals: gate.fabrication_signals,
-    spec_ref: input.specRef,
-    cleared: writeResult.ok,
-    next_recommended_phase: recommended,
-    audit_path: fields.audit_path,
-    audit_error: fields.audit_error,
-    anti_replay_persisted: record2.ok,
-    anti_replay_error: record2.ok ? null : record2.error ?? null,
-    hints
-  };
-}
-
 // src/tools/phase-verification-start.ts
 var TIER_VALUES = ["trivial", "small", "standard", "complex"];
 var phaseVerificationStartInputSchema = external_exports.object({
@@ -49874,7 +50210,7 @@ var phaseStatusInputSchema = external_exports.object({
 }).strict();
 var phaseStatusTool = {
   name: "rsct_phase_status",
-  description: "Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, and the next recommended phase per the canonical R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW order. Use to check where the task is mid-session before starting a new phase.",
+  description: "Pure query: returns the current state of the RSCT phase machine from .rsct/phase-state.json. Reports the active phase (or null), spec_slug, scope globs, verification block summary when active, the last completed REVIEW and its open findings when present, a run_alone record (present only when the developer chose run alone: the phases closed with no dialog that wait for the developer), and the next recommended phase per the canonical R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW order. Use to check where the task is mid-session before starting a new phase.",
   inputSchema: {
     type: "object",
     properties: {
@@ -49978,6 +50314,12 @@ async function phaseStatusHandler(rawInput) {
       `Plan-scoped batch token ACTIVE for '${token.plan_slug}' on '${token.branch}' (${token.actions_used}/${token.max_actions} commits used, expires ${token.expires_at}). rsct_request_commit needs no per-action dev_approval within scope; rsct_plan_revoke ends it early.`
     );
   }
+  const runAlone = readRunAlone(state);
+  if (runAlone) {
+    hints.push(
+      runAlone.pending.length > 0 ? `Run alone for '${runAlone.spec_slug}': waiting for the developer \u2014 ${describePending(runAlone.pending)}. They are approved, in order, at rsct_phase_review_complete; commits are refused until that REVIEW is approved.` : `Run alone for '${runAlone.spec_slug}'${runAlone.active ? "" : " (ended by a No)"}: commits are refused until a REVIEW is approved.`
+    );
+  }
   if (worktree.is_worktree) {
     hints.push(
       `Linked git worktree${worktree.name ? ` ('${worktree.name}')` : ""} \u2014 this phase-state + token are isolated to THIS worktree.`
@@ -49993,6 +50335,7 @@ async function phaseStatusHandler(rawInput) {
     verification,
     review,
     plan_authorization: planAuth,
+    ...runAlone && { run_alone: runAlone },
     worktree,
     next_recommended_phase: recommended,
     rsct_phase_order: RSCT_PHASES,
@@ -50281,13 +50624,16 @@ var phaseCodeStartInputSchema = external_exports.object({
   override_plan_tracking: external_exports.boolean().default(false).describe(
     "PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Requires dev_approval and always forces the OS dialog. Override is audit-logged."
   ),
+  run_alone: external_exports.boolean().default(false).describe(
+    "When true, asks the developer in a forced OS dialog whether the agent may run code \u2192 tests \u2192 review on its own and stop before the commit. Requires dev_approval; trust_allowed_for is ignored and no dialog channel means refused. On Yes, rsct_phase_code_complete and rsct_phase_test_complete close with no dialog and wait in run_alone.pending; rsct_phase_review_complete asks for each of them first, and rsct_request_commit refuses until that REVIEW is approved. Refused while a run_alone record already exists, and below the root of the repository or worktree."
+  ),
   dev_approval: external_exports.unknown().optional().describe(
-    "Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking is a per-call decision, not a pre-authorised tool."
+    "Required only when one of the override_* flags, or run_alone, is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool."
   )
 }).strict();
 var phaseCodeStartTool = {
   name: "rsct_phase_code_start",
-  description: 'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** \u2014 also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, the classification or plan tracking is a per-call decision. **Evidence gate** \u2014 `spec_tier \u2208 {trivial, small}` skips V and plan tracking (never REVIEW, which is mandatory at every tier), so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** \u2014 warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier \u2208 {trivial, small} the V gate is automatically bypassed.',
+  description: 'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** \u2014 for spec_tier \u2208 {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** \u2014 also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, the classification or plan tracking is a per-call decision. **Run alone** \u2014 `run_alone=true` asks the developer, in a forced OS dialog shown after every other gate passed, whether the agent may run code \u2192 tests \u2192 review on its own and stop before the commit; on Yes, code and test close with no dialog and the developer approves each of them, then the REVIEW, when back. **Evidence gate** \u2014 `spec_tier \u2208 {trivial, small}` skips V and plan tracking (never REVIEW, which is mandatory at every tier), so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** \u2014 warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier \u2208 {trivial, small} the V gate is automatically bypassed.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -50322,9 +50668,14 @@ var phaseCodeStartTool = {
         default: false,
         description: "PH-1: when true, bypass the plan-tracking gate. Requires dev_approval and forces the OS dialog (audit-logged)."
       },
+      run_alone: {
+        type: "boolean",
+        default: false,
+        description: "When true, a forced OS dialog asks the developer whether the agent may run code \u2192 tests \u2192 review on its own and stop before the commit (requires dev_approval; only at the root of the repository or worktree). On Yes, code and test close with no dialog and wait for the developer, who approves each one at rsct_phase_review_complete before any commit."
+      },
       dev_approval: {
         type: "object",
-        description: "The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags is true."
+        description: "The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags, or run_alone, is true."
       }
     },
     additionalProperties: false
@@ -50843,6 +51194,72 @@ async function phaseCodeStartHandler(rawInput, internal = {}) {
       resolution.config?.audit
     );
   }
+  let runAlonePatch = null;
+  if (input.run_alone) {
+    const currentRead = readPhaseState(resolution.root);
+    const current = currentRead.state ?? {};
+    const rejectRunAlone = (rejectKind, reason) => {
+      const audit = appendAuditEntry(
+        resolution.root,
+        {
+          event: rejectKind === "dialog_no" || rejectKind === "force_dialog_no_channel" || rejectKind === "no_channel" ? "run_alone.declined" : "code.start.rejected",
+          tool: "rsct_phase_code_start",
+          spec_ref: input.spec_ref,
+          spec_tier: input.spec_tier,
+          reject_kind: rejectKind,
+          reason
+        },
+        resolution.config?.audit
+      );
+      const fields = auditFields(audit);
+      return {
+        status: "run_alone_gate_rejected",
+        reject_kind: rejectKind,
+        reason,
+        spec_ref: input.spec_ref,
+        verification_gate: gate,
+        classify_gate: classifyGate,
+        plan_tracking_gate: planTrackingGate,
+        phase_state_path: "",
+        phase_state_written: false,
+        audit_path: fields.audit_path,
+        audit_error: fields.audit_error,
+        hints: [`${reason} Nothing was started.`]
+      };
+    };
+    const existingBlock = readRunAlone(current);
+    if (existingBlock !== null) {
+      return rejectRunAlone(
+        "run_alone_exists",
+        `A run-alone record already exists for spec '${existingBlock.spec_slug}'${existingBlock.pending.length > 0 ? ` with phases waiting for the developer (${existingBlock.pending.map((p) => p.phase).join(", ")})` : ""}. It ends when a REVIEW is approved with nothing pending, or with rsct_phase_abandon while a phase is active. Start the code phase without run_alone, or finish that run first.`
+      );
+    }
+    const home = runAloneHome(resolution.root);
+    if (home !== null) {
+      return rejectRunAlone(
+        "run_alone_not_at_root",
+        `Run alone is only available at the root of the repository or worktree (${home.replace(/\\/g, "/")}): the record must live where every commit and REVIEW of this repository reads it. Start it from that root.`
+      );
+    }
+    if (currentRead.parse_error === void 0 && !startWouldBeRefused(current, input.spec_ref, input.spec_slug)) {
+      const specSlug = input.spec_slug ?? current.spec_slug ?? input.spec_ref;
+      const choice = await gateRunAloneChoice({
+        projectRoot: resolution.root,
+        config: resolution.config,
+        rsctInstalled: resolution.rsct_installed,
+        specSlug,
+        devApproval: input.dev_approval,
+        ...internal.promptFn !== void 0 && { promptFn: internal.promptFn },
+        ...internal.now !== void 0 && { now: internal.now }
+      });
+      if (choice.status === "rejected") {
+        return rejectRunAlone(choice.reject_kind, `Run alone was not approved (${choice.reject_kind}): ${choice.reason}.`);
+      }
+      runAlonePatch = (state) => {
+        state.run_alone = { spec_slug: state.spec_slug, approved_at: choice.approved_at, active: true, pending: [] };
+      };
+    }
+  }
   const args2 = {
     projectRoot: resolution.root,
     phase: "code",
@@ -50851,7 +51268,7 @@ async function phaseCodeStartHandler(rawInput, internal = {}) {
   if (input.spec_slug !== void 0) args2.specSlug = input.spec_slug;
   if (input.scope_globs !== void 0) args2.scopeGlobs = input.scope_globs;
   if (input.persona !== void 0) args2.persona = input.persona;
-  const result = startPhaseGeneric(args2, resolution.config);
+  const result = startPhaseGeneric(args2, resolution.config, runAlonePatch ? { patch: runAlonePatch } : {});
   const extras = {
     verification_gate: gate,
     classify_gate: classifyGate,
@@ -50859,6 +51276,22 @@ async function phaseCodeStartHandler(rawInput, internal = {}) {
     bootstrap_marker: bootstrap
   };
   const baseHints = result.hints ?? [];
+  if (runAlonePatch && result.status === "started") {
+    appendAuditEntry(
+      resolution.root,
+      {
+        event: "run_alone.approved",
+        tool: "rsct_phase_code_start",
+        spec_ref: input.spec_ref,
+        spec_slug: result.spec_slug,
+        spec_tier: input.spec_tier
+      },
+      resolution.config?.audit
+    );
+    baseHints.push(
+      `Run alone approved by the developer: rsct_phase_code_complete and rsct_phase_test_complete close with no dialog; each waits for the developer, who approves it at rsct_phase_review_complete before any commit. Follow the approved plan; stop when the review work is done.`
+    );
+  }
   if (bootstrap.status !== "fresh" && bootstrap.hint) {
     baseHints.push(bootstrap.hint);
   }
@@ -50874,7 +51307,7 @@ var phaseCodeCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseCodeCompleteTool = {
   name: "rsct_phase_code_complete",
-  description: '\xA7C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: test \u2014 then the mandatory REVIEW over code and tests together (cycle R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW).',
+  description: '\xA7C-gated C phase closure. Reads .rsct/phase-state.json (must hold phase="code" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. When the developer chose run alone at rsct_phase_code_start, it closes with NO dialog (status "deferred"): the phase waits in run_alone.pending for the developer, who approves it in its own dialog at rsct_phase_review_complete, before any commit. Suggested action_scope: "code_complete:spec_ref=<X>". Next recommended phase: test \u2014 then the mandatory REVIEW over code and tests together (cycle R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW).',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -50889,16 +51322,13 @@ var phaseCodeCompleteTool = {
 async function phaseCodeCompleteHandler(rawInput, internal = {}) {
   const input = phaseCodeCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  return gatePhaseComplete(
-    {
-      projectRoot: resolution.root,
-      phase: "code",
-      specRef: input.spec_ref,
-      devApproval: input.dev_approval
-    },
-    resolution.config,
-    internal
-  );
+  const args2 = {
+    projectRoot: resolution.root,
+    phase: "code",
+    specRef: input.spec_ref,
+    devApproval: input.dev_approval
+  };
+  return deferPhaseComplete(args2, resolution.config, internal) ?? gatePhaseComplete(args2, resolution.config, internal);
 }
 
 // src/tools/phase-review-start.ts
@@ -51057,6 +51487,9 @@ async function phaseReviewStartHandler(rawInput, internal = {}) {
     const removed = comment_sweep.files.reduce((n, f) => n + f.removed.length, 0);
     result.hints.push(`Comment sweep: ${comment_sweep.files.length} touched code file(s), ${remaining} still with comments, ${removed} comment(s) removed so far (each needs a disposition at _complete).`);
   }
+  if (persisted && readRunAlone(readPhaseState(resolution.root).state)?.active === true) {
+    result.hints.push(stopPointHint());
+  }
   return {
     ...result,
     findings: persisted ? declared : [],
@@ -51111,7 +51544,7 @@ var phaseReviewCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -51312,6 +51745,24 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
   );
   if (precheck) {
     return { ...precheck, actions_summary, evidence_mix, head_stale: staleness.head_stale, comment_sweep: null };
+  }
+  const pendingApproval = await approvePendingPhases({
+    projectRoot,
+    config: config2,
+    devApproval: input.dev_approval,
+    promptFn,
+    now,
+    auditWriter: appendAudit
+  });
+  if (!pendingApproval.ok) {
+    return reject({
+      ...base,
+      rejectKind: pendingApproval.reject_kind,
+      reason: pendingApproval.reason,
+      hints: pendingApproval.hints,
+      comment_sweep: null,
+      extra: { run_alone_approved: pendingApproval.approved.map((p) => p.phase) }
+    });
   }
   const findingsGate = checkFindingsGate({
     baseline,
@@ -51643,6 +52094,8 @@ Yes = allow these versions. No = reject this REVIEW.`
   if (!stamp.ok) {
     output.hints.push(`\u26A0 review phase completed but I could not stamp completed_at into the review block (${stamp.reason}).`);
   }
+  const runAloneClosed = closeRunAlone({ projectRoot, config: config2, specRef: input.spec_ref, auditWriter: appendAudit });
+  if (runAloneClosed) output.hints.push(runAloneClosed);
   const s = readPhaseState(projectRoot);
   if (stamp.ok && s.state?.review_findings !== void 0) {
     const next = { ...s.state };
@@ -51739,7 +52192,7 @@ var phaseTestCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseTestCompleteTool = {
   name: "rsct_phase_test_complete",
-  description: '\xA7C-gated T phase closure. Reads .rsct/phase-state.json (must hold phase="test" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. Suggested action_scope: "test_complete:spec_ref=<X>". Next recommended phase: review \u2014 the mandatory REVIEW over code and tests together closes the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW).',
+  description: '\xA7C-gated T phase closure. Reads .rsct/phase-state.json (must hold phase="test" + matching spec_slug), validates dev_approval, pops the OS dialog when required, and clears the active phase on success. When the developer chose run alone at rsct_phase_code_start, it closes with NO dialog (status "deferred"): the phase waits in run_alone.pending for the developer, who approves it in its own dialog at rsct_phase_review_complete, before any commit. Suggested action_scope: "test_complete:spec_ref=<X>". Next recommended phase: review \u2014 the mandatory REVIEW over code and tests together closes the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW).',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -51754,16 +52207,13 @@ var phaseTestCompleteTool = {
 async function phaseTestCompleteHandler(rawInput, internal = {}) {
   const input = phaseTestCompleteInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  return gatePhaseComplete(
-    {
-      projectRoot: resolution.root,
-      phase: "test",
-      specRef: input.spec_ref,
-      devApproval: input.dev_approval
-    },
-    resolution.config,
-    internal
-  );
+  const args2 = {
+    projectRoot: resolution.root,
+    phase: "test",
+    specRef: input.spec_ref,
+    devApproval: input.dev_approval
+  };
+  return deferPhaseComplete(args2, resolution.config, internal) ?? gatePhaseComplete(args2, resolution.config, internal);
 }
 
 // src/tools/phase-abandon.ts
@@ -51861,12 +52311,22 @@ async function phaseAbandonHandler(rawInput, internal = {}) {
   const phase = state.phase ?? "";
   const specSlug = state.spec_slug ?? null;
   const hasVerification = state.verification !== void 0;
+  const runAlone = readRunAlone(state);
+  const pendingDropped = runAlone?.pending ?? [];
   const gate = await gateRequest({
     toolName: "rsct_phase_abandon",
     approval: input.dev_approval,
+    ...pendingDropped.length > 0 && {
+      forceDialog: true,
+      forceDialogReason: "abandoning drops phases the agent closed on its own, still waiting for the developer"
+    },
     dialog: {
       title: "RSCT \u2014 abandon phase",
-      message: `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ""}?
+      message: pendingDropped.length > 0 ? `This also drops what the agent closed on its own, still waiting for your approval: ${describePending(pendingDropped)}.
+
+Abandon phase '${phase}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}
+Spec: '${specLabel(specSlug ?? "")}'
+Reason: ${specLabel(input.reason)}` : `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ""}?
 
 Reason: ${input.reason}
 
@@ -51931,7 +52391,8 @@ This discards the phase without advancing the RSCT cycle.`
       reason: input.reason,
       abandoned_at: now.toISOString(),
       phase_state_written: writeResult.ok,
-      preserved_keys: writeResult.ok ? preservedKeys : []
+      preserved_keys: writeResult.ok ? preservedKeys : [],
+      ...runAlone !== null && { run_alone_dropped: pendingDropped.map((p) => p.phase) }
     },
     config2?.audit
   );

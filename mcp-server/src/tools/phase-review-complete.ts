@@ -64,6 +64,7 @@ import {
 import { DEAD_CODE_KEPT_EVENT, PUBLIC_API_APPROVED_EVENT, deadCodeKeepKey, deriveAuditCeiling, publicApiApprovalKey } from '../lib/free-commit.js'
 import { validateDevApproval } from '../lib/dev-approval.js'
 import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
+import { approvePendingPhases, closeRunAlone } from '../lib/run-alone.js'
 
 const findingActionSchema = z
   .object({
@@ -150,6 +151,9 @@ export type PhaseReviewCompleteRejectKind =
   | GateRejectKind
   | FindingsGateRejectKind
   | 'block_actions_present'
+  | 'run_alone_rejected'
+  | 'run_alone_state_write_failed'
+  | 'run_alone_pending'
   | PhaseReviewSweepRejectKind
 
 export interface CommentSweepSummary {
@@ -185,7 +189,7 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code — a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle — an importer it cannot parse, an import() or require(), a file nothing imports — is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code — a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle — an importer it cannot parse, an import() or require(), a file nothing imports — is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -431,6 +435,25 @@ export async function phaseReviewCompleteHandler(
   )
   if (precheck) {
     return { ...precheck, actions_summary, evidence_mix, head_stale: staleness.head_stale, comment_sweep: null }
+  }
+
+  const pendingApproval = await approvePendingPhases({
+    projectRoot,
+    config,
+    devApproval: input.dev_approval,
+    promptFn,
+    now,
+    auditWriter: appendAudit,
+  })
+  if (!pendingApproval.ok) {
+    return reject({
+      ...base,
+      rejectKind: pendingApproval.reject_kind,
+      reason: pendingApproval.reason,
+      hints: pendingApproval.hints,
+      comment_sweep: null,
+      extra: { run_alone_approved: pendingApproval.approved.map((p) => p.phase) },
+    })
   }
 
   const findingsGate = checkFindingsGate({
@@ -794,6 +817,8 @@ export async function phaseReviewCompleteHandler(
   if (!stamp.ok) {
     output.hints.push(`⚠ review phase completed but I could not stamp completed_at into the review block (${stamp.reason}).`)
   }
+  const runAloneClosed = closeRunAlone({ projectRoot, config, specRef: input.spec_ref, auditWriter: appendAudit })
+  if (runAloneClosed) output.hints.push(runAloneClosed)
   const s = readPhaseState(projectRoot)
   if (stamp.ok && s.state?.review_findings !== undefined) {
     const next: PhaseState = { ...s.state }

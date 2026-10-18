@@ -12,6 +12,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-10-18
+
+### Added
+
+- **Run alone (#128).** `rsct_phase_code_start` takes `run_alone`, at the root of the repository or
+  worktree: a forced OS dialog, shown after every other gate passed, asks the developer whether the
+  agent may run code → tests → review on its own and stop before the commit. On Yes, `rsct_phase_code_complete` and `rsct_phase_test_complete`
+  close with no dialog (`status: "deferred"`) and wait for the developer. When the developer is back,
+  `rsct_phase_review_complete` asks for each of them, in order, before any sweep or file change, then
+  for the REVIEW. A No sends the work back to that phase (`run_alone_rejected`), and it and every later
+  phase are redone with their dialogs. Until that REVIEW is approved, `rsct_request_commit` refuses
+  every commit (`run_alone_pending`), before any dialog and before a batch token is read, also when
+  the commit or the REVIEW names a folder below that root, and `rsct_phase_abandon` forces its dialog
+  while phases are pending. Nothing changes where it is never chosen in the repository or worktree,
+  apart from the
+  unreadable-state message, which now says that deleting the file also drops the run-alone record.
+  See ADR-029.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE. Run `/rsct-setup` in a project to get
+  the updated rules (§0, §D) that tell the agent when to stop; the tools work without it.
+
 ## [2.15.0] - 2026-10-17
 
 ### Added

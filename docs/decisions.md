@@ -1635,6 +1635,93 @@ sentence first). `/rsct-uninstall` removes both guard entries whenever it remove
 enforcement state, from `settings.json` and `settings.local.json`, before
 `.rsct/scripts/`: a guard entry whose script is gone refuses every call it matches.
 
+### ADR-029 — Run alone: code and tests close with no dialog when the developer chose it, and are approved before any commit (#128, 2.16.0)
+**Status**: active.
+**Tags**: gates, phases, dialog
+
+**Context**: every phase completion opens an OS dialog and the tool call waits for the answer
+(`gatePhaseComplete`, `lib/phase-machine.ts`; no timeout in the server), so the agent stops at
+`rsct_phase_code_complete` while the developer is away. Starts open no dialog; a start is refused
+only while another phase is active, never because the previous one was not approved. The only
+approval bound to the work itself is the REVIEW's: it stamps each file's exact blob and
+`rsct_request_commit` refuses a staged blob no stamp covers (`review_missing`).
+
+**Decision**:
+- `rsct_phase_code_start` takes `run_alone`, only at the root of the repository or worktree
+  (`git rev-parse --show-toplevel`; elsewhere `run_alone_not_at_root`), so the record lives where
+  every commit and REVIEW of that tree reads it. With `dev_approval`, it opens a forced OS dialog
+  (`trust_allowed_for` ignored; no channel = refused) after every gate that has no dialog, and only
+  when the state file parses and the start's own refusals (another phase active, another task
+  recorded) do not apply. Framework text comes first; the spec comes last, on one line (every line
+  break, U+000B, U+000C and U+0085 included, becomes a space), capped at 200 characters; the
+  enforcement warning line appears when the guards are not running. On Yes, the same state write
+  that sets `phase='code'` stores `run_alone = { spec_slug, approved_at, active: true, pending: [] }`;
+  a start refused after the dialog leaves nothing. Refused while a record exists. The developer's
+  choice is the OS dialog: a confirmation word typed in the chat was rejected, because the agent
+  relays what is typed and already knows the word.
+- While the record is active and names the state's `spec_slug`, `rsct_phase_code_complete` and
+  `rsct_phase_test_complete` run their precheck and `dev_approval` validation but show no dialog:
+  the phase closes as before, `{ phase, completed_at }` joins `pending` (`status: "deferred"`,
+  audit `<phase>.complete.deferred`), and the approval is recorded as used once that write lands.
+  The fabrication signals that would force a dialog are recorded, not acted on: the deferred phase
+  is approved later in a forced dialog anyway. The deferral lives in those two tools only.
+- `rsct_phase_review_complete`, whenever `pending` is non-empty — whatever spec the REVIEW runs
+  under — shows one forced dialog per entry, in order, right after its precheck and before any
+  sweep or file change. A Yes removes the entry its dialog named (by phase and time, so a second
+  session cannot make one Yes approve another phase) and is written at once; a No drops that entry
+  and every later one, sets `active: false`, clears `phase`, `scope_globs` and `started_at`, and
+  refuses (`run_alone_rejected`); a write that fails changes nothing; no channel leaves the rest
+  pending. A No to the REVIEW's own dialog, once nothing is pending, keeps the mode on: what is
+  redone closes again with no dialog and is asked again before any commit. Named from a folder
+  below the root while the root holds a record, it refuses (`run_alone_pending`).
+- `rsct_request_commit` refuses (`run_alone_pending`) before any dialog and before a batch token
+  is read while a record exists at the named folder or at its repository or worktree root, also
+  after a No; an unparseable state file falls to the existing `review_unreadable`.
+- The record ends when a REVIEW is approved with nothing pending, or with `rsct_phase_abandon`
+  while a phase is active: abandon drops it and, while entries are pending, forces its dialog and
+  names them first, then the repository line, with the spec and the reason last, one line each.
+  `rsct_phase_status` reports the record of the folder it names, only when there is one. The audit
+  line `run_alone.declined` means the dialog did not approve it (a No, or no dialog channel); a
+  refusal before the dialog — a malformed, reused or stale `dev_approval` — is
+  `code.start.rejected`. The unreadable-state message, which calls deleting the file a
+  safe recovery, also says that this drops the record.
+
+**Direction**: stricter for commits (a new refusal that holds until the REVIEW is approved) and for
+abandon while phases are pending. More permissive in timing — code and tests close without the
+developer watching — by the developer's choice, per task, in a forced OS dialog (decided with the
+maintainer, #128).
+
+**Alternatives considered**:
+- Leaving the dialogs open while the developer is away (non-blocking dialogs, or the last one
+  waiting) — the dialog call blocks every RSCT tool (`execFileSync`), and the approvals can wait
+  for the developer to be present instead; no dialog opens during the run.
+- One summary dialog for code, tests and review at the end — rejected by the maintainer: one
+  dialog per phase.
+- A No sending everything back to the code phase — rejected: the work goes back to the rejected
+  phase.
+- A typed confirmation word in the dialog — the agent cannot reach the OS dialog, so Yes already
+  proves a human answered.
+
+**What is given up, by name**: `run_alone.pending` lives in `.rsct/phase-state.json`, like every
+other gate record, and an agent that writes that file directly can erase it — the commit dialog
+stays the guarantee, and under a batch token (`rsct_plan_authorize`) there is no commit dialog;
+a second worktree the agent creates has its own state, with no record — its commits still need
+their own dialog (a batch token is per worktree), and its merge back needs the merge dialog; the
+commit's batch-token writes reuse the state read before the dialog, so a record another session
+writes during that dialog can be lost (this predates run alone); the test completion carries no
+proof that tests ran; after a No, phase order is not enforced (a start checks
+only that no phase is active); on macOS any non-zero, non-negative `osascript` exit reads as No, so
+a dialog failure there ends the mode and the work is redone with dialogs; a server older than
+2.16.0 — a Claude Code session opened before the upgrade — ignores the record and does not refuse
+the commit, until it restarts.
+
+**Consequences**: `tests/unit/run-alone.test.ts` (the choice, the deferral, the approvals in
+order, a No, no channel, the spec-slug switch, a second session, a failed write, a subfolder, the
+commit refusal, abandon, status, and the unchanged flow without a record). A project that never
+chooses it sees no change apart from the longer unreadable-state message: every new behaviour is
+keyed on the record, and the existing tests of every touched tool pass unedited. Run alone is not
+available in a monorepo package or a nested project whose root is below the repository root.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)

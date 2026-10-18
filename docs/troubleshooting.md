@@ -318,8 +318,10 @@ line to `.rsct/audit.log`). Two ways out:
 1. **Repair the JSON.** Everything the file recorded comes back.
 2. **Delete the file.** RSCT starts from a clean state — and that drops what the
    file recorded: the REVIEW ledger (staged code needs a REVIEW again), an active
-   plan token, the tier recorded by `rsct_classify_task`, and a `review_drift`
-   lock if one was armed. Before deleting, look at `.rsct/audit.log`: a recent
+   plan token, the tier recorded by `rsct_classify_task`, a `review_drift`
+   lock if one was armed, and a `run_alone` record with the phases the agent
+   closed on its own and you have not approved yet (the next REVIEW then asks
+   for none of them). Before deleting, look at `.rsct/audit.log`: a recent
    `review.commit_drift` line names code that landed without a review, and that
    lock will not come back on its own — run a REVIEW over those paths.
 

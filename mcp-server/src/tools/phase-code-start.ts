@@ -12,6 +12,7 @@ import {
   tierRank,
   evaluateBootstrapMarker,
   type BootstrapMarker,
+  type PhaseState,
 } from '../lib/phase-scope.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { findPlanBySlug, phaseSpecExists } from '../lib/plan.js'
@@ -22,6 +23,7 @@ import {
 } from '../lib/ceremony-gate.js'
 import type { GateRejectKind } from '../lib/request-gate.js'
 import type { DialogOptions, DialogResult } from '../lib/os-dialog.js'
+import { gateRunAloneChoice, readRunAlone, runAloneHome, startWouldBeRefused } from '../lib/run-alone.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -65,11 +67,17 @@ export const phaseCodeStartInputSchema = z
       .describe(
         'PH-1: when true, bypass the plan-tracking gate (missing plan_/progress_/phase-spec files). Requires dev_approval and always forces the OS dialog. Override is audit-logged.',
       ),
+    run_alone: z
+      .boolean()
+      .default(false)
+      .describe(
+        'When true, asks the developer in a forced OS dialog whether the agent may run code → tests → review on its own and stop before the commit. Requires dev_approval; trust_allowed_for is ignored and no dialog channel means refused. On Yes, rsct_phase_code_complete and rsct_phase_test_complete close with no dialog and wait in run_alone.pending; rsct_phase_review_complete asks for each of them first, and rsct_request_commit refuses until that REVIEW is approved. Refused while a run_alone record already exists, and below the root of the repository or worktree.',
+      ),
     dev_approval: z
       .unknown()
       .optional()
       .describe(
-        'Required only when one of the override_* flags is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking is a per-call decision, not a pre-authorised tool.',
+        'Required only when one of the override_* flags, or run_alone, is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool.',
       ),
   })
   .strict()
@@ -98,12 +106,15 @@ export interface PhaseCodeStartGateRejectedOutput {
     | 'classify_gate_rejected'
     | 'plan_tracking_gate_rejected'
     | 'bypass_gate_rejected'
+    | 'run_alone_gate_rejected'
   reject_kind:
     | 'verification_required'
     | 'verification_incomplete'
     | 'classify_downgrade'
     | 'classify_evidence_absent'
     | 'plan_tracking'
+    | 'run_alone_exists'
+    | 'run_alone_not_at_root'
     | GateRejectKind
   reason: string
   spec_ref: string
@@ -166,7 +177,7 @@ export type PhaseCodeStartOutput =
 export const phaseCodeStartTool: Tool = {
   name: 'rsct_phase_code_start',
   description:
-    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, the classification or plan tracking is a per-call decision. **Evidence gate** — `spec_tier ∈ {trivial, small}` skips V and plan tracking (never REVIEW, which is mandatory at every tier), so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
+    'Start the C (Code) phase. Writes phase="code" into .rsct/phase-state.json and emits code.start audit. `scope_globs[]` are honored by rsct_check_edit_scope to gate which files may be edited during this phase. **CAP-28: verification gate** — for spec_tier ∈ {standard, complex} this tool reads phase-state.json and rejects unless a verification block matching spec_ref has completed_at set. Pass `override_verification_skip=true` to bypass. **CAP-30: classify gate** — also rejects when `spec_tier` is lower than `last_classify.tier_max` (the highest tier ever returned by rsct_classify_task for this project). Pass `override_classify_downgrade=true` to bypass. **EVERY `override_*` flag requires `dev_approval` and FORCES the OS dialog** (`trust_allowed_for` is ignored), because a bypass of V, the classification or plan tracking is a per-call decision. **Run alone** — `run_alone=true` asks the developer, in a forced OS dialog shown after every other gate passed, whether the agent may run code → tests → review on its own and stop before the commit; on Yes, code and test close with no dialog and the developer approves each of them, then the REVIEW, when back. **Evidence gate** — `spec_tier ∈ {trivial, small}` skips V and plan tracking (never REVIEW, which is mandatory at every tier), so it is refused (`classify_evidence_absent`) unless an rsct_classify_task verdict is on record for this project: classify first, then pass the tier it returned. **CAP-31: bootstrap visibility** — warns (hint + audit) if `bootstrap_at` is missing or older than 4 hours. For spec_tier ∈ {trivial, small} the V gate is automatically bypassed.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -206,10 +217,16 @@ export const phaseCodeStartTool: Tool = {
         description:
           'PH-1: when true, bypass the plan-tracking gate. Requires dev_approval and forces the OS dialog (audit-logged).',
       },
+      run_alone: {
+        type: 'boolean',
+        default: false,
+        description:
+          'When true, a forced OS dialog asks the developer whether the agent may run code → tests → review on its own and stop before the commit (requires dev_approval; only at the root of the repository or worktree). On Yes, code and test close with no dialog and wait for the developer, who approves each one at rsct_phase_review_complete before any commit.',
+      },
       dev_approval: {
         type: 'object',
         description:
-          'The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags is true.',
+          'The dev_approval payload (timestamp, action_scope, reason). Required only when one of the override_* flags, or run_alone, is true.',
       },
     },
     additionalProperties: false,
@@ -805,6 +822,73 @@ export async function phaseCodeStartHandler(
     )
   }
 
+  let runAlonePatch: ((state: PhaseState) => void) | null = null
+  if (input.run_alone) {
+    const currentRead = readPhaseState(resolution.root)
+    const current = currentRead.state ?? {}
+    const rejectRunAlone = (rejectKind: 'run_alone_exists' | 'run_alone_not_at_root' | GateRejectKind, reason: string): PhaseCodeStartGateRejectedOutput => {
+      const audit = appendAuditEntry(
+        resolution.root,
+        {
+          event: rejectKind === 'dialog_no' || rejectKind === 'force_dialog_no_channel' || rejectKind === 'no_channel' ? 'run_alone.declined' : 'code.start.rejected',
+          tool: 'rsct_phase_code_start',
+          spec_ref: input.spec_ref,
+          spec_tier: input.spec_tier,
+          reject_kind: rejectKind,
+          reason,
+        },
+        resolution.config?.audit,
+      )
+      const fields = auditFields(audit)
+      return {
+        status: 'run_alone_gate_rejected',
+        reject_kind: rejectKind,
+        reason,
+        spec_ref: input.spec_ref,
+        verification_gate: gate,
+        classify_gate: classifyGate,
+        plan_tracking_gate: planTrackingGate,
+        phase_state_path: '',
+        phase_state_written: false,
+        audit_path: fields.audit_path,
+        audit_error: fields.audit_error,
+        hints: [`${reason} Nothing was started.`],
+      }
+    }
+    const existingBlock = readRunAlone(current)
+    if (existingBlock !== null) {
+      return rejectRunAlone(
+        'run_alone_exists',
+        `A run-alone record already exists for spec '${existingBlock.spec_slug}'${existingBlock.pending.length > 0 ? ` with phases waiting for the developer (${existingBlock.pending.map((p) => p.phase).join(', ')})` : ''}. It ends when a REVIEW is approved with nothing pending, or with rsct_phase_abandon while a phase is active. Start the code phase without run_alone, or finish that run first.`,
+      )
+    }
+    const home = runAloneHome(resolution.root)
+    if (home !== null) {
+      return rejectRunAlone(
+        'run_alone_not_at_root',
+        `Run alone is only available at the root of the repository or worktree (${home.replace(/\\/g, '/')}): the record must live where every commit and REVIEW of this repository reads it. Start it from that root.`,
+      )
+    }
+    if (currentRead.parse_error === undefined && !startWouldBeRefused(current, input.spec_ref, input.spec_slug)) {
+      const specSlug = input.spec_slug ?? current.spec_slug ?? input.spec_ref
+      const choice = await gateRunAloneChoice({
+        projectRoot: resolution.root,
+        config: resolution.config,
+        rsctInstalled: resolution.rsct_installed,
+        specSlug,
+        devApproval: input.dev_approval,
+        ...(internal.promptFn !== undefined && { promptFn: internal.promptFn }),
+        ...(internal.now !== undefined && { now: internal.now }),
+      })
+      if (choice.status === 'rejected') {
+        return rejectRunAlone(choice.reject_kind, `Run alone was not approved (${choice.reject_kind}): ${choice.reason}.`)
+      }
+      runAlonePatch = (state) => {
+        state.run_alone = { spec_slug: state.spec_slug!, approved_at: choice.approved_at, active: true, pending: [] }
+      }
+    }
+  }
+
   const args: StartPhaseInput = {
     projectRoot: resolution.root,
     phase: 'code',
@@ -813,7 +897,7 @@ export async function phaseCodeStartHandler(
   if (input.spec_slug !== undefined) args.specSlug = input.spec_slug
   if (input.scope_globs !== undefined) args.scopeGlobs = input.scope_globs
   if (input.persona !== undefined) args.persona = input.persona
-  const result = startPhaseGeneric(args, resolution.config)
+  const result = startPhaseGeneric(args, resolution.config, runAlonePatch ? { patch: runAlonePatch } : {})
   const extras = {
     verification_gate: gate,
     classify_gate: classifyGate,
@@ -821,6 +905,22 @@ export async function phaseCodeStartHandler(
     bootstrap_marker: bootstrap,
   }
   const baseHints = result.hints ?? []
+  if (runAlonePatch && result.status === 'started') {
+    appendAuditEntry(
+      resolution.root,
+      {
+        event: 'run_alone.approved',
+        tool: 'rsct_phase_code_start',
+        spec_ref: input.spec_ref,
+        spec_slug: result.spec_slug,
+        spec_tier: input.spec_tier,
+      },
+      resolution.config?.audit,
+    )
+    baseHints.push(
+      `Run alone approved by the developer: rsct_phase_code_complete and rsct_phase_test_complete close with no dialog; each waits for the developer, who approves it at rsct_phase_review_complete before any commit. Follow the approved plan; stop when the review work is done.`,
+    )
+  }
   if (bootstrap.status !== 'fresh' && bootstrap.hint) {
     baseHints.push(bootstrap.hint)
   }
