@@ -55,8 +55,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Migration for existing projects
 
-- Run the installer from an updated clone and restart the IDE. Run `/rsct-setup` in a project to
-  get the updated rules (§B, §C) and memory templates. On a machine with no dialog channel (CI,
+- Run the installer from an updated clone and restart the IDE, then **run `/rsct-setup` in every
+  project**: each project holds its own copy of the terminal guard (`.rsct/scripts/terminal-guard.js`),
+  and only `/rsct-setup` replaces it, so the brace and glob fix (advisory GHSA-xrvg-vqxr-rp8v)
+  reaches a project only then; it also brings the updated rules (§B, §C) and memory templates. Until
+  then `rsct_status` reports that copy as different from the shipped one. On a machine with no dialog channel (CI,
   headless), commit, push, merge and rebase through RSCT stop working: the developer runs them by
   hand. A token minted before the update no longer counts — the audit line an older version
   wrote lacks what is now checked — so authorize again.
