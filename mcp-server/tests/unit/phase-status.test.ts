@@ -14,6 +14,7 @@ import {
   type PhaseStatusOutput,
 } from '../../src/tools/phase-status.js'
 import { RSCT_PHASES } from '../../src/lib/phase-machine.js'
+import { recordMint } from '../plan-token-fixture.js'
 
 let tmpRoot: string
 
@@ -118,21 +119,22 @@ describe('rsct_phase_status', () => {
   })
 
   it('surfaces an active plan-scoped batch token (T3)', async () => {
-    writePhaseState({
-      plan_authorization: {
-        plan_slug: 't3',
-        branch: 'feat/t3',
-        covers: ['commit'],
-        authorized_at: '2026-06-22T12:00:00.000Z',
-        expires_at: '2026-06-22T14:00:00.000Z',
-        max_actions: 5,
-        actions_used: 2,
-        approval_ref: {
-          action_scope: 'plan_authorize:t3',
-          timestamp: '2026-06-22T11:59:00.000Z',
-        },
+    const authorized = new Date(Date.now() - 60_000)
+    const token = {
+      plan_slug: 't3',
+      branch: 'feat/t3',
+      covers: ['commit'],
+      authorized_at: authorized.toISOString(),
+      expires_at: new Date(authorized.getTime() + 2 * 60 * 60_000).toISOString(),
+      max_actions: 5,
+      actions_used: 2,
+      approval_ref: {
+        action_scope: 'plan_authorize:t3',
+        timestamp: new Date(authorized.getTime() - 60_000).toISOString(),
       },
-    })
+    }
+    writePhaseState({ plan_authorization: token })
+    recordMint(tmpRoot, token)
     const r = (await phaseStatusHandler({ project_root: tmpRoot })) as PhaseStatusOutput
     expect(r.plan_authorization?.plan_slug).toBe('t3')
     expect(r.plan_authorization?.actions_used).toBe(2)

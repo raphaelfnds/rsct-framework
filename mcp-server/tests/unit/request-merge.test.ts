@@ -118,6 +118,33 @@ const BASE_CONFIG = {
   app: { name: 'test-app', org: 'test-org' },
 }
 
+describe('rsct_request_merge — the dialog is required', () => {
+  it('refuses with no dialog channel even when trust_allowed_for lists the merge', async () => {
+    writeConfig(tmpRoot, { ...BASE_CONFIG, approval_modes: { trust_allowed_for: ['rsct_request_merge'] } })
+    const merges: string[] = []
+    const exec = gitExec({
+      'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
+      'merge --no-ff -- feat/foo': MERGE_OK,
+    }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 })
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      {
+        rangeReader: emptyRange,
+        gitStateOverride: gitState('feat/integration'),
+        gitExecutor: (root, args) => {
+          if (args[0] === 'merge') merges.push(args.join(' '))
+          return exec(root, args)
+        },
+        promptFn: async () => ({ response: 'no-channel', channel: 'none', error: 'no display' }),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(merges).toEqual([])
+  })
+})
+
 describe('rsct_request_merge — happy path', () => {
   it('merges feature into integration with --no-ff by default', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)

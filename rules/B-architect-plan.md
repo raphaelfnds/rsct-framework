@@ -115,11 +115,14 @@ NEVER edit code without first presenting the user a plan containing:
 
    **Execution mode — offer batch commits for multi-phase plans (after approval):**
    Once the plan is approved and its tracking files exist, if the plan is
-   **multi-phase** (several phases, each with its own `spec_`), OFFER the dev a
-   plan-scoped **batch-commit** token — mark it **Recommended** for multi-phase
-   runs so you don't stop for an OK on every single commit:
-   `mcp__rsct__rsct_plan_authorize` (one dev OK covers up to `max_actions` commits
-   of this plan on this branch; end it early with `rsct_plan_revoke`). It
+   **multi-phase** — `plan_<slug>.md` lists **two or more phases** in its
+   `## Phases & parallelization` table — OFFER the dev a plan-scoped
+   **batch-commit** token — mark it **Recommended** for multi-phase runs so you
+   don't stop for an OK on every single commit:
+   `mcp__rsct__rsct_plan_authorize({ plan_slug })` (one dev OK, in a dialog that
+   names the plan and its phases, covers up to `max_actions` commits of this plan
+   on this branch for **8 hours at most, never extended**; end it early with
+   `rsct_plan_revoke`). The tool refuses a plan with fewer than two phases. It
    **auto-resets per new planning** without any extra step: a new plan normally
    means a new branch (`1 plan = 1 branch`) which revokes it, marking the prior
    plan complete revokes it too, the TTL bounds any stale grant, and the budget

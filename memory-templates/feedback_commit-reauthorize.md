@@ -32,7 +32,12 @@ same session.
 When `rsct-mcp` is installed, use the §C-gated MCP tools for the four mutating
 ops — the terminal guard refuses a plain `git commit` / `push` / `merge` /
 `rebase` (and `cherry-pick`, `revert`, `am`, `gh pr merge`) from the agent's
-Bash, PowerShell or Monitor tool. The tools enforce the rule mechanically
+Bash, PowerShell or Monitor tool, and so does a `git pull` that is not `--ff-only`
+and `git commit-tree`. Every one of these tools shows the OS dialog —
+`trust_allowed_for` does not apply to them, and with no dialog channel they are
+refused. The only exception is a commit under the batch token the developer
+approved for a multi-phase plan, for 8 hours at most. The tools enforce the rule
+mechanically
 (single-use `dev_approval` payload + cross-platform OS dialog + audit log
 entry per call):
 

@@ -113,6 +113,28 @@ const BASE_CONFIG = {
   app: { name: 'test-app', org: 'test-org' },
 }
 
+describe('rsct_request_push — the dialog is required', () => {
+  it('refuses with no dialog channel even when trust_allowed_for lists the push', async () => {
+    writeConfig(tmpRoot, { ...BASE_CONFIG, approval_modes: { trust_allowed_for: ['rsct_request_push'] } })
+    const pushes: string[] = []
+    const out = (await requestPushHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      {
+        gitStateOverride: gitState('feat/foo'),
+        gitExecutor: (root, args) => {
+          if (args[0] === 'push') pushes.push(args.join(' '))
+          return gitExec({ 'push -- origin feat/foo': PUSH_OK })(root, args)
+        },
+        promptFn: dialog({ response: 'no-channel', channel: 'none', error: 'no display' }),
+        now: FIXED_NOW,
+      },
+    )) as RequestPushOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(pushes).toEqual([])
+  })
+})
+
 describe('rsct_request_push — happy path', () => {
   it('pushes a non-protected branch and writes audit', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)

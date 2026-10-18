@@ -12,6 +12,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **The terminal guard reads brace patterns and globs like variables.** A git or gh subcommand
+  written as a bash brace pattern (`git {commit,} -m x`) or a glob (`git [c]ommit -m x`) is
+  refused, as is a brace pattern run as the command and a glob run as the command before a
+  refused verb; a subcommand built partly from a variable (`git co$X`, `git "co$X"`) is refused
+  too. In bash a `{` or `}` separates commands only as a word of its own. Patterns where git takes
+  an argument (`git add src/*.ts`, `stash@{0}`) and `case` patterns still pass. See ADR-030.
+
+### Changed
+
+- **Every commit goes through your dialog; the only exception is a batch token for a multi-phase
+  plan, 8 hours at most.** `rsct_request_commit` with a `dev_approval`, `rsct_request_push`,
+  `rsct_request_merge`, `rsct_request_rebase` and `rsct_plan_authorize` always show the OS dialog:
+  `approval_modes.trust_allowed_for` no longer applies to them, and with no dialog channel they are
+  refused (`force_dialog_no_channel`). A config that lists them still loads; the entries have no
+  effect. See ADR-030.
+- **The batch token (`rsct_plan_authorize`) lives 8 hours at most from your approval and a commit
+  never extends it.** The sliding window (re-armed on every commit, up to 24 hours or more) is gone;
+  `ttl_minutes` / `plan_token_ttl_minutes` set the fixed lifetime, 5–480 minutes, default 480. `plan_token_ttl_slide_minutes` and
+  `plan_token_ttl_abs_minutes` are removed (a config that has them still loads).
+- **The batch token is only for a plan with two or more phases**, listed in the `## Phases` table of
+  `plan_<slug>.md` (`not_multi_phase` otherwise). `plan_slug` names the plan; without it, the newest
+  `plan_*.md` — a `spec_` file is never taken as the plan. The branch, plan and phase checks run
+  before the dialog, and the dialog now names the number of commits, the expiry, the branch, the
+  plan and its phases.
+- **A token counts only while the audit log holds the `plan_authorize.authorized` line its
+  approval wrote** — plan, branch, time, approval, expiry and number of commits all equal — and no
+  `plan_revoke.revoked` line names it; the mint writes that line first and mints nothing when it
+  cannot, and the revoke writes its line before it clears the token. A revoked token written back
+  into the state file does not count, and a commit that failed no longer brings one back.
+  `rsct_phase_status` says when a token has expired or has no matching line.
+- **The terminal guard also refuses `git commit-tree`, `filter-branch`, `fast-import`,
+  `quiltimport`, `replay`, and every `git pull` except `git pull --ff-only` with plain options**
+  (every word written out — no variable or pattern, also inside a word — no `--no-ff` / `-r`, no
+  repository spelled as a path, no `-c pull.*`, also before an alias). `git fetch` passes. Inside
+  code passed to `node -e`, `python -c` and the like, any `git pull` is refused.
+- Dialog texts drop U+061C and U+2060–U+2064 as well as the zero-width and bidirectional controls.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE. Run `/rsct-setup` in a project to
+  get the updated rules (§B, §C) and memory templates. On a machine with no dialog channel (CI,
+  headless), commit, push, merge and rebase through RSCT stop working: the developer runs them by
+  hand. A token minted before the update no longer counts — the audit line an older version
+  wrote lacks what is now checked — so authorize again.
+
 ## [2.16.0] - 2026-10-18
 
 ### Added

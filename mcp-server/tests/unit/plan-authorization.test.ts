@@ -49,6 +49,7 @@ const ctxOK = {
   branch: 'feat/t3',
   tokenPlan: plan('in progress'),
   action: 'commit',
+  mintRecorded: true,
 }
 
 describe('lib/plan-authorization — emitToken', () => {

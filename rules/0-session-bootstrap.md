@@ -25,7 +25,7 @@ In order, with NO other tool call in between:
    and let them answer. They are emitted a bounded number of times,
    so a hint you read and drop is spent:
    - **"A newer RSCT release is available"** — relay it. If they want
-     it: `git pull` + reinstall + `/rsct-setup`. If they decline THIS
+     it: `git pull --ff-only` + reinstall + `/rsct-setup`. If they decline THIS
      release, call `rsct_status` again with
      `decline_update:"<the tag named in the hint>"` — that release is
      never raised again, a newer one asks once. Only the release named

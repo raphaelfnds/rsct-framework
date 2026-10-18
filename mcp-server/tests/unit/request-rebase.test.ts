@@ -86,6 +86,23 @@ describe('rsct_request_rebase', () => {
     expect(out.reject_kind).toBe('pre_merge_ack_missing')
   })
 
+  it('needs the dialog: with no dialog channel nothing runs', async () => {
+    const calls: string[] = []
+    const out = (await requestRebaseHandler(
+      { project_root: tmpRoot, ref: 'main', dev_approval: approval(), pre_merge_ack: ack() },
+      internal({
+        promptFn: async () => ({ response: 'no-channel', channel: 'none', error: 'no display' }),
+        gitExecutor: (root, args) => {
+          if (args[0] === 'rebase' || args[0] === 'merge') calls.push(args.join(' '))
+          return okExec(root, args)
+        },
+      }),
+    )) as RequestRebaseOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(calls).toEqual([])
+  })
+
   it('rebases onto the ref on the happy path', async () => {
     const out = (await requestRebaseHandler(
       { project_root: tmpRoot, ref: 'main', dev_approval: approval(), pre_merge_ack: ack() },

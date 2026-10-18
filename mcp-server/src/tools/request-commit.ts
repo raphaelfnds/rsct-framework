@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
-import { findActivePlan, findPlanBySlug } from '../lib/plan.js'
+import { findActivePlan, findPlanFileBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
   getStagedDiff,
@@ -82,11 +82,12 @@ import {
   type PlanAuthorizationBlock,
 } from '../lib/phase-scope.js'
 import { describePending, readHomeRunAlone, readRunAlone } from '../lib/run-alone.js'
+import { isTokenMintRecorded } from '../lib/plan-token-record.js'
 import {
   readToken,
   validateToken,
   consumeTokenAction,
-  rearmToken,
+  tokenExpiryMs,
   type TokenInvalidReason,
 } from '../lib/plan-authorization.js'
 import { confirmedTopologyMode } from '../lib/topology.js'
@@ -211,7 +212,7 @@ function runRetention(
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication, with an OS dialog when required) OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog and so no forecast.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog — trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused — OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -246,12 +247,24 @@ function planTokenRejectReason(reason: TokenInvalidReason): string {
     case 'branch_mismatch':
       return 'the plan token was minted for a different branch (tokens auto-revoke on branch switch) — re-authorize on this branch or pass a per-action dev_approval'
     case 'plan_gone':
-      return "the plan token's plan_/spec_ file no longer exists — re-authorize with rsct_plan_authorize"
+      return "the plan token's plan_<slug>.md file no longer exists — re-authorize with rsct_plan_authorize"
     case 'plan_complete':
       return "the plan token's plan is marked complete — re-authorize if work continues"
     case 'exhausted':
       return 'the plan token reached its max_actions budget — mint a fresh token with rsct_plan_authorize'
+    case 'unrecorded':
+      return 'the audit log holds no plan_authorize.authorized line for this plan token, so it was not minted by an approved rsct_plan_authorize — commit with a per-action dev_approval, or ask the developer to authorize again'
   }
+}
+
+function sameToken(a: PlanAuthorizationBlock | null, b: PlanAuthorizationBlock): boolean {
+  return (
+    a !== null &&
+    a.plan_slug === b.plan_slug &&
+    a.branch === b.branch &&
+    a.authorized_at === b.authorized_at &&
+    a.actions_used === b.actions_used
+  )
 }
 
 export async function requestCommitHandler(
@@ -493,7 +506,7 @@ export async function requestCommitHandler(
   let authorizedVia: CommitAuthVia
   let approval: DevApproval | null = null
   let fabricationSignals: FabricationSignal[] = []
-  let tokenCtx: { token: PlanAuthorizationBlock; baseState: PhaseState } | null = null
+  let tokenCtx: { token: PlanAuthorizationBlock } | null = null
 
   if (input.dev_approval !== undefined) {
     const retentionLine = resolution.rsct_installed
@@ -502,6 +515,8 @@ export async function requestCommitHandler(
     const gate = await gateRequest({
       toolName: 'rsct_request_commit',
       approval: input.dev_approval,
+      forceDialog: true,
+      forceDialogReason: 'every commit needs the developer in the OS dialog, or a batch token they approved in one (rsct_plan_authorize); with no dialog channel, the developer commits by hand in their own terminal',
       dialog: {
         title: 'RSCT — commit approval',
         message:
@@ -562,12 +577,13 @@ export async function requestCommitHandler(
   } else {
     const existing = readPhaseState(projectRoot)
     const token = readToken(existing.state)
-    const tokenPlan = token ? findPlanBySlug(projectRoot, token.plan_slug) : null
+    const tokenPlan = token ? findPlanFileBySlug(projectRoot, token.plan_slug) : null
     const verdict = validateToken(token, {
       now,
       branch: gitState.branch,
       tokenPlan,
       action: 'commit',
+      mintRecorded: token !== null && isTokenMintRecorded(projectRoot, config?.audit, token),
     })
 
     if (!verdict.valid) {
@@ -608,7 +624,7 @@ export async function requestCommitHandler(
 
     channel = 'plan_token'
     authorizedVia = 'plan_token'
-    tokenCtx = { token: verdict.token, baseState: existing.state ?? {} }
+    tokenCtx = { token: verdict.token }
   }
 
   const overrideBranch = approval?.override_protected_branch
@@ -829,15 +845,23 @@ export async function requestCommitHandler(
   let reservedToken: PlanAuthorizationBlock | null = null
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token)
-    const reserve = writePhaseState(projectRoot, {
-      ...tokenCtx.baseState,
-      plan_authorization: reservedToken,
-    })
-    if (!reserve.ok) {
+    const fresh = readPhaseState(projectRoot)
+    const unchanged = fresh.parse_error === undefined && sameToken(readToken(fresh.state), tokenCtx.token)
+    const reserve = unchanged
+      ? writePhaseState(projectRoot, {
+          ...fresh.state!,
+          plan_authorization: reservedToken,
+        })
+      : null
+    if (reserve === null || !reserve.ok) {
       const detail =
-        reserve.reason === 'locked'
-          ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)`
-          : reserve.error
+        reserve === null
+          ? fresh.parse_error !== undefined
+            ? 'phase-state.json could not be read while this commit was being checked'
+            : 'the plan token changed while this commit was being checked (revoked, used or re-minted)'
+          : reserve.reason === 'locked'
+            ? `phase-state.json is being edited by another session (locked ${reserve.lock_age_ms}ms ago)`
+            : reserve.error
       const reason = `could not reserve a plan-token action (${detail}) — retry, or commit with a per-action dev_approval`
       const audit = appendAudit(
         projectRoot,
@@ -883,13 +907,22 @@ export async function requestCommitHandler(
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
     let refundNote = ''
     if (tokenCtx) {
-      const refund = writePhaseState(projectRoot, {
-        ...tokenCtx.baseState,
-        plan_authorization: tokenCtx.token,
-      })
-      refundNote = refund.ok
-        ? ' The reserved token action was refunded.'
-        : ' ⚠ the reserved token action could NOT be refunded (phase-state write failed) — one action was forfeited (fail-safe).'
+      const fresh = readPhaseState(projectRoot)
+      const stillReserved = fresh.parse_error === undefined && sameToken(readToken(fresh.state), reservedToken!)
+      const refund = stillReserved
+        ? writePhaseState(projectRoot, {
+            ...fresh.state!,
+            plan_authorization: tokenCtx.token,
+          })
+        : null
+      refundNote =
+        refund === null
+          ? fresh.parse_error !== undefined
+            ? ' phase-state.json could not be read after the commit failed; nothing was refunded.'
+            : ' The plan token changed during the commit (revoked or re-minted); nothing was refunded.'
+          : refund.ok
+            ? ' The reserved token action was refunded.'
+            : ' ⚠ the reserved token action could NOT be refunded (phase-state write failed) — one action was forfeited (fail-safe).'
     }
     const audit = appendAudit(
       projectRoot,
@@ -1010,25 +1043,12 @@ export async function requestCommitHandler(
     }
   } else {
     antiReplayPersisted = true
+    const expiryMs = tokenExpiryMs(reservedToken!, now)
     tokenSummary = {
       plan_slug: reservedToken!.plan_slug,
       actions_used: reservedToken!.actions_used,
       max_actions: reservedToken!.max_actions,
-      expires_at: reservedToken!.expires_at,
-    }
-    const rearmed = rearmToken(reservedToken!, now)
-    if (rearmed !== reservedToken!) {
-      const w = writePhaseState(projectRoot, {
-        ...(readPhaseState(projectRoot).state ?? tokenCtx!.baseState),
-        plan_authorization: rearmed,
-      })
-      if (w.ok) {
-        tokenSummary.expires_at = rearmed.expires_at
-      } else {
-        bookkeepingHints.push(
-          '⚠ token sliding-window re-arm did not persist — the token keeps its current expiry (fail-safe).',
-        )
-      }
+      expires_at: new Date(expiryMs!).toISOString(),
     }
   }
 

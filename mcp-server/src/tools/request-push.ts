@@ -487,6 +487,8 @@ export async function requestPushHandler(
   const gate = await gateRequest({
     toolName: 'rsct_request_push',
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: 'a push needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — push approval',
       // The dialog is the one channel the agent cannot rewrite or summarize

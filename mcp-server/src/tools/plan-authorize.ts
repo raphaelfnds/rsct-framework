@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
-import { findActivePlan } from '../lib/plan.js'
+import { findNewestPlanFile, findPlanFileBySlug, isSafePlanSlug, readPlanFilePhases, type PlanPhase } from '../lib/plan.js'
 import { readGitState, type GitState } from '../lib/git.js'
 import {
   effectiveProtectedList,
@@ -32,16 +32,20 @@ import {
   emitToken,
   resolveTtlMinutes,
   resolveMaxActions,
-  resolveSlideMinutes,
-  resolveAbsTtlMinutes,
   PLAN_TOKEN_COVERS,
+  PLAN_TOKEN_TTL_DEFAULT_MIN,
   PLAN_TOKEN_TTL_MIN,
   PLAN_TOKEN_TTL_MAX,
   PLAN_TOKEN_MAX_ACTIONS_MIN,
   PLAN_TOKEN_MAX_ACTIONS_MAX,
 } from '../lib/plan-authorization.js'
+import { PLAN_AUTHORIZED_EVENT } from '../lib/plan-token-record.js'
+import { specLabel } from '../lib/run-alone.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
+
+const MIN_PHASES = 2
+const PHASES_SHOWN = 8
 
 export const planAuthorizeInputSchema = z
   .object({
@@ -54,6 +58,12 @@ export const planAuthorizeInputSchema = z
       .describe(
         'The dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:" (INV-2.2 scope_mismatch). Validated via the full §C gate (schema/skew/anti-reuse/fabrication + OS dialog). This single approval mints a batch token covering up to max_actions commits.',
       ),
+    plan_slug: z
+      .string()
+      .optional()
+      .describe(
+        'The plan to authorize, as the <slug> of plan_<slug>.md at the project root (letters, digits, ".", "_", "-"). Omitted: the newest plan_*.md. The plan must list at least two phases in its "## Phases" table.',
+      ),
     ttl_minutes: z
       .number()
       .int()
@@ -61,7 +71,7 @@ export const planAuthorizeInputSchema = z
       .max(PLAN_TOKEN_TTL_MAX)
       .optional()
       .describe(
-        `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}–${PLAN_TOKEN_TTL_MAX}). Precedence: this input > .rsct.json approval_modes.plan_token_ttl_minutes > 120.`,
+        `Token lifetime in minutes from this approval (${PLAN_TOKEN_TTL_MIN}–${PLAN_TOKEN_TTL_MAX}; never extended). Precedence: this input > .rsct.json approval_modes.plan_token_ttl_minutes > ${PLAN_TOKEN_TTL_DEFAULT_MIN}.`,
       ),
     max_actions: z
       .number()
@@ -84,6 +94,8 @@ export type PlanAuthorizeRejectKind =
   | 'no_active_plan'
   | 'protected_branch'
   | 'no_branch'
+  | 'invalid_plan_slug'
+  | 'not_multi_phase'
 
 export interface PlanAuthorizeOutput {
   status: PlanAuthorizeStatus
@@ -114,7 +126,7 @@ export interface PlanAuthorizeInternal {
 export const planAuthorizeTool: Tool = {
   name: 'rsct_plan_authorize',
   description:
-    "T3 §C-gated plan execution mode. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval (validated by the full §C gate — schema/skew/anti-reuse/fabrication + OS dialog) authorizes up to max_actions COMMITS within the active plan + current branch + a time window, so rsct_request_commit no longer needs a fresh approval per commit. COMMIT ONLY — push/merge keep per-action §C. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires an active plan_/spec_ at the project root and a NON-protected branch. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status=\"state_write_failed\"): no token is minted, the approval is not consumed and the file is left untouched.",
+    "T3 §C-gated plan execution mode — the ONLY way commits go through with no dialog. Mints a PLAN-SCOPED BATCH TOKEN: one dev_approval, answered by the developer in a FORCED OS dialog (trust_allowed_for is ignored; no dialog channel = refused), authorizes up to max_actions COMMITS on the current branch for a MULTI-PHASE plan — a plan_<slug>.md (named by plan_slug, else the newest) whose \"## Phases\" table lists at least two phases — for at most 8 hours from the approval, never extended. The dialog names the plan, its phases, the commit count and the expiry. COMMIT ONLY — push, merge and rebase keep their own dialog. The token NEVER bypasses branch protection (INV-5) or the secrets scan (INV-6): the token commit path carries no overrides. Requires a NON-protected branch. A token counts only while the audit log holds the plan_authorize.authorized line it was minted with. Auto-revokes on branch switch, plan completion/deletion, expiry, or exhaustion; revoke early with rsct_plan_revoke. The emitting dev_approval is consumed (cannot re-mint). Every token-authorized commit is still individually audited. An unreadable .rsct/phase-state.json is refused (status=\"state_write_failed\"): no token is minted, the approval is not consumed and the file is left untouched.",
   inputSchema: {
     type: 'object',
     required: ['dev_approval'],
@@ -128,9 +140,13 @@ export const planAuthorizeTool: Tool = {
         description:
           'dev_approval payload (timestamp, action_scope, reason). action_scope SHOULD start with "plan_authorize:".',
       },
+      plan_slug: {
+        type: 'string',
+        description: 'The <slug> of plan_<slug>.md to authorize (letters, digits, ".", "_", "-"); omitted: the newest plan_*.md. It must list at least two phases in its "## Phases" table.',
+      },
       ttl_minutes: {
         type: 'number',
-        description: `Token lifetime in minutes (${PLAN_TOKEN_TTL_MIN}–${PLAN_TOKEN_TTL_MAX}; default 120).`,
+        description: `Token lifetime in minutes from this approval (${PLAN_TOKEN_TTL_MIN}–${PLAN_TOKEN_TTL_MAX}; default ${PLAN_TOKEN_TTL_DEFAULT_MIN}; never extended).`,
       },
       max_actions: {
         type: 'number',
@@ -167,16 +183,135 @@ export async function planAuthorizeHandler(
   })
   const advisoryHints = installAdvisory.hint ? [installAdvisory.hint] : []
 
+  const refuse = (
+    reject_kind: PlanAuthorizeRejectKind,
+    reason: string,
+  ): PlanAuthorizeOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'plan_authorize.rejected',
+        tool: 'rsct_plan_authorize',
+        reject_kind,
+        reason,
+        branch,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      channel: null,
+      reject_kind,
+      reason,
+      fabrication_signals: [],
+      plan_slug: null,
+      branch,
+      expires_at: null,
+      max_actions: null,
+      covers: [],
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [...anchorHints(projectRoot, config?.audit), ...advisoryHints, `${reason} No dialog was shown.`],
+    }
+  }
+
+  if (branch === null) {
+    return refuse(
+      'no_branch',
+      'no branch resolved (detached HEAD or not in a git worktree) — a batch token must be scoped to a named branch',
+    )
+  }
+
+  const { list: protectedList } = effectiveProtectedList(config)
+  if (isProtectedBranch(branch, protectedList)) {
+    return refuse(
+      'protected_branch',
+      `branch '${branchLabel}' is protected — batch tokens are only granted on derived branches (create one: git checkout -b <slug>). Protected-branch commits still require a per-action dev_approval with override_protected_branch.`,
+    )
+  }
+
+  if (input.plan_slug !== undefined && !isSafePlanSlug(input.plan_slug)) {
+    return refuse(
+      'invalid_plan_slug',
+      `plan_slug '${specLabel(input.plan_slug, 80)}' is not a plan name: use the <slug> of plan_<slug>.md at the project root (letters, digits, ".", "_", "-", no "..")`,
+    )
+  }
+  const plan = input.plan_slug !== undefined ? findPlanFileBySlug(projectRoot, input.plan_slug) : findNewestPlanFile(projectRoot)
+  if (!plan) {
+    return refuse(
+      'no_active_plan',
+      input.plan_slug !== undefined
+        ? `no plan_${input.plan_slug}.md at the project root — a batch token is scoped to a plan file`
+        : 'no plan_<slug>.md at the project root — a batch token is scoped to a plan file. Create the plan first.',
+    )
+  }
+  const phases = readPlanFilePhases(plan.plan_path)
+  if (phases.length < MIN_PHASES) {
+    return refuse(
+      'not_multi_phase',
+      `a batch token is only for a plan with ${MIN_PHASES} or more phases: plan_${plan.slug}.md lists ${phases.length} in its "## Phases" table (a row needs a Phase and a Goal that are filled in). Each commit of this plan shows its own dialog.`,
+    )
+  }
+
+  const ttlMinutes = resolveTtlMinutes(
+    input.ttl_minutes,
+    config?.approval_modes?.plan_token_ttl_minutes,
+  )
+  const maxActions = resolveMaxActions(
+    input.max_actions,
+    config?.approval_modes?.plan_token_max_actions,
+  )
+  const expiresPreview = new Date(now.getTime() + ttlMinutes * 60_000).toISOString()
+
+  const unreadableBefore = refuseUnreadableState(projectRoot, readPhaseState(projectRoot))
+  if (unreadableBefore && !unreadableBefore.ok && unreadableBefore.reason === 'unreadable_state') {
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'plan_authorize.state_write_failed',
+        tool: 'rsct_plan_authorize',
+        reason: unreadableBefore.error,
+        branch,
+        plan_slug: plan.slug,
+        channel: null,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'state_write_failed',
+      channel: null,
+      reject_kind: null,
+      reason: unreadableBefore.error,
+      fabrication_signals: [],
+      plan_slug: plan.slug,
+      branch,
+      expires_at: null,
+      max_actions: maxActions,
+      covers: [...PLAN_TOKEN_COVERS],
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: [...anchorHints(projectRoot, config?.audit), `⚠ token NOT minted — ${unreadableBefore.error} dev_approval NOT consumed. No dialog was shown.`],
+    }
+  }
+
   const gate = await gateRequest({
     toolName: 'rsct_plan_authorize',
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: 'a batch token is granted only by the developer, in this dialog',
     dialog: {
-      title: 'RSCT — authorize batch plan execution',
-      message:
-        `Authorize batch commits for this plan on '${branchLabel}'?` +
-        (installAdvisory.dialogLine ? `\n${installAdvisory.dialogLine}` : '') +
-        `\n\nThis lets rsct_request_commit commit WITHOUT a fresh approval each time — limited to this plan and branch, until it expires, runs out, or is revoked.` +
-        gateDialogFooter(projectRoot, config),
+      title: 'RSCT — authorize batch commits',
+      message: mintDialogMessage({
+        maxActions,
+        expiresAt: expiresPreview,
+        branch: branchLabel,
+        warningLine: installAdvisory.dialogLine,
+        footer: gateDialogFooter(projectRoot, config),
+        planSlug: plan.slug,
+        phases,
+      }),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -216,82 +351,8 @@ export async function planAuthorizeHandler(
     }
   }
 
-  const reject = (
-    reject_kind: PlanAuthorizeRejectKind,
-    reason: string,
-  ): PlanAuthorizeOutput => {
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'plan_authorize.rejected',
-        tool: 'rsct_plan_authorize',
-        reject_kind,
-        reason,
-        branch,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      channel: gate.channel,
-      reject_kind,
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      plan_slug: null,
-      branch,
-      expires_at: null,
-      max_actions: null,
-      covers: [],
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: [...anchorHints(projectRoot, config?.audit), reason],
-    }
-  }
-
-  if (branch === null) {
-    return reject(
-      'no_branch',
-      'no branch resolved (detached HEAD or not in a git worktree) — a batch token must be scoped to a named branch',
-    )
-  }
-
-  const { list: protectedList } = effectiveProtectedList(config)
-  if (isProtectedBranch(branch, protectedList)) {
-    return reject(
-      'protected_branch',
-      `branch '${branchLabel}' is protected — batch tokens are only granted on derived branches (create one: git checkout -b <slug>). Protected-branch commits still require a per-action dev_approval with override_protected_branch.`,
-    )
-  }
-
-  const activePlan = findActivePlan(projectRoot)
-  if (!activePlan) {
-    return reject(
-      'no_active_plan',
-      'no active plan_<slug>.md / spec_<slug>.md at the project root — a batch token must be scoped to a plan. Create the plan/spec first.',
-    )
-  }
-
-  const ttlMinutes = resolveTtlMinutes(
-    input.ttl_minutes,
-    config?.approval_modes?.plan_token_ttl_minutes,
-  )
-  const maxActions = resolveMaxActions(
-    input.max_actions,
-    config?.approval_modes?.plan_token_max_actions,
-  )
-  const slideMinutes = resolveSlideMinutes(
-    input.ttl_minutes,
-    config?.approval_modes?.plan_token_ttl_slide_minutes,
-  )
-  const absTtlMinutes = resolveAbsTtlMinutes(
-    undefined,
-    config?.approval_modes?.plan_token_ttl_abs_minutes,
-  )
-
   const token = emitToken({
-    planSlug: activePlan.slug,
+    planSlug: plan.slug,
     branch,
     ttlMinutes,
     maxActions,
@@ -300,23 +361,9 @@ export async function planAuthorizeHandler(
       timestamp: gate.approval.timestamp,
     },
     now,
-    slideMinutes,
-    absTtlMinutes,
   })
 
-  const existing = readPhaseState(projectRoot)
-  const baseState: PhaseState = existing.state ?? {}
-  const newState: PhaseState = { ...baseState, plan_authorization: token }
-  const writeResult = refuseUnreadableState(projectRoot, existing) ?? writePhaseState(projectRoot, newState)
-
-  if (!writeResult.ok) {
-    const unreadable = writeResult.reason === 'unreadable_state'
-    const reason =
-      writeResult.reason === 'locked'
-        ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? 'unknown'}) — wait and retry`
-        : unreadable
-          ? writeResult.error
-          : `phase-state.json write failed: ${writeResult.error}`
+  const notMinted = (reason: string, unreadable: boolean): PlanAuthorizeOutput => {
     const audit = appendAudit(
       projectRoot,
       {
@@ -324,7 +371,7 @@ export async function planAuthorizeHandler(
         tool: 'rsct_plan_authorize',
         reason,
         branch,
-        plan_slug: activePlan.slug,
+        plan_slug: plan.slug,
         channel: gate.channel,
       },
       config?.audit,
@@ -335,7 +382,7 @@ export async function planAuthorizeHandler(
       reject_kind: null,
       reason,
       fabrication_signals: gate.fabrication_signals,
-      plan_slug: activePlan.slug,
+      plan_slug: plan.slug,
       branch,
       expires_at: null,
       max_actions: maxActions,
@@ -352,34 +399,57 @@ export async function planAuthorizeHandler(
     }
   }
 
-  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
+  const existing = readPhaseState(projectRoot)
+  const unreadableState = refuseUnreadableState(projectRoot, existing)
+  if (unreadableState && !unreadableState.ok && unreadableState.reason === 'unreadable_state') {
+    return notMinted(unreadableState.error, true)
+  }
+
   const audit = appendAudit(
     projectRoot,
     {
-      event: 'plan_authorize.authorized',
+      event: PLAN_AUTHORIZED_EVENT,
       tool: 'rsct_plan_authorize',
       branch,
-      plan_slug: activePlan.slug,
+      plan_slug: plan.slug,
+      phases: phases.length,
+      authorized_at: token.authorized_at,
       expires_at: token.expires_at,
       max_actions: maxActions,
       covers: token.covers,
+      approval_action_scope: token.approval_ref.action_scope,
+      approval_timestamp: token.approval_ref.timestamp,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
     },
     config?.audit,
   )
   const afields = auditFields(audit)
+  if (afields.audit_error !== null) {
+    return notMinted(`the audit log could not record the authorization (${afields.audit_error}) — a token counts only while that line exists`, false)
+  }
+
+  const baseState: PhaseState = existing.state ?? {}
+  const writeResult = writePhaseState(projectRoot, { ...baseState, plan_authorization: token })
+  if (!writeResult.ok) {
+    const reason =
+      writeResult.reason === 'locked'
+        ? `another session is editing phase-state.json (locked ${writeResult.lock_age_ms}ms ago by ${writeResult.held_by_session ?? 'unknown'}) — wait and retry`
+        : writeResult.reason === 'unreadable_state'
+          ? writeResult.error
+          : `phase-state.json write failed: ${writeResult.error}`
+    return notMinted(reason, writeResult.reason === 'unreadable_state')
+  }
+
+  const record = recordApproval(gate.approval, { projectRoot, now, auditConfig: config?.audit })
 
   const hints: string[] = [...anchorHints(projectRoot, config?.audit), ...advisoryHints,
-    `Batch authorization granted for '${activePlan.slug}' on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push/merge still need a per-action approval.`,
+    `Batch authorization granted for '${plan.slug}' (${phases.length} phases) on '${branchLabel}': up to ${maxActions} commit(s) until ${token.expires_at}, never extended. rsct_request_commit needs NO dev_approval for those. Revoke early with rsct_plan_revoke; switching branch, finishing the plan, or expiry ends it automatically. push, merge and rebase still need their own dialog.`,
   ]
   if (!record.ok) {
     hints.push(
       `⚠ authorization granted, but I could not record the approval as used: ${record.error}. The dev_approval that granted it could be accepted again by mistake for a short time — use a fresh one next time, or repair .rsct/approvals-seen.json.`,
     )
-  }
-  if (afields.audit_error !== null) {
-    hints.push(`⚠ token minted but audit log write failed: ${afields.audit_error}.`)
   }
 
   return {
@@ -388,7 +458,7 @@ export async function planAuthorizeHandler(
     reject_kind: null,
     reason: null,
     fabrication_signals: gate.fabrication_signals,
-    plan_slug: activePlan.slug,
+    plan_slug: plan.slug,
     branch,
     expires_at: token.expires_at,
     max_actions: maxActions,
@@ -398,4 +468,26 @@ export async function planAuthorizeHandler(
     anti_replay_error: record.ok ? null : (record.error ?? null),
     hints,
   }
+}
+
+function mintDialogMessage(args: {
+  maxActions: number
+  expiresAt: string
+  branch: string
+  warningLine: string | null
+  footer: string
+  planSlug: string
+  phases: PlanPhase[]
+}): string {
+  const shown = args.phases.slice(0, PHASES_SHOWN).map((p) => `• ${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`)
+  const more = args.phases.length > PHASES_SHOWN ? [`… and ${args.phases.length - PHASES_SHOWN} more`] : []
+  return [
+    `Authorize up to ${args.maxActions} commits with NO dialog, until ${args.expiresAt} UTC (8 h at most, never extended), on branch '${specLabel(args.branch, 80)}'?`,
+    ...(args.warningLine ? [args.warningLine] : []),
+    '',
+    'Commit only: merge, rebase and push keep their own dialog. Revoke early with rsct_plan_revoke.',
+  ].join('\n') +
+    args.footer +
+    `\nPlan: '${specLabel(args.planSlug, 80)}' — ${args.phases.length} phases:\n` +
+    [...shown, ...more].join('\n')
 }

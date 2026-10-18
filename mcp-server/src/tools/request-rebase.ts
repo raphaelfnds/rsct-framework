@@ -221,6 +221,8 @@ export async function requestRebaseHandler(
   const gate = await gateRequest({
     toolName: 'rsct_request_rebase',
     approval: input.dev_approval,
+    forceDialog: true,
+    forceDialogReason: 'a rebase or squash needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — rebase approval',
       message:

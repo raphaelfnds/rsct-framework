@@ -269,7 +269,7 @@ function updateHint(tag: string): string {
   const clean = normalizeTag(tag)
   return (
     `A newer RSCT release (v${clean}) is available — you have ${RSCT_MCP_VERSION}. ` +
-    'Update the framework (git pull + reinstall) then run /rsct-setup to apply it. ' +
+    'Update the framework (git pull --ff-only + reinstall) then run /rsct-setup to apply it. ' +
     `(suggestion only) If the dev declines THIS release, call rsct_status with ` +
     `decline_update:"v${clean}" — only the release named here is accepted, it will not be ` +
     'raised again, and a newer one will ask once.'

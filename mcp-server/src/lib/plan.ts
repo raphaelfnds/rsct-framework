@@ -386,3 +386,125 @@ function extractTableField(text: string, field: string): string | null {
   if (!match || !match[1]) return null
   return match[1].trim().replace(/`/g, '')
 }
+
+const SAFE_PLAN_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export function isSafePlanSlug(slug: string): boolean {
+  return SAFE_PLAN_SLUG.test(slug) && !slug.includes('..')
+}
+
+export function findPlanFileBySlug(projectRoot: string, slug: string): ActivePlan | null {
+  if (!isSafePlanSlug(slug)) return null
+  const name = `plan_${slug}.md`
+  let entries: string[]
+  try {
+    entries = readdirSync(projectRoot)
+  } catch {
+    return null
+  }
+  if (!entries.includes(name)) return null
+  const path = join(projectRoot, name)
+  if (safeMtime(path) === null) return null
+  const metadata = extractPlanMetadata(path)
+  const progressPath = join(projectRoot, `progress_${slug}.md`)
+  return {
+    slug,
+    plan_path: path,
+    progress_path: safeMtime(progressPath) !== null ? progressPath : null,
+    status: metadata.status,
+    branch: metadata.branch,
+    created: metadata.created,
+  }
+}
+
+export function findNewestPlanFile(projectRoot: string): ActivePlan | null {
+  let entries: string[]
+  try {
+    entries = readdirSync(projectRoot)
+  } catch {
+    return null
+  }
+  const newest = entries
+    .filter((name) => /^plan_.+\.md$/.test(name))
+    .map((name) => ({ slug: name.slice('plan_'.length, -'.md'.length), mtime: safeMtime(join(projectRoot, name)) }))
+    .filter((entry): entry is { slug: string; mtime: number } => entry.mtime !== null && isSafePlanSlug(entry.slug))
+    .sort((a, b) => b.mtime - a.mtime)[0]
+  return newest ? findPlanFileBySlug(projectRoot, newest.slug) : null
+}
+
+export interface PlanPhase {
+  id: string
+  goal: string
+}
+
+const FENCE = /^\s*(```|~~~)/
+const PHASES_HEADING = /^#{2,6}\s+Phases\b/i
+const ANY_HEADING = /^#{1,6}\s/
+const TABLE_ROW = /^\s*\|/
+const SEPARATOR_ROW = /^\s*\|?\s*:?-{3,}/
+const PLACEHOLDER = /^(?:<[^>]*>|tbd|todo|n\/a|—|–|-)?$/i
+const ESCAPED_PIPE = String.fromCharCode(92, 124)
+const PIPE_MARK = String.fromCharCode(0)
+
+function tableCells(line: string): string[] {
+  const cells = line.split(ESCAPED_PIPE).join(PIPE_MARK).split('|').map((cell) => cell.split(PIPE_MARK).join('|').trim())
+  if (cells.length > 0 && cells[0] === '') cells.shift()
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop()
+  return cells
+}
+
+function filledCell(cell: string | undefined): cell is string {
+  return cell !== undefined && !PLACEHOLDER.test(cell.replace(/`/g, '').trim())
+}
+
+export function readPlanPhases(text: string): PlanPhase[] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  let inFence = false
+  let at = -1
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    if (FENCE.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (!inFence && PHASES_HEADING.test(line)) {
+      at = i + 1
+      break
+    }
+  }
+  if (at < 0) return []
+  const table: string[] = []
+  for (let i = at; i < lines.length; i++) {
+    const line = lines[i]!
+    if (FENCE.test(line)) {
+      inFence = !inFence
+      if (table.length > 0) break
+      continue
+    }
+    if (inFence) continue
+    if (ANY_HEADING.test(line)) break
+    if (TABLE_ROW.test(line)) table.push(line)
+    else if (table.length > 0) break
+  }
+  if (table.length < 3 || !SEPARATOR_ROW.test(table[1]!)) return []
+  const header = tableCells(table[0]!).map((cell) => cell.toLowerCase())
+  const idColumn = header.indexOf('phase')
+  const goalColumn = header.indexOf('goal')
+  if (idColumn < 0 || goalColumn < 0) return []
+  const phases: PlanPhase[] = []
+  for (const row of table.slice(2)) {
+    const cells = tableCells(row)
+    const id = cells[idColumn]
+    const goal = cells[goalColumn]
+    if (filledCell(id) && filledCell(goal)) phases.push({ id, goal })
+  }
+  return phases
+}
+
+export function readPlanFilePhases(path: string): PlanPhase[] {
+  try {
+    return readPlanPhases(readFileSync(path, 'utf8'))
+  } catch {
+    return []
+  }
+}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -174,7 +174,8 @@ describe('rsct_request_commit — only a commit that landed cuts the audit log (
     expect(text).toContain(`a commit that LANDED also removes audit-log lines older than ${AUDIT_RETENTION_DAYS} days`)
     expect(text).toContain('a refused or unapproved call removes nothing')
     expect(text).toContain('The approval dialog forecasts the cut only when it reaches entries older than 20 days')
-    expect(text).toContain('a commit under a plan token, or one approved with no dialog channel (trust_allowed_for), shows no dialog')
+    expect(text).toContain('a commit under a plan token shows no dialog and so no forecast')
+    expect(text).not.toContain('one approved with no dialog channel (trust_allowed_for)')
   })
 
   it('does not cut, or announce a cut for, a project whose config is absent', async () => {
@@ -226,6 +227,11 @@ describe('rsct_request_commit — only a commit that landed cuts the audit log (
       }),
       'utf8',
     )
+    appendFileSync(
+      logPath(),
+      `${JSON.stringify({ ts: NOW.toISOString(), event: 'plan_authorize.authorized', plan_slug: 'p', branch: 'feat/x', authorized_at: NOW.toISOString(), expires_at: new Date(NOW.getTime() + 60 * 60_000).toISOString(), max_actions: 5, approval_action_scope: 'plan_authorize:p', approval_timestamp: NOW.toISOString() })}\n`,
+      'utf8',
+    )
     const out = (await requestCommitHandler(
       { project_root: root, message: 'feat: a change' },
       internal('yes', {}),
@@ -238,7 +244,7 @@ describe('rsct_request_commit — only a commit that landed cuts the audit log (
     expect(events()).not.toContain('verification.finding')
   })
 
-  it('cuts when the approval was trusted with no dialog channel', async () => {
+  it('refuses a commit with no dialog channel even when trust_allowed_for lists it, and cuts nothing', async () => {
     seedOldHistory()
     writeFileSync(
       join(root, '.rsct.json'),
@@ -257,10 +263,11 @@ describe('rsct_request_commit — only a commit that landed cuts the audit log (
       },
       internal('yes', { promptFn: async () => ({ response: 'no-channel', channel: 'none' }) }),
     )) as RequestCommitOutput
-    expect(out.status).toBe('committed')
-    expect(out.channel).toBe('trust')
-    expect(retentionHints(out)[0]).toMatch(REMOVED)
-    expect(events()).not.toContain('verification.finding')
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('force_dialog_no_channel')
+    expect(out.reason).toContain('trust_allowed_for is ignored')
+    expect(retentionHints(out)).toHaveLength(0)
+    expect(events()).toContain('verification.finding')
   })
 
   it('reports a small cut in the hints without forecasting it in the dialog', async () => {
