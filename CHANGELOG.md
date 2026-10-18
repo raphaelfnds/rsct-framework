@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-10-18
+
 ### Added
 
 - **Run alone (#128).** `rsct_phase_code_start` takes `run_alone`, at the root of the repository or
