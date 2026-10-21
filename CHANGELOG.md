@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-10-21
+
 ### Security
 
 - **Approval dialogs show the framework's lines before anything the agent wrote.** In every dialog
