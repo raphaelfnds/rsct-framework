@@ -1,6 +1,7 @@
 import { resolve, dirname, basename, join } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { readWorktreeInfo, safeGitRead } from './git.js'
+import { DIALOG_PATH_LIMIT, specLabel } from './dialog-text.js'
 
 /**
  * #92 — where the SHARED anchors live.
@@ -168,9 +169,9 @@ export function clearAnchorCache(): void {
  */
 export function repositoryDialogLine(projectRoot: string): string {
   const a = anchorFor(projectRoot)
-  const shown = a.root.replace(/\\/g, '/')
+  const shown = specLabel(a.root.replace(/\\/g, '/'), DIALOG_PATH_LIMIT)
   if (a.status === 'relocated') {
-    return `Repository: ${shown}\n⚠ RSCT state resolves there, NOT at the folder you passed (${resolve(projectRoot).replace(/\\/g, '/')}).`
+    return `Repository: ${shown}\n⚠ RSCT state resolves there, NOT at the folder you passed (${specLabel(resolve(projectRoot).replace(/\\/g, '/'), DIALOG_PATH_LIMIT)}).`
   }
   if (a.status === 'not-applicable') return `Folder: ${shown} (not a git repository)`
   if (a.status === 'unavailable') return `Folder: ${shown} (git could not confirm the repository)`

@@ -17,6 +17,7 @@ import {
   type FabricationSignal,
 } from '../lib/dev-approval.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
+import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, specLabel } from '../lib/dialog-text.js'
 import {
   createIssue as ghCreateIssue,
   isGhAvailable,
@@ -440,13 +441,14 @@ export async function captureIssueHandler(
     dialog: {
       title: 'RSCT — create GitHub issue',
       message:
-        `Create issue '${input.title}' (severity=${input.severity})?\n\n` +
-        `Labels: ${labels.length > 0 ? labels.join(', ') : '(none — no matching label in this repository)'}\n` +
+        `Create a GitHub issue (severity=${input.severity})?\n\n` +
+        `GH CLI will run in '${specLabel(projectRoot, DIALOG_PATH_LIMIT)}'.` +
         // A label gh is about to reject belongs in the dialog, not only in the
         // hints afterwards: approving a call already known to fail spends the
         // dev's single-use approval on nothing.
-        (resolved.warnings.length > 0 ? `\n⚠ ${resolved.warnings.join('\n⚠ ')}\n` : '') +
-        `GH CLI will run in '${projectRoot}'.`,
+        (resolved.warnings.length > 0 ? `\n\n${resolved.warnings.map((w) => `⚠ ${specLabel(w, DIALOG_UNCUT)}`).join('\n')}` : '') +
+        `\n\nLabels: ${labels.length > 0 ? specLabel(labels.join(', '), DIALOG_UNCUT) : '(none — no matching label in this repository)'}` +
+        `\nTitle: '${specLabel(input.title, DIALOG_UNCUT)}'`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {

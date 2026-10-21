@@ -1,5 +1,5 @@
-import { appendFileSync, copyFileSync, existsSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { appendFileSync, copyFileSync, existsSync, statSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { ensureParentDir } from './io-utils.js'
 import { anchorFor, sameDirectory, type AnchorStatus } from './repo-anchor.js'
 import type { RsctAuditConfig } from './project-root.js'
@@ -56,8 +56,34 @@ export interface AuditPathDecision {
   base: string
   /** A configured `audit.path` pointed outside `base` and was refused. */
   escaped: string | null
+  unusable: { path: string; reason: AuditPathUnusable } | null
   /** Anchor status, so a caller can report a relocation or a degraded read. */
   anchor: AnchorStatus
+}
+
+export type AuditPathUnusable = 'stream' | 'name' | 'not_a_file'
+
+const WINDOWS_FORBIDDEN = /[<>"|?*]/
+
+const PORT_DIGITS = `0-9${String.fromCharCode(0xb9, 0xb2, 0xb3)}`
+
+const WINDOWS_RESERVED = new RegExp(`^(?:con|prn|aux|nul|com[${PORT_DIGITS}]|lpt[${PORT_DIGITS}]|conin\\$|conout\\$)(?:\\..*)?$`, 'i')
+
+function unusableTail(base: string, candidate: string): AuditPathUnusable | null {
+  const tail = relative(base, candidate)
+  if (tail === '') return 'not_a_file'
+  const windows = process.platform === 'win32'
+  if (windows && tail.includes(':')) return 'stream'
+  if (/\p{Cc}/u.test(tail)) return 'name'
+  const segments = tail.split(sep)
+  if (windows) {
+    if (WINDOWS_FORBIDDEN.test(tail)) return 'name'
+    if (segments.some((s) => WINDOWS_RESERVED.test(s) || /[. ]$/.test(s))) return 'name'
+  }
+  for (let i = 1; i < segments.length; i += 1) {
+    if (statSync(join(base, ...segments.slice(0, i)), { throwIfNoEntry: false })?.isDirectory() === false) return 'not_a_file'
+  }
+  return statSync(candidate, { throwIfNoEntry: false })?.isFile() === false ? 'not_a_file' : null
 }
 
 const migrationAttempted = new Set<string>()
@@ -128,11 +154,20 @@ export function decideAuditPath(
   if (configured && configured.length > 0) {
     const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured)
     if (!isInside(base, candidate)) {
-      return { path: fallback, base, escaped: candidate, anchor: anchor.status }
+      return { path: fallback, base, escaped: candidate, unusable: null, anchor: anchor.status }
     }
-    return { path: candidate, base, escaped: null, anchor: anchor.status }
+    let reason: AuditPathUnusable | null
+    try {
+      reason = unusableTail(base, candidate)
+    } catch {
+      reason = 'not_a_file'
+    }
+    if (reason !== null) {
+      return { path: fallback, base, escaped: null, unusable: { path: configured, reason }, anchor: anchor.status }
+    }
+    return { path: candidate, base, escaped: null, unusable: null, anchor: anchor.status }
   }
-  return { path: fallback, base, escaped: null, anchor: anchor.status }
+  return { path: fallback, base, escaped: null, unusable: null, anchor: anchor.status }
 }
 
 /**

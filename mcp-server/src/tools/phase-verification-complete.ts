@@ -36,6 +36,8 @@ import {
   type PhaseState,
 } from '../lib/phase-scope.js'
 import { getHeadShaFull } from '../lib/git.js'
+import { gateDialogFooter } from '../lib/gate-dialog.js'
+import { DIALOG_UNCUT, specLabel } from '../lib/dialog-text.js'
 
 
 const findingActionSchema = z
@@ -392,7 +394,10 @@ export async function phaseVerificationCompleteHandler(
       // `trust` channel when no dialog channel exists (headless, CI), and on that
       // path this string is never rendered. The hints and audit legs below are
       // what survive there.
-      message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}`,
+      message:
+        `Complete V phase?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}` +
+        gateDialogFooter(projectRoot) +
+        `\nSpec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {

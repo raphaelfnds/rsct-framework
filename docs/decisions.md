@@ -669,7 +669,7 @@ language other than JavaScript/TypeScript is uncovered — and said so in a hint
 export is reported dead in a repository that holds files in other languages.
 
 ### ADR-019 — Authorize, revoke, abandon and commit refuse an unreadable phase-state, and no commit is made on one (#101)
-**Status**: active. Since 2.17.0 (ADR-030): in named limit (2), "the reserve and refund writes start from the state read before authorization" no longer holds — they read the state again just before writing and write only if the stored token is unchanged (a check before the write, not under the lock), and the re-arm is gone; named limit (4) no longer holds — `rsct_plan_authorize` checks its pre-conditions and an unreadable state before its dialog.
+**Status**: active. Since 2.17.0 (ADR-030): in named limit (2), "the reserve and refund writes start from the state read before authorization" no longer holds — they read the state again just before writing and write only if the stored token is unchanged (a check before the write, not under the lock), and the re-arm is gone; named limit (4) no longer holds — `rsct_plan_authorize` checks its pre-conditions and an unreadable state before its dialog. Since 2.18.0 (ADR-031), in named limit (1), the refusal text no longer recommends deleting — it says to stop and ask the developer, as `rsct_load_context` and `rsct_status` now do; deleting still drops the drift lock and the tier ratchet.
 **Tags**: phase-state, gates, commit-gate
 **Context**: ADR-017 named four tools as still unguarded. MEASURED before this change, by driving
 the real handlers on a file cut mid-object: only two of the four wrote. `rsct_plan_authorize`
@@ -1056,7 +1056,7 @@ Named limits:
   the whole file. That is growth proportional to use, left as it was — #93 stays open for it.
 
 ### ADR-025 — The audit log keeps ten days of routine history; what gates read and bypass records stay (#93, 2.14.0)
-**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93. Since 2.17.0 (ADR-030) `plan_authorize.authorized` and `plan_revoke.revoked` are pinned too: the commit gate reads them to decide whether a batch token counts.
+**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93. Since 2.17.0 (ADR-030) `plan_authorize.authorized` and `plan_revoke.revoked` are pinned too: the commit gate reads them to decide whether a batch token counts. Since 2.18.0 (ADR-031) an `audit.path` that names a stream is ignored when the path is decided, so the named limit "Only retention refuses such a path; the log is still written there" no longer holds: the log is written to the default path, and retention still cuts nothing while the config names a stream.
 **Tags**: audit-log, retention, growth, cross-os
 
 **Context**: `.rsct/audit.log` is the only copy of what it holds and had no bound. MEASURED on 19
@@ -1429,7 +1429,7 @@ Not measured: the two channels on one machine, a registry install over a link, t
 `"private": true`, and anything on macOS, pnpm, yarn or bun.
 
 ### ADR-027 — The approval dialog gets its text as data, runs by full path, and has no test override (2.14.1)
-**Status**: active. Since 2.17.0 (ADR-030) the named limit "a dialog program that starts and then fails, or is stopped, still counts as no channel, so where the tool is listed in `trust_allowed_for` the call is trusted" no longer holds for commit, push, merge, rebase and `rsct_plan_authorize`, which always force the dialog.
+**Status**: active. Since 2.17.0 (ADR-030) the named limit "a dialog program that starts and then fails, or is stopped, still counts as no channel, so where the tool is listed in `trust_allowed_for` the call is trusted" no longer holds for commit, push, merge, rebase and `rsct_plan_authorize`, which always force the dialog. Since 2.18.0 (ADR-031) the given-up item "agent text is shown as written, in some dialogs before framework lines" no longer holds: every dialog shows the framework lines first and the agent text last, on one line per value; text that imitates framework lines is still not addressed.
 **Tags**: security, dialog, cross-os
 
 **Context**: every approval the framework treats as human goes through `lib/os-dialog.ts`
@@ -1643,7 +1643,7 @@ enforcement state, from `settings.json` and `settings.local.json`, before
 `.rsct/scripts/`: a guard entry whose script is gone refuses every call it matches.
 
 ### ADR-029 — Run alone: code and tests close with no dialog when the developer chose it, and are approved before any commit (#128, 2.16.0)
-**Status**: active.
+**Status**: active. Since 2.18.0 (ADR-031) the unreadable-state message no longer calls deleting the file a safe recovery; it says to ask the developer and names what deleting drops, the run_alone record included.
 **Tags**: gates, phases, dialog
 
 **Context**: every phase completion opens an OS dialog and the tool call waits for the answer
@@ -1847,6 +1847,136 @@ tests, each with the guarantee it still holds: the token fixtures gained the aud
 mint writes; the mint fixtures gained a two-phase table; "cuts when the approval was trusted with
 no dialog channel" became "refuses … and cuts nothing"; `git pull` moved to the refused list with
 `--ff-only` forms allowed; a Start-Process example passes a variable to `fetch` instead of `pull`.
+
+### ADR-031 — Dialogs put the framework first; plan lookups are deterministic; the REVIEW names the process; an audit.path no file can sit at is ignored (2.18.0)
+**Status**: active.
+**Tags**: dialog, gates, plan, classify, audit-log, cross-os
+
+**Context**: MEASURED 2026-10-21 on `main` @ `bfa4946` (2.17.0), Windows 11 / NTFS, real handlers
+bundled with esbuild.
+- Dialogs: a commit message of one line, 300 blank lines and one more line made a 307-line
+  dialog whose repository line was the last; a `spec_ref` carrying 200 line breaks put a line
+  reading `Repository: …` 200 lines above the framework's bypass list; the code-complete dialog
+  began with the spec and had no repository line. In the V review: a push branch, the reason of an
+  abandon, issue labels, a relocated folder name inside the repository line, and branch names git
+  accepts with line separators did the same. In the REVIEW: combining marks stacked on one letter of
+  the agent's text drew over the framework lines above it (MEASURED by rendering the commit dialog
+  text off-screen with the MessageBox font). Whether a dialog program cuts a long text on screen was
+  NOT measured (the developer declined an on-screen test); the order is fixed regardless.
+- Plans (#86): two `spec_` files on one branch with equal mtimes — the winner was the
+  alphabetically first on NTFS (readdir order; ext4 and APFS order otherwise), so `plan_complete`
+  passed or failed by file name alone. `findPlanByBranch` compared the raw string: a merge of
+  `refs/heads/x`, `heads/x` or `X` (git resolves loose refs ignoring case on NTFS and APFS), a push
+  of `HEAD:main` or `x:main`, and a squash of `x` found no plan and skipped the check.
+- Tier (#89): `rsct_phase_code_start` is optional — classify complex, then REVIEW start, REVIEW
+  complete and commit landed with three dialogs, none naming V, a plan or the tier. The messages for
+  an unreadable `.rsct/phase-state.json` (the refusal, `rsct_load_context`, `rsct_status`) called
+  deleting the file a safe recovery or a clean start.
+- `audit.path`: `.rsct/audit.log:x` wrote every entry into an NTFS stream while the file a
+  developer opens stayed empty; a NUL, a control character, `? * < > | "` or a folder (`.`, `.rsct`)
+  made every write fail; a bare reserved name such as `NUL`, `COM` with a superscript digit, or a
+  name ending in a dot created a file ordinary tools do not open (names such as `nul.log` open on
+  Windows 11 and are reserved on older Windows). The config loaded in every case.
+
+**Decision**:
+- `lib/dialog-text.ts`, a module with no imports: `specLabel` (format characters removed, line
+  breaks and tabs → one space, control characters removed, a run of more than four combining marks
+  cut to four; cut by code point when a limit is given), `dialogList` (one flattened line per item,
+  then "… and N more") and `commitMessageView`. Every dialog shows the question, its warnings and the
+  repository line first, and what the agent supplied last, one line per value: commit, push, merge,
+  rebase, the completion of research, spec, code, test, review and V (these gain the repository
+  line), the ceremony bypass, abandon on both paths, the REVIEW's unverified-files question (Yes/No
+  meaning right after the question) and issue creation (where gh runs and the label warnings, then
+  labels, then title). Values on the question line — branch, ref and remote names, the phase of an
+  abandon — and folders in the repository line are flattened and cut past 1,000 characters, so a
+  name cannot wrap the framework lines off the dialog; the push dialog names the destination on its
+  own line when it differs from the source. Every other agent value is flattened and not cut; the
+  cuts that existed before stay (comment excerpts 80, kept-code notes 100, allowlisted comments 120,
+  the run-alone spec 200, the plan-authorization labels). The protected-branch notice of the footer
+  and the times of pending run-alone phases are flattened too.
+- The commit message is shown last, after the repository line, under "Commit message:". CRLF,
+  CR, VT, FF, NEL, U+2028 and U+2029 become line breaks; trailing whitespace is dropped; runs of
+  blank lines collapse to one and leading or trailing blank lines go; any other control or format
+  character, and the part of a mark pile past four, is shown as U+FFFD — it is in the message git
+  records, so it is marked, not hidden. No line cap and no width cap.
+- One enumerator in `lib/plan.ts` feeds `findActivePlan`, `findPlanByBranch`, `findNewestPlanFile`
+  and `listPlans`: newest mtime first, then the NFC file name in code-unit order (never
+  `localeCompare`, which depends on the locale). `branchKey` is `stripRefsPrefix` over the trimmed,
+  NFC, lower-cased name; `findPlanByBranch` takes a `Branch` row written exactly as the name first,
+  then one that matches by key. The integration gate reads `branchPlansHaveOpenItems`: merge — the
+  source branch; rebase — the current branch; squash — the current branch and the squashed ref;
+  push to a protected branch — the pushed source of the refspec, `HEAD`/`@` meaning the current
+  branch, an empty source (a delete) reading none.
+- The REVIEW-complete dialog carries a framework line: "Process: classified '<latest>' by
+  rsct_classify_task (highest on record '<max>'); V phase for this spec: completed | not run." —
+  latest from `last_classify`, highest from `readClassifyEvidence` (state and audit log), V from a
+  verification block of this `spec_ref` with a `completed_at`. `UNREADABLE_STATE_ADVICE`, shared by
+  the refusal, `rsct_load_context` and `rsct_status`, says to stop and ask the developer and names
+  what deleting drops.
+- `decideAuditPath` reads the part of the configured path below the base (`path.relative`, after
+  the existing outside-the-project check, split on the platform separator) and ignores the value —
+  default log, `unusable: { path, reason }` — when it is empty, or on Windows holds `:` (a stream,
+  checked first), when it holds a control character, on Windows `< > " | ? *`, a reserved device
+  name (CON, PRN, AUX, NUL, COM and LPT with a digit or a superscript digit, CONIN$, CONOUT$, any
+  case, any extension) or a segment ending in a dot or a space, or when it names a folder or a path
+  through a file (every OS). A stat that throws counts as not a file. `escaped` is unchanged.
+  `anchorHints` names the value (`JSON.stringify`, so a NUL shows) and the reason. Retention
+  refuses to cut while the configured value names a stream (`stream_path`), keyed on that decision.
+
+**Direction**: stricter on every part. No refusal is removed; the new refusals are the integration
+gate finding the plan it used to miss. A dialog hides nothing it showed before except a name on a
+framework line past 1,000 characters and a pile of more than four combining marks.
+
+**Alternatives considered**:
+- A dialog at `rsct_phase_code_start` for every trivial/small start (the first approved option)
+  — dropped after V: the start is optional, so it would cost the honest path a dialog and leave the
+  documented and the deliberate path open; the REVIEW line reaches both.
+- The downgrade check reading the higher of the state file and the audit log, so that deleting the
+  state file no longer drops it — built, and dropped in REVIEW: the audit log is shared by linked
+  worktrees and the state file is not, so after one complex verdict anywhere in the repository every
+  smaller start in a new worktree would need the override dialog, and the start is optional anyway.
+  The REVIEW line shows the highest classification from the log instead.
+- Reading every plan of the branch for `plan_complete` — rejected: a multi-phase plan's progress
+  tracks later phases as open, so every mid-plan integration would be refused (the
+  `lib/pre-merge-ack.ts` note on non-final merges), and the progress files are agent-writable.
+- A 40-line cap on the commit message, and an 80-character cut of names — dropped in V and REVIEW:
+  they hid text the dialog showed, the destination of a push included.
+- Refusing the whole config on an unusable `audit.path` (premise #1's usual answer) — rejected: a
+  rejected config makes the project unmanaged, which switches the edit-scope guard off (ADR-022);
+  ignoring the value keeps the project managed and the log where the developer looks, as for a
+  path outside the project.
+- Removing retention's stream refusal once the path falls back — rejected in V: the next cut would
+  replace the default log and the stream with it, erasing what the old config wrote there.
+- A colon refused outside Windows too — rejected: on Linux and macOS it is part of a file name, the
+  check runs on the machine that reads the config, and a POSIX test pins that.
+- Resolving the integrated ref to a commit and taking every branch at it — not taken: heavier, and
+  branches that share a commit right after branching would bring in unrelated plans.
+
+**What is given up, by name**: text that imitates framework lines, letters that render blank, and a
+long line in some dialog programs (ADR-027); the issue body is not shown in the capture dialog; the
+progress files and the `Branch` row stay agent-written, a plan saved later still wins a lookup by
+key, case folding joins names a case-sensitive file system keeps apart, any revision that is not a
+branch name (a sha, a tag, a remote-tracking name, an expression) finds no plan, and there is no
+`rsct_plan_start` (#86); `rsct_classify_task` stays ungated, `rsct_phase_code_start` optional, and
+deleting the state file still drops the downgrade record (ADR-019) — the REVIEW line makes the
+outcome visible, it does not refuse it, and it reads the audit log the config names; a V block from
+an older task with the same `spec_ref` still reads as completed; `code_start` still shows its
+override dialog before refusals that need none (ADR-014); for `audit.path`, links inside the project
+are not resolved (as before), a path longer than the classic Windows limit is kept, and entries an
+older guard or sanitizer copy writes keep going to the old path until `/rsct-setup` replaces it; on
+Linux and macOS a dialog program that cannot open still reads as No (ADR-027).
+
+**Consequences**: `tests/unit/dialog-text-order.test.ts`, `plan-lookup-spellings.test.ts`,
+`tier-record-review-line.test.ts`, `audit-path-unusable.test.ts`. Edited tests, each with the
+guarantee it still holds: `version-drift-inert.test.ts` — the warning sits once right after the
+question and a healthy guard shows none, now with the message under "Commit message:" last;
+`audit-retention.test.ts` — a stream naming a working file cuts nothing and leaves both files as
+they were (one outcome now, since the value is no longer a second log), and a NUL path no longer
+counts as a second log: the default one is still forecast and cut; `audit-log.test.ts` — a failed
+write returns `write_failed` and never throws, now provoked by a file where the default `.rsct`
+folder goes (a configured path through a file is ignored, pinned by `audit-path-unusable`);
+`run-alone.test.ts` imports `specLabel` from its new module. The edit-scope guard and the sanitizer
+bundle `decideAuditPath`, so a project needs `/rsct-setup` for its copies to follow the new rule.
 
 ---
 
@@ -2692,7 +2822,9 @@ those files. Keyed by module and symbol; restatements of what the code says were
   The active-plan lookup accepts `spec_` as an alias of `plan_`, as rules/B does (CAP-53).
 - `findPlanByBranch` keys the integration gate's plan-complete check on the plan whose `Branch` row
   is the branch being integrated, so touching an unrelated completed plan to win the mtime race
-  cannot pass the check (plan-lifecycle-v2, HOLE A).
+  cannot pass the check (plan-lifecycle-v2, HOLE A). Since 2.18.0 (ADR-031) both sides go through
+  `branchKey` (no `refs/heads/` or `heads/`, NFC, lower case), and the tools ask
+  `branchPlansHaveOpenItems` for the branches they integrate.
 - `isPlanComplete` reads the plan's `Status` row with English and pt-BR completion words, starting
   on a word boundary so "incomplete" is not "complete"; a plan it reads as finished ends that
   plan's batch token (`plan_complete`). Its only caller is `validateToken`.
@@ -2701,12 +2833,14 @@ those files. Keyed by module and symbol; restatements of what the code says were
   refuses a `plan_complete: true` that visible open items contradict. The destructive cleanup uses
   `progressCompletionState`, where only `all_closed` (at least one closed item, none open) counts:
   the absence of open items never clears an unfinished plan for deletion.
-- `listPlans` (#55) orders by the plan file's mtime only. The table's `Last update` row is reported
+- `listPlans` (#55) orders by the plan file's mtime, and since 2.18.0 (ADR-031) a tie by the NFC
+  file name in code-unit order. The table's `Last update` row is reported
   and never sorts: two recency sources disagree as soon as someone forgets to edit the row. `slug`
   comes from the file name and is the resolution identity; the `Slug` row is reported as
   `declared_slug` and never resolves a plan (#57). `slug` is not unique in the list — `plan_x.md`
-  and `spec_x.md` can coexist and share `progress_x.md`. `findActivePlan` and `findPlanByBranch`
-  keep their own walk; moving them onto the shared enumerator wants characterisation tests first.
+  and `spec_x.md` can coexist and share `progress_x.md`. Since 2.18.0 `findActivePlan`,
+  `findPlanByBranch` and `findNewestPlanFile` filter the same enumerator, pinned by
+  `plan-lookup-spellings.test.ts` with ten mixed-case names of one mtime.
 - Metadata rows are read from a markdown table within the first 60 lines.
 
 ### `lib/update-check.ts` (migrated in the 2.17.0 REVIEW)

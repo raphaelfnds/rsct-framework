@@ -98,6 +98,7 @@ import {
   affectedConsumers,
 } from '../lib/contracts.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { DIALOG_PATH_LIMIT, commitMessageView, specLabel } from '../lib/dialog-text.js'
 
 export const requestCommitInputSchema = z
   .object({
@@ -521,12 +522,12 @@ export async function requestCommitHandler(
         title: 'RSCT — commit approval',
         message:
           [
-            `Approve commit on '${branchLabel}'?`,
+            `Approve commit on '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}'?`,
             ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
             ...(retentionLine ? [retentionLine] : []),
-            '',
-            `message: ${input.message}`,
-          ].join('\n') + gateDialogFooter(projectRoot, config),
+          ].join('\n') +
+          gateDialogFooter(projectRoot, config) +
+          `\n\nCommit message:\n${commitMessageView(input.message)}`,
       },
       projectRoot,
       ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),

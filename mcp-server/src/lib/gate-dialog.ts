@@ -1,5 +1,6 @@
 import { anchorFor, repositoryDialogLine } from './repo-anchor.js'
-import { decideAuditPath } from './audit-log.js'
+import { decideAuditPath, type AuditPathUnusable } from './audit-log.js'
+import { DIALOG_UNCUT, specLabel } from './dialog-text.js'
 import {
   effectiveProtectedList,
   narrowedProtectionNotice,
@@ -31,7 +32,7 @@ export function gateDialogFooter(
   config?: BranchProtectionConfig,
 ): string {
   const notice = config === undefined ? '' : narrowedProtectionNotice(effectiveProtectedList(config))
-  return `\n\n${repositoryDialogLine(projectRoot)}${notice ? `\n${notice}` : ''}`
+  return `\n\n${repositoryDialogLine(projectRoot)}${notice ? `\n${specLabel(notice, DIALOG_UNCUT)}` : ''}`
 }
 
 /**
@@ -64,5 +65,17 @@ export function anchorHints(
         `swapped for a blank one without touching the project.`,
     )
   }
+  if (decision.unusable !== null) {
+    hints.push(
+      `⚠ .rsct.json audit.path (${JSON.stringify(decision.unusable.path)}) ${UNUSABLE_AUDIT_PATH[decision.unusable.reason]} ` +
+        `and was ignored — the audit log stays at ${decision.path.replace(/\\/g, '/')}.`,
+    )
+  }
   return hints
+}
+
+const UNUSABLE_AUDIT_PATH: Record<AuditPathUnusable, string> = {
+  stream: 'names a stream inside a file, which no file listing or editor shows,',
+  name: 'holds a character or a name RSCT does not accept for the audit log (a control character, or on Windows < > " | ? *, a reserved device name such as NUL, or a name ending in a dot or a space),',
+  not_a_file: 'names a folder, or a path through a file, where no log can be written,',
 }

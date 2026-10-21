@@ -252,7 +252,8 @@ describe('the tools a developer meets, in a project that holds an inert guard (#
     expect(out.status).toBe('committed')
     expect(dialogs).toHaveLength(1)
     const lines = dialogs[0]!.split('\n')
-    expect(lines.slice(0, 4)).toEqual(["Approve commit on 'feat/x'?", WARNING, '', 'message: checkpoint'])
+    expect(lines.slice(0, 2)).toEqual(["Approve commit on 'feat/x'?", WARNING])
+    expect(lines.slice(-2)).toEqual(['Commit message:', 'checkpoint'])
     expect(lines.filter((line) => line === WARNING)).toHaveLength(1)
   })
 
@@ -262,7 +263,8 @@ describe('the tools a developer meets, in a project that holds an inert guard (#
     expect(approved.out.status).toBe('committed')
     expect(approved.dialogs).toHaveLength(1)
     expect(approved.dialogs[0]).not.toContain('RSCT enforcement')
-    expect(approved.dialogs[0]!.startsWith("Approve commit on 'feat/x'?\n\nmessage: checkpoint")).toBe(true)
+    expect(approved.dialogs[0]).toMatch(/^Approve commit on 'feat\/x'\?\n\n(?:Repository|Folder): /)
+    expect(approved.dialogs[0]!.endsWith('\n\nCommit message:\ncheckpoint')).toBe(true)
   })
 
   it('rsct_status carries the notice with the reason', async () => {

@@ -12,6 +12,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Approval dialogs show the framework's lines before anything the agent wrote.** In every dialog
+  — commit, push, merge, rebase, the completion of research, spec, code, test, review and V, the
+  bypass and abandon dialogs, the REVIEW's unverified-files question and issue creation — the
+  question, its warnings and the repository line (for issue creation, where gh runs) come first,
+  and what the agent supplied (spec
+  name, reason, title, labels, file paths, comment excerpts, notes) comes last, one line per value,
+  with line breaks turned into spaces and invisible characters removed. Branch, ref and remote names
+  stay on the question line, flattened; the push dialog also names the destination branch. The
+  commit message is shown last, under "Commit message:", with runs of blank lines collapsed and
+  invisible characters shown as `�`. A run of more than four combining marks on one letter is cut
+  to four, so it cannot draw over the lines above it. Nothing else the dialogs showed before is cut,
+  except a name on a framework line past 1,000 characters. The completion dialogs gain the
+  repository line. See ADR-031.
+- **An `audit.path` no file can sit at is ignored.** A configured path with a control character,
+  one that names a folder or goes through a file, and on Windows one that names a stream inside a
+  file, holds `< > " | ? *`, a reserved device name such as `NUL`, or ends in a dot or a space, is
+  ignored like a path outside the project: the log stays at `.rsct/audit.log` and the tool hints
+  say why. While the value names a stream, retention cuts no log, so what is already there is kept.
+  See ADR-031.
+
+### Changed
+
+- **The REVIEW dialog says what process the work went through (#89):** the latest and the highest
+  classification on record, and whether a V phase completed for this spec. `rsct_phase_code_start`
+  is optional, so the REVIEW every code commit needs is where this is shown.
+- **An unreadable `.rsct/phase-state.json` no longer comes with advice to delete it (#89):** the
+  refusal and the hints of `rsct_load_context` and `rsct_status` tell the agent to stop and ask you,
+  and name what deleting drops.
+- **Plan lists have one order on every system (#86):** files with the same modification time are
+  ordered by name, so a tie picks the same plan on Windows, Linux and macOS.
+- **The integration check finds the plan through the spellings git accepts for a branch (#86):**
+  `refs/heads/x`, `heads/x` and another letter case (a `Branch` row written exactly as the name is
+  preferred); a push reads the plan of the pushed source (`HEAD:main` and `x:main` included), and a
+  squash reads the plan of the squashed ref as well as the current branch.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE, then **run `/rsct-setup` in every
+  project**: each project holds its own copies of the edit-scope guard and the session-start
+  sanitizer (`.rsct/scripts/`), which carry the new `audit.path` rule, and only `/rsct-setup`
+  replaces them. Until then `rsct_status` reports those copies as different from the shipped ones.
+
 ## [2.17.0] - 2026-10-18
 
 ### Security

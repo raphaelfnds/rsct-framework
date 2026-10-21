@@ -21,6 +21,8 @@ import {
   recordConsumedApproval,
   type FabricationSignal,
 } from './dev-approval.js'
+import { gateDialogFooter } from './gate-dialog.js'
+import { DIALOG_UNCUT, specLabel } from './dialog-text.js'
 
 export const RSCT_PHASES = [
   'research',
@@ -457,11 +459,11 @@ export async function gatePhaseComplete(
     ...(internal.forceDialogReason !== undefined && { forceDialogReason: internal.forceDialogReason }),
     dialog: {
       title: `RSCT — ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${
-        internal.dialogDetail ? `
-
-${internal.dialogDetail}` : ''
-      }`,
+      message:
+        `Complete the ${input.phase} phase?` +
+        gateDialogFooter(input.projectRoot) +
+        (internal.dialogDetail ? `\n\n${internal.dialogDetail}` : '') +
+        `\n\nSpec: '${specLabel(input.specRef, DIALOG_UNCUT)}'`,
     },
     projectRoot: input.projectRoot,
     ...(config?.approval_modes !== undefined && {
