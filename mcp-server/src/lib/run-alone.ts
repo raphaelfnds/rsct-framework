@@ -23,19 +23,9 @@ import {
 import type { RsctConfig } from './project-root.js'
 import { anchorFor, sameDirectory } from './repo-anchor.js'
 import { gateRequest, inferRejectKind, type GateRejectKind } from './request-gate.js'
-
-const SPEC_LABEL_LIMIT = 200
-
-const LINE_BREAKS = new RegExp(`[${String.fromCharCode(10, 11, 12, 13, 0x85, 0x2028, 0x2029)}]+`, 'g')
-
-const INVISIBLE = new RegExp(`[${String.fromCharCode(0x061c, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff)}]`, 'g')
+import { specLabel } from './dialog-text.js'
 
 const PHASE_LABEL: Record<RunAlonePendingEntry['phase'], string> = { code: 'code', test: 'tests' }
-
-export function specLabel(spec: string, limit: number = SPEC_LABEL_LIMIT): string {
-  const flat = spec.replace(INVISIBLE, '').replace(LINE_BREAKS, ' ')
-  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat
-}
 
 function isPendingEntry(value: unknown): value is RunAlonePendingEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -56,7 +46,7 @@ export function readRunAlone(state: PhaseState | null | undefined): RunAloneBloc
 }
 
 export function describePending(pending: readonly RunAlonePendingEntry[]): string {
-  return pending.map((p) => `${PHASE_LABEL[p.phase]} (done ${p.completed_at})`).join(', ')
+  return pending.map((p) => `${PHASE_LABEL[p.phase]} (done ${specLabel(p.completed_at, 40)})`).join(', ')
 }
 
 export function runAloneHome(projectRoot: string): string | null {
@@ -94,7 +84,7 @@ function pendingDialog(projectRoot: string, entry: RunAlonePendingEntry, specSlu
   return {
     title: `RSCT — approve ${PHASE_LABEL[entry.phase]} done on its own`,
     message:
-      `Approve the ${PHASE_LABEL[entry.phase]} phase the agent completed on its own at ${entry.completed_at}?` +
+      `Approve the ${PHASE_LABEL[entry.phase]} phase the agent completed on its own at ${specLabel(entry.completed_at, 40)}?` +
       '\n\nYes = approve it. No = the work goes back to this phase; it and every later phase are redone, with dialogs.' +
       gateDialogFooter(projectRoot) +
       `\nSpec: '${specLabel(specSlug)}'`,

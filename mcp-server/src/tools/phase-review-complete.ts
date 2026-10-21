@@ -65,6 +65,9 @@ import { DEAD_CODE_KEPT_EVENT, PUBLIC_API_APPROVED_EVENT, deadCodeKeepKey, deriv
 import { validateDevApproval } from '../lib/dev-approval.js'
 import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 import { approvePendingPhases, closeRunAlone } from '../lib/run-alone.js'
+import { gateDialogFooter } from '../lib/gate-dialog.js'
+import { DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
+import { readClassifyEvidence } from '../lib/ceremony-gate.js'
 
 const findingActionSchema = z
   .object({
@@ -291,10 +294,18 @@ function summarize(files: SweepFile[]): CommentSweepSummary {
   }
 }
 
-function listLines(items: string[], limit: number): string {
-  const head = items.slice(0, limit).map((i) => `• ${i}`)
-  if (items.length > limit) head.push(`… and ${items.length - limit} more`)
-  return head.join('\n')
+function processLine(projectRoot: string, config: RsctConfig | null, specRef: string): string {
+  const state = readPhaseState(projectRoot).state
+  const latest = state?.last_classify?.tier ?? null
+  const highest = readClassifyEvidence(projectRoot, config).tierMax
+  const shown = latest ?? highest
+  const tier =
+    shown === null
+      ? 'no classification on record'
+      : `classified '${specLabel(shown, 20)}' by rsct_classify_task${highest !== null && highest !== shown ? ` (highest on record '${specLabel(highest, 20)}')` : ''}`
+  const verification = state?.verification
+  const vDone = verification?.spec_ref === specRef && typeof verification.completed_at === 'string'
+  return `Process: ${tier}; V phase for this spec: ${vDone ? 'completed' : 'not run'}.`
 }
 
 interface DeadCodeReport {
@@ -609,13 +620,16 @@ export async function phaseReviewCompleteHandler(
     const dialog = await promptFn({
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
-        `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment or dead-code check:\n\n` +
-        listLines(
+        'These exact file versions would become committable WITHOUT a mechanical comment or dead-code check. Yes = allow these versions. No = reject this REVIEW.' +
+        gateDialogFooter(projectRoot) +
+        '\n\n' +
+        dialogList(
           unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
           40,
+          DIALOG_UNCUT,
         ) +
-        `\n${reportLine}` +
-        `\n\nYes = allow these versions. No = reject this REVIEW.`,
+        `\n${specLabel(reportLine, DIALOG_UNCUT)}` +
+        `\n\nSpec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`,
     })
     if (dialog.response !== 'yes') {
       const declined = dialog.response === 'no'
@@ -644,39 +658,41 @@ export async function phaseReviewCompleteHandler(
 
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]))
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })))
-  const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`]
+  const detailParts = [processLine(projectRoot, config, input.spec_ref), `Evidence: ${describeEvidenceMix(evidence_mix)}`]
   if (newlyKept.length > 0) {
     detailParts.push(
       `Dead code KEPT at your request: ${newlyKept.length}. Each stays until its declaration changes.`,
-      listLines(newlyKept.map((k) => `${k.path}:${k.name} — ${k.note.slice(0, 100)}`), 10),
+      dialogList(newlyKept.map((k) => `${k.path}:${k.name} — ${specLabel(k.note, 100)}`), 10, DIALOG_UNCUT),
     )
   }
   if (publicApiPending.length > 0) {
     detailParts.push(
       `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
-      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10),
+      dialogList(publicApiPending.map((p) => `${p.path}:${p.name}`), 10, DIALOG_UNCUT),
     )
   }
   if (commentForce) {
     detailParts.push(
       `Comments removed: ${summary.removed_count} (migrated ${summary.migrated}, discarded ${summary.discarded}).`,
-      listLines(
-        removedLines.map(({ c, d }) => `${c.path}:${c.line} ${d?.action === 'migrated' ? '→ migrated' : '→ discarded'}: ${c.body.slice(0, 80)}`),
+      dialogList(
+        removedLines.map(({ c, d }) => `${c.path}:${c.line} ${d?.action === 'migrated' ? '→ migrated' : '→ discarded'}: ${specLabel(c.body, 80)}`),
         10,
+        DIALOG_UNCUT,
       ),
     )
     if (unverified.length > 0) detailParts.push(`Unverified files allowed: ${unverified.length}.`)
     if (summary.allowlist_changes.length > 0) {
       detailParts.push(
         `Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`,
-        listLines(
-          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${c.body.slice(0, 120)}`),
+        dialogList(
+          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${specLabel(c.body, 120)}`),
           10,
+          DIALOG_UNCUT,
         ),
       )
     }
   }
-  if (mustForce) detailParts.push(reportLine)
+  if (mustForce) detailParts.push(specLabel(reportLine, DIALOG_UNCUT))
 
   const result = await gatePhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },

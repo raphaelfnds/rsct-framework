@@ -1276,10 +1276,7 @@ describe('lib/audit-retention — replacing the file without losing an entry (#9
     writeFileSync(oldPath(), `${OLD_ROUTINE}\n${RECENT}\n`, 'utf8')
     writeLog([OLD_ROUTINE, RECENT])
     const outcomes = pruneAuditLog(root, { path: '.rsct/reports/audit-prune-old.log::$DATA' }, NOW)
-    expect(outcomes.map((outcome) => ('reason' in outcome ? outcome.reason : outcome.status))).toEqual([
-      'stream_path',
-      'stream_path',
-    ])
+    expect(outcomes.map((outcome) => ('reason' in outcome ? outcome.reason : outcome.status))).toEqual(['stream_path'])
     expect(readFileSync(oldPath(), 'utf8')).toBe(`${OLD_ROUTINE}\n${RECENT}\n`)
     expect(logLines()).toEqual([OLD_ROUTINE, RECENT])
   })
@@ -1330,12 +1327,12 @@ describe('lib/audit-retention — replacing the file without losing an entry (#9
     expect(eventsIn()).toEqual(['code.start', AUDIT_PRUNED_EVENT])
   })
 
-  it('still forecasts the cut of one log when the other cannot even be looked at', () => {
+  it('still forecasts and cuts the default log when audit.path holds a NUL and is ignored', () => {
     writeLog([OLD_ROUTINE, RECENT])
     const config = { path: `logs/a${String.fromCharCode(0)}.log` }
     expect(previewRetention(root, config, NOW)).toBe(1)
     const outcomes = pruneAuditLog(root, config, NOW)
-    expect(outcomes.map((outcome) => ('reason' in outcome ? outcome.reason : outcome.status))).toEqual(['failed', 'pruned'])
+    expect(outcomes.map((outcome) => ('reason' in outcome ? outcome.reason : outcome.status))).toEqual(['pruned'])
     expect(eventsIn()).toEqual(['code.start', AUDIT_PRUNED_EVENT])
   })
 

@@ -1,6 +1,7 @@
 import { deriveAuditCeiling, higherTier, isFreeTier } from './free-commit.js'
 import { gateRequest, type GateChannel, type GateRejectKind } from './request-gate.js'
 import { gateDialogFooter } from './gate-dialog.js'
+import { DIALOG_UNCUT, specLabel } from './dialog-text.js'
 import { readPhaseState } from './phase-scope.js'
 import type { DialogOptions, DialogResult } from './os-dialog.js'
 import type { RsctConfig } from './project-root.js'
@@ -99,9 +100,10 @@ export async function gateCeremonyBypass(args: {
     dialog: {
       title: `RSCT — bypass requested (${args.specTier})`,
       message:
-        `Spec '${args.specRef}' asks to:\n\n${asked}\n\n` +
+        `This start asks to:\n\n${asked}\n\n` +
         `These are the checks that catch a task being treated as smaller than it is.` +
-        gateDialogFooter(args.projectRoot),
+        gateDialogFooter(args.projectRoot) +
+        `\nSpec: '${specLabel(args.specRef, DIALOG_UNCUT)}'`,
     },
     projectRoot: args.projectRoot,
     ...(args.config?.approval_modes !== undefined && {

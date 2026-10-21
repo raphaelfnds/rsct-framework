@@ -26,8 +26,9 @@ import {
   PHASE_STATE_PRESERVED_ON_ABANDON,
   type PhaseState,
 } from '../lib/phase-scope.js'
-import { describePending, readRunAlone, specLabel } from '../lib/run-alone.js'
+import { describePending, readRunAlone } from '../lib/run-alone.js'
 import { gateDialogFooter } from '../lib/gate-dialog.js'
+import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, specLabel } from '../lib/dialog-text.js'
 
 export const phaseAbandonInputSchema = z
   .object({
@@ -186,8 +187,8 @@ export async function phaseAbandonHandler(
       title: 'RSCT — abandon phase',
       message:
         pendingDropped.length > 0
-          ? `This also drops what the agent closed on its own, still waiting for your approval: ${describePending(pendingDropped)}.\n\nAbandon phase '${phase}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}\nSpec: '${specLabel(specSlug ?? '')}'\nReason: ${specLabel(input.reason)}`
-          : `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ''}?\n\nReason: ${input.reason}\n\nThis discards the phase without advancing the RSCT cycle.`,
+          ? `This also drops what the agent closed on its own, still waiting for your approval: ${describePending(pendingDropped)}.\n\nAbandon phase '${specLabel(phase, DIALOG_PATH_LIMIT)}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}\nSpec: '${specLabel(specSlug ?? '')}'\nReason: ${specLabel(input.reason)}`
+          : `Abandon phase '${specLabel(phase, DIALOG_PATH_LIMIT)}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}${specSlug ? `\nSpec: '${specLabel(specSlug, DIALOG_UNCUT)}'` : ''}\nReason: ${specLabel(input.reason, DIALOG_UNCUT)}`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {

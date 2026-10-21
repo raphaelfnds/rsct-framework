@@ -3906,49 +3906,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative6, options, skipNormalization) {
+    function resolveComponent(base, relative7, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative6 = parse4(serialize2(relative6, options), options);
+        relative7 = parse4(serialize2(relative7, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative6.scheme) {
-        target.scheme = relative6.scheme;
-        target.userinfo = relative6.userinfo;
-        target.host = relative6.host;
-        target.port = relative6.port;
-        target.path = removeDotSegments(relative6.path || "");
-        target.query = relative6.query;
+      if (!options.tolerant && relative7.scheme) {
+        target.scheme = relative7.scheme;
+        target.userinfo = relative7.userinfo;
+        target.host = relative7.host;
+        target.port = relative7.port;
+        target.path = removeDotSegments(relative7.path || "");
+        target.query = relative7.query;
       } else {
-        if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
-          target.userinfo = relative6.userinfo;
-          target.host = relative6.host;
-          target.port = relative6.port;
-          target.path = removeDotSegments(relative6.path || "");
-          target.query = relative6.query;
+        if (relative7.userinfo !== void 0 || relative7.host !== void 0 || relative7.port !== void 0) {
+          target.userinfo = relative7.userinfo;
+          target.host = relative7.host;
+          target.port = relative7.port;
+          target.path = removeDotSegments(relative7.path || "");
+          target.query = relative7.query;
         } else {
-          if (!relative6.path) {
+          if (!relative7.path) {
             target.path = base.path;
-            if (relative6.query !== void 0) {
-              target.query = relative6.query;
+            if (relative7.query !== void 0) {
+              target.query = relative7.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative6.path[0] === "/") {
-              target.path = removeDotSegments(relative6.path);
+            if (relative7.path[0] === "/") {
+              target.path = removeDotSegments(relative7.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative6.path;
+                target.path = "/" + relative7.path;
               } else if (!base.path) {
-                target.path = relative6.path;
+                target.path = relative7.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative7.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative6.query;
+            target.query = relative7.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3956,7 +3956,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative6.fragment;
+      target.fragment = relative7.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -9669,7 +9669,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join35, isAbsolute: isAbsolute9, sep: sep3 } = __require("path");
+    var { join: join35, isAbsolute: isAbsolute9, sep: sep4 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9777,7 +9777,7 @@ var require_transport = __commonJS({
         let fixTarget2;
         for (const filePath of callers) {
           try {
-            const context = filePath === "node:repl" ? process.cwd() + sep3 : filePath;
+            const context = filePath === "node:repl" ? process.cwd() + sep4 : filePath;
             fixTarget2 = createRequire(context).resolve(origin);
             break;
           } catch (err2) {
@@ -23196,6 +23196,40 @@ function gitSquash(projectRoot, sourceBranch, executor = defaultGitExecutor) {
   return { ok: true, sha_before, sha_after, stdout: exec.stdout.trim() };
 }
 
+// src/lib/dialog-text.ts
+init_esm_shims();
+var SPEC_LABEL_LIMIT = 200;
+var DIALOG_PATH_LIMIT = 1e3;
+var DIALOG_UNCUT = Number.POSITIVE_INFINITY;
+var LINE_BREAK_CODES = [10, 11, 12, 13, 133, 8232, 8233];
+var BREAK_RUNS = new RegExp(`[${String.fromCharCode(9, ...LINE_BREAK_CODES)}]+`, "g");
+var MESSAGE_BREAKS = new RegExp(`${String.fromCharCode(13, 10)}|[${String.fromCharCode(...LINE_BREAK_CODES)}]`, "g");
+var FORMAT = new RegExp("\\p{Cf}", "gu");
+var CONTROL = new RegExp("\\p{Cc}", "gu");
+var HIDDEN = /[\p{Cc}\p{Cf}]/gu;
+var SHOWN_HIDDEN = String.fromCharCode(65533);
+var MARK_PILE = new RegExp("(\\p{M}{4})\\p{M}+", "gu");
+function specLabel(text2, limit = SPEC_LABEL_LIMIT) {
+  const flat = text2.replace(FORMAT, "").replace(BREAK_RUNS, " ").replace(CONTROL, "").replace(MARK_PILE, "$1");
+  const points = Array.from(flat);
+  return points.length > limit ? `${points.slice(0, limit - 1).join("")}\u2026` : flat;
+}
+function dialogList(items, limit, width = SPEC_LABEL_LIMIT) {
+  const head = items.slice(0, limit).map((item) => `\u2022 ${specLabel(item, width)}`);
+  if (items.length > limit) head.push(`\u2026 and ${items.length - limit} more`);
+  return head.join("\n");
+}
+function commitMessageView(message) {
+  const kept = [];
+  for (const raw of message.replace(MESSAGE_BREAKS, "\n").split("\n")) {
+    const line2 = raw.replace(/\t/g, " ").replace(HIDDEN, SHOWN_HIDDEN).replace(MARK_PILE, `$1${SHOWN_HIDDEN}`).trimEnd();
+    if (line2 === "" && (kept.length === 0 || kept[kept.length - 1] === "")) continue;
+    kept.push(line2);
+  }
+  while (kept.length > 0 && kept[kept.length - 1] === "") kept.pop();
+  return kept.join("\n");
+}
+
 // src/lib/repo-anchor.ts
 function canonicalPath(p) {
   let current = resolve(p);
@@ -23230,10 +23264,10 @@ function anchorFor(projectRoot, deps = {}) {
 }
 function repositoryDialogLine(projectRoot) {
   const a = anchorFor(projectRoot);
-  const shown = a.root.replace(/\\/g, "/");
+  const shown = specLabel(a.root.replace(/\\/g, "/"), DIALOG_PATH_LIMIT);
   if (a.status === "relocated") {
     return `Repository: ${shown}
-\u26A0 RSCT state resolves there, NOT at the folder you passed (${resolve(projectRoot).replace(/\\/g, "/")}).`;
+\u26A0 RSCT state resolves there, NOT at the folder you passed (${specLabel(resolve(projectRoot).replace(/\\/g, "/"), DIALOG_PATH_LIMIT)}).`;
   }
   if (a.status === "not-applicable") return `Folder: ${shown} (not a git repository)`;
   if (a.status === "unavailable") return `Folder: ${shown} (git could not confirm the repository)`;
@@ -23300,6 +23334,25 @@ function auditFields(audit) {
     audit_error: audit.error ?? "write_failed"
   };
 }
+var WINDOWS_FORBIDDEN = /[<>"|?*]/;
+var PORT_DIGITS = `0-9${String.fromCharCode(185, 178, 179)}`;
+var WINDOWS_RESERVED = new RegExp(`^(?:con|prn|aux|nul|com[${PORT_DIGITS}]|lpt[${PORT_DIGITS}]|conin\\$|conout\\$)(?:\\..*)?$`, "i");
+function unusableTail(base, candidate) {
+  const tail = relative(base, candidate);
+  if (tail === "") return "not_a_file";
+  const windows = process.platform === "win32";
+  if (windows && tail.includes(":")) return "stream";
+  if (new RegExp("\\p{Cc}", "u").test(tail)) return "name";
+  const segments = tail.split(sep);
+  if (windows) {
+    if (WINDOWS_FORBIDDEN.test(tail)) return "name";
+    if (segments.some((s) => WINDOWS_RESERVED.test(s) || /[. ]$/.test(s))) return "name";
+  }
+  for (let i2 = 1; i2 < segments.length; i2 += 1) {
+    if (statSync(join(base, ...segments.slice(0, i2)), { throwIfNoEntry: false })?.isDirectory() === false) return "not_a_file";
+  }
+  return statSync(candidate, { throwIfNoEntry: false })?.isFile() === false ? "not_a_file" : null;
+}
 var migrationAttempted = /* @__PURE__ */ new Set();
 function migrateLegacyLog(projectRoot, base, target) {
   if (sameDirectory(projectRoot, base)) return;
@@ -23334,11 +23387,20 @@ function decideAuditPath(projectRoot, config2) {
   if (configured && configured.length > 0) {
     const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
     if (!isInside(base, candidate)) {
-      return { path: fallback, base, escaped: candidate, anchor: anchor.status };
+      return { path: fallback, base, escaped: candidate, unusable: null, anchor: anchor.status };
     }
-    return { path: candidate, base, escaped: null, anchor: anchor.status };
+    let reason;
+    try {
+      reason = unusableTail(base, candidate);
+    } catch {
+      reason = "not_a_file";
+    }
+    if (reason !== null) {
+      return { path: fallback, base, escaped: null, unusable: { path: configured, reason }, anchor: anchor.status };
+    }
+    return { path: candidate, base, escaped: null, unusable: null, anchor: anchor.status };
   }
-  return { path: fallback, base, escaped: null, anchor: anchor.status };
+  return { path: fallback, base, escaped: null, unusable: null, anchor: anchor.status };
 }
 function isInside(base, candidate) {
   if (sameDirectory(base, candidate)) return true;
@@ -23836,6 +23898,7 @@ function tierRank(tier) {
   if (!tier) return 0;
   return TIER_RANK[tier] ?? 0;
 }
+var UNREADABLE_STATE_ADVICE = "Stop and ask the developer: repairing the file keeps every record in it; deleting it drops the REVIEW ledger (the files need a new REVIEW), an armed review_drift lock, kept dead-code decisions, a batch token, the tier recorded by rsct_classify_task, and a run_alone record with the phases waiting in it for the developer.";
 function refuseUnreadableState(projectRoot, read) {
   if (read.parse_error === void 0) return null;
   const path2 = phaseStatePath(projectRoot);
@@ -23844,7 +23907,7 @@ function refuseUnreadableState(projectRoot, read) {
     path: path2,
     reason: "unreadable_state",
     parse_error: read.parse_error,
-    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. Repair or delete that file; deleting it is a safe recovery. Deleting it also drops a run_alone record and the phases waiting in it for the developer.`
+    error: `${path2} could not be read (${read.parse_error}) \u2014 nothing was overwritten. ${UNREADABLE_STATE_ADVICE}`
   };
 }
 var BOOTSTRAP_STALE_MS = 4 * 60 * 60 * 1e3;
@@ -23974,7 +24037,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.17.0";
+var RSCT_MCP_VERSION = "2.18.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -24849,13 +24912,6 @@ function getInstallDriftNotice(args2) {
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
-  // Values are deliberately LOOSE here while the exposed inputSchema advertises the
-  // strict contract. rsct_status is the session-bootstrap tool documented "always
-  // succeeds", and its .parse() is unguarded — a z.enum would turn a paraphrased
-  // update_check:"On" into a hard failure that also loses git state, topology and
-  // the install-drift security hint. `coerce` extends that to a `true` an agent
-  // might infer from an on/off switch: it becomes "true", which is simply ignored
-  // with a hint. Unknown KEYS still reject (.strict): loose values, strict shape.
   update_check: external_exports.coerce.string().optional(),
   decline_update: external_exports.coerce.string().optional()
 }).strict();
@@ -24918,11 +24974,6 @@ async function statusHandler(rawInput, deps = {}) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      // #50: report what the gates ENFORCE, not the raw key. Reading the config
-      // alone made an installed project that omits `protected_branches` report an
-      // empty list while `effectiveProtectedList` was protecting four branches at
-      // every §C gate. Gated on rsct_installed so a project with no `.rsct.json`
-      // still reports nothing rather than inheriting defaults it is not governed by.
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
@@ -24985,7 +25036,7 @@ function bootstrapHints(refresh) {
   const { marker, read, write } = refresh;
   if (write === null) {
     return [
-      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
+      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written. Stamping it would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. ${UNREADABLE_STATE_ADVICE}`
     ];
   }
   const hints = [];
@@ -25044,20 +25095,42 @@ init_esm_shims();
 
 // src/lib/plan.ts
 init_esm_shims();
-function findActivePlan(projectRoot) {
-  let entries;
-  try {
-    entries = readdirSync(projectRoot);
-  } catch {
-    return null;
+
+// src/lib/push-refspec.ts
+init_esm_shims();
+function stripRefsPrefix(ref) {
+  if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
+  if (ref.startsWith("heads/")) return ref.slice("heads/".length);
+  return ref;
+}
+function parsePushRefspec(refspec) {
+  if (refspec.startsWith("-")) return { ok: false, reason: "option_shaped" };
+  const forced = refspec.startsWith("+");
+  const body2 = forced ? refspec.slice(1) : refspec;
+  const lastColon = body2.lastIndexOf(":");
+  const destination = lastColon >= 0 ? body2.slice(lastColon + 1) : body2;
+  const source = lastColon >= 0 ? body2.slice(0, lastColon) : body2;
+  if (destination.length === 0) return { ok: false, reason: "empty_destination" };
+  if (destination.startsWith("-")) return { ok: false, reason: "option_shaped" };
+  if (destination.includes("*")) return { ok: false, reason: "glob" };
+  const candidates = [.../* @__PURE__ */ new Set([destination, stripRefsPrefix(destination)])];
+  return { ok: true, candidates, destination, source, forced };
+}
+function pushRefspecRejectReason(reason, refspec) {
+  const subject = `push target ${JSON.stringify(refspec)}`;
+  switch (reason) {
+    case "option_shaped":
+      return `${subject} starts with '-', which git reads as an OPTION rather than a branch. Pass a plain branch name.`;
+    case "glob":
+      return `${subject} contains '*'. A glob refspec can rewrite branches the branch-protection check never sees, so it is refused. Push one branch at a time.`;
+    case "empty_destination":
+      return `${subject} has an empty destination. A bare ':' is git's "matching" refspec \u2014 it pushes every matching ref, protected branches included. Name the branch explicitly.`;
   }
-  const candidates = entries.filter((name2) => /^(?:plan|spec)_.+\.md$/.test(name2)).map((name2) => {
-    const path2 = join(projectRoot, name2);
-    const slug = name2.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, "");
-    const mtime = safeMtime(path2);
-    return { name: name2, path: path2, slug, mtime };
-  }).filter((entry) => entry.mtime !== null).sort((a, b) => b.mtime - a.mtime);
-  const winner = candidates[0];
+}
+
+// src/lib/plan.ts
+function findActivePlan(projectRoot) {
+  const winner = enumeratePlanFiles(projectRoot)[0];
   if (!winner) return null;
   const metadata2 = extractPlanMetadata(winner.path);
   const progress_path = join(projectRoot, `progress_${winner.slug}.md`);
@@ -25098,22 +25171,19 @@ function isPlanComplete(status) {
   if (!status) return false;
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status);
 }
+function branchKey(name2) {
+  return stripRefsPrefix(name2.trim().normalize("NFC").toLowerCase());
+}
 function findPlanByBranch(projectRoot, branch) {
-  let entries;
-  try {
-    entries = readdirSync(projectRoot);
-  } catch {
-    return null;
-  }
-  const winner = entries.filter((name2) => /^(?:plan|spec)_.+\.md$/.test(name2)).map((name2) => {
-    const path2 = join(projectRoot, name2);
-    return {
-      slug: name2.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, ""),
-      mtime: safeMtime(path2),
-      branch: extractPlanMetadata(path2).branch
-    };
-  }).filter((e) => e.mtime !== null).filter((e) => e.branch !== null && e.branch === branch).sort((a, b) => b.mtime - a.mtime)[0];
+  const wanted = branchKey(branch);
+  const claimed = enumeratePlanFiles(projectRoot).map((entry) => ({ slug: entry.slug, row: extractPlanMetadata(entry.path).branch })).filter((entry) => entry.row !== null);
+  const winner = claimed.find((entry) => entry.row === branch) ?? claimed.find((entry) => branchKey(entry.row) === wanted);
   return winner ? findPlanBySlug(projectRoot, winner.slug) : null;
+}
+function branchPlansHaveOpenItems(projectRoot, branches) {
+  const plans = branches.filter((branch) => branch !== null && branch.length > 0).map((branch) => findPlanByBranch(projectRoot, branch)).filter((plan) => plan !== null);
+  if (plans.length === 0) return void 0;
+  return plans.some((plan) => progressHasOpenItems(projectRoot, plan.slug));
 }
 function scanProgressCheckboxes(body2) {
   const norm = body2.replace(/\r\n?/g, "\n");
@@ -25161,14 +25231,20 @@ function safeMtime(path2) {
     return null;
   }
 }
-function enumeratePlanFiles(projectRoot) {
+function newestFirst(a, b) {
+  if (a.mtime !== b.mtime) return b.mtime - a.mtime;
+  const an = a.name.normalize("NFC");
+  const bn = b.name.normalize("NFC");
+  return an < bn ? -1 : an > bn ? 1 : 0;
+}
+function enumeratePlanFiles(projectRoot, pattern = /^(?:plan|spec)_.+\.md$/) {
   let entries;
   try {
     entries = readdirSync(projectRoot);
   } catch {
     return [];
   }
-  return entries.filter((name2) => /^(?:plan|spec)_.+\.md$/.test(name2)).map((name2) => {
+  return entries.filter((name2) => pattern.test(name2)).map((name2) => {
     const path2 = join(projectRoot, name2);
     return {
       name: name2,
@@ -25176,7 +25252,7 @@ function enumeratePlanFiles(projectRoot) {
       slug: name2.replace(/^(?:plan|spec)_/, "").replace(/\.md$/, ""),
       mtime: safeMtime(path2)
     };
-  }).filter((e) => e.mtime !== null).sort((a, b) => b.mtime - a.mtime);
+  }).filter((e) => e.mtime !== null).sort(newestFirst);
 }
 function listPlans(projectRoot, opts = {}) {
   const now = (opts.now ?? /* @__PURE__ */ new Date()).getTime();
@@ -25257,13 +25333,7 @@ function findPlanFileBySlug(projectRoot, slug) {
   };
 }
 function findNewestPlanFile(projectRoot) {
-  let entries;
-  try {
-    entries = readdirSync(projectRoot);
-  } catch {
-    return null;
-  }
-  const newest = entries.filter((name2) => /^plan_.+\.md$/.test(name2)).map((name2) => ({ slug: name2.slice("plan_".length, -".md".length), mtime: safeMtime(join(projectRoot, name2)) })).filter((entry) => entry.mtime !== null && isSafePlanSlug(entry.slug)).sort((a, b) => b.mtime - a.mtime)[0];
+  const newest = enumeratePlanFiles(projectRoot, /^plan_.+\.md$/).find((entry) => isSafePlanSlug(entry.slug));
   return newest ? findPlanFileBySlug(projectRoot, newest.slug) : null;
 }
 var FENCE = /^\s*(```|~~~)/;
@@ -25880,7 +25950,6 @@ async function loadContextHandler(rawInput) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      // #50: the enforced list, not the raw key — see the note in status.ts.
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
@@ -25905,7 +25974,7 @@ function bootstrapHints2(refresh) {
   const { marker, read, write } = refresh;
   if (write === null) {
     return [
-      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. Repair the JSON by hand, or delete .rsct/phase-state.json to start clean (that discards any active phase and any batch authorization).`
+      `\u26A0 .rsct/phase-state.json exists but could not be parsed (${truncateForHint(read.parse_error ?? "unknown error")}) \u2014 the \xA70 bootstrap marker was deliberately NOT written, and any context_stale flag the file held was NOT cleared. Stamping would have replaced the file with a fresh marker and nothing else, discarding whatever plan authorization or classify verdict it still holds. ${UNREADABLE_STATE_ADVICE}`
     ];
   }
   const hints = [];
@@ -44303,7 +44372,6 @@ var LOOK_BACK_WAIT_MS = 20;
 var MAX_LOG_BYTES = 512 * 1024 * 1024;
 var NEWLINE = 10;
 var CASE_BLIND = process.platform === "win32" || process.platform === "darwin";
-var DEVICE_PREFIX = /^\\\\[?.]\\/;
 var PLAN9_VOLUME = 16914839;
 var STRICT_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 var PRUNED_MARK = Buffer.from(`"event":"${AUDIT_PRUNED_EVENT}"`, "utf8");
@@ -44560,9 +44628,6 @@ function soleNameOfALog(path2, candidates) {
   if (held === null) return false;
   return candidates.some((log) => soleIdentity(log) === held) && soleIdentity(path2) === held;
 }
-function namesAStream(path2) {
-  return process.platform === "win32" && path2.replace(DEVICE_PREFIX, "").indexOf(":", 2) >= 0;
-}
 function isRegularFile(path2) {
   try {
     return lstatSync(path2, { throwIfNoEntry: false })?.isFile() === true;
@@ -44747,7 +44812,7 @@ function candidatesFor(projectRoot, config2) {
   const logs = oneLog ? [isRegularFile(fallback.path) ? fallback.path : configured.path] : named;
   const paths = workingPaths(configured.base);
   const working = [paths.lock, paths.temp, paths.old];
-  const refusal = configured.anchor === "unavailable" ? "anchor_unavailable" : named.some(namesAStream) ? "stream_path" : named.some((log) => working.some((path2) => sameSpelling(log, path2))) ? "working_path" : null;
+  const refusal = configured.anchor === "unavailable" ? "anchor_unavailable" : configured.unusable?.reason === "stream" ? "stream_path" : named.some((log) => working.some((path2) => sameSpelling(log, path2))) ? "working_path" : null;
   return { logs, named, paths, refusal };
 }
 function pruneAuditLog(projectRoot, config2, now, seams = {}) {
@@ -45188,7 +45253,7 @@ function gateDialogFooter(projectRoot, config2) {
   return `
 
 ${repositoryDialogLine(projectRoot)}${notice ? `
-${notice}` : ""}`;
+${specLabel(notice, DIALOG_UNCUT)}` : ""}`;
 }
 function anchorHints(projectRoot, auditConfig) {
   const hints = [];
@@ -45202,8 +45267,18 @@ function anchorHints(projectRoot, auditConfig) {
       `\u26A0 .rsct.json audit.path ("${decision.escaped.replace(/\\/g, "/")}") resolves OUTSIDE the project and was ignored \u2014 the audit log stays at ${decision.path.replace(/\\/g, "/")}. An audit log outside the repository can be swapped for a blank one without touching the project.`
     );
   }
+  if (decision.unusable !== null) {
+    hints.push(
+      `\u26A0 .rsct.json audit.path (${JSON.stringify(decision.unusable.path)}) ${UNUSABLE_AUDIT_PATH[decision.unusable.reason]} and was ignored \u2014 the audit log stays at ${decision.path.replace(/\\/g, "/")}.`
+    );
+  }
   return hints;
 }
+var UNUSABLE_AUDIT_PATH = {
+  stream: "names a stream inside a file, which no file listing or editor shows,",
+  name: 'holds a character or a name RSCT does not accept for the audit log (a control character, or on Windows < > " | ? *, a reserved device name such as NUL, or a name ending in a dot or a space),',
+  not_a_file: "names a folder, or a path through a file, where no log can be written,"
+};
 
 // src/lib/phase-machine.ts
 init_esm_shims();
@@ -45510,9 +45585,11 @@ async function gatePhaseComplete(input, config2, internal = {}) {
     ...internal.forceDialogReason !== void 0 && { forceDialogReason: internal.forceDialogReason },
     dialog: {
       title: `RSCT \u2014 ${input.phase} complete`,
-      message: `Complete the ${input.phase} phase for spec '${input.specRef}'?${internal.dialogDetail ? `
+      message: `Complete the ${input.phase} phase?` + gateDialogFooter(input.projectRoot) + (internal.dialogDetail ? `
 
-${internal.dialogDetail}` : ""}`
+${internal.dialogDetail}` : "") + `
+
+Spec: '${specLabel(input.specRef, DIALOG_UNCUT)}'`
     },
     projectRoot: input.projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -45630,14 +45707,7 @@ ${internal.dialogDetail}` : ""}`
 }
 
 // src/lib/run-alone.ts
-var SPEC_LABEL_LIMIT = 200;
-var LINE_BREAKS = new RegExp(`[${String.fromCharCode(10, 11, 12, 13, 133, 8232, 8233)}]+`, "g");
-var INVISIBLE = new RegExp(`[${String.fromCharCode(1564, 8203, 8204, 8205, 8206, 8207, 8288, 8289, 8290, 8291, 8292, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297, 65279)}]`, "g");
 var PHASE_LABEL = { code: "code", test: "tests" };
-function specLabel(spec, limit = SPEC_LABEL_LIMIT) {
-  const flat = spec.replace(INVISIBLE, "").replace(LINE_BREAKS, " ");
-  return flat.length > limit ? `${flat.slice(0, limit - 1)}\u2026` : flat;
-}
 function isPendingEntry(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entry = value;
@@ -45655,7 +45725,7 @@ function readRunAlone(state) {
   };
 }
 function describePending(pending) {
-  return pending.map((p) => `${PHASE_LABEL[p.phase]} (done ${p.completed_at})`).join(", ");
+  return pending.map((p) => `${PHASE_LABEL[p.phase]} (done ${specLabel(p.completed_at, 40)})`).join(", ");
 }
 function runAloneHome(projectRoot) {
   if (anchorFor(projectRoot).status !== "relocated") return null;
@@ -45684,7 +45754,7 @@ Spec: '${specLabel(specSlug)}'`
 function pendingDialog(projectRoot, entry, specSlug) {
   return {
     title: `RSCT \u2014 approve ${PHASE_LABEL[entry.phase]} done on its own`,
-    message: `Approve the ${PHASE_LABEL[entry.phase]} phase the agent completed on its own at ${entry.completed_at}?
+    message: `Approve the ${PHASE_LABEL[entry.phase]} phase the agent completed on its own at ${specLabel(entry.completed_at, 40)}?
 
 Yes = approve it. No = the work goes back to this phase; it and every later phase are redone, with dialogs.` + gateDialogFooter(projectRoot) + `
 Spec: '${specLabel(specSlug)}'`
@@ -46333,12 +46403,13 @@ async function requestCommitHandler(rawInput, internal = {}) {
       dialog: {
         title: "RSCT \u2014 commit approval",
         message: [
-          `Approve commit on '${branchLabel}'?`,
+          `Approve commit on '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}'?`,
           ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : [],
-          ...retentionLine ? [retentionLine] : [],
-          "",
-          `message: ${input.message}`
-        ].join("\n") + gateDialogFooter(projectRoot, config2)
+          ...retentionLine ? [retentionLine] : []
+        ].join("\n") + gateDialogFooter(projectRoot, config2) + `
+
+Commit message:
+${commitMessageView(input.message)}`
       },
       projectRoot,
       ...config2?.approval_modes !== void 0 && { approvalModes: config2.approval_modes },
@@ -47046,38 +47117,6 @@ function preMergeAckHint(decision) {
   return `Pre-integration hygiene checklist (pre_merge_ack) is incomplete \u2014 you declared/omitted: ${(decision.failing ?? []).join(", ")}. Resolve each item (finish the work, record pending ADRs via \xA7H, close associated issues, sweep the carried files for dead code) and re-attest. Booleans you mark false mean "not ready" and are honored as a stop. Paths are compared case-sensitively after normalizing separators and Unicode form, so copy them back exactly as listed.`;
 }
 
-// src/lib/push-refspec.ts
-init_esm_shims();
-function stripRefsPrefix(ref) {
-  if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
-  if (ref.startsWith("heads/")) return ref.slice("heads/".length);
-  return ref;
-}
-function parsePushRefspec(refspec) {
-  if (refspec.startsWith("-")) return { ok: false, reason: "option_shaped" };
-  const forced = refspec.startsWith("+");
-  const body2 = forced ? refspec.slice(1) : refspec;
-  const lastColon = body2.lastIndexOf(":");
-  const destination = lastColon >= 0 ? body2.slice(lastColon + 1) : body2;
-  const source = lastColon >= 0 ? body2.slice(0, lastColon) : body2;
-  if (destination.length === 0) return { ok: false, reason: "empty_destination" };
-  if (destination.startsWith("-")) return { ok: false, reason: "option_shaped" };
-  if (destination.includes("*")) return { ok: false, reason: "glob" };
-  const candidates = [.../* @__PURE__ */ new Set([destination, stripRefsPrefix(destination)])];
-  return { ok: true, candidates, destination, source, forced };
-}
-function pushRefspecRejectReason(reason, refspec) {
-  const subject = `push target ${JSON.stringify(refspec)}`;
-  switch (reason) {
-    case "option_shaped":
-      return `${subject} starts with '-', which git reads as an OPTION rather than a branch. Pass a plain branch name.`;
-    case "glob":
-      return `${subject} contains '*'. A glob refspec can rewrite branches the branch-protection check never sees, so it is refused. Push one branch at a time.`;
-    case "empty_destination":
-      return `${subject} has an empty destination. A bare ':' is git's "matching" refspec \u2014 it pushes every matching ref, protected branches included. Name the branch explicitly.`;
-  }
-}
-
 // src/tools/request-push.ts
 var requestPushInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
@@ -47239,8 +47278,9 @@ async function requestPushHandler(rawInput, internal = {}) {
   let crossCheck = null;
   let degradedHint = null;
   if (branchProtected) {
-    const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null;
-    const progressOpen = pushingPlan ? progressHasOpenItems(projectRoot, pushingPlan.slug) : void 0;
+    const source = refspec.ok ? refspec.source : "";
+    const pushedBranch = /^(?:head|@)$/i.test(source) ? gitState.branch : source;
+    const progressOpen = branchPlansHaveOpenItems(projectRoot, [pushedBranch]);
     const range = rangeBase !== null && rangeHead !== null ? (internal.rangeReader ?? getRangePaths)(projectRoot, rangeBase, rangeHead) : { status: "unavailable" };
     crossCheck = describeCrossCheck(range);
     const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
@@ -47307,7 +47347,8 @@ async function requestPushHandler(rawInput, internal = {}) {
     dialog: {
       title: "RSCT \u2014 push approval",
       message: [
-        `Approve push of '${branchLabel}' to '${remote}'?`,
+        `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
+        ...refspec.ok && refspec.destination !== refspec.source ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`] : [],
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
       ].join("\n") + gateDialogFooter(projectRoot, config2)
     },
@@ -47597,7 +47638,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
   });
   if (installAdvisory.hint) advisories.push(installAdvisory.hint);
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch);
-  const progressOpen = integratingPlan ? progressHasOpenItems(projectRoot, integratingPlan.slug) : void 0;
+  const progressOpen = branchPlansHaveOpenItems(projectRoot, [input.source_branch]);
   const range = (internal.rangeReader ?? getRangePaths)(projectRoot, "HEAD", input.source_branch);
   const crossCheck = describeCrossCheck(range);
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
@@ -47695,7 +47736,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
     dialog: {
       title: "RSCT \u2014 merge approval",
       message: [
-        `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
+        `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
       ].join("\n") + gateDialogFooter(projectRoot, config2)
     },
@@ -48335,8 +48376,7 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
   };
 }
 function mintDialogMessage(args2) {
-  const shown = args2.phases.slice(0, PHASES_SHOWN).map((p) => `\u2022 ${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`);
-  const more = args2.phases.length > PHASES_SHOWN ? [`\u2026 and ${args2.phases.length - PHASES_SHOWN} more`] : [];
+  const phases = dialogList(args2.phases.map((p) => `${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`), PHASES_SHOWN, 130);
   return [
     `Authorize up to ${args2.maxActions} commits with NO dialog, until ${args2.expiresAt} UTC (8 h at most, never extended), on branch '${specLabel(args2.branch, 80)}'?`,
     ...args2.warningLine ? [args2.warningLine] : [],
@@ -48344,7 +48384,7 @@ function mintDialogMessage(args2) {
     "Commit only: merge, rebase and push keep their own dialog. Revoke early with rsct_plan_revoke."
   ].join("\n") + args2.footer + `
 Plan: '${specLabel(args2.planSlug, 80)}' \u2014 ${args2.phases.length} phases:
-` + [...shown, ...more].join("\n");
+` + phases;
 }
 
 // src/tools/plan-revoke.ts
@@ -48619,7 +48659,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     hints: [...anchorHints(projectRoot, config2?.audit), ...over.hints ?? []]
   });
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null;
-  const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : void 0;
+  const progressOpen = branchPlansHaveOpenItems(projectRoot, [currentBranch, ...mode === "squash" ? [input.ref] : []]);
   const range = mode === "rebase" ? (internal.rangeReader ?? getRangePaths)(projectRoot, input.ref, "HEAD") : (internal.rangeReader ?? getRangePaths)(projectRoot, "HEAD", input.ref);
   const crossCheck = describeCrossCheck(range);
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
@@ -48685,7 +48725,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     forceDialogReason: "a rebase or squash needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal",
     dialog: {
       title: "RSCT \u2014 rebase approval",
-      message: `Approve ${mode} of '${currentLabel}' ${mode === "rebase" ? "onto" : "from"} '${input.ref}'? (history-rewriting)` + (installAdvisory.dialogLine ? `
+      message: `Approve ${mode} of '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}' ${mode === "rebase" ? "onto" : "from"} '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'? (history-rewriting)` + (installAdvisory.dialogLine ? `
 ${installAdvisory.dialogLine}` : "") + gateDialogFooter(projectRoot, config2)
     },
     projectRoot,
@@ -49628,7 +49668,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: null,
@@ -49664,8 +49703,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // The stored block belongs to another spec; weighing its evidence here
-      // would describe a set this caller is not completing.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: fields2.audit_path,
@@ -49688,8 +49725,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     storedRunId: existing.state.verification.findings_run_id ?? null,
     suppliedRunId: input.findings_run_id ?? null,
     actions: input.findings_actions,
-    // Redundant here — the spec_ref_mismatch branch above already returned — but
-    // passed so both phases feed the gate identically and neither can drift.
     storedSpecRef: existing.state.verification.spec_ref ?? null,
     specRef: input.spec_ref
   });
@@ -49768,16 +49803,12 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 verification complete",
-      // #75. The mix rides the line the dev actually reads before clicking. It is
-      // one of THREE surfaces, not the surface: `gateRequest` falls back to the
-      // `trust` channel when no dialog channel exists (headless, CI), and on that
-      // path this string is never rendered. The hints and audit legs below are
-      // what survive there.
-      message: `Complete V phase for spec '${input.spec_ref}'?
+      message: `Complete V phase?
 
 ${input.findings_actions.length} action(s): ${summary["address-now"]} address-now, ${summary["capture-as-issue"]} capture, ${summary.defer} defer, ${summary.accept} accept
 
-Evidence: ${describeEvidenceMix(evidence_mix)}`
+Evidence: ${describeEvidenceMix(evidence_mix)}` + gateDialogFooter(projectRoot) + `
+Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -50761,11 +50792,12 @@ async function gateCeremonyBypass(args2) {
     forceDialog: true,
     dialog: {
       title: `RSCT \u2014 bypass requested (${args2.specTier})`,
-      message: `Spec '${args2.specRef}' asks to:
+      message: `This start asks to:
 
 ${asked}
 
-These are the checks that catch a task being treated as smaller than it is.` + gateDialogFooter(args2.projectRoot)
+These are the checks that catch a task being treated as smaller than it is.` + gateDialogFooter(args2.projectRoot) + `
+Spec: '${specLabel(args2.specRef, DIALOG_UNCUT)}'`
     },
     projectRoot: args2.projectRoot,
     ...args2.config?.approval_modes !== void 0 && {
@@ -51820,10 +51852,15 @@ function summarize(files) {
     report_path: null
   };
 }
-function listLines(items, limit) {
-  const head = items.slice(0, limit).map((i2) => `\u2022 ${i2}`);
-  if (items.length > limit) head.push(`\u2026 and ${items.length - limit} more`);
-  return head.join("\n");
+function processLine(projectRoot, config2, specRef) {
+  const state = readPhaseState(projectRoot).state;
+  const latest = state?.last_classify?.tier ?? null;
+  const highest = readClassifyEvidence(projectRoot, config2).tierMax;
+  const shown = latest ?? highest;
+  const tier = shown === null ? "no classification on record" : `classified '${specLabel(shown, 20)}' by rsct_classify_task${highest !== null && highest !== shown ? ` (highest on record '${specLabel(highest, 20)}')` : ""}`;
+  const verification = state?.verification;
+  const vDone = verification?.spec_ref === specRef && typeof verification.completed_at === "string";
+  return `Process: ${tier}; V phase for this spec: ${vDone ? "completed" : "not run"}.`;
 }
 function writeReport(projectRoot, specRef, files, dispositions, deadCode) {
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]));
@@ -52076,15 +52113,14 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
     }
     const dialog = await promptFn({
       title: `RSCT \u2014 ${unverified.length} file(s) the comment sweep cannot verify`,
-      message: `Spec '${input.spec_ref}'. These exact file versions would become committable WITHOUT a mechanical comment or dead-code check:
-
-` + listLines(
+      message: "These exact file versions would become committable WITHOUT a mechanical comment or dead-code check. Yes = allow these versions. No = reject this REVIEW." + gateDialogFooter(projectRoot) + "\n\n" + dialogList(
         unverified.map((f) => `${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`),
-        40
+        40,
+        DIALOG_UNCUT
       ) + `
-${reportLine}
+${specLabel(reportLine, DIALOG_UNCUT)}
 
-Yes = allow these versions. No = reject this REVIEW.`
+Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
     });
     if (dialog.response !== "yes") {
       const declined = dialog.response === "no";
@@ -52110,39 +52146,41 @@ Yes = allow these versions. No = reject this REVIEW.`
   }
   const byId = new Map(dispositions.map((d) => [d.comment_id, d]));
   const removedLines = removedFiles.flatMap((f) => f.removed.map((c) => ({ c, d: byId.get(c.id) })));
-  const detailParts = [`Evidence: ${describeEvidenceMix(evidence_mix)}`];
+  const detailParts = [processLine(projectRoot, config2, input.spec_ref), `Evidence: ${describeEvidenceMix(evidence_mix)}`];
   if (newlyKept.length > 0) {
     detailParts.push(
       `Dead code KEPT at your request: ${newlyKept.length}. Each stays until its declaration changes.`,
-      listLines(newlyKept.map((k) => `${k.path}:${k.name} \u2014 ${k.note.slice(0, 100)}`), 10)
+      dialogList(newlyKept.map((k) => `${k.path}:${k.name} \u2014 ${specLabel(k.note, 100)}`), 10, DIALOG_UNCUT)
     );
   }
   if (publicApiPending.length > 0) {
     detailParts.push(
       `Exports nothing here uses, exempted by "public_api": ${publicApiPending.length}.`,
-      listLines(publicApiPending.map((p) => `${p.path}:${p.name}`), 10)
+      dialogList(publicApiPending.map((p) => `${p.path}:${p.name}`), 10, DIALOG_UNCUT)
     );
   }
   if (commentForce) {
     detailParts.push(
       `Comments removed: ${summary.removed_count} (migrated ${summary.migrated}, discarded ${summary.discarded}).`,
-      listLines(
-        removedLines.map(({ c, d }) => `${c.path}:${c.line} ${d?.action === "migrated" ? "\u2192 migrated" : "\u2192 discarded"}: ${c.body.slice(0, 80)}`),
-        10
+      dialogList(
+        removedLines.map(({ c, d }) => `${c.path}:${c.line} ${d?.action === "migrated" ? "\u2192 migrated" : "\u2192 discarded"}: ${specLabel(c.body, 80)}`),
+        10,
+        DIALOG_UNCUT
       )
     );
     if (unverified.length > 0) detailParts.push(`Unverified files allowed: ${unverified.length}.`);
     if (summary.allowlist_changes.length > 0) {
       detailParts.push(
         `Allowlisted comments added or changed: ${summary.allowlist_changes.length}.`,
-        listLines(
-          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${c.body.slice(0, 120)}`),
-          10
+        dialogList(
+          summary.allowlist_changes.map((c) => `${c.path}:${c.line} kept: ${specLabel(c.body, 120)}`),
+          10,
+          DIALOG_UNCUT
         )
       );
     }
   }
-  if (mustForce) detailParts.push(reportLine);
+  if (mustForce) detailParts.push(specLabel(reportLine, DIALOG_UNCUT));
   const result = await gatePhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
     config2,
@@ -52505,13 +52543,11 @@ async function phaseAbandonHandler(rawInput, internal = {}) {
       title: "RSCT \u2014 abandon phase",
       message: pendingDropped.length > 0 ? `This also drops what the agent closed on its own, still waiting for your approval: ${describePending(pendingDropped)}.
 
-Abandon phase '${phase}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}
+Abandon phase '${specLabel(phase, DIALOG_PATH_LIMIT)}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}
 Spec: '${specLabel(specSlug ?? "")}'
-Reason: ${specLabel(input.reason)}` : `Abandon phase '${phase}'${specSlug ? ` for spec '${specSlug}'` : ""}?
-
-Reason: ${input.reason}
-
-This discards the phase without advancing the RSCT cycle.`
+Reason: ${specLabel(input.reason)}` : `Abandon phase '${specLabel(phase, DIALOG_PATH_LIMIT)}'? This discards the phase without advancing the RSCT cycle.${gateDialogFooter(projectRoot)}${specSlug ? `
+Spec: '${specLabel(specSlug, DIALOG_UNCUT)}'` : ""}
+Reason: ${specLabel(input.reason, DIALOG_UNCUT)}`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -52971,15 +53007,14 @@ async function captureIssueHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 create GitHub issue",
-      message: `Create issue '${input.title}' (severity=${input.severity})?
+      message: `Create a GitHub issue (severity=${input.severity})?
 
-Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching label in this repository)"}
-` + // A label gh is about to reject belongs in the dialog, not only in the
-      // hints afterwards: approving a call already known to fail spends the
-      // dev's single-use approval on nothing.
-      (resolved.warnings.length > 0 ? `
-\u26A0 ${resolved.warnings.join("\n\u26A0 ")}
-` : "") + `GH CLI will run in '${projectRoot}'.`
+GH CLI will run in '${specLabel(projectRoot, DIALOG_PATH_LIMIT)}'.` + (resolved.warnings.length > 0 ? `
+
+${resolved.warnings.map((w) => `\u26A0 ${specLabel(w, DIALOG_UNCUT)}`).join("\n")}` : "") + `
+
+Labels: ${labels.length > 0 ? specLabel(labels.join(", "), DIALOG_UNCUT) : "(none \u2014 no matching label in this repository)"}
+Title: '${specLabel(input.title, DIALOG_UNCUT)}'`
     },
     projectRoot,
     ...config2?.approval_modes !== void 0 && {
@@ -53063,9 +53098,6 @@ Labels: ${labels.length > 0 ? labels.join(", ") : "(none \u2014 no matching labe
       anti_replay_error: null,
       hints: [
         `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
-        // A caller-supplied label that does not exist is the most likely cause
-        // of a `failed` here, so RSCT names it rather than leaving gh's raw
-        // error as the only clue.
         ...resolved.warnings
       ]
     };

@@ -38,7 +38,6 @@ const LOOK_BACK_WAIT_MS = 20
 const MAX_LOG_BYTES = 512 * 1024 * 1024
 const NEWLINE = 0x0a
 const CASE_BLIND = process.platform === 'win32' || process.platform === 'darwin'
-const DEVICE_PREFIX = /^\\\\[?.]\\/
 const PLAN9_VOLUME = 0x01021997
 const STRICT_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 const PRUNED_MARK = Buffer.from(`"event":"${AUDIT_PRUNED_EVENT}"`, 'utf8')
@@ -415,10 +414,6 @@ function soleNameOfALog(path: string, candidates: string[]): boolean {
   return candidates.some((log) => soleIdentity(log) === held) && soleIdentity(path) === held
 }
 
-function namesAStream(path: string): boolean {
-  return process.platform === 'win32' && path.replace(DEVICE_PREFIX, '').indexOf(':', 2) >= 0
-}
-
 function isRegularFile(path: string): boolean {
   try {
     return lstatSync(path, { throwIfNoEntry: false })?.isFile() === true
@@ -629,7 +624,7 @@ function candidatesFor(
   const refusal =
     configured.anchor === 'unavailable'
       ? 'anchor_unavailable'
-      : named.some(namesAStream)
+      : configured.unusable?.reason === 'stream'
         ? 'stream_path'
         : named.some((log) => working.some((path) => sameSpelling(log, path)))
           ? 'working_path'

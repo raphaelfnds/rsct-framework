@@ -2,9 +2,9 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import {
+  branchPlansHaveOpenItems,
   findActivePlan,
   findPlanByBranch,
-  progressHasOpenItems,
 } from '../lib/plan.js'
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
@@ -52,6 +52,7 @@ import {
   crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 
 export const requestMergeInputSchema = z
   .object({
@@ -203,9 +204,7 @@ export async function requestMergeHandler(
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
 
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch)
-  const progressOpen = integratingPlan
-    ? progressHasOpenItems(projectRoot, integratingPlan.slug)
-    : undefined
+  const progressOpen = branchPlansHaveOpenItems(projectRoot, [input.source_branch])
   const range = (internal.rangeReader ?? getRangePaths)(projectRoot, 'HEAD', input.source_branch)
   const crossCheck = describeCrossCheck(range)
   const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
@@ -306,7 +305,7 @@ export async function requestMergeHandler(
     dialog: {
       title: 'RSCT — merge approval',
       message: [
-        `Approve merge of '${input.source_branch}' into '${targetLabel}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
+        `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
       ].join('\n') + gateDialogFooter(projectRoot, config),
     },

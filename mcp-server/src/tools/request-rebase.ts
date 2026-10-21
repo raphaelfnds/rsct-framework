@@ -2,9 +2,9 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import {
+  branchPlansHaveOpenItems,
   findActivePlan,
   findPlanByBranch,
-  progressHasOpenItems,
 } from '../lib/plan.js'
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
@@ -32,6 +32,7 @@ import {
   crossCheckBlockedReason,
 } from '../lib/pre-merge-ack.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 
 export const requestRebaseInputSchema = z
@@ -153,7 +154,7 @@ export async function requestRebaseHandler(
   })
 
   const currentPlan = currentBranch ? findPlanByBranch(projectRoot, currentBranch) : null
-  const progressOpen = currentPlan ? progressHasOpenItems(projectRoot, currentPlan.slug) : undefined
+  const progressOpen = branchPlansHaveOpenItems(projectRoot, [currentBranch, ...(mode === 'squash' ? [input.ref] : [])])
   const range =
     mode === 'rebase'
       ? (internal.rangeReader ?? getRangePaths)(projectRoot, input.ref, 'HEAD')
@@ -226,7 +227,7 @@ export async function requestRebaseHandler(
     dialog: {
       title: 'RSCT — rebase approval',
       message:
-        `Approve ${mode} of '${currentLabel}' ${mode === 'rebase' ? 'onto' : 'from'} '${input.ref}'? (history-rewriting)` +
+        `Approve ${mode} of '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}' ${mode === 'rebase' ? 'onto' : 'from'} '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'? (history-rewriting)` +
         (installAdvisory.dialogLine ? `\n${installAdvisory.dialogLine}` : '') +
         gateDialogFooter(projectRoot, config),
     },

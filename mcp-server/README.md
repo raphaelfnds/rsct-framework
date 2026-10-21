@@ -1159,7 +1159,7 @@ commits actually go:
 |---|---|
 | repository whose root carries `.rsct.json` (the common case) | unchanged |
 | submodule | its own working root |
-| **linked worktree** | the **main** worktree — so the audit-log ceiling (tier ratchet, review decisions) survives `git worktree add` |
+| **linked worktree** | the **main** worktree — so what the gates read from the audit log (classification evidence, review decisions) survives `git worktree add`; the downgrade record lives in `.rsct/phase-state.json`, one per checkout |
 | **monorepo package with its own `.rsct.json`** | the repository root |
 | **project nested inside an unrelated repository** | that repository's root |
 | not a git repository | unchanged; the binding reports `not-applicable` |
@@ -1168,7 +1168,9 @@ When it relocates, every §C dialog and the tool's `hints[]` say so — a reloca
 never silent, and it is never a rejection. A configured `audit.path` that resolves
 **outside** that base is refused (the log falls back to the default) and reported,
 because a log outside the repository can be swapped for a blank one without touching
-the project.
+the project. Since 2.18.0 the same happens to a path no file can sit at — a control
+character, a folder or a path through a file, and on Windows a stream (`:`), `< > " | ? *`,
+a reserved device name or a trailing dot or space (ADR-031).
 
 > **Known limitation.** `/rsct-uninstall` and the `.gitignore` block are still
 > project-relative, so in the three relocating shapes above they do not follow the
