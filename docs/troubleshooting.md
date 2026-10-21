@@ -349,13 +349,28 @@ line to `.rsct/audit.log`). Two ways out:
 2. **Delete the file.** RSCT starts from a clean state — and that drops what the
    file recorded: the REVIEW ledger (staged code needs a REVIEW again), an active
    plan token, the tier recorded by `rsct_classify_task`, a `review_drift`
-   lock if one was armed, and a `run_alone` record with the phases the agent
+   lock if one was armed, kept dead-code decisions, and a `run_alone` record with the phases the agent
    closed on its own and you have not approved yet (the next REVIEW then asks
    for none of them). Before deleting, look at `.rsct/audit.log`: a recent
    `review.commit_drift` line names code that landed without a review, and that
    lock will not come back on its own — run a REVIEW over those paths.
 
+Since 2.18.0 the message — and the hints of `rsct_load_context` and
+`rsct_status` for the same file — asks the agent to stop and ask you; deciding
+between the two is yours.
 An empty file is not corruption; RSCT writes over it.
+
+## "`.rsct.json` audit.path (…) … was ignored — the audit log stays at …"
+
+Since 2.18.0 a configured `audit.path` that no file can sit at is ignored, the
+same way as one that points outside the project: a value with a control
+character, one that names a folder or goes through a file, and on Windows one
+that names a stream inside a file (a `:` after the drive), holds `< > " | ? *`,
+a reserved device name such as `NUL` or `CON`, or ends in a dot or a space. The
+log stays at `.rsct/audit.log`, where you can open it, and the tool hints quote
+the value. Fix or remove `audit.path` in `.rsct.json`. While the value names a
+stream, the ten-day cut leaves every log alone, so what the old setting wrote
+into that stream is kept until you move it out.
 
 ## `.rsct/audit.log` is shorter than it used to be
 

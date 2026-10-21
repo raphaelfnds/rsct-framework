@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, realpathSync } from 'fs';
-import { isAbsolute, resolve, join, dirname, basename } from 'path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, statSync, realpathSync } from 'fs';
+import { isAbsolute, resolve, join, dirname, relative, sep, basename } from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -138,6 +138,25 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
 
 // src/lib/audit-log.ts
 var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
+var WINDOWS_FORBIDDEN = /[<>"|?*]/;
+var PORT_DIGITS = `0-9${String.fromCharCode(185, 178, 179)}`;
+var WINDOWS_RESERVED = new RegExp(`^(?:con|prn|aux|nul|com[${PORT_DIGITS}]|lpt[${PORT_DIGITS}]|conin\\$|conout\\$)(?:\\..*)?$`, "i");
+function unusableTail(base, candidate) {
+  const tail = relative(base, candidate);
+  if (tail === "") return "not_a_file";
+  const windows = process.platform === "win32";
+  if (windows && tail.includes(":")) return "stream";
+  if (new RegExp("\\p{Cc}", "u").test(tail)) return "name";
+  const segments = tail.split(sep);
+  if (windows) {
+    if (WINDOWS_FORBIDDEN.test(tail)) return "name";
+    if (segments.some((s) => WINDOWS_RESERVED.test(s) || /[. ]$/.test(s))) return "name";
+  }
+  for (let i = 1; i < segments.length; i += 1) {
+    if (statSync(join(base, ...segments.slice(0, i)), { throwIfNoEntry: false })?.isDirectory() === false) return "not_a_file";
+  }
+  return statSync(candidate, { throwIfNoEntry: false })?.isFile() === false ? "not_a_file" : null;
+}
 var migrationAttempted = /* @__PURE__ */ new Set();
 function migrateLegacyLog(projectRoot, base, target) {
   if (sameDirectory(projectRoot, base)) return;
@@ -172,11 +191,20 @@ function decideAuditPath(projectRoot, config) {
   if (configured && configured.length > 0) {
     const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
     if (!isInside(base, candidate)) {
-      return { path: fallback, base, escaped: candidate, anchor: anchor.status };
+      return { path: fallback, base, escaped: candidate, unusable: null, anchor: anchor.status };
     }
-    return { path: candidate, base, escaped: null, anchor: anchor.status };
+    let reason;
+    try {
+      reason = unusableTail(base, candidate);
+    } catch {
+      reason = "not_a_file";
+    }
+    if (reason !== null) {
+      return { path: fallback, base, escaped: null, unusable: { path: configured, reason }, anchor: anchor.status };
+    }
+    return { path: candidate, base, escaped: null, unusable: null, anchor: anchor.status };
   }
-  return { path: fallback, base, escaped: null, anchor: anchor.status };
+  return { path: fallback, base, escaped: null, unusable: null, anchor: anchor.status };
 }
 function isInside(base, candidate) {
   if (sameDirectory(base, candidate)) return true;

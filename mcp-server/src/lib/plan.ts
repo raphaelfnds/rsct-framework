@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { stripRefsPrefix } from './push-refspec.js'
 
 export interface ActivePlan {
   slug: string
@@ -11,25 +12,7 @@ export interface ActivePlan {
 }
 
 export function findActivePlan(projectRoot: string): ActivePlan | null {
-  let entries: string[]
-  try {
-    entries = readdirSync(projectRoot)
-  } catch {
-    return null
-  }
-
-  const candidates = entries
-    .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
-    .map((name) => {
-      const path = join(projectRoot, name)
-      const slug = name.replace(/^(?:plan|spec)_/, '').replace(/\.md$/, '')
-      const mtime = safeMtime(path)
-      return { name, path, slug, mtime }
-    })
-    .filter((entry): entry is { name: string; path: string; slug: string; mtime: number } => entry.mtime !== null)
-    .sort((a, b) => b.mtime - a.mtime)
-
-  const winner = candidates[0]
+  const winner = enumeratePlanFiles(projectRoot)[0]
   if (!winner) return null
 
   const metadata = extractPlanMetadata(winner.path)
@@ -78,27 +61,26 @@ export function isPlanComplete(status: string | null | undefined): boolean {
   return /\b(complete|done|closed|shipped|finished|conclu[ií])/i.test(status)
 }
 
+export function branchKey(name: string): string {
+  return stripRefsPrefix(name.trim().normalize('NFC').toLowerCase())
+}
+
 export function findPlanByBranch(projectRoot: string, branch: string): ActivePlan | null {
-  let entries: string[]
-  try {
-    entries = readdirSync(projectRoot)
-  } catch {
-    return null
-  }
-  const winner = entries
-    .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
-    .map((name) => {
-      const path = join(projectRoot, name)
-      return {
-        slug: name.replace(/^(?:plan|spec)_/, '').replace(/\.md$/, ''),
-        mtime: safeMtime(path),
-        branch: extractPlanMetadata(path).branch,
-      }
-    })
-    .filter((e): e is { slug: string; mtime: number; branch: string | null } => e.mtime !== null)
-    .filter((e) => e.branch !== null && e.branch === branch)
-    .sort((a, b) => b.mtime - a.mtime)[0]
+  const wanted = branchKey(branch)
+  const claimed = enumeratePlanFiles(projectRoot)
+    .map((entry) => ({ slug: entry.slug, row: extractPlanMetadata(entry.path).branch }))
+    .filter((entry): entry is { slug: string; row: string } => entry.row !== null)
+  const winner = claimed.find((entry) => entry.row === branch) ?? claimed.find((entry) => branchKey(entry.row) === wanted)
   return winner ? findPlanBySlug(projectRoot, winner.slug) : null
+}
+
+export function branchPlansHaveOpenItems(projectRoot: string, branches: readonly (string | null)[]): boolean | undefined {
+  const plans = branches
+    .filter((branch): branch is string => branch !== null && branch.length > 0)
+    .map((branch) => findPlanByBranch(projectRoot, branch))
+    .filter((plan): plan is ActivePlan => plan !== null)
+  if (plans.length === 0) return undefined
+  return plans.some((plan) => progressHasOpenItems(projectRoot, plan.slug))
 }
 
 export type ProgressCompletionState = 'no_file' | 'no_checkboxes' | 'has_open' | 'all_closed'
@@ -163,7 +145,14 @@ interface PlanFileEntry {
   mtime: number
 }
 
-function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
+function newestFirst(a: PlanFileEntry, b: PlanFileEntry): number {
+  if (a.mtime !== b.mtime) return b.mtime - a.mtime
+  const an = a.name.normalize('NFC')
+  const bn = b.name.normalize('NFC')
+  return an < bn ? -1 : an > bn ? 1 : 0
+}
+
+function enumeratePlanFiles(projectRoot: string, pattern: RegExp = /^(?:plan|spec)_.+\.md$/): PlanFileEntry[] {
   let entries: string[]
   try {
     entries = readdirSync(projectRoot)
@@ -171,7 +160,7 @@ function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
     return []
   }
   return entries
-    .filter((name) => /^(?:plan|spec)_.+\.md$/.test(name))
+    .filter((name) => pattern.test(name))
     .map((name) => {
       const path = join(projectRoot, name)
       return {
@@ -182,7 +171,7 @@ function enumeratePlanFiles(projectRoot: string): PlanFileEntry[] {
       }
     })
     .filter((e): e is PlanFileEntry => e.mtime !== null)
-    .sort((a, b) => b.mtime - a.mtime)
+    .sort(newestFirst)
 }
 
 export interface PlanSummary {
@@ -304,17 +293,7 @@ export function findPlanFileBySlug(projectRoot: string, slug: string): ActivePla
 }
 
 export function findNewestPlanFile(projectRoot: string): ActivePlan | null {
-  let entries: string[]
-  try {
-    entries = readdirSync(projectRoot)
-  } catch {
-    return null
-  }
-  const newest = entries
-    .filter((name) => /^plan_.+\.md$/.test(name))
-    .map((name) => ({ slug: name.slice('plan_'.length, -'.md'.length), mtime: safeMtime(join(projectRoot, name)) }))
-    .filter((entry): entry is { slug: string; mtime: number } => entry.mtime !== null && isSafePlanSlug(entry.slug))
-    .sort((a, b) => b.mtime - a.mtime)[0]
+  const newest = enumeratePlanFiles(projectRoot, /^plan_.+\.md$/).find((entry) => isSafePlanSlug(entry.slug))
   return newest ? findPlanFileBySlug(projectRoot, newest.slug) : null
 }
 

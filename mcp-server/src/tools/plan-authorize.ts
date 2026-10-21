@@ -40,7 +40,7 @@ import {
   PLAN_TOKEN_MAX_ACTIONS_MAX,
 } from '../lib/plan-authorization.js'
 import { PLAN_AUTHORIZED_EVENT } from '../lib/plan-token-record.js'
-import { specLabel } from '../lib/run-alone.js'
+import { dialogList, specLabel } from '../lib/dialog-text.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 
@@ -479,8 +479,7 @@ function mintDialogMessage(args: {
   planSlug: string
   phases: PlanPhase[]
 }): string {
-  const shown = args.phases.slice(0, PHASES_SHOWN).map((p) => `• ${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`)
-  const more = args.phases.length > PHASES_SHOWN ? [`… and ${args.phases.length - PHASES_SHOWN} more`] : []
+  const phases = dialogList(args.phases.map((p) => `${specLabel(p.id, 20)}: ${specLabel(p.goal, 100)}`), PHASES_SHOWN, 130)
   return [
     `Authorize up to ${args.maxActions} commits with NO dialog, until ${args.expiresAt} UTC (8 h at most, never extended), on branch '${specLabel(args.branch, 80)}'?`,
     ...(args.warningLine ? [args.warningLine] : []),
@@ -489,5 +488,5 @@ function mintDialogMessage(args: {
   ].join('\n') +
     args.footer +
     `\nPlan: '${specLabel(args.planSlug, 80)}' — ${args.phases.length} phases:\n` +
-    [...shown, ...more].join('\n')
+    phases
 }

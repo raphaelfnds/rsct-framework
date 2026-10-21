@@ -36,6 +36,8 @@ import {
   type PhaseState,
 } from '../lib/phase-scope.js'
 import { getHeadShaFull } from '../lib/git.js'
+import { gateDialogFooter } from '../lib/gate-dialog.js'
+import { DIALOG_UNCUT, specLabel } from '../lib/dialog-text.js'
 
 
 const findingActionSchema = z
@@ -96,7 +98,6 @@ export type PhaseVerificationCompleteRejectKind =
   | 'block_actions_present'
   | 'spec_ref_mismatch'
 
-/** Re-exported so existing importers keep their path (#19). */
 export type { ActionsSummary }
 
 export interface PhaseVerificationCompleteOutput {
@@ -109,26 +110,8 @@ export interface PhaseVerificationCompleteOutput {
   cleared_verification: boolean
   cleared_phase: boolean
   actions_summary: ActionsSummary
-  /**
-   * #75. How the findings this phase raised are KNOWN, counted from the stored
-   * baseline rather than from `findings_actions` — an action records what was
-   * decided, never what it rested on. Required rather than optional so every
-   * return path below has to carry it: an omission is a compile error, not a
-   * silently absent field on the one path nobody looked at.
-   */
   evidence_mix: EvidenceMix
-  /**
-   * #75 Part C. `true` when HEAD moved since the V phase started, `false` when it
-   * did not, `null` when it cannot be told (no stamp, or no git). Reported, never
-   * acted on — see `headStaleness`.
-   */
   head_stale: boolean | null
-  /**
-   * #40: on a findings-gate rejection, every finding still awaiting an action.
-   * Present only on those rejections — nothing else in the framework surfaces the
-   * stored ids, so without this the only way back is re-running `_start`, which
-   * rewrites the baseline the caller is being measured against.
-   */
   open_findings?: StoredFinding[]
   audit_path: string | null
   audit_error: string | null
@@ -230,7 +213,6 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: null,
@@ -267,8 +249,6 @@ export async function phaseVerificationCompleteHandler(
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // The stored block belongs to another spec; weighing its evidence here
-      // would describe a set this caller is not completing.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: fields.audit_path,
@@ -281,20 +261,7 @@ export async function phaseVerificationCompleteHandler(
     }
   }
 
-  // #40. Placed AFTER the spec_ref match — demanding answers for another spec's
-  // baseline sends the caller after the wrong findings — and BEFORE the block check,
-  // so an unknown id carrying action:'block' is reported as the unknown id rather
-  // than as an instruction to change the action on a finding that does not exist.
-  //
-  // Every rejection here is a real reject_kind with its own audit entry, exactly like
-  // the three around it: leaving the evasion these guards exist to catch as the only
-  // unlogged outcome would invert the point.
   const baseline = readFindingsBaseline(existing.state.verification.findings)
-  // #75. From the BASELINE, never from findings_actions: an action records the
-  // decision, not the evidence. `null` propagates as `measurable: false`, so a
-  // hand-edited or foreign block reads as "unmeasurable" instead of as a clean
-  // row of zeros — the difference between "nothing was found" and "nothing can
-  // be counted" is exactly the confusion this issue was opened over.
   const evidence_mix = summarizeEvidence(baseline)
   const staleness = headStaleness(
     existing.state.verification.head_sha,
@@ -305,8 +272,6 @@ export async function phaseVerificationCompleteHandler(
     storedRunId: existing.state.verification.findings_run_id ?? null,
     suppliedRunId: input.findings_run_id ?? null,
     actions: input.findings_actions,
-    // Redundant here — the spec_ref_mismatch branch above already returned — but
-    // passed so both phases feed the gate identically and neither can drift.
     storedSpecRef: existing.state.verification.spec_ref ?? null,
     specRef: input.spec_ref,
   })
@@ -387,12 +352,10 @@ export async function phaseVerificationCompleteHandler(
     approval: input.dev_approval,
     dialog: {
       title: 'RSCT — verification complete',
-      // #75. The mix rides the line the dev actually reads before clicking. It is
-      // one of THREE surfaces, not the surface: `gateRequest` falls back to the
-      // `trust` channel when no dialog channel exists (headless, CI), and on that
-      // path this string is never rendered. The hints and audit legs below are
-      // what survive there.
-      message: `Complete V phase for spec '${input.spec_ref}'?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}`,
+      message:
+        `Complete V phase?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}` +
+        gateDialogFooter(projectRoot) +
+        `\nSpec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`,
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {
@@ -437,12 +400,6 @@ export async function phaseVerificationCompleteHandler(
     }
   }
 
-  // #40 considered gating this on a non-empty baseline, so an agent could not stamp
-  // decisions about findings that never existed. Rejected: the audit log is
-  // agent-written throughout, a decision the dev genuinely made about something the
-  // checklist could not see is still worth recording, and dropping it deletes real
-  // information to prevent a weaker kind of noise. The hole worth closing was the
-  // phase completing unanswered, and the gate above closes that.
   for (const fa of input.findings_actions) {
     appendAudit(
       projectRoot,
@@ -460,12 +417,6 @@ export async function phaseVerificationCompleteHandler(
 
   const completedAt = new Date().toISOString()
   const newState: PhaseState = { ...existing.state }
-  // CAP-28: don't delete the verification block — preserve it as audit
-  // trail so that rsct_phase_code_start (and any other downstream gate)
-  // can verify that V actually ran + was completed for this spec_ref.
-  // Large arrays (`findings`, `discovered_importers`) are pruned to keep
-  // state size bounded; metadata fields (spec_ref/spec_tier/started_at)
-  // and the new `completed_at` stamp are retained.
   const prevV = existing.state.verification
   const completedV: NonNullable<PhaseState['verification']> = {
     completed_at: completedAt,
@@ -474,21 +425,9 @@ export async function phaseVerificationCompleteHandler(
   if (prevV?.spec_tier !== undefined) completedV.spec_tier = prevV.spec_tier
   if (prevV?.started_at !== undefined) completedV.started_at = prevV.started_at
   if (prevV?.persona !== undefined) completedV.persona = prevV.persona
-  // #75 Part C / V-3. This prune is an ALLOWLIST — a fresh object with explicit
-  // copies — so a field not named here is dropped by construction. The stamp has
-  // to be named or the record of WHICH commit the findings described disappears
-  // at exactly the moment the phase becomes evidence for `rsct_phase_code_start`.
   if (prevV?.head_sha !== undefined) completedV.head_sha = prevV.head_sha
   if (prevV?.observed_at !== undefined) completedV.observed_at = prevV.observed_at
-  // findings + discovered_importers + declared_paths intentionally dropped
-  // (their content already lives in the audit log as per-finding entries).
   newState.verification = completedV
-  // The active-phase label is ALWAYS cleared once `completed_at` is stamped: the
-  // phase is over, so a surviving label has no meaning. It used to be optional
-  // via `clear_phase`, whose contract ("when false, only the verification
-  // sub-block is cleared") stopped being true at CAP-28 — the sub-block is now
-  // deliberately preserved, so `false` did nothing except strand a `verification`
-  // label that no tool could clear without also destroying the V record.
   delete newState.phase
   delete newState.scope_globs
   delete newState.started_at
@@ -517,7 +456,6 @@ export async function phaseVerificationCompleteHandler(
   const fields = auditFields(completeAudit)
   const hints: string[] = []
   if (writeResult.ok) {
-    // The leg that survives a headless run, where the dialog above never renders.
     hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
     hints.push(
       `V phase completed for spec '${input.spec_ref}'. ${input.findings_actions.length} action(s) recorded; active phase cleared. The verification block is RETAINED (with completed_at) — it is what rsct_phase_code_start checks. Next: rsct_phase_code_start.`,

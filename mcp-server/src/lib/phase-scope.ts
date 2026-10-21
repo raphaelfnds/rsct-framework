@@ -443,6 +443,9 @@ export function tierRank(tier: string | undefined | null): number {
   return TIER_RANK[tier] ?? 0
 }
 
+export const UNREADABLE_STATE_ADVICE =
+  'Stop and ask the developer: repairing the file keeps every record in it; deleting it drops the REVIEW ledger (the files need a new REVIEW), an armed review_drift lock, kept dead-code decisions, a batch token, the tier recorded by rsct_classify_task, and a run_alone record with the phases waiting in it for the developer.'
+
 export function refuseUnreadableState(
   projectRoot: string,
   read: PhaseStateReadResult,
@@ -454,7 +457,7 @@ export function refuseUnreadableState(
     path,
     reason: 'unreadable_state',
     parse_error: read.parse_error,
-    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. Repair or delete that file; deleting it is a safe recovery. Deleting it also drops a run_alone record and the phases waiting in it for the developer.`,
+    error: `${path} could not be read (${read.parse_error}) — nothing was overwritten. ${UNREADABLE_STATE_ADVICE}`,
   }
 }
 

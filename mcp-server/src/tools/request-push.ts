@@ -2,9 +2,9 @@ import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import {
+  branchPlansHaveOpenItems,
   findActivePlan,
   findPlanByBranch,
-  progressHasOpenItems,
 } from '../lib/plan.js'
 import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
@@ -58,6 +58,7 @@ import {
   stripRefsPrefix,
 } from '../lib/push-refspec.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
+import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 
 export const requestPushInputSchema = z
   .object({
@@ -305,10 +306,9 @@ export async function requestPushHandler(
   let degradedHint: string | null = null
 
   if (branchProtected) {
-    const pushingPlan = branch ? findPlanByBranch(projectRoot, branch) : null
-    const progressOpen = pushingPlan
-      ? progressHasOpenItems(projectRoot, pushingPlan.slug)
-      : undefined
+    const source = refspec.ok ? refspec.source : ''
+    const pushedBranch = /^(?:head|@)$/i.test(source) ? gitState.branch : source
+    const progressOpen = branchPlansHaveOpenItems(projectRoot, [pushedBranch])
     const range: RangePathsResult =
       rangeBase !== null && rangeHead !== null
         ? (internal.rangeReader ?? getRangePaths)(projectRoot, rangeBase, rangeHead)
@@ -389,7 +389,10 @@ export async function requestPushHandler(
     dialog: {
       title: 'RSCT — push approval',
       message: [
-        `Approve push of '${branchLabel}' to '${remote}'?`,
+        `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
+        ...(refspec.ok && refspec.destination !== refspec.source
+          ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`]
+          : []),
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
       ].join('\n') + gateDialogFooter(projectRoot, config),
     },
