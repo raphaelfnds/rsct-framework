@@ -24912,13 +24912,6 @@ function getInstallDriftNotice(args2) {
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
-  // Values are deliberately LOOSE here while the exposed inputSchema advertises the
-  // strict contract. rsct_status is the session-bootstrap tool documented "always
-  // succeeds", and its .parse() is unguarded — a z.enum would turn a paraphrased
-  // update_check:"On" into a hard failure that also loses git state, topology and
-  // the install-drift security hint. `coerce` extends that to a `true` an agent
-  // might infer from an on/off switch: it becomes "true", which is simply ignored
-  // with a hint. Unknown KEYS still reject (.strict): loose values, strict shape.
   update_check: external_exports.coerce.string().optional(),
   decline_update: external_exports.coerce.string().optional()
 }).strict();
@@ -24981,11 +24974,6 @@ async function statusHandler(rawInput, deps = {}) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      // #50: report what the gates ENFORCE, not the raw key. Reading the config
-      // alone made an installed project that omits `protected_branches` report an
-      // empty list while `effectiveProtectedList` was protecting four branches at
-      // every §C gate. Gated on rsct_installed so a project with no `.rsct.json`
-      // still reports nothing rather than inheriting defaults it is not governed by.
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
@@ -25962,7 +25950,6 @@ async function loadContextHandler(rawInput) {
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      // #50: the enforced list, not the raw key — see the note in status.ts.
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
@@ -49681,7 +49668,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // No block at all, so there is nothing to weigh — `unmeasurable`, not zeros.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: null,
@@ -49717,8 +49703,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
       cleared_verification: false,
       cleared_phase: false,
       actions_summary: summary,
-      // The stored block belongs to another spec; weighing its evidence here
-      // would describe a set this caller is not completing.
       evidence_mix: summarizeEvidence(null),
       head_stale: null,
       audit_path: fields2.audit_path,
@@ -49741,8 +49725,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     storedRunId: existing.state.verification.findings_run_id ?? null,
     suppliedRunId: input.findings_run_id ?? null,
     actions: input.findings_actions,
-    // Redundant here — the spec_ref_mismatch branch above already returned — but
-    // passed so both phases feed the gate identically and neither can drift.
     storedSpecRef: existing.state.verification.spec_ref ?? null,
     specRef: input.spec_ref
   });
@@ -49821,11 +49803,6 @@ async function phaseVerificationCompleteHandler(rawInput, internal = {}) {
     approval: input.dev_approval,
     dialog: {
       title: "RSCT \u2014 verification complete",
-      // #75. The mix rides the line the dev actually reads before clicking. It is
-      // one of THREE surfaces, not the surface: `gateRequest` falls back to the
-      // `trust` channel when no dialog channel exists (headless, CI), and on that
-      // path this string is never rendered. The hints and audit legs below are
-      // what survive there.
       message: `Complete V phase?
 
 ${input.findings_actions.length} action(s): ${summary["address-now"]} address-now, ${summary["capture-as-issue"]} capture, ${summary.defer} defer, ${summary.accept} accept
@@ -53032,10 +53009,7 @@ async function captureIssueHandler(rawInput, internal = {}) {
       title: "RSCT \u2014 create GitHub issue",
       message: `Create a GitHub issue (severity=${input.severity})?
 
-GH CLI will run in '${specLabel(projectRoot, DIALOG_PATH_LIMIT)}'.` + // A label gh is about to reject belongs in the dialog, not only in the
-      // hints afterwards: approving a call already known to fail spends the
-      // dev's single-use approval on nothing.
-      (resolved.warnings.length > 0 ? `
+GH CLI will run in '${specLabel(projectRoot, DIALOG_PATH_LIMIT)}'.` + (resolved.warnings.length > 0 ? `
 
 ${resolved.warnings.map((w) => `\u26A0 ${specLabel(w, DIALOG_UNCUT)}`).join("\n")}` : "") + `
 
@@ -53124,9 +53098,6 @@ Title: '${specLabel(input.title, DIALOG_UNCUT)}'`
       anti_replay_error: null,
       hints: [
         `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
-        // A caller-supplied label that does not exist is the most likely cause
-        // of a `failed` here, so RSCT names it rather than leaving gh's raw
-        // error as the only clue.
         ...resolved.warnings
       ]
     };

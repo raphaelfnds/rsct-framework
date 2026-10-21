@@ -126,17 +126,9 @@ export interface CaptureIssueInternal {
     type?: string
   }) => GhCreateIssueResult
   ghAvailable?: () => boolean
-  /** Test seam: substitute host-repo discovery. */
   ghVocabulary?: (cwd: string) => GhRepoVocabulary
 }
 
-/**
- * Preference order per severity, matched case-insensitively against whatever the
- * host repo actually offers. High-severity findings are defects; low-severity
- * ones are usually hardening. Whichever preference matches first wins, and if
- * NONE matches the issue is created unlabeled — which always succeeds. The
- * framework never creates a label or a type in someone else's repo.
- */
 const LABEL_PREFERENCE: Record<Severity, string[]> = {
   critical: ['bug', 'enhancement'],
   high: ['bug', 'enhancement'],
@@ -154,12 +146,10 @@ const TYPE_PREFERENCE: Record<Severity, string[]> = {
 export interface LabelResolution {
   labels: string[]
   type: string | null
-  /** Why these were chosen — surfaced so the mapping is visible, not inferred. */
   decision: string
   warnings: string[]
 }
 
-/** Case-insensitive lookup that returns the repo's own spelling. */
 function matchFirst(preferences: string[], available: string[]): string | null {
   const byLower = new Map(available.map((a) => [a.toLowerCase(), a]))
   for (const p of preferences) {
@@ -179,9 +169,6 @@ export function resolveLabels(args: {
 
   const type = matchFirst(TYPE_PREFERENCE[severity], vocabulary.types)
 
-  // An explicit request is honored verbatim — the dev may know about a label
-  // discovery could not see. An unknown one is WARNED, never silently dropped:
-  // dropping it would hide a typo, and `gh` will report the real error.
   if (requested !== undefined) {
     if (vocabulary.discovered) {
       const known = new Set(vocabulary.labels.map((l) => l.toLowerCase()))
@@ -309,20 +296,10 @@ export async function captureIssueHandler(
   const ghAvailableFn = internal.ghAvailable ?? isGhAvailable
   const ghVocabulary = internal.ghVocabulary ?? readRepoVocabulary
 
-  // Host-repo discovery is deferred until the call is BOTH create-mode and
-  // carrying a dev_approval — see `resolveVocabulary` below. It shells out to
-  // `gh` (including two authenticated GitHub API reads), and no §C-gated tool
-  // may produce an external effect before its gate: an unapproved call would
-  // otherwise trigger real network reads and hand back the repository's label
-  // vocabulary in `suggested_gh_command`. Draft mode never discovers at all —
-  // it is documented as "no external mutation", and a `gh label list` per draft
-  // would be a surprising cost.
   const noVocabulary: GhRepoVocabulary = { labels: [], types: [], discovered: false }
   const resolveVocabulary = (): GhRepoVocabulary =>
     ghAvailableFn() ? ghVocabulary(projectRoot) : noVocabulary
 
-  // Pre-authorization paths (draft, missing approval, gh unavailable) describe
-  // only what the caller asked for — nothing discovered, nothing invented.
   const requestedLabels = input.labels ?? []
   const formattedBody = formatBody({
     body: input.body,
@@ -424,9 +401,6 @@ export async function captureIssueHandler(
     }
   }
 
-  // Past both guards: the call is create-mode, carries an approval payload and
-  // gh is present. Only now is it legitimate to read the host repo, so the §C
-  // dialog can name the labels the issue will actually get.
   const resolved = resolveLabels({
     requested: input.labels,
     severity: input.severity,
@@ -443,9 +417,6 @@ export async function captureIssueHandler(
       message:
         `Create a GitHub issue (severity=${input.severity})?\n\n` +
         `GH CLI will run in '${specLabel(projectRoot, DIALOG_PATH_LIMIT)}'.` +
-        // A label gh is about to reject belongs in the dialog, not only in the
-        // hints afterwards: approving a call already known to fail spends the
-        // dev's single-use approval on nothing.
         (resolved.warnings.length > 0 ? `\n\n${resolved.warnings.map((w) => `⚠ ${specLabel(w, DIALOG_UNCUT)}`).join('\n')}` : '') +
         `\n\nLabels: ${labels.length > 0 ? specLabel(labels.join(', '), DIALOG_UNCUT) : '(none — no matching label in this repository)'}` +
         `\nTitle: '${specLabel(input.title, DIALOG_UNCUT)}'`,
@@ -535,9 +506,6 @@ export async function captureIssueHandler(
       anti_replay_error: null,
       hints: [
         `gh issue create failed (${ghResult.reason}). ${ghResult.error}`,
-        // A caller-supplied label that does not exist is the most likely cause
-        // of a `failed` here, so RSCT names it rather than leaving gh's raw
-        // error as the only clue.
         ...resolved.warnings,
       ],
     }
@@ -565,7 +533,6 @@ export async function captureIssueHandler(
   const fields = auditFields(createdAudit)
 
   const hints: string[] = [`Issue created: ${ghResult.url}`]
-  // State the mapping rather than leaving the dev to infer it from the issue.
   hints.push(
     `Labels: ${resolved.decision}${resolved.type ? `; issue type '${resolved.type}' matched` : ''}.`,
   )

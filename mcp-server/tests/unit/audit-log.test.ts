@@ -78,8 +78,6 @@ describe('lib/audit-log — appendAuditEntry', () => {
   })
 
   it('returns { ok: false, reason: "write_failed" } when the parent path is a file (portable failure)', () => {
-    // Place a regular file where the writer expects a directory; mkdirSync on a path
-    // whose ancestor is a file fails with ENOTDIR/EEXIST on every platform we support.
     const blockingFile = join(tmpRoot, '.rsct')
     writeFileSync(blockingFile, 'not-a-dir', 'utf8')
 

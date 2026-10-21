@@ -48,14 +48,6 @@ export interface ActivePhaseVerificationSummary {
   spec_ref: string | null
   spec_tier: string | null
   findings_count: number
-  /**
-   * #75. How the open findings are known.
-   *
-   * This is the §0 bootstrap read — the FIRST thing a resumed session sees — so a
-   * count alone is where the mix would be missing exactly when a fresh session is
-   * forming its picture of the work. `measurable: false` means no baseline could
-   * be read, which is not the same as a phase that raised nothing.
-   */
   evidence_mix: EvidenceMix
   started_at: string | null
 }
@@ -91,7 +83,6 @@ export interface LoadContextOutput {
   }
   knowledge: KnowledgeIndex
   universe: UniverseBlock
-  /** T2: repo topology (mono/monorepo/multi-repo) — single source, parity with status. */
   topology: TopologyBlock
   next_action_hints: string[]
 }
@@ -158,12 +149,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const decisionsSnapshot = readDecisions(resolution.root)
   const knowledge = readKnowledgeIndex(resolution.root)
 
-  // CAP-31: stamp bootstrap marker — load_context is the §0 entry
-  // point. Best-effort write; the call never fails on it. plan-lifecycle-v2 (D4):
-  // load_context is the ONLY caller that actually re-reads plan/decisions/
-  // knowledge, so it (and only it) clears the context_stale re-bootstrap flag.
-  // #53: evaluated BEFORE the stamp (a post-stamp read describes what this call
-  // just wrote), and the outcome is reported instead of swallowed.
   const bootstrap: BootstrapRefresh | null = resolution.rsct_installed
     ? readThenStampBootstrap(resolution.root, { clearStale: true })
     : null
@@ -172,10 +157,7 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   const recent_premises = decisionsSnapshot.premises.slice(-excerptCount).reverse()
   const recent_adrs = decisionsSnapshot.adrs.slice(-excerptCount).reverse()
 
-  // T1.a: org-level universe via the single source (same getUniverse as status).
   const universe = getUniverse(resolution.config, resolution.root)
-  // T2: repo topology via the single source (same detectTopology as status).
-  // Reuse the already-resolved universe block (avoids a second resolution).
   const topology = detectTopology(resolution.config, resolution.root, {}, universe)
   const next_action_hints = buildHints({
     resolution,
@@ -188,16 +170,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
   if (bootstrap) next_action_hints.push(...bootstrapHints(bootstrap))
   if (universe.hint) next_action_hints.push(universe.hint)
   if (topology.hint) next_action_hints.push(topology.hint)
-  // plan-lifecycle-v2 (Bloco 2.4): retroactive reconciliation. If the active
-  // plan's branch already looks integrated into the mainline and no keep|delete
-  // disposition was recorded, nudge the dev to run rsct_plan_dispose. LOCAL
-  // check only (offline; no `gh` round-trip on every bootstrap) — a squash/rebase
-  // PR merge is blind to `git branch --merged` and is instead caught when the
-  // dev runs rsct_plan_dispose explicitly (documented residual). Read-only; opens
-  // no gate.
-  // Only reconcile once you've LEFT the plan's branch (git.branch differs) — a
-  // branch you're still on cannot already be integrated, so this skips the git
-  // subprocess on every bootstrap during active feature work (the common case).
   if (
     resolution.rsct_installed &&
     active_plan?.branch &&
@@ -219,9 +191,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
       }
     }
   }
-  // Install-drift: local compare of this project's stamped rsct_version and of
-  // its installed enforcement scripts vs the running binary (parity with
-  // rsct_status — same helper/text). Handler level.
   if (resolution.rsct_installed) {
     const drift = getInstallDriftNotice({
       projectRoot: resolution.root,
@@ -230,10 +199,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
     })
     if (drift.hint) next_action_hints.push(drift.hint)
     if (drift.severity === 'security') {
-      // Recorded at every §0 bootstrap, not only at the commit gate: an escalated
-      // state means the sanitizer failed to strip a `Bash(git commit)` allow-entry,
-      // in which case commits bypass rsct_request_commit entirely and the exposure
-      // window would leave no trail at all. One entry per load_context call.
       appendAuditEntry(
         resolution.root,
         {
@@ -257,7 +222,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
       app_name: resolution.config?.app?.name ?? null,
       org_slug: resolution.config?.app?.org ?? null,
       rsct_version: resolution.config?.rsct_version ?? null,
-      // #50: the enforced list, not the raw key — see the note in status.ts.
       protected_branches: resolution.rsct_installed
         ? effectiveProtectedList(resolution.config ?? undefined).list
         : [],
@@ -282,16 +246,6 @@ export async function loadContextHandler(rawInput: unknown): Promise<LoadContext
 
 const BOOTSTRAP_STALE_MIN = Math.round(BOOTSTRAP_STALE_MS / 60000)
 
-/**
- * #53: the §0 bootstrap report, in `rsct_load_context`'s own voice — twin of the
- * one in tools/status.ts, which carries the note on why the verdict strings are
- * per-call-site rather than shared. This tool is the one that really re-loads
- * context, so it can say so where `rsct_status` cannot.
- *
- * The extra branch is D4: `clearStale` rides in the SAME write as the marker, so
- * a write that does not land leaves the re-bootstrap obligation undischarged
- * while the rest of this report reads like context was reloaded. Say it.
- */
 function bootstrapHints(refresh: BootstrapRefresh): string[] {
   const { marker, read, write } = refresh
 
@@ -330,9 +284,6 @@ function bootstrapHints(refresh: BootstrapRefresh): string[] {
   )
   if (writeHint) {
     hints.push(writeHint)
-    // D4: the clear rides in that same failed write. Truthiness, not
-    // `!== undefined` — that is the predicate the edit guard itself uses, so a
-    // `context_stale: null` on disk must not produce a "still blocked" claim.
     if (readContextStale(read.state) !== null) {
       hints.push(
         `⚠ The re-bootstrap flag (context_stale) was NOT cleared, because the phase-state write did not land — rsct_check_edit_scope keeps reporting 'stale_context' and managed edits stay blocked. Re-run rsct_load_context once the write can succeed.`,
@@ -369,7 +320,6 @@ function buildHints({
     return hints
   }
 
-  // #50: same effective list the §C gates use — past this point rsct_installed is true.
   const protected_branches = effectiveProtectedList(resolution.config ?? undefined).list
   if (git.available && git.branch && protected_branches.includes(git.branch)) {
     hints.push(
@@ -377,8 +327,6 @@ function buildHints({
     )
   }
 
-  // #49 — bootstrap is where `adrs_count: 0` gets believed. A parser or IO miss that
-  // says nothing becomes "this project records no decisions" for the whole session.
   const miss = corpusMiss({
     read_error: decisions.read_error,
     has_ids: decisions.has_decision_ids,
@@ -400,10 +348,6 @@ function buildHints({
         `Active phase: verification (spec_ref='${active_phase.verification.spec_ref ?? '?'}', ${active_phase.verification.findings_count} finding(s)). Call rsct_phase_verification_complete with an action for EVERY finding + dev_approval before editing code — rsct_phase_status lists the open ids if you no longer have them.`,
       )
     } else if (active_phase.phase === 'review') {
-      // #40: a resumed REVIEW needs the same steer. load_context is step 2 of the
-      // mandatory bootstrap chain, so leaving it on the generic branch means the
-      // tool that runs first every session says nothing about the state this gate
-      // introduced.
       hints.push(
         `Active phase: review. Every finding declared at rsct_phase_review_start needs an action before rsct_phase_review_complete will close it — call rsct_phase_status to list the open ones and their findings_run_id.`,
       )

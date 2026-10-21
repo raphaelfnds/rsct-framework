@@ -3093,6 +3093,129 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **`promptYesNo`** is synchronous underneath (`execFileSync`) but returns a Promise, so an
   asynchronous backend (DBus, a native module) can replace it without changing its callers.
 
+### `lib/audit-log.ts`, `lib/gate-dialog.ts`, `lib/repo-anchor.ts` (migrated in the 2.18.0 REVIEW)
+
+- `auditFields` sits beside `AuditAppendResult` because 15 tools had each declared an identical
+  private copy (#10). A disabled audit maps to `{null, null}`; only a write failure sets
+  `audit_error`.
+- `appendAuditEntry` stamps `ts` over any caller value, appends one line, creates the parent
+  folder, and never throws: a mutating tool must go on when the log cannot be written, and reports
+  `write_failed` instead.
+- `decideAuditPath`'s base is the repository the action lands in, not the caller's `project_root`
+  (#92): a crafted subdirectory resolves back to that repository, so it cannot present a fresh
+  ceiling, lock or history. A configured path outside the base is ignored and reported (`escaped`)
+  because, MEASURED, an absolute `audit.path` moved the anchors away from the right root.
+  `isInside` compares through the anchor's own normalisation — a raw `startsWith` disagrees with
+  `sameDirectory` on a trailing separator, on `/` against `\` and on drive-letter case — and the
+  `sameDirectory` call covers a path equal to the base, which has no trailing separator to match.
+- `migrateLegacyLog` (AUDIT-2) carries an existing log to a relocated base: without it the first
+  run after the upgrade in a monorepo package or a nested project finds no log, and a spent approval
+  would become replayable. It copies, never moves (the old file stays as evidence and a half-done
+  copy cannot destroy the only one), skips when both exist (two histories merged blind would count
+  twice), runs once per root per process, and never throws — a failed copy leaves the new place
+  empty, which fails closed at the history signal.
+- `gateDialogFooter` (#92 defects A and F): MEASURED, before it no gated dialog named the
+  repository — every message named a branch, a commit message or refs, so in the crafted-root probe
+  the developer read "Authorize batch commits for this plan on 'main'?", true and useless, while
+  every anchor sat in the crafted folder. Tools pass `config` only where they gate on branch
+  protection; the narrowing notice is noise elsewhere. `anchorHints` carries the same facts in
+  `hints[]`, because with no dialog channel the footer is never rendered. A relocation is reported,
+  never refused (D1): refusing breaks the monorepo-package and nested-project setups measured
+  legitimate.
+- `repo-anchor.ts` (#92): MEASURED, an `rsct_request_commit` with `project_root` at a crafted
+  subdirectory committed into the parent repository while the parent's log recorded nothing. The
+  field is not rejected — the sanctioned registration passes no root, installs default to user
+  scope, and the fallbacks are unreliable under WSL-from-Windows, so the per-call field is the last
+  resort where they fail; the shared anchors resolve at the repository the mutation lands in
+  instead. The derivation is global (one log per repository); only the reporting is scoped to the
+  gated tools. `LOCAL_ANCHORS` stay per checkout.
+- `canonicalPath` resolves the nearest existing ancestor and re-attaches the rest, since a
+  containment candidate often does not exist yet; when nothing resolves (a `//wsl.localhost/` path
+  that throws) it returns the plain absolute form, so a comparison degrades instead of failing.
+  Normalising for comparison: `resolve()` already absorbs a trailing separator, forward slashes and
+  `./` (MEASURED by mutation: removing the explicit strip reddened nothing; it remains for a drive
+  root). Case is folded on Windows only — a candidate that does not exist keeps the caller's
+  spelling, which on Windows names the same file, and folding on Linux would call two different
+  folders equal.
+- The anchor cache lives for the process: the answer for a root goes stale only if the
+  repository's identity changes under it (`git init` inside it, or `.git` removed). A new worktree
+  is a new key; `git init` in a crafted subdirectory makes the commits land there, so that escape
+  closes itself.
+- `resolveRepositoryAnchor`: a linked worktree resolves to its main worktree (`--show-toplevel`
+  names the worktree), a submodule to its own toplevel (`dirname(common-dir)` points inside
+  `.git/modules`), everything else to its toplevel; a bare main repository to its common dir's
+  parent. `--path-format=absolute` is not used (AD-003). `repositoryDialogLine` names the target in
+  the one channel the agent cannot forge but could aim.
+
+### `tools/capture-issue.ts` (migrated in the 2.18.0 REVIEW)
+
+- Labels: a preference list per severity, matched without case against what the host repository
+  offers; the first match wins; with none the issue is created unlabeled, which always succeeds.
+  The framework never creates a label or a type in someone else's repository. An explicit label is
+  used as written (the developer may know one discovery cannot see) and an unknown one is warned
+  about, never dropped — dropping would hide a typo, and gh reports the real error; after a
+  `failed` call the hint names it as the likely cause.
+- Host-repository discovery waits until the call is in create mode and carries a `dev_approval`: it
+  runs gh, two authenticated API reads included, and no gated tool may cause an external effect
+  before its gate. Draft mode never discovers ("no external mutation"). Paths before authorization
+  describe only what the caller asked.
+- A label gh is about to refuse is named in the dialog, not only in the hints: approving a call
+  already known to fail spends the approval on nothing. The chosen mapping is stated in the hints.
+
+### `tools/load-context.ts`, `tools/status.ts` (migrated in the 2.18.0 REVIEW)
+
+- `rsct_load_context` is the §0 entry point. It reports how the open findings are known (#75)
+  because it is the first thing a resumed session reads; `measurable: false` means no baseline
+  could be read, not that nothing was raised. The bootstrap marker is evaluated before it is
+  stamped (#53 — a read after the stamp describes the stamp) and the write is reported. Only this
+  tool clears `context_stale` (plan-lifecycle-v2 D4), in the same write as the marker, so a failed
+  write says the re-bootstrap obligation is still there; the check is truthiness, the predicate the
+  edit guard uses.
+- Plan reconciliation (plan-lifecycle-v2 2.4) is local only (no gh round trip on every bootstrap)
+  and runs only once the session has left the plan's branch, since a branch still checked out
+  cannot be integrated; a squash or rebase merge is invisible to `git branch --merged` and is
+  caught when the developer runs `rsct_plan_dispose` (a residual).
+- An escalated sanitizer state is recorded at every bootstrap, not only at the commit gate: it
+  means a `Bash(git commit)` allow survived, commits can bypass `rsct_request_commit`, and the
+  window would leave no trail. `adrs_count: 0` comes with a warning (#49) because a parse or read
+  miss would otherwise read as "no decisions" for the whole session; a resumed REVIEW gets its own
+  steer (#40).
+- Both report the protected list the gates enforce (`effectiveProtectedList`, #50), not the raw
+  key, and only when the project is managed.
+- `rsct_status` accepts loose values while its advertised schema is strict: it is the bootstrap
+  tool documented to always succeed, and its parse is unguarded, so a `z.enum` would turn a
+  paraphrased `update_check: "On"` into a failure that also loses git state, topology and the
+  install-drift hint; `coerce` turns a `true` into `"true"`, ignored with a hint. Unknown keys
+  still reject. Its `deps` argument is a test seam, not MCP surface — without it the suite would
+  call api.github.com and rewrite the contributor's `~/.rsct`.
+- The update-check mutations run before the read, so turning the check off is not followed by a
+  notice on how to undo it and a decline silences the hint being answered; the environment switch
+  outranks the file, so a confirmation never contradicts it on a CI image. Caller input echoed
+  into hints is bounded. In a linked worktree the runtime state (`phase-state.json`, the approval
+  store, a batch token) is that worktree's own, and the status says so.
+- The bootstrap verdict strings are per tool, not shared: `evaluateBootstrapMarker`'s own hints
+  tell the reader to run both tools, which is self-referential from inside either. Every
+  "recorded" claim depends on `recorded`.
+
+### `tools/phase-verification-complete.ts` (migrated in the 2.18.0 REVIEW)
+
+- `evidence_mix` (#75) is counted from the stored baseline, never from `findings_actions` (an
+  action records a decision, not what it rested on), and is a required field so every return path
+  carries it; `null` reads as `measurable: false`, not as zeros. A block of another spec is not
+  weighed. The mix rides the dialog line, the hints and the audit entry — the dialog is absent on a
+  run with no dialog channel. `head_stale` (#75 C) is reported, never acted on.
+- A findings-gate rejection lists every finding still awaiting an action (#40); otherwise the only
+  way back is re-running `_start`, which rewrites the baseline. The unknown-id check runs after the
+  spec match and before the block check, and every rejection is audited. Gating recorded decisions
+  on a non-empty baseline was considered and rejected: the log is agent-written anyway, and dropping
+  a decision the developer made deletes information.
+- The completed verification block is kept (CAP-28), so `rsct_phase_code_start` can see that V ran
+  for this spec; the prune is an allowlist — spec, tier, start and completion times and `head_sha`
+  stay, findings and importers go (they are in the audit log). The phase label is always cleared
+  once `completed_at` is stamped: the old `clear_phase: false` stranded a label no tool could clear
+  without destroying the record. `PhaseVerificationCompleteInput` stays exported where importers
+  expect it (#19).
+
 ---
 
 ## How to contribute new decisions
