@@ -10,6 +10,7 @@ const BASH = bashAvailable()
 const ROOT = repoRoot(__dirname)
 const INSTALL = resolve(ROOT, 'scripts', 'install.sh')
 const UNINSTALL = resolve(ROOT, 'scripts', 'uninstall-framework.sh')
+const LIB = resolve(ROOT, 'scripts', 'rsct-lib.sh')
 
 const RUNTIME_DIRS = ['prompts', 'rules', 'doc-templates', 'memory-templates', 'universe-templates']
 const COMMANDS = ['rsct-setup', 'rsct-universe', 'rsct-uninstall', 'rsct-clean-code']
@@ -31,6 +32,9 @@ afterEach(() => {
 interface RunOpts {
   env?: Record<string, string | undefined>
   path?: string
+  exactPath?: string
+  args?: string[]
+  cwd?: string
   input?: string
   timeoutMs?: number
 }
@@ -57,9 +61,10 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
     RSCT_SKIP_MCP: '1',
     ...opts.env,
     ...(opts.path ? { PATH: `${opts.path}${delimiter}${inheritedPath()}` } : {}),
+    ...(opts.exactPath ? { PATH: opts.exactPath } : {}),
   })
   if (!env.RSCT_SKIP_MCP) {
-    if (!opts.path) {
+    if (!opts.path && !opts.exactPath) {
       throw new Error(
         'runScript: RSCT_SKIP_MCP was cleared without a stub bin dir — refusing to run. ' +
           'The MCP branch would reach the REAL `npm` and `claude`. Pass `path: newStubBin()`.',
@@ -75,7 +80,8 @@ function runScript(script: string, home: string, opts: RunOpts = {}): { ok: bool
     }
   }
   try {
-    const out = execFileSync(bashBin(), [script], {
+    const out = execFileSync(bashBin(), [script, ...(opts.args ?? [])], {
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
       env,
       encoding: 'utf8',
       stdio: opts.input === undefined ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
@@ -97,6 +103,7 @@ const STUB_CLAUDE = [
   'echo "STUB-CLAUDE $*" >> "$CFG_DIR/stub-claude.log"',
   'if [ -n "$STUB_CLAUDE_FAIL" ]; then exit 1; fi',
   'if [ -n "$STUB_CLAUDE_LIE" ]; then exit 0; fi',
+  'if [ -n "$STUB_CLAUDE_CORRUPT" ]; then printf "not json" > "$CFG"; exit 0; fi',
   'cat >/dev/null 2>&1 || true',
   'case "$1 $2 $3" in',
   '  "mcp add rsct")',
@@ -137,11 +144,15 @@ const STUB_REASON: Record<string, string> = {
   'rsct-mcp': 'The scripts would resolve, and could start, the rsct-mcp installed on this machine.',
 }
 
-function newStubBin(opts: { realNpm?: boolean; withoutCommand?: boolean } = {}): string {
+function newStubBin(opts: { realNpm?: boolean; withoutCommand?: boolean; withoutClaude?: boolean } = {}): string {
   const dir = newSandbox()
   const stubs: Record<string, string> = opts.realNpm
     ? { claude: STUB_CLAUDE }
-    : { npm: STUB_NPM, claude: STUB_CLAUDE, ...(opts.withoutCommand ? {} : { 'rsct-mcp': STUB_RSCT_MCP }) }
+    : {
+        npm: STUB_NPM,
+        ...(opts.withoutClaude ? {} : { claude: STUB_CLAUDE }),
+        ...(opts.withoutCommand ? {} : { 'rsct-mcp': STUB_RSCT_MCP }),
+      }
   for (const [bin, body] of Object.entries(stubs)) {
     writeFileSync(join(dir, bin), body)
     chmodSync(join(dir, bin), 0o755)
@@ -161,6 +172,36 @@ function newStubBin(opts: { realNpm?: boolean; withoutCommand?: boolean } = {}):
     }
   }
   return dir
+}
+
+function nodeOnlyDir(): string {
+  const dir = newSandbox()
+  const node = process.execPath.replace(/\\/g, '/')
+  writeFileSync(join(dir, 'node'), `#!/bin/sh\nexec "${node}" "$@"\n`)
+  chmodSync(join(dir, 'node'), 0o755)
+  return dir
+}
+
+function coreToolsDirs(): string[] {
+  if (process.platform !== 'win32') return ['/usr/bin', '/bin']
+  return [execFileSync(bashBin(), ['-c', 'cygpath -w /usr/bin'], { encoding: 'utf8' }).trim()]
+}
+
+function pathWithoutHostTools(stub: string, opts: { withoutNode?: boolean } = {}): string {
+  const path = [stub, ...(opts.withoutNode ? [] : [nodeOnlyDir()]), ...coreToolsDirs()].join(delimiter)
+  for (const bin of ['claude', 'rsct-mcp']) {
+    const found = execFileSync(bashBin(), ['-c', `command -v ${bin} || true`], {
+      env: overlayEnv(process.env, { PATH: path }),
+      encoding: 'utf8',
+    }).trim()
+    if (found && !found.includes('rsct-install-')) {
+      throw new Error(
+        `a ${bin} outside the sandbox is reachable on the reduced PATH (${found}) — refusing to run. ` +
+          STUB_REASON[bin],
+      )
+    }
+  }
+  return path
 }
 
 const stubMcpLog = (stub: string) => {
@@ -305,50 +346,77 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
   }, 60_000)
 })
 
-describe.skipIf(!BASH)('install/uninstall WSL guard (CAP-38 family)', () => {
-  function matches(osrelease: string): boolean {
-    try {
-      execFileSync(bashBin(), ['-c', `printf '%s\\n' "$1" | grep -qiE "microsoft|wsl"`, '_', osrelease], { stdio: 'ignore' })
-      return true
-    } catch {
-      return false
-    }
+const OSRELEASE_CHECK = /grep -qiE "([^"]+)" \/proc\/sys\/kernel\/osrelease/
+
+const THIS_IS_WSL = (() => {
+  try {
+    return /microsoft|wsl/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8'))
+  } catch {
+    return false
   }
-  it('matches WSL osrelease strings', () => {
-    expect(matches('5.15.0-microsoft-standard-WSL2')).toBe(true)
-    expect(matches('4.4.0-19041-Microsoft')).toBe(true)
-  })
-  it('does not match a vanilla Linux osrelease', () => {
-    expect(matches('6.5.0-generic')).toBe(false)
-    expect(matches('5.10.0-21-amd64')).toBe(false)
+})()
+
+describe.skipIf(!BASH)('install/uninstall WSL detection reads osrelease the same way (#110)', () => {
+  for (const script of [INSTALL, UNINSTALL]) {
+    const name = script.replace(/\\/g, '/').split('/').pop()!
+    const pattern = readFileSync(script, 'utf8').match(OSRELEASE_CHECK)?.[1] ?? ''
+    const matches = (osrelease: string): boolean => {
+      try {
+        execFileSync(bashBin(), ['-c', 'printf "%s\\n" "$2" | grep -qiE "$1"', '_', pattern, osrelease], { stdio: 'ignore' })
+        return true
+      } catch {
+        return false
+      }
+    }
+    it(`${name}: matches a WSL2 and a WSL1 osrelease, not a plain Linux one`, () => {
+      expect(pattern, `${name} must read /proc/sys/kernel/osrelease with grep -qiE`).not.toBe('')
+      expect(matches('5.15.0-microsoft-standard-WSL2')).toBe(true)
+      expect(matches('4.4.0-19041-Microsoft')).toBe(true)
+      expect(matches('6.5.0-generic')).toBe(false)
+      expect(matches('5.10.0-21-amd64')).toBe(false)
+    })
+  }
+
+  it.skipIf(THIS_IS_WSL)('--wsl outside WSL stops both scripts before anything is written or removed', () => {
+    const home = newSandbox()
+    const installed = runScript(INSTALL, home, { args: ['--wsl'] })
+    expect(installed.ok, installed.out).toBe(false)
+    expect(installed.out, installed.out).toMatch(/--wsl was given, but this is not WSL/)
+    expect(present(rsctHome(home))).toBe(false)
+    expect(present(commandsDir(home))).toBe(false)
+
+    expect(runScript(INSTALL, home).ok).toBe(true)
+    const removed = runScript(UNINSTALL, home, { args: ['--wsl'] })
+    expect(removed.ok, removed.out).toBe(false)
+    expect(removed.out, removed.out).toMatch(/--wsl was given, but this is not WSL/)
+    expect(present(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
+  }, 90_000)
+
+  it('the PATH rebuild comes before the first node, npm or claude call in both scripts', () => {
+    const CALL = /(^|[;&|(`!{]|\$\(|\b(if|elif|then|else|do|while|until|exec|env|nohup|command)\s|\b\w+=\S*\s)\s*"?(node|npm|claude)"?(\s|\)|$)|rsct_host_config|command -v (node|npm|claude)\b/
+    for (const script of [INSTALL, UNINSTALL]) {
+      const lines = readFileSync(script, 'utf8').replace(/\r/g, '').split('\n')
+      const rebuild = lines.findIndex((line) => /^\s*PATH=\$\(rsct_linux_path "\$PATH"\)$/.test(line))
+      const firstCall = lines.findIndex(
+        (line) => (!/^\s*echo /.test(line) || /\$\(\s*(node|npm|claude)\b/.test(line)) && CALL.test(line),
+      )
+      expect(rebuild, `${script}: no PATH rebuild`).toBeGreaterThan(-1)
+      expect(firstCall, `${script}: no node/npm/claude call found — the check would pass vacuously`).toBeGreaterThan(-1)
+      expect(rebuild, `${script}: line ${firstCall + 1} runs before the PATH rebuild`).toBeLessThan(firstCall)
+    }
   })
 })
 
 describe.skipIf(!BASH)('uninstall plan-line wording under --skip-mcp (A4)', () => {
   it('reports a detected global rsct-mcp as left untouched, not "will ask separately"', () => {
     const home = newSandbox()
+    seedFramework(home)
     const binDir = newSandbox()
     const fake = join(binDir, 'rsct-mcp')
     writeFileSync(fake, '#!/bin/sh\nexit 0\n')
     chmodSync(fake, 0o755)
 
-    let out: string
-    try {
-      out = execFileSync(bashBin(), [UNINSTALL], {
-        env: {
-          ...process.env,
-          HOME: home.replace(/\\/g, '/'),
-          RSCT_ASSUME_YES: '1',
-          RSCT_SKIP_MCP: '1',
-          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        },
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    } catch (e: unknown) {
-      const err = e as { stdout?: string; stderr?: string; message?: string }
-      out = `${err.stdout ?? ''}\n${err.stderr ?? ''}\n${err.message ?? ''}`
-    }
+    const { out } = runScript(UNINSTALL, home, { path: binDir })
 
     expect(out, out).toMatch(/global rsct-mcp at .*\(left untouched; --skip-mcp set\)/)
     expect(out).not.toMatch(/will ask separately/)
@@ -718,10 +786,11 @@ function writeTreePackage(tree: SourceTree, files: string[]): void {
   )
 }
 
-function newSourceTree(files: string[], marker: string): SourceTree {
+function newSourceTree(files: string[], marker: string, opts: { withoutLib?: boolean } = {}): SourceTree {
   const root = newSandbox()
   mkdirSync(join(root, 'scripts'))
   copyFileSync(INSTALL, join(root, 'scripts', 'install.sh'))
+  if (!opts.withoutLib) copyFileSync(LIB, join(root, 'scripts', 'rsct-lib.sh'))
   writeFileSync(join(root, 'VERSION'), '9.9.9\n')
   for (const d of RUNTIME_DIRS) {
     mkdirSync(join(root, d))
@@ -1113,6 +1182,208 @@ describe.skipIf(!BASH)('uninstall-framework.sh treats the copy as part of the co
     },
     60_000,
   )
+})
+
+describe.skipIf(!BASH)('both scripts load scripts/rsct-lib.sh from beside them, or stop before writing (#110)', () => {
+  it('the installer stops when the lib is missing', () => {
+    const home = newSandbox()
+    const tree = newSourceTree(['dist'], 'V1', { withoutLib: true })
+    const r = runScript(tree.install, home)
+    expect(r.ok, r.out).toBe(false)
+    expect(r.out, r.out).toMatch(/rsct-lib\.sh/)
+    expect(present(rsctHome(home))).toBe(false)
+    expect(present(commandsDir(home))).toBe(false)
+  }, 60_000)
+
+  it('an exported CDPATH does not break finding the lib when the scripts run by a relative path', () => {
+    const tree = newSourceTree(['dist'], 'V1')
+    const root = resolve(tree.install, '..', '..')
+    copyFileSync(UNINSTALL, join(root, 'scripts', 'uninstall-framework.sh'))
+    const home = newSandbox()
+    const env = { CDPATH: '.:' }
+    const installed = runScript('scripts/install.sh', home, { env, cwd: root })
+    expect(installed.ok, installed.out).toBe(true)
+    expect(present(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
+    const removed = runScript('scripts/uninstall-framework.sh', home, { env, cwd: root })
+    expect(removed.ok, removed.out).toBe(true)
+    expect(present(rsctHome(home))).toBe(false)
+  }, 90_000)
+
+  it('the uninstaller stops when the lib is missing', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    const scripts = join(newSandbox(), 'scripts')
+    mkdirSync(scripts)
+    copyFileSync(UNINSTALL, join(scripts, 'uninstall-framework.sh'))
+    const r = runScript(join(scripts, 'uninstall-framework.sh'), home)
+    expect(r.ok, r.out).toBe(false)
+    expect(r.out, r.out).toMatch(/rsct-lib\.sh/)
+    expect(present(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
+  }, 60_000)
+})
+
+describe.skipIf(!BASH)('uninstall-framework.sh removes the user-scope registration where Claude Code keeps it (#82)', () => {
+  const reach = { RSCT_SKIP_MCP: undefined as string | undefined }
+  const asked = { ...reach, RSCT_ASSUME_YES: undefined as string | undefined }
+  const noCommand = () => pathWithoutHostTools(newStubBin({ withoutCommand: true }))
+  const QUALIFIED = /Done\. The user-scope registration named above is still in place\./
+  const REMOVED = /Done\. RSCT framework removed from this machine\./
+  const NO_ENTRY = '{\n  "mcpServers": {}\n}\n'
+
+  it('reads and cleans the host config under CLAUDE_CONFIG_DIR, and leaves $HOME/.claude.json alone', () => {
+    const home = newSandbox()
+    const cfgDir = newSandbox()
+    seedFramework(home)
+    seedHostConfig(cfgDir, USER_ENTRY)
+    seedHostConfig(home, NO_ENTRY)
+    const cfgName = cfgDir.replace(/\\/g, '/').split('/').pop()!
+    const r = runScript(UNINSTALL, home, {
+      env: { ...reach, CLAUDE_CONFIG_DIR: cfgDir.replace(/\\/g, '/') },
+      exactPath: noCommand(),
+    })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toContain(`${cfgName}/.claude.json (top-level mcpServers.rsct)`)
+    expect(stubClaudeLog(cfgDir)).toMatch(/mcp remove rsct --scope user/)
+    expect(hostConfig(cfgDir).mcpServers?.rsct, 'the entry must be gone from the file Claude Code reads').toBeUndefined()
+    expect(hostConfigRaw(home), '$HOME/.claude.json is not the host config here').toBe(NO_ENTRY)
+    expect(r.out, r.out).toMatch(/✓ Unregistered rsct from Claude Code \(user scope\)\./)
+    expect(r.out, r.out).toMatch(REMOVED)
+  }, 60_000)
+
+  it('names a registration it cannot remove without a claude CLI, and does not say "removed"', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, {
+      env: reach,
+      exactPath: pathWithoutHostTools(newStubBin({ withoutCommand: true, withoutClaude: true })),
+    })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/No 'claude' CLI on PATH to remove it with\. It stays in .*\.claude\.json\./)
+    expect(r.out, r.out).toMatch(/Remove it with: claude mcp remove rsct --scope user/)
+    expect(r.out, r.out).toMatch(QUALIFIED)
+    expect(r.out).not.toMatch(REMOVED)
+    expect(hostConfigRaw(home)).toBe(USER_ENTRY)
+  }, 60_000)
+
+  it('offers a registration that is the only thing left instead of "Nothing to remove"', () => {
+    const home = newSandbox()
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, { env: reach, exactPath: noCommand() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out).not.toMatch(/Nothing to remove/)
+    expect(r.out, r.out).toMatch(/Detected:\s+rsct registered at user scope in .*\.claude\.json \(will ask separately\)/)
+    expect(hostConfig(home).mcpServers?.rsct).toBeUndefined()
+    expect(r.out, r.out).toMatch(REMOVED)
+  }, 60_000)
+
+  it('still says "Nothing to remove" when there is no framework and no registration', () => {
+    const home = newSandbox()
+    seedHostConfig(home, NO_ENTRY)
+    const r = runScript(UNINSTALL, home, { env: reach, exactPath: noCommand() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/Nothing to remove — RSCT framework is not installed on this machine\./)
+    expect(r.out).not.toMatch(/Not checked/)
+    expect(stubClaudeLog(home)).toBe('')
+  }, 60_000)
+
+  it('a registration that is the only thing left under --skip-mcp is named, not offered', () => {
+    const home = newSandbox()
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, { exactPath: noCommand() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/Nothing to remove except the user-scope registration in .*\.claude\.json, which --skip-mcp leaves in place\./)
+    expect(r.out).not.toMatch(/Proceed with framework removal/)
+    expect(hostConfigRaw(home)).toBe(USER_ENTRY)
+  }, 60_000)
+
+  it('without node it says the registration was not checked instead of "removed"', (ctx) => {
+    const noNode = pathWithoutHostTools(newStubBin({ withoutCommand: true }), { withoutNode: true })
+    const found = execFileSync(bashBin(), ['-c', 'command -v node || true'], {
+      env: overlayEnv(process.env, { PATH: noNode }),
+      encoding: 'utf8',
+    }).trim()
+    if (found) ctx.skip()
+
+    const home = newSandbox()
+    seedFramework(home)
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, { env: reach, exactPath: noNode })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/Done\. Not checked: whether rsct is still registered at user scope in .*\.claude\.json/)
+    expect(r.out).not.toMatch(REMOVED)
+    expect(hostConfigRaw(home)).toBe(USER_ENTRY)
+
+    const empty = newSandbox()
+    seedHostConfig(empty, USER_ENTRY)
+    const e = runScript(UNINSTALL, empty, { env: reach, exactPath: noNode })
+    expect(e.ok, e.out).toBe(true)
+    expect(e.out, e.out).toMatch(/Nothing to remove — RSCT framework is not installed on this machine\./)
+    expect(e.out, e.out).toMatch(/Not checked: whether rsct is registered at user scope in .*\.claude\.json \(node is not on PATH\)\./)
+  }, 90_000)
+
+  it('does not believe a CLI that exits 0 and leaves the entry', () => {
+    const home = newSandbox()
+    const cfgDir = newSandbox()
+    seedFramework(home)
+    seedHostConfig(home, NO_ENTRY)
+    seedHostConfig(cfgDir, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, {
+      env: { ...reach, STUB_CLAUDE_LIE: '1', CLAUDE_CONFIG_DIR: cfgDir.replace(/\\/g, '/') },
+      exactPath: noCommand(),
+    })
+    expect(r.ok, r.out).toBe(true)
+    expect(stubClaudeLog(cfgDir)).toMatch(/mcp remove rsct --scope user/)
+    expect(r.out, r.out).toMatch(/rsct is still registered at user scope in .*\.claude\.json\./)
+    expect(r.out).not.toMatch(/✓ Unregistered/)
+    expect(r.out, r.out).toMatch(QUALIFIED)
+    expect(hostConfig(cfgDir).mcpServers?.rsct).toBeDefined()
+  }, 60_000)
+
+  it('a host config the CLI left unreadable is not counted as removed', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, { env: { ...reach, STUB_CLAUDE_CORRUPT: '1' }, exactPath: noCommand() })
+    expect(r.ok, r.out).toBe(true)
+    expect(r.out, r.out).toMatch(/\.claude\.json could not be read after the removal, so it is not confirmed\./)
+    expect(r.out).not.toMatch(/✓ Unregistered/)
+    expect(r.out, r.out).toMatch(/Done\. Not confirmed: whether the user-scope registration named above was removed\./)
+    expect(r.out).not.toMatch(QUALIFIED)
+    expect(r.out).not.toMatch(REMOVED)
+  }, 60_000)
+
+  it('believes the file, not the exit code, when the CLI removes the entry and exits non-zero', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    seedHostConfig(home, USER_ENTRY)
+    const r = runScript(UNINSTALL, home, { env: { ...reach, STUB_CLAUDE_ACT_THEN_FAIL: '1' }, exactPath: noCommand() })
+    expect(r.ok, r.out).toBe(true)
+    expect(hostConfig(home).mcpServers?.rsct).toBeUndefined()
+    expect(r.out, r.out).toMatch(/✓ Unregistered rsct from Claude Code \(user scope\)\./)
+    expect(r.out, r.out).toMatch(REMOVED)
+  }, 60_000)
+
+  it('a kept registration (--skip-mcp, or the answer n) is named in the closing line', () => {
+    const skipped = newSandbox()
+    seedFramework(skipped)
+    seedHostConfig(skipped, USER_ENTRY)
+    const s = runScript(UNINSTALL, skipped, { exactPath: noCommand() })
+    expect(s.ok, s.out).toBe(true)
+    expect(s.out, s.out).toMatch(/rsct registered at user scope in .*\.claude\.json \(left untouched; --skip-mcp set\)/)
+    expect(s.out, s.out).toMatch(QUALIFIED)
+    expect(stubClaudeLog(skipped)).toBe('')
+    expect(hostConfigRaw(skipped)).toBe(USER_ENTRY)
+
+    const declined = newSandbox()
+    seedFramework(declined)
+    seedHostConfig(declined, USER_ENTRY)
+    const d = runScript(UNINSTALL, declined, { env: asked, exactPath: noCommand(), input: 'y\nn\n' })
+    expect(d.ok, d.out).toBe(true)
+    expect(d.out, d.out).toMatch(/Kept user-scope registration\./)
+    expect(d.out, d.out).toMatch(QUALIFIED)
+    expect(hostConfigRaw(declined)).toBe(USER_ENTRY)
+  }, 90_000)
 })
 
 describe('the companion is installed by the installer, not from the clone (#74)', () => {

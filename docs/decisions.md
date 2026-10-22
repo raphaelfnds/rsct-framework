@@ -1056,7 +1056,7 @@ Named limits:
   the whole file. That is growth proportional to use, left as it was — #93 stays open for it.
 
 ### ADR-025 — The audit log keeps ten days of routine history; what gates read and bypass records stay (#93, 2.14.0)
-**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93. Since 2.17.0 (ADR-030) `plan_authorize.authorized` and `plan_revoke.revoked` are pinned too: the commit gate reads them to decide whether a batch token counts. Since 2.18.0 (ADR-031) an `audit.path` that names a stream is ignored when the path is decided, so the named limit "Only retention refuses such a path; the log is still written there" no longer holds: the log is written to the default path, and retention still cuts nothing while the config names a stream.
+**Status**: active. Supersedes ADR-024's decision "do not build a retention policy". Closes #93. Since 2.17.0 (ADR-030) `plan_authorize.authorized` and `plan_revoke.revoked` are pinned too: the commit gate reads them to decide whether a batch token counts. Since 2.18.0 (ADR-031) an `audit.path` that names a stream is ignored when the path is decided, so the named limit "Only retention refuses such a path; the log is still written there" no longer holds: the log is written to the default path, and retention still cuts nothing while the config names a stream. Since 2.19.0 (ADR-032) a Claude Code inside WSL can be installed with `--wsl`, so the named limit "That combination has no supported install today (#110)" no longer holds: a project on `/mnt/c` is reachable from such an install, and its log is still never cut there.
 **Tags**: audit-log, retention, growth, cross-os
 
 **Context**: `.rsct/audit.log` is the only copy of what it holds and had no bound. MEASURED on 19
@@ -1353,7 +1353,8 @@ Named limits:
   in CI only, and the field logs came from a machine that had not been updated.
 
 ### ADR-026 — The companion is not published to a package registry (#112, 2.14.0)
-**Status**: active. The decision #112 asked for; ADR-021 and AD-007 stand.
+**Status**: active. The decision #112 asked for; ADR-021 and AD-007 stand. The line "a Claude Code
+that runs inside WSL still has no supported install (#110)" is superseded by ADR-032 (2.19.0).
 **Tags**: install, supply-chain, npm
 
 **Context**: a user gets the companion only through `scripts/install.sh`, run from a source tree
@@ -1977,6 +1978,154 @@ write returns `write_failed` and never throws, now provoked by a file where the 
 folder goes (a configured path through a file is ignored, pinned by `audit-path-unusable`);
 `run-alone.test.ts` imports `specLabel` from its new module. The edit-scope guard and the sanitizer
 bundle `decideAuditPath`, so a project needs `/rsct-setup` for its copies to follow the new rule.
+
+### ADR-032 — `--wsl` installs for a Claude Code inside WSL; the uninstaller reads Claude Code's host config; hook scripts only through a link (#110, #82, 2.19.0)
+**Status**: active. Supersedes ADR-026's line "a Claude Code that runs inside WSL still has no
+supported install (#110)" and ADR-025's "That combination has no supported install today (#110)";
+the rest of both stands.
+**Tags**: install, uninstall, wsl, cross-os
+
+**Context**: MEASURED on `main` @ `9d188c1` (2.18.0), Windows 11 with WSL2 (Ubuntu, kernel
+`5.15.167.4-microsoft-standard-WSL2`) and Git Bash 5.2.26.
+- Both scripts stopped under WSL, so a Claude Code whose CLI runs inside a distro had no install.
+  Inside WSL the Windows PATH comes along: `command -v claude`, `npm` and `rsct-mcp` answer the
+  Windows programs under `/mnt/c/...` with nothing installed in Linux, and the Windows npm acts on
+  the Windows prefix (CLAUDE.md, WSL table, #74).
+- `/usr/bin/wslpath -w` answers `\\wsl.localhost\<distro>\…` for a path on the Linux disk and a
+  drive path for `/mnt/c/…`, also when the path goes through a link into `/mnt/c`.
+- The uninstaller looked for the user-scope entry in `$HOME/.claude.json`, only when `claude` was
+  on PATH. Claude Code keeps it in `$CLAUDE_CONFIG_DIR/.claude.json`, else in `os.homedir()` — on
+  Windows `USERPROFILE` (the installer's `HOST_CFG`, #73). So an entry under `CLAUDE_CONFIG_DIR`, or
+  any entry on a machine without the CLI, was not seen; a machine with only the registration left
+  answered "Nothing to remove" before looking for it; and the closing line said "RSCT framework
+  removed" with the entry in place.
+- `/rsct-setup` 4.V.a also read `RSCT_FRAMEWORK_SOURCE`, an override no page documented.
+
+**Decision**:
+- Both scripts take `--wsl`. The `osrelease` check stays inline; the shared functions live in
+  `scripts/rsct-lib.sh`, sourced with `.` — a tree without it stops before any write. Not WSL and no
+  flag: as before. `--wsl` outside WSL: stop. WSL without the flag: stop, and the message names
+  `--wsl`. WSL with the flag: the steps below.
+- A path is on the Linux side only when `/usr/bin/wslpath -w` (called by full path; missing → stop)
+  answers `\\wsl.localhost\` or `\\wsl$\`. Any other answer, or none, counts as not Linux. Without
+  asking, these count as not Linux too: a path that is not absolute (a relative `HOME` would be
+  judged against the folder the script starts in, and the installer later `cd`s into the clone),
+  including a Windows-form value such as `C:\…`; a path with a `.` or `..` segment (the kernel
+  resolves `..` on disk, so the deepest existing folder of `a/missing/../..` is not where a write
+  lands); a link whose target is gone. A path that does not exist yet is judged by its deepest
+  existing folder or link, found without external tools. A program counts as Windows unless it is
+  confirmed on the Linux side, readable, and does not start with `MZ` (read with a bash builtin).
+  Shell functions named `node`, `npm`, `claude` or `rsct-mcp` (an exported one, or one from
+  `BASH_ENV`) are dropped after the PATH rebuild, so a call runs the file that was checked.
+- PATH is rebuilt once, before the first `node`, `npm` or `claude` call (a test pins the order),
+  keeping only absolute Linux-side entries, split on `:` with globbing off; an empty result stops
+  the run. A `node`, `npm` or `claude` that still resolves to a Windows program stops the run. The
+  installer also stops when no Linux `claude` is left. `~/.rsct`, `~/.claude/commands`, the
+  host-config folder, the host-config file itself and `npm prefix -g` must all be on the Linux side,
+  or the run stops before writing and names the path. `npm prefix -g` runs only after the other
+  destinations pass — npm writes its log folder under `HOME` (measured: with `HOME` on `/mnt/c` it
+  created `.npm` there before the stop, found in the REVIEW) — and an answer of nothing stops the
+  run. Under `--wsl` the `claude` commands both scripts print name the Linux `claude` by full
+  path; when the uninstaller has no Linux `claude` or npm, its hints say to edit the file, install
+  the tool inside WSL or run the uninstaller again, never a bare `claude` or `npm` that the
+  developer's shell could resolve to the Windows one. Two hints stay bare. `sudo npm`: with a
+  `secure_path` in sudoers, as on Ubuntu, `sudo` does not search `/mnt/c`; without one it may (not
+  measured). The project-scope step of the uninstaller's manual steps, when there is no Linux
+  `claude`: what a Windows `claude` writes besides that project's `.mcp.json` was not measured.
+- Installer: when the `rsct-mcp` the original PATH resolves is a Windows program after the install,
+  it does not report the companion as installed, registers nothing and leaves the recorded scope as
+  it was; the message names the Linux folder to put first. A Linux shim is not a Windows program, so
+  ADR-021's version-manager case is unchanged. Uninstaller: no Linux `claude` needed; a Windows
+  `rsct-mcp` is named as the Windows install's and not touched.
+- Uninstaller, every OS (#82): the host config is resolved as in the installer
+  (`rsct_host_config`, which turns backslashes into slashes on Windows only); the entry is detected
+  whenever node is present; "Nothing to remove" counts a registration (under `--skip-mcp` it names
+  the one it leaves); after `claude mcp remove` the file is re-read and the CLI's exit code is not
+  used. When the entry stays (no CLI, still present, answered `n`, `--skip-mcp`) the closing line
+  says so; when the file can no longer be read it says the removal is not confirmed; without node it
+  says the registration was not checked.
+- 4.V.a takes the hook scripts from `$(npm root -g)/rsct-mcp` only when that entry is a link
+  (`[ -L ]`) holding them — the link the installer creates to its copy (ADR-021) and the link a
+  contributor makes to a clone (`CONTRIBUTING.md`); a plain folder under that name is reported and
+  Phase 4.V is skipped. `RSCT_FRAMEWORK_SOURCE` is removed. The "not installed" texts point at
+  `bash scripts/install.sh`.
+
+**Direction**: more permissive by design for one path, decided by the maintainer in the #110 plan:
+the refusal under WSL gains an opt-in, `--wsl`, and every check on it stops the run or holds back
+the step (the Windows `rsct-mcp` case registers nothing, the uninstaller leaves it untouched).
+Every existing path is unchanged, stricter (4.V.a; the uninstaller's closing line; both scripts
+need `scripts/rsct-lib.sh` beside them) or corrected: the uninstaller now finds a user-scope entry
+it used to miss (under `CLAUDE_CONFIG_DIR`, without the CLI, or when it was the only thing left)
+and, with a `claude` CLI, removes it when asked or under `-y`; on Linux and macOS the host-config
+path keeps a backslash, and on every OS, without node, it follows `CLAUDE_CONFIG_DIR`. Apart from
+these, what ran before still runs the same way: on Windows the whole lifecycle with a real npm
+10.9.2 (install, update, keep or skip the companion, uninstall, and the 2.18.0 scripts against
+these in both directions) gave the 2.18.0 results, and Git Bash with the clone under
+`//wsl.localhost/` installed and uninstalled as before (MEASURED 2026-10-21); for Linux and macOS
+the CI matrix (ubuntu, windows, macos) runs the suite on the release pull request (which `bash` the
+macOS runner puts first, and so whether bash 3.2 itself runs, was not checked). ADR-026's reopen condition "the install channel is redesigned" is not
+met: the same installer, one option, nothing published.
+
+**Alternatives considered**:
+- Putting the Linux npm folder first on PATH (the first plan) — dropped in V: every Windows program
+  not shadowed by name stayed reachable.
+- An environment variable that makes a test machine look like WSL — rejected: an agent can set an
+  environment variable, and a check it can switch off is not a check (ADR-027). CI covers the pure
+  functions and the non-WSL verdicts; the WSL runs are proven by hand.
+- Refusing any `rsct-mcp` not proven to be the copy — rejected: a version manager's shim cannot be
+  proven (ADR-021) and would stop working.
+- 4.V.a reading `~/.rsct/mcp-server` only — rejected in V: the contributor link points at a clone,
+  and contributors would lose their hooks.
+- Detecting WSL by `WSL_DISTRO_NAME` or `uname` — not taken: the environment variable can be set,
+  and `osrelease` is what the guard read before.
+
+**What is given up, by name**: a container that shares the WSL kernel (Docker Desktop's) matches
+`osrelease`, has no `wslpath` and stops; WSL1 was not measured; a custom kernel whose `osrelease`
+names neither "microsoft" nor "wsl" is not detected, as before; a folder shared on purpose between
+the Windows and Linux homes stops a `--wsl` run; a Windows `HOME` that differs from `USERPROFILE`
+without `CLAUDE_CONFIG_DIR` cannot be reproduced through the test harness; the WSL runs are proven
+by hand on one machine, not in CI. The checks judge folders and the host-config file, not what a
+program does: a Linux-side program named `node`, `npm` or `claude` that itself starts a Windows
+program passes; a Windows folder reached through a mount other than `/mnt/<drive>` is judged by
+what `wslpath` answers (not measured); npm's own cache and log folders are not checked; a link to
+the Windows side placed inside `~/.rsct` or `~/.claude/commands`, rather than the folder itself, is
+not seen. Both scripts now need `scripts/rsct-lib.sh` beside them: a script copied alone or run
+through a link stops before doing anything; piped into bash it has no file name, so it reads an
+`rsct-lib.sh` from the current folder, and stops when there is none (undocumented use). The
+uninstaller still stops at a closed stdin before its closing line, as before. A relative PATH entry
+that wins the lookup of `rsct-mcp` makes that command read as the Windows one (fails closed). The
+uninstaller names a Windows `rsct-mcp` only when it comes first on the original PATH; behind a
+Linux one it is not mentioned. A host config node cannot parse counts as holding no entry at
+detection (the re-read after a removal tells that case apart).
+
+**Consequences**: `tests/bash/rsct-lib.test.ts`, `tests/bash/hook-source-link.test.ts`, and new
+blocks in `tests/bash/script-install.test.ts` (both scripts stop without the lib and find it under
+an exported `CDPATH`, `--wsl` outside WSL, the PATH order — a call after `if`, `elif`, `then`, `do`,
+`exec`, `env`, `!`, `{` or an assignment, quoted, or inside `$(…)` on an `echo` line counts —, and
+the #82 cases, two of which put the entry only in the `CLAUDE_CONFIG_DIR` file so a detection or a
+re-read of `$HOME` fails). Edited tests, each with the guarantee it still holds: the
+`osrelease` matcher test re-typed the grep — it now reads the pattern from both scripts, and the
+WSL2, WSL1 and plain-Linux strings it pinned are pinned there; the `--skip-mcp` wording test (A4)
+runs through `runScript`, so its host config is the sandbox's; the bash lint expects three scripts
+(the lib is linted as one). The session rules and the memory template name the installer, so a
+project picks the new text up through `/rsct-setup`.
+
+Proven by hand inside WSL (2026-10-21, a stub `claude`, the official node 22.14.0 for Linux unpacked
+in a temporary folder, the sandbox removed afterwards): without `--wsl` it stops; without a Linux
+`claude` it stops and names the Windows one; `HOME`, `CLAUDE_CONFIG_DIR` or npm's prefix on
+`/mnt/c` stop it before anything is written there; a clone on the Linux disk and one on `/mnt/c`
+install, update and uninstall; with no Linux node, or node without npm, the companion is skipped
+and the Windows npm is never run; with the Windows `rsct-mcp` first on PATH the companion is linked
+in Linux, nothing is registered and the message names the Linux folder; with the Linux folder first
+the command is the copy, starts, and is registered and later removed from the Linux host config.
+After the REVIEW fixes: a `~/.claude.json` that is a link into `/mnt/c`, a `HOME` with `..` behind
+a missing folder, a `HOME` plainly on `/mnt/c` with a Linux npm present (npm never ran, the folder
+stayed empty), a PATH with only Windows-side folders, and an `npm prefix -g` that answers nothing
+all stop both scripts with nothing written or removed; so does a relative `HOME`; an exported
+shell function named `claude` is not what runs (the checked file is); the uninstaller's hints name
+the Linux `claude` by full path, or say to edit the file or install npm inside WSL. Before and
+after every WSL run the Windows install's global link, user-scope entry, `~/.rsct` and slash
+commands were identical.
 
 ---
 
@@ -2676,12 +2825,19 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - `sql_dialect` is validated three times on purpose — Phase 3, the CREATE render (the shell
   does not persist between phases, so the value is re-declared) and the UPDATE splice — and
   an existing invalid value is repaired in place, because it rejects the whole config.
+- **4.V.a (migrated in the 2.19.0 REVIEW).** On Windows `npm root -g` answers a native path
+  (`C:\Users\…\node_modules`); `[ -f ]`, `dirname` and `tail` worked on it only through Git Bash's
+  tolerance of mixed separators, so it goes through `cygpath -u`. Linux and macOS have no `cygpath`,
+  so the value is kept as it is. The hook scripts are taken only when `<root>/rsct-mcp` answers
+  `[ -L ]` (ADR-032): MEASURED 2026-10-21 in Git Bash, npm's Windows junction answers true and a
+  package folder from the registry answers false; on Linux and macOS npm links with a symlink.
 
 ### `scripts/install.sh` (migrated in the #74 REVIEW)
 
 - **WSL guard.** `/proc/sys/kernel/osrelease` matching `microsoft|wsl` covers WSL1 and WSL2 (the
   test pins one string of each). A WSL shell would install into `/home/<user>/.rsct/`, which a
-  Claude Code running on Windows never reads. The Claude-Code-inside-WSL case is #110.
+  Claude Code running on Windows never reads. Since 2.19.0, `--wsl` installs for a Claude Code that
+  runs inside WSL (ADR-032); the check stays inline, ahead of sourcing `scripts/rsct-lib.sh`.
 - **`read_or_default`.** `read -r` returns non-zero at EOF and `set -e` turns that into an abort, on
   purpose. An unconditional EOF fallback was measured in the #73 REVIEW: `bash scripts/install.sh
   </dev/null` without `RSCT_ASSUME_YES` ran a FULL install, because `Proceed? [y/N]` displays N and
@@ -2690,9 +2846,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
   EMPTY reply falls back. The stderr line exists because the abort used to be silent.
 - **Host config path (`HOST_CFG`, #73).** `claude mcp add/remove` is a Node program: it honours
   `CLAUDE_CONFIG_DIR`, else `os.homedir()` — `USERPROFILE` on Windows, not bash's `$HOME`. The script
-  resolves the same file through node and falls back to `$HOME/.claude.json` only when node is
-  absent. While it read `$HOME` and the CLI wrote elsewhere, detection missed a live user-scope entry
-  and recorded `project` over it.
+  resolves the same file through node (`rsct_host_config` in `scripts/rsct-lib.sh` since 2.19.0) and
+  falls back to `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json` only when node is absent or prints
+  nothing. While it read `$HOME` and the CLI wrote elsewhere, detection missed a live user-scope
+  entry and recorded `project` over it.
 - **Every `node -e` body is single-quoted.** In a double-quoted body bash collapses `\\` (`\\b`
   becomes a backspace) and `$`/backticks go live; that is POSIX double-quote semantics, the same on
   Linux and macOS, and `bash -n` does not flag it. A backslash is built with
@@ -2746,15 +2903,55 @@ those files. Keyed by module and symbol; restatements of what the code says were
   identity check can prove "this is the copy" and nothing else — behind a version manager's shim it
   says "could not be confirmed", never "is not".
 
+### `scripts/rsct-lib.sh` (2.19.0, #110)
+
+- MEASURED 2026-10-21 in WSL2 (Ubuntu, kernel `5.15.167.4-microsoft-standard-WSL2`, bash 5.2.21):
+  `wslpath -w` answered `\\wsl.localhost\Ubuntu\home\<user>` for the home, `\\wsl.localhost\Ubuntu\tmp`
+  for `/tmp`, `C:\Users` for `/mnt/c/Users` and for a link inside `/tmp` that points there. PATH
+  held 47 entries, 38 of them under `/mnt/`; `node` had no Linux copy while `npm`, `claude` and
+  `rsct-mcp` answered the Windows programs.
+- `rsct_wslpath_side` reads only the prefix: a share named `\\wsl.localhost.example\…`, a `\\?\`
+  path, an upper-case `\\WSL.LOCALHOST\` and an empty answer are the Windows side, so a doubtful
+  answer stops a `--wsl` run instead of letting it write.
+- `rsct_path_side` refuses a `.` or `..` segment before asking: the walk up to the deepest existing
+  folder is lexical, the kernel's `..` is not, so `HOME=/home/u/missing/../../../mnt/c/x` was judged
+  by `/home/u` while `mkdir -p` wrote under `/mnt/c/x` (found in the 2.19.0 REVIEW). The walk uses
+  `${path%/*}`, not `dirname`: with every PATH entry dropped, `dirname` is not found, the path stays
+  empty and the loop never ended (reproduced in the same REVIEW). In Git Bash `[ -e ]` resolves `..`
+  by the text alone, so the reproduction needs a Linux kernel. A path that is not absolute is
+  refused instead of being joined to `$PWD` (second REVIEW: `C:\Users\…` was judged by the current
+  folder and passed), and so is a link whose target is gone, which `wslpath` would judge by the
+  link's own place. The `MZ` test reads two characters with `read -n 2`, a builtin, so it does not
+  depend on a `head` being on the rebuilt PATH.
+- `rsct_linux_path` keeps no entry that is not absolute (`.`, `bin`, `node_modules/.bin`), because
+  `rsct_path_side` answers `unknown` for it: after the installer's `cd` into a clone on `/mnt/c`,
+  such an entry would resolve there (reproduced). It splits on `:` with `IFS` local to the
+  function and `set -f`, so an entry with a space stays whole and an entry with `*` is not
+  expanded; `set +f` afterwards. The callers do not run with `noglob` on purpose (the uninstaller
+  turns it off before its wipe loop anyway).
+- Contract under `set -e`: `rsct_tool_is_windows` is a yes/no function, called only in `if`;
+  every other function prints its answer and returns 0, so `X=$(…)` never stops a script.
+- `rsct_host_config` builds the backslash with `String.fromCharCode(92)` inside a single-quoted
+  `node -e` (CLAUDE.md, cross-OS rule 4, MED-16/CAP-20) and turns it into `/` on Windows only: on
+  Linux and macOS a backslash is part of a file name, and Claude Code there keeps it. Without node
+  it falls back to `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`.
+
 ### `scripts/uninstall-framework.sh` (migrated in the #74 REVIEW)
 
 - The companion is asked about separately because a developer may keep the server for projects wired
   through `.mcp.json` after removing the framework files; `--skip-mcp` asks nothing and touches
   neither the global install, its files, nor a user-scope registration — and the plan line says
   "left untouched" rather than "will ask separately".
-- User-scope detection parses `~/.claude.json`: `claude mcp list` in a pipe includes the project-scope
-  entries of any `.mcp.json` in the cwd ancestry, and would offer a removal the user-scope command
-  cannot perform. It reads `$HOME`, not `CLAUDE_CONFIG_DIR` — the gap recorded on #82.
+- User-scope detection parses the host config's top-level `mcpServers.rsct`: `claude mcp list` in a
+  pipe includes the project-scope entries of any `.mcp.json` in the cwd ancestry, and would offer a
+  removal the user-scope command cannot perform. Since 2.19.0 (#82) the file is resolved like the
+  installer's `HOST_CFG` (`rsct_host_config` in `scripts/rsct-lib.sh`), detection needs node but not
+  `claude`, and the entry is re-read after `claude mcp remove`, whose exit code is not used. The
+  re-read exits 0 (still there), 1 (gone) or 2 (unreadable), so a file the CLI damaged or deleted
+  is reported as not confirmed instead of removed.
+- Both scripts compute `SCRIPT_DIR` with `CDPATH= cd --`: with an exported `CDPATH` holding `.`,
+  `cd` prints the folder and the command substitution captured it twice, so sourcing
+  `rsct-lib.sh` failed (found in the 2.19.0 REVIEW; the uninstaller had no `SCRIPT_DIR` before).
 - The removed-command list keeps the two retired names so old stubs are cleaned.
 - `set +f` precedes the wipe loop: with `noglob` inherited from the environment the loop ran over the
   literal patterns, removed nothing and still printed "Removed" (measured).
@@ -2937,6 +3134,20 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### Tests and build
 
+- `tests/bash/lint.test.ts` (migrated in the 2.19.0 REVIEW) is the static bash lint (T0.a): `bash -n`
+  over every prompt block and script (the V2 regression gate), the AP1–AP7 detectors over the real
+  corpus with no ERROR finding allowed, one self-test per detector (it must flag a known-bad and
+  pass a known-good: a detector with no proof it fires is a silent pass), and the CI guard that
+  fails when `RSCT_REQUIRE_BASH=1` and bash is missing. The block counts guard against an extractor
+  that lints nothing. No `scripts/*.sh` may be skipped by the illustrative-sentinel heuristic: it
+  exists for prompt blocks that show a "❌ NÃO usar" example, but `loadScriptBlocks` runs the same
+  `skipState` over whole scripts, so one comment with ❌, PROIBIDO or "NÃO usar" would switch off
+  every detector and the `bash -n` gate for that file, and the skip is only logged (#73: the
+  install.sh comments of the time cited anti-pattern #5 by name). The skipped-block report is
+  informational, not an assertion. The `bash -n` gate spawns about 70 synchronous bash processes,
+  slow under Git Bash on Windows CI, hence its 120 s timeout. The AP5 self-test's known-bad parses
+  and re-stringifies a whole file; its known-goods are the documented `.mcp.json` exception and a
+  per-value text splice. AP6 is off by default.
 - `verification-checklist.test.ts`: the clean-pass suppression is scoped to the corpus MISS, not to
   a small corpus — the cases use only `decisions.md` with no `knowledge/` directory, because a
   present knowledge category emits `forgotten` prompts that would lift the count above zero and skip

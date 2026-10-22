@@ -120,7 +120,8 @@ Every change to bash prompts, scripts, `rsct-mcp` code, or templates **must work
 without regression on Windows (Git Bash / MSYS2), Linux (GNU coreutils), and
 macOS (BSD coreutils)**. "Works on my Windows" is not proof of done. WSL is a
 fourth environment with its own measured differences — see the WSL subsection of
-[CLAUDE.md](CLAUDE.md); today the installer refuses to run inside it (#110).
+[CLAUDE.md](CLAUDE.md). Inside WSL the installer and uninstaller run only with
+`--wsl`, for a Claude Code whose CLI runs in that distro (ADR-032).
 
 The most dangerous bugs here are **silent** — e.g. BSD `grep` on macOS treats a
 GNU-only `\|` alternation as a literal and returns empty with no error. The

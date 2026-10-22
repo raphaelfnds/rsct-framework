@@ -2,28 +2,95 @@
 
 set -e
 
+WSL_FLAG="no"
+for arg in "$@"; do
+  case "$arg" in
+    --wsl) WSL_FLAG="yes" ;;
+  esac
+done
+
+IS_WSL="no"
 if [ -f /proc/sys/kernel/osrelease ] && \
    grep -qiE "microsoft|wsl" /proc/sys/kernel/osrelease 2>/dev/null; then
-  echo "════════════════════════════════════════════════════════"
-  echo "ERROR: This script is running under WSL (Windows Subsystem for Linux)."
-  echo "════════════════════════════════════════════════════════"
-  echo ""
-  echo "WSL writes to /home/<user>/.rsct/, but Claude Code on Windows"
-  echo "looks for ~/.rsct/ at C:/Users/<user>/.rsct/. They are different"
-  echo "filesystems — installing here would land in the wrong place and"
-  echo "Claude Code would never find it."
-  echo ""
-  echo "Open Git Bash on Windows (Start menu → Git Bash) and re-run:"
-  echo "  cd /c/Users/<you>/path/to/rsct-framework"
-  echo "  bash scripts/install.sh"
-  echo ""
-  echo "If you genuinely want to install under WSL for use by Claude Code"
-  echo "running inside WSL (rare), edit this guard out and proceed at"
-  echo "your own risk."
-  exit 1
+  IS_WSL="yes"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/rsct-lib.sh"
+
+WSL_VERDICT=$(rsct_wsl_verdict "$IS_WSL" "$WSL_FLAG")
+case "$WSL_VERDICT" in
+  normal|wsl) ;;
+  stop-not-wsl)
+    echo "ERROR: --wsl was given, but this is not WSL (Windows Subsystem for Linux)."
+    echo "  --wsl is for a Claude Code that runs inside a WSL distro: run this installer"
+    echo "  from a shell inside that distro. Here, run it without --wsl."
+    exit 1
+    ;;
+  *)
+    echo "════════════════════════════════════════════════════════"
+    echo "ERROR: This script is running under WSL (Windows Subsystem for Linux)."
+    echo "════════════════════════════════════════════════════════"
+    echo ""
+    echo "WSL writes to /home/<user>/.rsct/, but Claude Code on Windows"
+    echo "looks for ~/.rsct/ at C:/Users/<user>/.rsct/. They are different"
+    echo "filesystems — installing here would land in the wrong place and"
+    echo "Claude Code would never find it."
+    echo ""
+    echo "If your Claude Code runs on Windows, open Git Bash on Windows"
+    echo "(Start menu → Git Bash) and re-run:"
+    echo "  cd /c/Users/<you>/path/to/rsct-framework"
+    echo "  bash scripts/install.sh"
+    echo ""
+    echo "If your Claude Code runs inside this WSL distro, re-run with --wsl:"
+    echo "  bash scripts/install.sh --wsl"
+    exit 1
+    ;;
+esac
+
+ORIGINAL_PATH="$PATH"
+WINDOWS_CLAUDE=""
+if [ "$WSL_VERDICT" = "wsl" ]; then
+  if [ ! -x "$RSCT_WSLPATH" ]; then
+    echo "ERROR: --wsl needs $RSCT_WSLPATH to tell Windows programs from Linux ones,"
+    echo "  and it is not there (a container that shares the WSL kernel?). Nothing was written."
+    exit 1
+  fi
+  WINDOWS_CLAUDE=$(type -P claude 2>/dev/null || true)
+  PATH=$(rsct_linux_path "$PATH")
+  if [ -z "$PATH" ]; then
+    echo "ERROR: --wsl: no folder on PATH could be confirmed to be on WSL's Linux side"
+    echo "  ($RSCT_WSLPATH gave no Linux answer for any of them). Nothing was written."
+    exit 1
+  fi
+  export PATH
+  hash -r
+  unset -f node npm claude rsct-mcp 2>/dev/null || true
+  for tool in node npm claude; do
+    tool_path=$(type -P "$tool" 2>/dev/null || true)
+    if [ -n "$tool_path" ] && rsct_tool_is_windows "$tool_path"; then
+      echo "ERROR: --wsl: '$tool' at $tool_path is a Windows program, or could not be checked."
+      echo "  Nothing was written."
+      exit 1
+    fi
+  done
+  if [ -z "$(type -P claude 2>/dev/null || true)" ]; then
+    echo "ERROR: --wsl: no Claude Code CLI ('claude') was found inside WSL."
+    if [ -n "$WINDOWS_CLAUDE" ]; then
+      echo "  The 'claude' on PATH is the Windows one: $WINDOWS_CLAUDE"
+      echo "  If that is the Claude Code you use, run this installer from Git Bash on Windows, without --wsl."
+    fi
+    echo "  To use Claude Code inside WSL, install its CLI inside WSL first, then run this installer again"
+    echo "  with --wsl. Nothing was written."
+    exit 1
+  fi
+fi
+
+CLAUDE_HINT="claude"
+if [ "$WSL_VERDICT" = "wsl" ]; then
+  CLAUDE_HINT="\"$(type -P claude 2>/dev/null || true)\""
+fi
+
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ ! -f "$SOURCE_DIR/prompts/01-setup.md" ] || [ ! -f "$SOURCE_DIR/VERSION" ]; then
@@ -73,10 +140,26 @@ mcp_command_is_copy() {
   [ "$(dirname "$1")/node_modules/rsct-mcp/dist/index.js" -ef "$MCP_HOME/dist/index.js" ]
 }
 
-HOST_CFG="$HOME/.claude.json"
-if command -v node >/dev/null 2>&1; then
-  HOST_CFG_RESOLVED=$(node -e 'var d = process.env.CLAUDE_CONFIG_DIR || require("os").homedir(); process.stdout.write(d.split(String.fromCharCode(92)).join("/") + "/.claude.json")' 2>/dev/null || echo "")
-  if [ -n "$HOST_CFG_RESOLVED" ]; then HOST_CFG="$HOST_CFG_RESOLVED"; fi
+HOST_CFG=$(rsct_host_config)
+
+if [ "$WSL_VERDICT" = "wsl" ]; then
+  NPM_PREFIX=""
+  UNSAFE_DESTINATION=$(rsct_wsl_unsafe_destination "$RSCT_HOME" "$CLAUDE_COMMANDS_DIR" "$(dirname "$HOST_CFG")" "$HOST_CFG")
+  if [ -z "$UNSAFE_DESTINATION" ] && command -v npm >/dev/null 2>&1; then
+    NPM_PREFIX=$(npm prefix -g 2>/dev/null || true)
+    if [ -z "$NPM_PREFIX" ]; then
+      echo "ERROR: --wsl: 'npm prefix -g' gave no folder, so npm's global folder cannot be checked."
+      echo "  Nothing was written."
+      exit 1
+    fi
+    UNSAFE_DESTINATION=$(rsct_wsl_unsafe_destination "$NPM_PREFIX")
+  fi
+  if [ -n "$UNSAFE_DESTINATION" ]; then
+    echo "ERROR: --wsl: $UNSAFE_DESTINATION is not on WSL's Linux side, or could not be checked."
+    echo "  An install for a Claude Code inside WSL must write only to the Linux side;"
+    echo "  writing there could change the Windows install. Nothing was written."
+    exit 1
+  fi
 fi
 
 MCP_SCOPE_RECORDED=""
@@ -321,7 +404,25 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
           ); then
             echo ""
             MCP_CMD=$(command -v rsct-mcp 2>/dev/null || true)
-            if mcp_command_is_copy "$MCP_CMD"; then
+            WSL_NAME_WINDOWS=""
+            if [ "$WSL_VERDICT" = "wsl" ]; then
+              ORIGINAL_MCP_CMD=$(PATH="$ORIGINAL_PATH"; hash -r; type -P rsct-mcp 2>/dev/null || true)
+              if [ -n "$ORIGINAL_MCP_CMD" ] && rsct_tool_is_windows "$ORIGINAL_MCP_CMD"; then
+                WSL_NAME_WINDOWS="$ORIGINAL_MCP_CMD"
+              fi
+            fi
+            if [ -n "$WSL_NAME_WINDOWS" ]; then
+              if [ -n "$MCP_CMD" ]; then
+                WSL_BIN_DIR=$(dirname "$MCP_CMD")
+              else
+                WSL_BIN_DIR="$NPM_PREFIX/bin"
+              fi
+              echo "⚠ rsct-mcp was copied to $MCP_HOME and npm linked it inside WSL, but in"
+              echo "  this shell 'rsct-mcp' still resolves to the Windows one: $WSL_NAME_WINDOWS"
+              echo "  A Claude Code inside WSL starts 'rsct-mcp' by name, so it would run the Windows"
+              echo "  install. Put $WSL_BIN_DIR ahead of the /mnt/ folders on PATH,"
+              echo "  then run this installer again with --wsl."
+            elif mcp_command_is_copy "$MCP_CMD"; then
               if "$MCP_CMD" </dev/null >/dev/null 2>&1; then
                 echo "✓ rsct-mcp installed. The command runs from $MCP_HOME —"
                 echo "  a copy of this version, not this clone. Switching branches, moving or"
@@ -341,33 +442,37 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
               echo "  bin directory ahead of it on PATH and run this installer again."
             fi
 
-            echo ""
-            echo "────────────────────────────────────────────────────────"
-            echo "Register rsct-mcp with Claude Code now?"
-            echo "────────────────────────────────────────────────────────"
-            echo "  [1] Solo developer — USER scope (Recommended)"
-            echo "      → registers once per machine; rsct__* tools available in"
-            echo "        every project on this machine after IDE restart."
-            echo "  [2] Team — PROJECT scope (committable .mcp.json)"
-            echo "      → /rsct-setup writes and approves a .mcp.json in each"
-            echo "        project. Requires REMOVING any user-scope entry, since"
-            echo "        a user-scope entry masks project scope everywhere."
-            echo ""
-            if [ -n "$MCP_SCOPE_LEGACY" ]; then
-              echo "  (recorded scope 'skip' is legacy — [3] no longer exists;"
-              echo "   the documented default [1] applies, and an unattended run"
-              echo "   registers nothing)"
-            elif [ -n "$MCP_SCOPE_KNOWN" ]; then
-              if [ -n "$ASSUME_YES" ]; then
-                echo "  (current: $MCP_SCOPE_KNOWN — kept unless overridden)"
-              else
-                echo "  (current: $MCP_SCOPE_KNOWN — press Enter to keep it)"
+            if [ -n "$WSL_NAME_WINDOWS" ]; then
+              mcp_scope="wsl-name"
+            else
+              echo ""
+              echo "────────────────────────────────────────────────────────"
+              echo "Register rsct-mcp with Claude Code now?"
+              echo "────────────────────────────────────────────────────────"
+              echo "  [1] Solo developer — USER scope (Recommended)"
+              echo "      → registers once per machine; rsct__* tools available in"
+              echo "        every project on this machine after IDE restart."
+              echo "  [2] Team — PROJECT scope (committable .mcp.json)"
+              echo "      → /rsct-setup writes and approves a .mcp.json in each"
+              echo "        project. Requires REMOVING any user-scope entry, since"
+              echo "        a user-scope entry masks project scope everywhere."
+              echo ""
+              if [ -n "$MCP_SCOPE_LEGACY" ]; then
+                echo "  (recorded scope 'skip' is legacy — [3] no longer exists;"
+                echo "   the documented default [1] applies, and an unattended run"
+                echo "   registers nothing)"
+              elif [ -n "$MCP_SCOPE_KNOWN" ]; then
+                if [ -n "$ASSUME_YES" ]; then
+                  echo "  (current: $MCP_SCOPE_KNOWN — kept unless overridden)"
+                else
+                  echo "  (current: $MCP_SCOPE_KNOWN — press Enter to keep it)"
+                fi
+              elif [ -n "$MCP_SCOPE_RECORDED" ]; then
+                echo "  (recorded scope unrecognized — the documented default [1] applies)"
               fi
-            elif [ -n "$MCP_SCOPE_RECORDED" ]; then
-              echo "  (recorded scope unrecognized — the documented default [1] applies)"
+              read_or_default mcp_scope "Choice [1/2] (default: $MCP_SCOPE_DEFAULT): " "$MCP_SCOPE_DEFAULT"
+              [ -n "$mcp_scope" ] || mcp_scope="$MCP_SCOPE_DEFAULT"
             fi
-            read_or_default mcp_scope "Choice [1/2] (default: $MCP_SCOPE_DEFAULT): " "$MCP_SCOPE_DEFAULT"
-            [ -n "$mcp_scope" ] || mcp_scope="$MCP_SCOPE_DEFAULT"
 
             if [ "$mcp_scope" = "3" ]; then
               echo ""
@@ -381,6 +486,10 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
             fi
 
             case "$mcp_scope" in
+              wsl-name)
+                echo ""
+                echo "→ Nothing was registered and the recorded scope is unchanged."
+                ;;
               2)
                 SCOPE_EFFECTIVE=""
                 USER_SCOPE_ENTRY="no"
@@ -434,7 +543,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                           echo "⚠ The user-scope entry could not be removed (or is still present)."
                           echo "  Recording 'user', because that is what still resolves."
                           echo "  Remove it manually and re-run this installer:"
-                          echo "      claude mcp remove rsct --scope user"
+                          echo "      $CLAUDE_HINT mcp remove rsct --scope user"
                         fi
                         ;;
                       *)
@@ -475,7 +584,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                       node -e 'try { var fs = require("fs"); function readJson(p) { try { var raw = fs.readFileSync(p, "utf8"); if (raw.charCodeAt(0) === 65279) { raw = raw.slice(1); } return raw.trim() ? JSON.parse(raw) : null; } catch (e) { return null; } } var j = readJson(process.argv[1]); if (!j) { process.exit(0); } var ks = Object.keys(j.projects || {}); var pending = []; for (var i = 0; i < ks.length; i++) { var k = ks[i]; if (!fs.existsSync(k + "/.rsct.json")) { continue; } var m = readJson(k + "/.mcp.json"); var registered = !!(m && m.mcpServers && m.mcpServers.rsct); var s = readJson(k + "/.claude/settings.local.json"); var approved = !!(s && Array.isArray(s.enabledMcpjsonServers) && s.enabledMcpjsonServers.indexOf("rsct") !== -1); if (!registered || !approved) { pending.push(k + (registered ? "   (registered, not approved)" : "   (no .mcp.json)")); } } if (pending.length) { console.log("  " + pending.length + " RSCT project(s) will NOT resolve rsct until /rsct-setup is re-run"); console.log("  in them (it writes the .mcp.json and approves it):"); var cap = pending.length < 20 ? pending.length : 20; for (var n = 0; n < cap; n++) { console.log("      " + pending[n]); } if (pending.length > cap) { console.log("      ... and " + (pending.length - cap) + " more"); } console.log(""); } } catch (e) { }' "$HOST_CFG" 2>/dev/null || true
                     fi
                     echo "  After /rsct-setup, restart Claude Code and verify with:"
-                    echo "    claude mcp list   →  rsct: rsct-mcp - ✓ Connected"
+                    echo "    $CLAUDE_HINT mcp list   →  rsct: rsct-mcp - ✓ Connected"
                     echo ""
                     echo "  Full doc: see 'Project scope detail' section in"
                     echo "  the rsct-framework README.md."
@@ -535,7 +644,7 @@ elif [ -d "$SOURCE_DIR/mcp-server" ] && [ -f "$SOURCE_DIR/mcp-server/package.jso
                   else
                     echo "⚠ rsct is NOT registered at user scope in $HOST_CFG."
                     echo "  Register manually, then re-run this installer:"
-                    echo "    claude mcp add rsct rsct-mcp --scope user"
+                    echo "    $CLAUDE_HINT mcp add rsct rsct-mcp --scope user"
                   fi
                 else
                   echo "⚠ 'claude' CLI not on PATH — cannot auto-register."
@@ -621,4 +730,8 @@ fi
 echo ""
 echo "To uninstall the framework from this machine (different from"
 echo "uninstalling RSCT from a project), run:"
-echo "  bash \"$SOURCE_DIR/scripts/uninstall-framework.sh\""
+if [ "$WSL_VERDICT" = "wsl" ]; then
+  echo "  bash \"$SOURCE_DIR/scripts/uninstall-framework.sh\" --wsl"
+else
+  echo "  bash \"$SOURCE_DIR/scripts/uninstall-framework.sh\""
+fi

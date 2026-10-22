@@ -123,7 +123,9 @@ session and FIRST again for every new task within a session. Do not
 read code beyond what the dev explicitly named, do not present a §B
 plan, and do not edit any file before steps 1–3 complete. If
 rsct-mcp is not installed (tool-not-found), fall back to §A–§H prose
-and tell the dev to run /rsct-setup + install rsct-mcp.
+and tell the dev to run `bash scripts/install.sh` from the framework
+clone (`bash scripts/install.sh --wsl` when Claude Code itself runs inside
+WSL), then /rsct-setup.
 
 See: rules/0-session-bootstrap.md (full prose §0), rules/B-architect-plan.md
 (updated §B with phase_spec_* pointers), rules/D-branch-protection.md

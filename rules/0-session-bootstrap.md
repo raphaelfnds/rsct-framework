@@ -286,5 +286,7 @@ classifier returns `tier: trivial` and tells you to skip the rest —
 
 If `rsct-mcp` is not installed (any `mcp__rsct__rsct_*` call returns
 "tool not found"), fall back to the §A–§H prose contract below and
-explicitly mention to the dev that they should run `/rsct-setup`
-and install `rsct-mcp` to enable the enforcement layer.
+explicitly mention to the dev that they should run
+`bash scripts/install.sh` from the framework clone
+(`bash scripts/install.sh --wsl` when Claude Code itself runs inside
+WSL), then `/rsct-setup`, to enable the enforcement layer.
