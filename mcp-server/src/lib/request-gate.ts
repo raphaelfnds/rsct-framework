@@ -19,6 +19,7 @@ export type GateRejectKind =
   | 'reused'
   | 'expired'
   | 'dialog_no'
+  | 'dialog_failed'
   | 'force_dialog_no_channel'
   | 'no_channel'
 
@@ -101,6 +102,9 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
         fabrication_signals: validation.fabrication_signals,
       }
     }
+    if (dialog.response !== 'no-channel') {
+      return dialogFailed(dialog, validation.fabrication_signals, `; ${why} — the dialog is required`)
+    }
     return {
       status: 'rejected',
       reason: `dialog channel unavailable (${dialog.error ?? 'no channel'}); ${why} — the dialog is required and trust_allowed_for is ignored`,
@@ -125,6 +129,9 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
       fabrication_signals: validation.fabrication_signals,
     }
   }
+  if (dialog.response !== 'no-channel') {
+    return dialogFailed(dialog, validation.fabrication_signals, '')
+  }
 
   const trustList = opts.approvalModes?.trust_allowed_for ?? []
   if (trustList.includes(opts.toolName)) {
@@ -140,6 +147,15 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
     reason: `dialog channel unavailable (${dialog.error ?? 'no channel'}) and '${opts.toolName}' is not listed in approval_modes.trust_allowed_for`,
     reject_kind: 'no_channel',
     fabrication_signals: validation.fabrication_signals,
+  }
+}
+
+function dialogFailed(dialog: DialogResult, signals: FabricationSignal[], tail: string): GateResult {
+  return {
+    status: 'rejected',
+    reason: `the approval dialog program ended without a Yes or No answer (${dialog.error ?? 'no answer'})${tail}; the request is refused and trust_allowed_for does not apply`,
+    reject_kind: 'dialog_failed',
+    fabrication_signals: signals,
   }
 }
 

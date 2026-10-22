@@ -644,7 +644,9 @@ export async function phaseReviewCompleteHandler(
       }
       const reason = declined
         ? 'the developer declined the unverified files — take them out of the change or make them scannable'
-        : `the unverified-files dialog could not be shown (${dialog.error ?? 'no channel'}) — only the developer can allow unverified files`
+        : dialog.response === 'no-channel'
+          ? `the unverified-files dialog could not be shown (${dialog.error ?? 'no channel'}) — only the developer can allow unverified files`
+          : `the unverified-files dialog ended without a Yes or No answer (${dialog.error ?? 'no answer'}) — only the developer can allow unverified files`
       return reject({
         ...base,
         rejectKind: declined ? 'unverified_declined' : 'unverified_undecided',

@@ -28573,11 +28573,11 @@ function readWorkingBlobIds(repo, paths) {
       "core.fsmonitor=false"
     ];
     const addPaths = (batch) => safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "add", "-f", "--", ...batch], "", env) !== null;
-    const failed = [];
+    const failed2 = [];
     for (let i2 = 0; i2 < paths.length; i2 += ADD_BATCH) {
       const batch = paths.slice(i2, i2 + ADD_BATCH);
       if (addPaths(batch)) continue;
-      for (const path2 of batch) if (!addPaths([path2])) failed.push(path2);
+      for (const path2 of batch) if (!addPaths([path2])) failed2.push(path2);
     }
     const listing = nulList(
       safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "ls-files", "-s", "-z", "--", ...paths], "", env)
@@ -28592,7 +28592,7 @@ function readWorkingBlobIds(repo, paths) {
     }
     for (const path2 of paths) {
       if (ids.has(path2)) continue;
-      if (failed.includes(path2)) continue;
+      if (failed2.includes(path2)) continue;
       const fallback = line(safeGitBuffer(repo.toplevel, ["hash-object", `--path=${path2}`, "--", path2]));
       if (fallback) ids.set(path2, fallback);
     }
@@ -28680,14 +28680,14 @@ function blobBatches(oids, sizes) {
 }
 function readBlobTexts(repo, oids) {
   const texts = /* @__PURE__ */ new Map();
-  const failed = /* @__PURE__ */ new Set();
+  const failed2 = /* @__PURE__ */ new Set();
   const missing = [];
   for (const oid of new Set(oids)) {
     const cached2 = blobTextCache.get(oid);
     if (cached2 === void 0) missing.push(oid);
     else texts.set(oid, cached2);
   }
-  if (missing.length === 0) return { texts, failed };
+  if (missing.length === 0) return { texts, failed: failed2 };
   const sizes = readBlobSizes(repo, missing);
   if (sizes === null) return null;
   for (const chunk of blobBatches(missing, sizes)) {
@@ -28695,7 +28695,7 @@ function readBlobTexts(repo, oids) {
 `, void 0, blobReadLimits.maxBuffer);
     if (batch === null) {
       if (chunk.length > 1) return null;
-      for (const oid of chunk) failed.add(oid);
+      for (const oid of chunk) failed2.add(oid);
       continue;
     }
     let offset = 0;
@@ -28713,7 +28713,7 @@ function readBlobTexts(repo, oids) {
       offset += size + 1;
     }
   }
-  return { texts, failed };
+  return { texts, failed: failed2 };
 }
 function readUntrackedPaths(repo) {
   return nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"]));
@@ -45019,7 +45019,16 @@ var DIALOG_TITLE_VARIABLE = "RSCT_DIALOG_TITLE";
 var MAC_OSASCRIPT = "/usr/bin/osascript";
 var LINUX_ZENITY = "/usr/bin/zenity";
 var VISIBLE_NUL = "\u2400";
-var WINDOWS_SCRIPT = `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); Write-Output $r`;
+var WINDOWS_NO_DESKTOP = "NoDesktop";
+var WINDOWS_SCRIPT_PREFIX = `$PSModuleAutoLoadingPreference = 'None'; if (-not [Environment]::UserInteractive) { [Console]::Out.Write('${WINDOWS_NO_DESKTOP}'); exit 0 }; `;
+var WINDOWS_SCRIPT = WINDOWS_SCRIPT_PREFIX + `[void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089'); $r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); [Console]::Out.Write([string]$r)`;
+var LINUX_ZENITY_EXIT_CODES = {
+  ZENITY_OK: "0",
+  ZENITY_CANCEL: "1",
+  ZENITY_ESC: "1",
+  ZENITY_ERROR: "255",
+  ZENITY_TIMEOUT: "5"
+};
 var MAC_SCRIPT_LINES = [
   "ObjC.import('Foundation')",
   "const env = $.NSProcessInfo.processInfo.environment",
@@ -45083,6 +45092,7 @@ function normalizeExecError(err2) {
     };
     const message = e.message ?? (e.code ? `exec failed: ${e.code}` : void 0);
     if (message) result.error = message;
+    if (typeof e.code === "string") result.code = e.code;
     return result;
   }
   return { exitCode: -1, stdout: "", stderr: "", error: String(err2) };
@@ -45103,27 +45113,31 @@ function windowsPowerShellPath(env = process.env) {
   const root = systemRoot !== void 0 && win32.isAbsolute(systemRoot) ? systemRoot : "C:\\Windows";
   return win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
+function programMissing(exec) {
+  return exec.code === "ENOENT";
+}
+function failed(channel, error2) {
+  return { response: "failed", channel, error: error2 };
+}
 function runWindowsDialog(options, executor) {
   const exec = executor(
     windowsPowerShellPath(),
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_SCRIPT],
     dialogEnvironment(options)
   );
-  if (exec.error || exec.exitCode < 0) {
-    return {
-      response: "no-channel",
-      channel: "none",
-      error: exec.error ?? `powershell exit ${exec.exitCode}`
-    };
+  if (programMissing(exec)) {
+    return { response: "no-channel", channel: "none", error: exec.error ?? "powershell not found" };
+  }
+  if (exec.error !== void 0 || exec.exitCode !== 0) {
+    return failed("windows", exec.error ?? `powershell exit ${exec.exitCode}`);
   }
   const stdout = exec.stdout.trim();
+  if (stdout === WINDOWS_NO_DESKTOP) {
+    return { response: "no-channel", channel: "none", error: "this Windows session has no desktop to show a dialog on" };
+  }
   if (stdout === "Yes") return { response: "yes", channel: "windows" };
   if (stdout === "No") return { response: "no", channel: "windows" };
-  return {
-    response: "no-channel",
-    channel: "none",
-    error: `unexpected powershell output: ${stdout}`
-  };
+  return failed("windows", `unexpected powershell output: ${stdout}`);
 }
 function runMacDialog(options, executor) {
   const exec = executor(
@@ -45131,39 +45145,30 @@ function runMacDialog(options, executor) {
     ["-l", "JavaScript", ...MAC_SCRIPT_LINES.flatMap((line2) => ["-e", line2])],
     dialogEnvironment(options)
   );
+  if (programMissing(exec)) {
+    return { response: "no-channel", channel: "none", error: exec.error ?? "osascript not found" };
+  }
   if (exec.exitCode !== 0) {
-    if (exec.error && exec.exitCode < 0) {
-      return { response: "no-channel", channel: "none", error: exec.error };
-    }
-    return { response: "no", channel: "macos" };
+    if (exec.exitCode > 0 && exec.stderr.includes("(-128)")) return { response: "no", channel: "macos" };
+    return failed("macos", `osascript exit ${exec.exitCode}: ${exec.stderr.trim()}`);
   }
   const stdout = exec.stdout.trim();
   if (stdout === "Yes") return { response: "yes", channel: "macos" };
   if (stdout === "No") return { response: "no", channel: "macos" };
-  return {
-    response: "no-channel",
-    channel: "none",
-    error: `unexpected osascript output: ${stdout}`
-  };
+  return failed("macos", `unexpected osascript output: ${stdout}`);
 }
 function runLinuxDialog(options, executor) {
-  const exec = executor(LINUX_ZENITY, [
-    "--question",
-    `--title=${options.title}`,
-    `--text=${options.message}`,
-    "--no-wrap",
-    "--no-markup"
-  ]);
-  if (exec.error && exec.exitCode < 0) {
-    return { response: "no-channel", channel: "none", error: exec.error };
+  const exec = executor(
+    LINUX_ZENITY,
+    ["--question", `--title=${options.title}`, `--text=${options.message}`, "--no-wrap", "--no-markup"],
+    { ...LINUX_ZENITY_EXIT_CODES }
+  );
+  if (programMissing(exec)) {
+    return { response: "no-channel", channel: "none", error: exec.error ?? "zenity not found" };
   }
   if (exec.exitCode === 0) return { response: "yes", channel: "linux-zenity" };
-  if (exec.exitCode === 1) return { response: "no", channel: "linux-zenity" };
-  return {
-    response: "no-channel",
-    channel: "none",
-    error: `zenity exit ${exec.exitCode}: ${exec.stderr.trim()}`
-  };
+  if (exec.exitCode === 1 && !/open display/i.test(exec.stderr)) return { response: "no", channel: "linux-zenity" };
+  return failed("linux-zenity", `zenity exit ${exec.exitCode}: ${exec.stderr.trim()}`);
 }
 
 // src/lib/request-gate.ts
@@ -45213,6 +45218,9 @@ async function gateRequest(opts) {
         fabrication_signals: validation.fabrication_signals
       };
     }
+    if (dialog.response !== "no-channel") {
+      return dialogFailed(dialog, validation.fabrication_signals, `; ${why} \u2014 the dialog is required`);
+    }
     return {
       status: "rejected",
       reason: `dialog channel unavailable (${dialog.error ?? "no channel"}); ${why} \u2014 the dialog is required and trust_allowed_for is ignored`,
@@ -45236,6 +45244,9 @@ async function gateRequest(opts) {
       fabrication_signals: validation.fabrication_signals
     };
   }
+  if (dialog.response !== "no-channel") {
+    return dialogFailed(dialog, validation.fabrication_signals, "");
+  }
   const trustList = opts.approvalModes?.trust_allowed_for ?? [];
   if (trustList.includes(opts.toolName)) {
     return {
@@ -45250,6 +45261,14 @@ async function gateRequest(opts) {
     reason: `dialog channel unavailable (${dialog.error ?? "no channel"}) and '${opts.toolName}' is not listed in approval_modes.trust_allowed_for`,
     reject_kind: "no_channel",
     fabrication_signals: validation.fabrication_signals
+  };
+}
+function dialogFailed(dialog, signals, tail) {
+  return {
+    status: "rejected",
+    reason: `the approval dialog program ended without a Yes or No answer (${dialog.error ?? "no answer"})${tail}; the request is refused and trust_allowed_for does not apply`,
+    reject_kind: "dialog_failed",
+    fabrication_signals: signals
   };
 }
 function inferRejectKind(reason) {
@@ -51430,7 +51449,7 @@ async function phaseCodeStartHandler(rawInput, internal = {}) {
       const audit = appendAuditEntry(
         resolution.root,
         {
-          event: rejectKind === "dialog_no" || rejectKind === "force_dialog_no_channel" || rejectKind === "no_channel" ? "run_alone.declined" : "code.start.rejected",
+          event: rejectKind === "dialog_no" || rejectKind === "dialog_failed" || rejectKind === "force_dialog_no_channel" || rejectKind === "no_channel" ? "run_alone.declined" : "code.start.rejected",
           tool: "rsct_phase_code_start",
           spec_ref: input.spec_ref,
           spec_tier: input.spec_tier,
@@ -52148,7 +52167,7 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
           );
         }
       }
-      const reason = declined ? "the developer declined the unverified files \u2014 take them out of the change or make them scannable" : `the unverified-files dialog could not be shown (${dialog.error ?? "no channel"}) \u2014 only the developer can allow unverified files`;
+      const reason = declined ? "the developer declined the unverified files \u2014 take them out of the change or make them scannable" : dialog.response === "no-channel" ? `the unverified-files dialog could not be shown (${dialog.error ?? "no channel"}) \u2014 only the developer can allow unverified files` : `the unverified-files dialog ended without a Yes or No answer (${dialog.error ?? "no answer"}) \u2014 only the developer can allow unverified files`;
       return reject({
         ...base,
         rejectKind: declined ? "unverified_declined" : "unverified_undecided",

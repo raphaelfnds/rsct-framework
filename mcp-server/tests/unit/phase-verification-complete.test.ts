@@ -203,7 +203,7 @@ describe('phase-verification-complete — §C gate rejection paths', () => {
       },
       {
         now: FIXED_NOW,
-        promptFn: dialog({ response: 'unavailable', channel: 'none' }),
+        promptFn: dialog({ response: 'no-channel', channel: 'none' }),
       },
     )) as PhaseVerificationCompleteOutput
 

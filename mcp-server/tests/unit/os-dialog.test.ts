@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { win32 } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, win32 } from 'node:path'
 import {
   defaultExecutor,
   promptYesNo,
@@ -10,6 +11,10 @@ import {
   DIALOG_MESSAGE_VARIABLE,
   DIALOG_TITLE_VARIABLE,
   DIALOG_TEXT_LIMIT,
+  LINUX_ZENITY_EXIT_CODES,
+  WINDOWS_NO_DESKTOP,
+  WINDOWS_SCRIPT,
+  WINDOWS_SCRIPT_PREFIX,
   type ExecResult,
   type Executor,
 } from '../../src/lib/os-dialog.js'
@@ -195,20 +200,58 @@ describe('runWindowsDialog', () => {
     expect(r).toEqual({ response: 'no', channel: 'windows' })
   })
 
-  it('returns no-channel when powershell errors (ENOENT)', () => {
+  it('returns no-channel when powershell is missing (ENOENT)', () => {
     const r = runWindowsDialog(
       OPTS,
-      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn powershell.exe ENOENT' }).executor,
+      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn powershell.exe ENOENT', code: 'ENOENT' }).executor,
     )
     expect(r.response).toBe('no-channel')
     expect(r.channel).toBe('none')
     expect(r.error).toContain('ENOENT')
   })
 
-  it('returns no-channel for unexpected output', () => {
-    const r = runWindowsDialog(OPTS, recording({ exitCode: 0, stdout: 'Cancel', stderr: '' }).executor)
+  it('returns no-channel when the session has no desktop, and only for that exact answer with exit 0', () => {
+    const r = runWindowsDialog(OPTS, recording({ exitCode: 0, stdout: `${WINDOWS_NO_DESKTOP}\r\n`, stderr: '' }).executor)
     expect(r.response).toBe('no-channel')
-    expect(r.error).toContain('Cancel')
+    expect(r.channel).toBe('none')
+    for (const result of [
+      { exitCode: 1, stdout: WINDOWS_NO_DESKTOP, stderr: '', error: 'Command failed' },
+      { exitCode: 0, stdout: WINDOWS_NO_DESKTOP.toLowerCase(), stderr: '' },
+      { exitCode: 0, stdout: `x${WINDOWS_NO_DESKTOP}`, stderr: '' },
+      { exitCode: 0, stdout: `${WINDOWS_NO_DESKTOP}Yes`, stderr: '' },
+    ]) {
+      expect(runWindowsDialog(OPTS, recording(result).executor).response, JSON.stringify(result)).toBe('failed')
+    }
+  })
+
+  it('a dialog that ends without Yes or No is failed, never no-channel', () => {
+    for (const result of [
+      { exitCode: 0, stdout: 'Cancel', stderr: '' },
+      { exitCode: 0, stdout: '', stderr: '' },
+      { exitCode: 1, stdout: '', stderr: '', error: 'Command failed' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'spawnSync powershell.exe terminated' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'spawnSync C:/x/ENOENT failed', code: 'UNKNOWN' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'Command failed: --text=ENOENT' },
+    ]) {
+      const r = runWindowsDialog(OPTS, recording(result).executor)
+      expect(r.response, JSON.stringify(result)).toBe('failed')
+      expect(r.channel).toBe('windows')
+    }
+  })
+
+  it('the Windows script starts with its fixed preamble and calls only .NET', () => {
+    expect(WINDOWS_SCRIPT.startsWith("$PSModuleAutoLoadingPreference = 'None'; ")).toBe(true)
+    expect(WINDOWS_SCRIPT.startsWith(WINDOWS_SCRIPT_PREFIX)).toBe(true)
+    expect(WINDOWS_SCRIPT_PREFIX).toBe(
+      "$PSModuleAutoLoadingPreference = 'None'; if (-not [Environment]::UserInteractive) { [Console]::Out.Write('NoDesktop'); exit 0 }; ",
+    )
+    expect(WINDOWS_SCRIPT).toBe(
+      WINDOWS_SCRIPT_PREFIX +
+        "[void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089'); " +
+        `$r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); ` +
+        '[Console]::Out.Write([string]$r)',
+    )
+    expect(WINDOWS_SCRIPT).not.toMatch(/\b(Add-Type|Write-Output|Write-Host|Import-Module)\b/i)
   })
 })
 
@@ -250,13 +293,14 @@ describe('runMacDialog', () => {
     expect(r).toEqual({ response: 'no', channel: 'macos' })
   })
 
-  it('returns no-channel for any other stdout', () => {
+  it('returns failed for any other stdout', () => {
     const r = runMacDialog(OPTS, recording({ exitCode: 0, stdout: 'button returned:Yes', stderr: '' }).executor)
-    expect(r.response).toBe('no-channel')
+    expect(r.response).toBe('failed')
+    expect(r.channel).toBe('macos')
     expect(r.error).toContain('button returned:Yes')
   })
 
-  it('returns no when osascript exits non-zero (user canceled)', () => {
+  it('returns no when osascript reports the user canceled (-128)', () => {
     const r = runMacDialog(
       OPTS,
       recording({ exitCode: 1, stdout: '', stderr: 'execution error: User canceled. (-128)' }).executor,
@@ -264,10 +308,23 @@ describe('runMacDialog', () => {
     expect(r).toEqual({ response: 'no', channel: 'macos' })
   })
 
+  it('any other osascript failure is failed, never a decline and never no-channel', () => {
+    for (const result of [
+      { exitCode: 1, stdout: '', stderr: 'execution error: No user interaction allowed. (-1713)' },
+      { exitCode: 1, stdout: '', stderr: '' },
+      { exitCode: -1, stdout: '', stderr: '(-128)', error: 'spawnSync /usr/bin/osascript terminated' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'Command failed: ENOENT' },
+    ]) {
+      const r = runMacDialog(OPTS, recording(result).executor)
+      expect(r.response, JSON.stringify(result)).toBe('failed')
+      expect(r.channel).toBe('macos')
+    }
+  })
+
   it('returns no-channel when osascript binary is missing', () => {
     const r = runMacDialog(
       OPTS,
-      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn osascript ENOENT' }).executor,
+      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn osascript ENOENT', code: 'ENOENT' }).executor,
     )
     expect(r.response).toBe('no-channel')
     expect(r.error).toContain('ENOENT')
@@ -288,6 +345,14 @@ describe('runLinuxDialog', () => {
     ])
   })
 
+  it('passes zenity its exit codes explicitly', () => {
+    const { executor, calls } = recording({ exitCode: 1, stdout: '', stderr: '' })
+    runLinuxDialog(OPTS, executor)
+    const expected = { ZENITY_OK: '0', ZENITY_CANCEL: '1', ZENITY_ESC: '1', ZENITY_ERROR: '255', ZENITY_TIMEOUT: '5' }
+    expect(calls[0]?.env).toEqual(expected)
+    expect(LINUX_ZENITY_EXIT_CODES).toEqual(expected)
+  })
+
   it('maps zenity exit 0 to yes', () => {
     const r = runLinuxDialog(OPTS, recording({ exitCode: 0, stdout: '', stderr: '' }).executor)
     expect(r).toEqual({ response: 'yes', channel: 'linux-zenity' })
@@ -301,15 +366,53 @@ describe('runLinuxDialog', () => {
   it('returns no-channel when zenity is not installed', () => {
     const r = runLinuxDialog(
       OPTS,
-      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn zenity ENOENT' }).executor,
+      recording({ exitCode: -1, stdout: '', stderr: '', error: 'spawn zenity ENOENT', code: 'ENOENT' }).executor,
     )
     expect(r.response).toBe('no-channel')
     expect(r.error).toContain('ENOENT')
   })
 
-  it('returns no-channel for unexpected exit codes', () => {
-    const r = runLinuxDialog(OPTS, recording({ exitCode: 5, stdout: '', stderr: 'X11 error' }).executor)
+  it('returns failed for unexpected exit codes and for a zenity that was stopped', () => {
+    for (const result of [
+      { exitCode: 5, stdout: '', stderr: 'X11 error' },
+      { exitCode: 255, stdout: '', stderr: '' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'spawnSync /usr/bin/zenity terminated' },
+      { exitCode: -1, stdout: '', stderr: '', error: 'Command failed: --text=ENOENT' },
+    ]) {
+      const r = runLinuxDialog(OPTS, recording(result).executor)
+      expect(r.response, JSON.stringify(result)).toBe('failed')
+      expect(r.channel).toBe('linux-zenity')
+    }
+  })
+
+  it('a zenity that could not open a display is failed, not a decline — read from its stderr only', () => {
+    for (const stderr of [
+      '(zenity:348): Gtk-WARNING **: 09:01:11.893: Failed to open display\n',
+      '(zenity:12): Gtk-WARNING **: cannot open display: :0\n',
+    ]) {
+      expect(runLinuxDialog(OPTS, recording({ exitCode: 1, stdout: '', stderr }).executor).response, stderr).toBe('failed')
+    }
+    const quoted = runLinuxDialog(
+      OPTS,
+      recording({ exitCode: 1, stdout: '', stderr: '', error: 'Command failed: /usr/bin/zenity --text=Failed to open display' }).executor,
+    )
+    expect(quoted).toEqual({ response: 'no', channel: 'linux-zenity' })
+    const ordinary = runLinuxDialog(
+      OPTS,
+      recording({ exitCode: 1, stdout: '', stderr: 'Gtk-Message: 09:01:11.893: GtkDialog mapped without a transient parent.\n' }).executor,
+    )
+    expect(ordinary).toEqual({ response: 'no', channel: 'linux-zenity' })
+  })
+})
+
+describe('a missing dialog program is recognised by its error code', () => {
+  it('defaultExecutor reports ENOENT for a program that does not exist, and the dialog reads it as no channel', () => {
+    const missing = join(tmpdir(), `rsct-no-such-dialog-${process.pid}`, 'zenity')
+    const result = defaultExecutor(missing, ['--question'])
+    expect(result.code).toBe('ENOENT')
+    expect(result.exitCode).toBe(-1)
+    const r = runLinuxDialog(OPTS, (_cmd, args, env) => defaultExecutor(missing, args, env))
     expect(r.response).toBe('no-channel')
-    expect(r.error).toContain('zenity exit 5')
+    expect(r.channel).toBe('none')
   })
 })
