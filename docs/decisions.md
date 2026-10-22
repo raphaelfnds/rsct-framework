@@ -1430,7 +1430,7 @@ Not measured: the two channels on one machine, a registry install over a link, t
 `"private": true`, and anything on macOS, pnpm, yarn or bun.
 
 ### ADR-027 — The approval dialog gets its text as data, runs by full path, and has no test override (2.14.1)
-**Status**: active. Since 2.17.0 (ADR-030) the named limit "a dialog program that starts and then fails, or is stopped, still counts as no channel, so where the tool is listed in `trust_allowed_for` the call is trusted" no longer holds for commit, push, merge, rebase and `rsct_plan_authorize`, which always force the dialog. Since 2.18.0 (ADR-031) the given-up item "agent text is shown as written, in some dialogs before framework lines" no longer holds: every dialog shows the framework lines first and the agent text last, on one line per value; text that imitates framework lines is still not addressed.
+**Status**: active. Since 2.17.0 (ADR-030) the named limit "a dialog program that starts and then fails, or is stopped, still counts as no channel, so where the tool is listed in `trust_allowed_for` the call is trusted" no longer holds for commit, push, merge, rebase and `rsct_plan_authorize`, which always force the dialog. Since 2.18.0 (ADR-031) the given-up item "agent text is shown as written, in some dialogs before framework lines" no longer holds: every dialog shows the framework lines first and the agent text last, on one line per value; text that imitates framework lines is still not addressed. Since 2.20.1 (ADR-034) the first limit no longer holds for any tool: a dialog that starts and ends without a Yes or No is refused as `dialog_failed`, and only a missing dialog program, a system with no supported dialog program or a Windows session with no desktop is no channel.
 **Tags**: security, dialog, cross-os
 
 **Context**: every approval the framework treats as human goes through `lib/os-dialog.ts`
@@ -1644,7 +1644,7 @@ enforcement state, from `settings.json` and `settings.local.json`, before
 `.rsct/scripts/`: a guard entry whose script is gone refuses every call it matches.
 
 ### ADR-029 — Run alone: code and tests close with no dialog when the developer chose it, and are approved before any commit (#128, 2.16.0)
-**Status**: active. Since 2.18.0 (ADR-031) the unreadable-state message no longer calls deleting the file a safe recovery; it says to ask the developer and names what deleting drops, the run_alone record included.
+**Status**: active. Since 2.18.0 (ADR-031) the unreadable-state message no longer calls deleting the file a safe recovery; it says to ask the developer and names what deleting drops, the run_alone record included. Since 2.20.1 (ADR-034) `run_alone.declined` is also written for a dialog that ended without a Yes or No (`dialog_failed`), and the given-up item that on macOS a non-zero `osascript` exit reads as No and ends the mode no longer holds: such a failure keeps the pending phases.
 **Tags**: gates, phases, dialog
 
 **Context**: every phase completion opens an OS dialog and the tool call waits for the answer
@@ -1850,7 +1850,7 @@ no dialog channel" became "refuses … and cuts nothing"; `git pull` moved to th
 `--ff-only` forms allowed; a Start-Process example passes a variable to `fetch` instead of `pull`.
 
 ### ADR-031 — Dialogs put the framework first; plan lookups are deterministic; the REVIEW names the process; an audit.path no file can sit at is ignored (2.18.0)
-**Status**: active.
+**Status**: active. Since 2.20.1 (ADR-034) the given-up item that on Linux and macOS a dialog program that cannot open still reads as No no longer holds: it is `dialog_failed`, a refusal that is not recorded as the developer's decision.
 **Tags**: dialog, gates, plan, classify, audit-log, cross-os
 
 **Context**: MEASURED 2026-10-21 on `main` @ `bfa4946` (2.17.0), Windows 11 / NTFS, real handlers
@@ -2253,6 +2253,85 @@ On a git older than 2.7 (no `worktree list`) the main worktree does not say it i
 `tests/bash/lib/chain-harness.ts`, which runs several blocks in one folder, each in its own shell)
 and `tests/bash/uninstall-inventory.test.ts`; no existing test was edited. Rules §B and §C and the
 hook bundle changed, so each project needs `/rsct-setup` after the installer.
+
+### ADR-034 — A dialog that ends without a Yes or No is refused for every tool; only a missing dialog program or a Windows session with no desktop is "no channel"; the Windows dialog script calls only .NET (2.20.1)
+**Status**: active. Narrows what ADR-027 counts as "no channel".
+**Tags**: security, dialog, gates, cross-os
+
+**Context**: MEASURED on `main` @ `7cfe603` (2.20.0).
+- `lib/os-dialog.ts` read any failure of the dialog program as "no channel" on Windows, and on Linux
+  and macOS a program with no exit status, an unexpected exit code or unexpected output.
+  `lib/request-gate.ts` then approved through `approval_modes.trust_allowed_for` for the tools that
+  can still be listed: the phase completions, `rsct_phase_abandon`, `rsct_capture_issue`. ADR-027
+  named this as given up; ADR-030 had already closed it for the five tools that always force the
+  dialog.
+- On GitHub's hosted runners, measured from a temporary private repository: the Windows
+  (win25-vs2026) and macOS (macos26) runners have a desktop, so a real dialog opens and waits; the
+  Ubuntu runner has no zenity, so the program is missing. None of them reaches the failure path, so
+  narrowing it changes nothing there.
+- zenity 4.0.1 (Ubuntu 24.04) with no display exits 1 with "Failed to open display" on stderr,
+  which read as the developer's No: `dialog_no`, and run-alone then dropped the phases closed on their
+  own.
+- The Windows dialog script relied on PowerShell command lookup.
+- Node's error message repeats the program's arguments, and on Linux the dialog text is one of them,
+  so a classification can read the exit status, the error code and stderr, never the message.
+
+**Decision**:
+- `DialogResponse` gains `failed`. `no-channel` is left only for: text over the limit (refused, as
+  before), an unsupported platform, a dialog program that is not installed (`ENOENT`, from the error
+  code), and a Windows session with no desktop. For the last one the script checks
+  `[Environment]::UserInteractive` right after turning module autoloading off and writes a fixed word;
+  it counts only with
+  exit code 0 and an exact match.
+- Every other ending that is not a clear Yes or No is `failed`. On Windows, a non-zero exit or any
+  unexpected output. On macOS, no exit status, a non-zero exit whose stderr is not the user-cancel code
+  `(-128)`, or unexpected output. On Linux, an exit code other than 0 or 1, no exit status, or exit 1
+  whose stderr says zenity could not open a display.
+- The gate consults `trust_allowed_for` only for `no-channel` exactly. `failed`, and any value it does
+  not know, is refused as `dialog_failed` on the forced and the normal path, with a reason that says
+  the list does not apply. Run-alone keeps the pending phases on `dialog_failed` (only `dialog_no` is
+  a decline); the REVIEW's unverified-files question stays undecided and records no answer;
+  `rsct_phase_code_start` writes `run_alone.declined` for it, as it does for a missing channel.
+- The Windows script turns PowerShell's module autoloading off first and calls only .NET: it loads
+  `System.Windows.Forms` by its full name and writes its answer through `[Console]::Out`.
+- zenity gets its exit codes explicitly (`ZENITY_OK=0`, `ZENITY_CANCEL=1`, `ZENITY_ESC=1`,
+  `ZENITY_ERROR=255`, `ZENITY_TIMEOUT=5`).
+
+**Direction**: stricter; nothing is looser. A Windows host where the dialog program starts and fails
+no longer reaches `trust_allowed_for`: PowerShell restricted (Constrained Language mode under
+application control), or a dialog program that cannot start; on Linux and macOS the same holds for a
+dialog program that was stopped. zenity with no display and macOS errors were already refusals; they
+no longer count as the developer's decision. What is recorded changes in one value: such a failure
+is `dialog_failed` in the `*.rejected` lines instead of `dialog_no`, `no_channel` or
+`force_dialog_no_channel`, or instead of an approval through `trust_allowed_for`; the event names stay
+the same. Unchanged: GitHub's runners, a missing dialog program, a system with no supported dialog
+program, a Windows session with no desktop.
+
+**Alternatives considered**:
+- Linux with zenity and no display as "no channel", like Windows with no desktop — rejected: it is a
+  refusal today, and the display can be broken from the user's own files, so it would loosen the gate.
+  The two systems differ on purpose.
+- Pinning the child's module settings — rejected in V: a script that calls no PowerShell command does
+  not depend on them.
+- A timeout on the dialog — not taken: the dialog waits for the developer by design.
+
+**What is given up, by name**: a Windows session with no desktop was not measured (the check rests on
+.NET's documented behaviour; GitHub's Windows runner answers True). macOS was not measured (no Mac):
+the `(-128)` rule and the "no GUI session" case are documented. zenity's exit-code variables are
+documented, not measured. A visible desktop nobody watches still waits. Another process of the same
+user acting on the dialog, and whoever controls the server's environment, stay as in ADR-027.
+
+**Consequences**: tests in `tests/unit/os-dialog.test.ts` (each platform's endings, the fixed script
+preamble, the explicit zenity exit codes, a real missing program read through `defaultExecutor`),
+`tests/integration/os-dialog-real.test.ts` (Windows: a session with no desktop is no channel and
+nothing after the check runs), `request-gate.test.ts`, `run-alone.test.ts`, `review-sweep-gate.test.ts`.
+Edited tests, each with the guarantee it held: the three missing-program fakes now carry `code`
+(missing program is still no channel); the "unexpected output or exit code → no channel" cases now
+expect `failed` ("unexpected is never Yes" still holds, and trust is no longer reached); the Windows
+echo follows the script's new last statement; the `ceremony-gate` and `phase-verification-complete`
+fakes returned `'unavailable'`, a value the dialog never returns, and now return `no-channel` (the
+refusal they pin is unchanged). No hook script bundled into projects contains the dialog code
+(measured in `dist/scripts/`), so the installer and an IDE restart are enough; no `/rsct-setup`.
 
 ---
 
@@ -3261,6 +3340,36 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### Tests and build
 
+- The dialog tests of 2.20.1 (ADR-034) never open a window: the unit tests hand `runWindowsDialog`,
+  `runMacDialog` and `runLinuxDialog` a recording executor, and the Windows integration test runs the
+  real PowerShell with the dialog call replaced by an echo (the no-desktop case also replaces the
+  check with `$true` on top of the echo, so a script that went past the check would still open no window). Each case exists for one mutation, all
+  killed: a Windows failure, an unexpected Linux ending or unexpected macOS output counted as no
+  channel; the no-desktop word matched loosely or with a failing exit; the desktop check inverted;
+  the script written through a cmdlet or with module autoloading left on; a missing program read
+  from the message instead of the error code; the error code not copied by `normalizeExecError`; any
+  macOS failure, or a stopped osascript, read as a decline; the Linux display check dropped or
+  reading the message; the zenity exit codes not passed; the gate trusting an unknown answer, a
+  forced failure reported as a missing channel, the reason losing its trust note; run-alone's start
+  not recording `dialog_failed` as declined; the REVIEW reason for a failure saying "could not be
+  shown". The gate's non-forced cases pin `fabrication_signals` as empty: with an `action_scope`
+  that does not match the tool, a scope signal forces the dialog, and the first version of those
+  cases tested the forced path by mistake (the gate mutation survived until the scope was fixed).
+  After the REVIEW, also killed: the no-desktop word accepted as a prefix (a case appends `Yes` to
+  it); the forced path refusing only `failed` (an unknown answer also runs forced); the script's last
+  statement written another way (the whole script is pinned, so Linux and macOS cells catch it too);
+  the zenity error code not passed; the no-desktop branch not ending the script — the real
+  no-desktop case runs on top of the echo, so that mutant fails the test instead of opening a window
+  (the first version replaced only the check, and only `exit 0` stood between it and a real dialog).
+  MEASURED on the release CI (PR #141, Node 20 cells red on all three systems, Node 22 green): on
+  Node 20 `execFileSync` hands `stdout` and `stderr` as `null` for a program that does not exist, and
+  the old `bufferOrStringToString` called `toString` on it, so a missing dialog program threw instead
+  of returning "no channel" (an older defect: the code was the same before 2.20.1). It now reads
+  `null` as empty. That makes Node 20 follow the documented rule — no dialog program means no
+  channel, where `trust_allowed_for` applies — which is more permissive than the crash for that one
+  case; the maintainer decided it (2026-10-22, "Ok para A"). The test that calls `defaultExecutor`
+  on a missing path is what catches it, on the Node 20 cells only.
+
 - The #82 tests of 2.20.0 (ADR-033) run the real prompt blocks. `tests/bash/lib/chain-harness.ts`
   runs several blocks in one folder, each in its own shell as the agent does, with node steps
   between them standing in for the agent's edits. `HOME` is the project folder by default; the
@@ -3644,8 +3753,11 @@ those files. Keyed by module and symbol; restatements of what the code says were
   for this spec; the prune is an allowlist — spec, tier, start and completion times and `head_sha`
   stay, findings and importers go (they are in the audit log). The phase label is always cleared
   once `completed_at` is stamped: the old `clear_phase: false` stranded a label no tool could clear
-  without destroying the record. `PhaseVerificationCompleteInput` stays exported where importers
-  expect it (#19).
+  without destroying the record. A `clear_phase` passed anyway is reported in the hints as
+  deprecated, so the caller learns it did nothing instead of finding out from the state; the other
+  top-level fields of the state survive the completion, and a rejected completion leaves the state
+  as it was (the test file's comments, migrated in the 2.20.1 REVIEW). `PhaseVerificationCompleteInput`
+  stays exported where importers expect it (#19).
 
 ---
 

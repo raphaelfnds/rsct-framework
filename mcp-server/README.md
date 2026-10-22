@@ -71,8 +71,8 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   (generated / vendored) go to one forced OS dialog only the dev answers: Yes
   makes those exact file versions committable without a mechanical comment or
   dead-code check, No
-  rejects the REVIEW (`unverified_declined`), no channel rejects
-  (`unverified_undecided`).
+  rejects the REVIEW (`unverified_declined`), no channel or a dialog that ends
+  without a Yes or No rejects (`unverified_undecided`).
 - When comments were removed, files are unverified or an allowlisted comment
   changed, the §C dialog is forced (`trust_allowed_for` ignored) and names a
   report under `.rsct/reports/`. On success the tool stamps a sweep ledger —
@@ -802,8 +802,8 @@ There are **four** §C-gated mutating ops: `rsct_request_commit`,
 an OS dialog for explicit dev confirmation (INV-2.1 out-of-band channel), and since
 2.17.0 the dialog is FORCED on all four (ADR-030): `trust_allowed_for[]` does not
 apply to them, and where no dialog channel exists they are refused
-(`force_dialog_no_channel`) — the developer commits, pushes, merges or rebases by
-hand. The one exception is a commit under a batch token the developer approved
+(`force_dialog_no_channel`; a dialog that ends without a Yes or No is
+`dialog_failed`) — the developer commits, pushes, merges or rebases by hand. The one exception is a commit under a batch token the developer approved
 (`rsct_plan_authorize`, below). Fabrication signals (INV-2.2) force the dialog as
 before.
 
@@ -954,7 +954,7 @@ plan, branch, time, approval, expiry and number of commits, and no
 the token).
 
 - Input: `project_root?`, `dev_approval`, `plan_slug?` (the `<slug>` of `plan_<slug>.md`; letters, digits, `.`, `_`, `-`; default the newest `plan_*.md`), `ttl_minutes?` (5–480, default 480), `max_actions?` (1–100, default 20). Defaults also configurable via `.rsct.json` `approval_modes.plan_token_ttl_minutes` / `plan_token_max_actions`.
-- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `not_multi_phase` / `invalid_plan_slug` / `protected_branch` / `no_branch` / `force_dialog_no_channel`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
+- Output: `status: 'authorized' | 'rejected' | 'state_write_failed'`, `plan_slug`, `branch`, `expires_at`, `max_actions`, `covers`, `reject_kind?` (incl. `no_active_plan` / `not_multi_phase` / `invalid_plan_slug` / `protected_branch` / `no_branch` / `force_dialog_no_channel` / `dialog_failed`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`.
 
 #### `rsct_plan_revoke` (T3)
 
@@ -1273,9 +1273,25 @@ A NUL character in the text is shown as `␀`. A title and text longer than
 shorten the text (the REVIEW's unverified-files question treats it as
 undecided).
 
-When no channel is available (CI, headless), the tool consults
+When no dialog can be shown at all, the tool consults
 `.rsct.json` `approval_modes.trust_allowed_for[]`: if the invoking
-tool's name is on the list, accept silently; otherwise reject. The list
+tool's name is on the list, accept silently; otherwise reject. Since 2.20.1
+(ADR-034) "no dialog can be shown" means only that the dialog program is not
+installed, that the system has no supported dialog program, or, on Windows, that
+the session has no desktop. A dialog that
+starts and ends without a Yes or No is refused for every tool
+(`reject_kind: dialog_failed`), and the list never applies to it:
+
+| Host | Result | `trust_allowed_for` |
+|---|---|---|
+| Windows with a desktop (GitHub's Windows runners included) | the dialog opens and waits | — |
+| Windows with no desktop (a service, a non-interactive session; not measured, ADR-034) | no channel | applies |
+| macOS with a desktop (GitHub's macOS runners included) | the dialog opens and waits | — |
+| macOS where the dialog program fails (no GUI session, an error; not measured, ADR-034) | `dialog_failed` | never |
+| Linux without zenity (GitHub's Ubuntu runners) | no channel | applies |
+| Linux with zenity and no display | `dialog_failed` | never |
+
+The list
 accepts `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge`,
 `rsct_plan_authorize`, `rsct_capture_issue`, `rsct_phase_abandon` and the
 six `rsct_phase_*_complete` tools. A call that forces the dialog ignores
@@ -1535,9 +1551,9 @@ expected tool and the response matches the docs above.
 
 | Platform | Channel | Verify |
 |---|---|---|
-| Windows | PowerShell MessageBox | Dialog appears with project name + action_scope. Yes → tool proceeds; No → tool rejects with `reject_kind: 'dialog_no'`. |
+| Windows | PowerShell MessageBox | Dialog appears with project name + action_scope. Yes → tool proceeds; No → tool rejects with `reject_kind: 'dialog_no'`; a dialog that ends any other way → `dialog_failed`. |
 | macOS | `/usr/bin/osascript` (JavaScript `displayDialog`) | Same. Run only on the CI macOS cells so far (ADR-027). |
-| Linux | `/usr/bin/zenity --question` | Same. Requires `zenity` at `/usr/bin/zenity`; if absent, `trust_allowed_for[]` is the documented fallback for the tools it still applies to — never commit, push, merge, rebase or `rsct_plan_authorize` (ADR-030). |
+| Linux | `/usr/bin/zenity --question` | Same. Requires `zenity` at `/usr/bin/zenity`; if absent, `trust_allowed_for[]` is the documented fallback for the tools it still applies to — never commit, push, merge, rebase or `rsct_plan_authorize` (ADR-030). With zenity installed and no display the request is refused (`dialog_failed`). |
 
 If only one platform is available, document the rest as "untested on
 target platform" in the M2 sign-off — does NOT block the gate.

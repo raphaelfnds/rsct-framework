@@ -12,6 +12,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.20.1] - 2026-10-22
+
+### Security
+
+- **An approval dialog that ends without a Yes or No is refused for every tool.** Before, any
+  failure of the dialog program on Windows, and some on Linux and macOS, counted as "no dialog
+  channel", so a tool listed in `approval_modes.trust_allowed_for` was approved with nobody answering
+  (since 2.17.0 this no longer applied to commit, push, merge, rebase and `rsct_plan_authorize`). Now
+  only a dialog program that is not installed, a Windows session with no desktop, or a system with no
+  supported dialog program counts as no channel. Every other ending is refused as `dialog_failed`, which the list never approves. See
+  ADR-034.
+- **The Windows dialog script calls only .NET**, with PowerShell's module autoloading turned off.
+- zenity is given its exit codes explicitly.
+
+### Fixed
+
+- On Linux with zenity and no display, and on macOS when the dialog program fails, the refusal is no
+  longer recorded as your decision: a phase closed on its own stays pending, and the REVIEW's
+  unverified-files question stays undecided.
+- On Node 20, a dialog program that is not installed no longer makes the approval tools fail with an
+  error: it is "no channel", as on Node 22 and as documented.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE. No `/rsct-setup` is needed: no hook
+  script copied into a project contains the dialog code. A session started before the restart keeps
+  the old behaviour.
+
 ## [2.20.0] - 2026-10-22
 
 ### Fixed
