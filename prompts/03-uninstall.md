@@ -1137,6 +1137,10 @@ markers.
 > per-developer MCP approval, and approving a server on YOUR machine is not a
 > decision to share with the repository.
 
+The block works in LF (`tr -d '\r'` first, anti-pattern #4): a CRLF `.gitignore` comes
+back with LF line endings on every system. Before 2.20.0, Linux and macOS awk saw the
+`\r` and left a blank line where the block had been.
+
 ```bash
 echo "  CHECKPOINT: Phase 4.4b excising the RSCT .gitignore block"
 GITIGNORE="$(pwd)/.gitignore"
@@ -1147,7 +1151,7 @@ if [ -f "$GITIGNORE" ] && grep -qE "$BEGIN_PATTERN" "$GITIGNORE" 2>/dev/null; th
   TMPFILE=$(mktemp)
   # Strip the marker block AND a single empty line immediately preceding
   # it (the install side inserts a leading blank for readability).
-  awk -v begin="$BEGIN_PATTERN" -v end="$END_PATTERN" '
+  tr -d '\r' < "$GITIGNORE" | awk -v begin="$BEGIN_PATTERN" -v end="$END_PATTERN" '
     BEGIN { in_block = 0; held = "" }
     {
       if (in_block) {
@@ -1170,7 +1174,7 @@ if [ -f "$GITIGNORE" ] && grep -qE "$BEGIN_PATTERN" "$GITIGNORE" 2>/dev/null; th
       print
     }
     END { if (held != "") { print held } }
-  ' "$GITIGNORE" > "$TMPFILE"
+  ' > "$TMPFILE"
   mv "$TMPFILE" "$GITIGNORE"
   echo "  excised RSCT plan-tracking block from $GITIGNORE"
 
