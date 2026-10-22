@@ -307,10 +307,28 @@ the config schema.
 ## A commit, push, merge or rebase is refused with `force_dialog_no_channel`
 
 Since 2.17.0 these four always need you in the OS dialog, and so does minting a
-batch token (`rsct_plan_authorize`). On a machine where no dialog can open — CI, a
-headless session, Linux without `/usr/bin/zenity` — they are refused, whatever
-`approval_modes.trust_allowed_for` lists: those names still load and have no effect.
-Run the command yourself in your own terminal.
+batch token (`rsct_plan_authorize`). On a machine where no dialog can open — Linux
+without `/usr/bin/zenity`, a Windows session with no desktop — they are refused,
+whatever `approval_modes.trust_allowed_for` lists: those names still load and have no
+effect. Run the command yourself in your own terminal.
+
+## A request is refused with `dialog_failed`
+
+The dialog program started but ended without a Yes or No: it failed, or it was
+closed some other way. Since 2.20.1 that is a refusal for every tool, and
+`approval_modes.trust_allowed_for` never applies to it — only a dialog program that
+is not installed, a system with no supported dialog program, or a Windows session
+with no desktop counts as "no dialog". It is not recorded as your decision: a phase
+closed on its own stays pending, and the REVIEW's unverified-files question stays
+undecided (at `rsct_phase_code_start` the audit line is `run_alone.declined` with
+`reject_kind: dialog_failed`, as for a missing channel). Common causes:
+- Linux with zenity installed but no display (an SSH session, a container): run from
+  a desktop session, or let the developer answer from one.
+- macOS with no GUI session (SSH): the same.
+- Windows where PowerShell is restricted (for example Constrained Language mode under
+  an application-control policy), or where the dialog program cannot start.
+
+The reason in the reply says what the dialog program reported.
 
 ## The batch token is refused or does not count
 

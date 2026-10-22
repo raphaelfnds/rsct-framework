@@ -830,7 +830,7 @@ export async function phaseCodeStartHandler(
       const audit = appendAuditEntry(
         resolution.root,
         {
-          event: rejectKind === 'dialog_no' || rejectKind === 'force_dialog_no_channel' || rejectKind === 'no_channel' ? 'run_alone.declined' : 'code.start.rejected',
+          event: rejectKind === 'dialog_no' || rejectKind === 'dialog_failed' || rejectKind === 'force_dialog_no_channel' || rejectKind === 'no_channel' ? 'run_alone.declined' : 'code.start.rejected',
           tool: 'rsct_phase_code_start',
           spec_ref: input.spec_ref,
           spec_tier: input.spec_tier,

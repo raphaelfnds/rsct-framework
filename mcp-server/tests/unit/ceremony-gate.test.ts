@@ -66,8 +66,8 @@ const no = (): ((o: DialogOptions) => Promise<DialogResult>) => async () => ({
   channel: 'windows',
 })
 const noChannel = (): ((o: DialogOptions) => Promise<DialogResult>) => async () => ({
-  response: 'unavailable',
-  channel: null,
+  response: 'no-channel',
+  channel: 'none',
   error: 'no dialog channel',
 })
 

@@ -180,6 +180,46 @@ describe('gateRequest — dialog stage (no fabrication signals)', () => {
     expect(r.status).toBe('rejected')
     if (r.status === 'rejected') expect(r.reject_kind).toBe('no_channel')
   })
+
+  it('refuses a dialog that ended without an answer even when the tool is allow-listed', async () => {
+    const r = await gateRequest({
+      toolName: 'rsct_phase_code_complete',
+      approval: approval({ action_scope: 'code_complete:feat/foo:abc' }),
+      dialog: DIALOG_OPTS,
+      projectRoot: tmpRoot,
+      now: FIXED_NOW,
+      approvalModes: { trust_allowed_for: ['rsct_phase_code_complete'] },
+      promptFn: dialogReturning({ response: 'failed', channel: 'windows', error: 'powershell exit 1' }),
+    })
+    expect(r.status).toBe('rejected')
+    if (r.status === 'rejected') {
+      expect(r.fabrication_signals).toEqual([])
+      expect(r.reject_kind).toBe('dialog_failed')
+      expect(r.reason).toContain('powershell exit 1')
+      expect(r.reason).toContain('trust_allowed_for does not apply')
+      expect(r.reason).not.toContain('the dialog is required')
+    }
+  })
+
+  it('refuses any answer it does not know, allow-listed or not, forced or not', async () => {
+    for (const [listed, forced] of [[true, false], [false, false], [true, true]] as const) {
+      const r = await gateRequest({
+        toolName: 'rsct_phase_code_complete',
+        approval: approval({ action_scope: `code_complete:feat/foo:${listed}:${forced}` }),
+        dialog: DIALOG_OPTS,
+        projectRoot: tmpRoot,
+        now: FIXED_NOW,
+        ...(forced && { forceDialog: true }),
+        ...(listed && { approvalModes: { trust_allowed_for: ['rsct_phase_code_complete'] } }),
+        promptFn: dialogReturning({ response: 'maybe', channel: 'none' } as unknown as DialogResult),
+      })
+      expect(r.status, `${listed} ${forced}`).toBe('rejected')
+      if (r.status === 'rejected') {
+        expect(r.fabrication_signals).toEqual([])
+        expect(r.reject_kind, `${listed} ${forced}`).toBe('dialog_failed')
+      }
+    }
+  })
 })
 
 describe('gateRequest — forced dialog (fabrication signals)', () => {
@@ -228,5 +268,25 @@ describe('gateRequest — forced dialog (fabrication signals)', () => {
     })
     expect(r.status).toBe('rejected')
     if (r.status === 'rejected') expect(r.reject_kind).toBe('dialog_no')
+  })
+
+  it('a forced dialog that ended without an answer is dialog_failed, not a missing channel', async () => {
+    const r = await gateRequest({
+      toolName: 'rsct_request_commit',
+      approval: approval(),
+      dialog: DIALOG_OPTS,
+      projectRoot: tmpRoot,
+      now: FIXED_NOW,
+      forceDialog: true,
+      forceDialogReason: 'commits always ask',
+      approvalModes: { trust_allowed_for: ['rsct_request_commit'] },
+      promptFn: dialogReturning({ response: 'failed', channel: 'linux-zenity', error: 'zenity exit 255' }),
+    })
+    expect(r.status).toBe('rejected')
+    if (r.status === 'rejected') {
+      expect(r.reject_kind).toBe('dialog_failed')
+      expect(r.reason).toContain('commits always ask')
+      expect(r.reason).toContain('trust_allowed_for does not apply')
+    }
   })
 })

@@ -5,6 +5,7 @@ import {
   runWindowsDialog,
   DIALOG_MESSAGE_VARIABLE,
   DIALOG_TITLE_VARIABLE,
+  WINDOWS_NO_DESKTOP,
   type DialogOptions,
   type Executor,
 } from '../../src/lib/os-dialog.js'
@@ -37,16 +38,22 @@ function occurrences(haystack: string, needle: string): number {
 }
 
 const WINDOWS_CALL = '[System.Windows.Forms.MessageBox]::Show('
+const WINDOWS_TAIL = '[Console]::Out.Write([string]$r)'
+
+function windowsEchoScript(script: string): string {
+  expect(occurrences(script, WINDOWS_CALL)).toBe(1)
+  expect(occurrences(script, WINDOWS_TAIL)).toBe(1)
+  return script
+    .replace(WINDOWS_CALL, '[string]::Concat(')
+    .replace(WINDOWS_TAIL, '[Console]::Out.Write([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$r)))')
+}
 
 function windowsEcho(captured: { stdout: string }, envInstead?: Record<string, string>): Executor {
   return (cmd, args, env) => {
-    const script = args[args.length - 1] ?? ''
-    expect(occurrences(args.join('\n'), WINDOWS_CALL)).toBe(1)
-    const echo = script
-      .replace(WINDOWS_CALL, '[string]::Concat(')
-      .replace('Write-Output $r', 'Write-Output ([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($r)))')
+    const echo = windowsEchoScript(args[args.length - 1] ?? '')
     const result = defaultExecutor(cmd, [...args.slice(0, -1), echo], envInstead ?? env)
     captured.stdout = result.stdout.trim()
+    expect(captured.stdout, 'this host has no interactive desktop, so the echo never ran').not.toBe(WINDOWS_NO_DESKTOP)
     return result
   }
 }
@@ -85,6 +92,17 @@ describe.runIf(process.platform === 'win32')('runWindowsDialog — real powershe
     const captured = { stdout: '' }
     runWindowsDialog({ title: TITLE, message: CORPUS[0]! }, windowsEcho(captured, SUBSTITUTE))
     expect(windowsShown(captured.stdout)).toBe('substitute textsubstitute titleYesNoQuestion')
+  }, 60_000)
+
+  it('a session with no desktop is no channel, and nothing after the check runs', () => {
+    const r = runWindowsDialog({ title: TITLE, message: 'm' }, (cmd, args, env) => {
+      const echo = windowsEchoScript(args[args.length - 1] ?? '')
+      const script = echo.replace('-not [Environment]::UserInteractive', '$true')
+      expect(script).not.toBe(echo)
+      return defaultExecutor(cmd, [...args.slice(0, -1), script], env)
+    })
+    expect(r.response).toBe('no-channel')
+    expect(r.channel).toBe('none')
   }, 60_000)
 })
 

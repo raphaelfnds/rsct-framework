@@ -170,6 +170,16 @@ describe('run alone — the choice at rsct_phase_code_start', () => {
     expect(readState().phase).toBeUndefined()
   })
 
+  it('a dialog that ended without an answer refuses the choice and is recorded like a missing channel', async () => {
+    writePlanAndV()
+    const { out } = await startRunAlone(['failed'])
+    expect(out.status).toBe('run_alone_gate_rejected')
+    if (out.status !== 'run_alone_gate_rejected') return
+    expect(out.reject_kind).toBe('dialog_failed')
+    expect(readState().run_alone).toBeUndefined()
+    expect(auditEvents().find((e) => e.event === 'run_alone.declined')?.reject_kind).toBe('dialog_failed')
+  })
+
   it('opens only after the gates with no dialog passed: a missing V shows no dialog and leaves no record', async () => {
     writeFileSync(join(tmpRoot, 'plan_feat-x.md'), '| Status | in-progress |\n', 'utf8')
     writeFileSync(join(tmpRoot, 'progress_feat-x.md'), '# progress\n', 'utf8')
@@ -355,6 +365,15 @@ describe('run alone — the approvals at rsct_phase_review_complete', () => {
     expect(out.reject_kind).toBe('force_dialog_no_channel')
     expect(readState().phase).toBe('review')
     expect(readRunAlone(readState())).toEqual(block([TEST_DONE]))
+  })
+
+  it('a dialog that ended without an answer is not a decline: the rest stays pending', async () => {
+    writeState({ phase: 'review', spec_slug: 'feat-x', run_alone: block([CODE_DONE, TEST_DONE]) })
+    const { out } = await reviewComplete(['yes', 'failed'])
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('dialog_failed')
+    expect(readRunAlone(readState())).toEqual(block([TEST_DONE]))
+    expect(auditEvents().some((e) => e.event === 'run_alone.pending_declined')).toBe(false)
   })
 
   it('asks for the pending phases whatever spec the review was started under', async () => {

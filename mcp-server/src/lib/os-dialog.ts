@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { win32 } from 'node:path'
 
-export type DialogResponse = 'yes' | 'no' | 'no-channel'
+export type DialogResponse = 'yes' | 'no' | 'no-channel' | 'failed'
 
 export type DialogChannel = 'windows' | 'macos' | 'linux-zenity' | 'none'
 
@@ -22,6 +22,7 @@ export interface ExecResult {
   stdout: string
   stderr: string
   error?: string
+  code?: string
 }
 
 export type Executor = (cmd: string, args: string[], env?: Record<string, string>) => ExecResult
@@ -39,10 +40,25 @@ const LINUX_ZENITY = '/usr/bin/zenity'
 
 const VISIBLE_NUL = '\u2400'
 
-const WINDOWS_SCRIPT =
-  'Add-Type -AssemblyName System.Windows.Forms; ' +
+export const WINDOWS_NO_DESKTOP = 'NoDesktop'
+
+export const WINDOWS_SCRIPT_PREFIX =
+  "$PSModuleAutoLoadingPreference = 'None'; " +
+  `if (-not [Environment]::UserInteractive) { [Console]::Out.Write('${WINDOWS_NO_DESKTOP}'); exit 0 }; `
+
+export const WINDOWS_SCRIPT =
+  WINDOWS_SCRIPT_PREFIX +
+  "[void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089'); " +
   `$r = [System.Windows.Forms.MessageBox]::Show($env:${DIALOG_MESSAGE_VARIABLE}, $env:${DIALOG_TITLE_VARIABLE}, 'YesNo', 'Question'); ` +
-  'Write-Output $r'
+  '[Console]::Out.Write([string]$r)'
+
+export const LINUX_ZENITY_EXIT_CODES: Readonly<Record<string, string>> = {
+  ZENITY_OK: '0',
+  ZENITY_CANCEL: '1',
+  ZENITY_ESC: '1',
+  ZENITY_ERROR: '255',
+  ZENITY_TIMEOUT: '5',
+}
 
 const MAC_SCRIPT_LINES: readonly string[] = [
   "ObjC.import('Foundation')",
@@ -121,6 +137,7 @@ function normalizeExecError(err: unknown): ExecResult {
     }
     const message = e.message ?? (e.code ? `exec failed: ${e.code}` : undefined)
     if (message) result.error = message
+    if (typeof e.code === 'string') result.code = e.code
     return result
   }
   return { exitCode: -1, stdout: '', stderr: '', error: String(err) }
@@ -145,6 +162,14 @@ export function windowsPowerShellPath(env: NodeJS.ProcessEnv = process.env): str
   return win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 }
 
+function programMissing(exec: ExecResult): boolean {
+  return exec.code === 'ENOENT'
+}
+
+function failed(channel: Exclude<DialogChannel, 'none'>, error: string): DialogResult {
+  return { response: 'failed', channel, error }
+}
+
 export function runWindowsDialog(options: DialogOptions, executor: Executor): DialogResult {
   const exec = executor(
     windowsPowerShellPath(),
@@ -152,21 +177,19 @@ export function runWindowsDialog(options: DialogOptions, executor: Executor): Di
     dialogEnvironment(options),
   )
 
-  if (exec.error || exec.exitCode < 0) {
-    return {
-      response: 'no-channel',
-      channel: 'none',
-      error: exec.error ?? `powershell exit ${exec.exitCode}`,
-    }
+  if (programMissing(exec)) {
+    return { response: 'no-channel', channel: 'none', error: exec.error ?? 'powershell not found' }
+  }
+  if (exec.error !== undefined || exec.exitCode !== 0) {
+    return failed('windows', exec.error ?? `powershell exit ${exec.exitCode}`)
   }
   const stdout = exec.stdout.trim()
+  if (stdout === WINDOWS_NO_DESKTOP) {
+    return { response: 'no-channel', channel: 'none', error: 'this Windows session has no desktop to show a dialog on' }
+  }
   if (stdout === 'Yes') return { response: 'yes', channel: 'windows' }
   if (stdout === 'No') return { response: 'no', channel: 'windows' }
-  return {
-    response: 'no-channel',
-    channel: 'none',
-    error: `unexpected powershell output: ${stdout}`,
-  }
+  return failed('windows', `unexpected powershell output: ${stdout}`)
 }
 
 export function runMacDialog(options: DialogOptions, executor: Executor): DialogResult {
@@ -176,39 +199,30 @@ export function runMacDialog(options: DialogOptions, executor: Executor): Dialog
     dialogEnvironment(options),
   )
 
+  if (programMissing(exec)) {
+    return { response: 'no-channel', channel: 'none', error: exec.error ?? 'osascript not found' }
+  }
   if (exec.exitCode !== 0) {
-    if (exec.error && exec.exitCode < 0) {
-      return { response: 'no-channel', channel: 'none', error: exec.error }
-    }
-    return { response: 'no', channel: 'macos' }
+    if (exec.exitCode > 0 && exec.stderr.includes('(-128)')) return { response: 'no', channel: 'macos' }
+    return failed('macos', `osascript exit ${exec.exitCode}: ${exec.stderr.trim()}`)
   }
   const stdout = exec.stdout.trim()
   if (stdout === 'Yes') return { response: 'yes', channel: 'macos' }
   if (stdout === 'No') return { response: 'no', channel: 'macos' }
-  return {
-    response: 'no-channel',
-    channel: 'none',
-    error: `unexpected osascript output: ${stdout}`,
-  }
+  return failed('macos', `unexpected osascript output: ${stdout}`)
 }
 
 export function runLinuxDialog(options: DialogOptions, executor: Executor): DialogResult {
-  const exec = executor(LINUX_ZENITY, [
-    '--question',
-    `--title=${options.title}`,
-    `--text=${options.message}`,
-    '--no-wrap',
-    '--no-markup',
-  ])
+  const exec = executor(
+    LINUX_ZENITY,
+    ['--question', `--title=${options.title}`, `--text=${options.message}`, '--no-wrap', '--no-markup'],
+    { ...LINUX_ZENITY_EXIT_CODES },
+  )
 
-  if (exec.error && exec.exitCode < 0) {
-    return { response: 'no-channel', channel: 'none', error: exec.error }
+  if (programMissing(exec)) {
+    return { response: 'no-channel', channel: 'none', error: exec.error ?? 'zenity not found' }
   }
   if (exec.exitCode === 0) return { response: 'yes', channel: 'linux-zenity' }
-  if (exec.exitCode === 1) return { response: 'no', channel: 'linux-zenity' }
-  return {
-    response: 'no-channel',
-    channel: 'none',
-    error: `zenity exit ${exec.exitCode}: ${exec.stderr.trim()}`,
-  }
+  if (exec.exitCode === 1 && !/open display/i.test(exec.stderr)) return { response: 'no', channel: 'linux-zenity' }
+  return failed('linux-zenity', `zenity exit ${exec.exitCode}: ${exec.stderr.trim()}`)
 }

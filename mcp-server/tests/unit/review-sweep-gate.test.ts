@@ -197,6 +197,11 @@ describe('rsct_phase_review_complete — comment sweep', () => {
     expect(auditEvents().some((e) => e.event === 'review.unverified_decision' && e.answer === 'no')).toBe(true)
     const closed = await completeReview({}, prompts('no-channel'))
     expect(closed.reject_kind).toBe('unverified_undecided')
+    const decisionsBefore = auditEvents().filter((e) => e.event === 'review.unverified_decision').length
+    const failed = await completeReview({}, prompts('failed'))
+    expect(failed.reject_kind).toBe('unverified_undecided')
+    expect(failed.reason).toContain('ended without a Yes or No answer')
+    expect(auditEvents().filter((e) => e.event === 'review.unverified_decision').length).toBe(decisionsBefore)
     const yes = prompts('yes', 'yes')
     const out = await completeReview({}, yes)
     expect(out.status).toBe('completed')
