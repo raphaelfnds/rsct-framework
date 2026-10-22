@@ -3134,6 +3134,20 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### Tests and build
 
+- `tests/bash/lint.test.ts` (migrated in the 2.19.0 REVIEW) is the static bash lint (T0.a): `bash -n`
+  over every prompt block and script (the V2 regression gate), the AP1–AP7 detectors over the real
+  corpus with no ERROR finding allowed, one self-test per detector (it must flag a known-bad and
+  pass a known-good: a detector with no proof it fires is a silent pass), and the CI guard that
+  fails when `RSCT_REQUIRE_BASH=1` and bash is missing. The block counts guard against an extractor
+  that lints nothing. No `scripts/*.sh` may be skipped by the illustrative-sentinel heuristic: it
+  exists for prompt blocks that show a "❌ NÃO usar" example, but `loadScriptBlocks` runs the same
+  `skipState` over whole scripts, so one comment with ❌, PROIBIDO or "NÃO usar" would switch off
+  every detector and the `bash -n` gate for that file, and the skip is only logged (#73: the
+  install.sh comments of the time cited anti-pattern #5 by name). The skipped-block report is
+  informational, not an assertion. The `bash -n` gate spawns about 70 synchronous bash processes,
+  slow under Git Bash on Windows CI, hence its 120 s timeout. The AP5 self-test's known-bad parses
+  and re-stringifies a whole file; its known-goods are the documented `.mcp.json` exception and a
+  per-value text splice. AP6 is off by default.
 - `verification-checklist.test.ts`: the clean-pass suppression is scoped to the corpus MISS, not to
   a small corpus — the cases use only `decisions.md` with no `knowledge/` directory, because a
   present knowledge category emits `forgotten` prompts that would lift the count above zero and skip
