@@ -3745,8 +3745,11 @@ those files. Keyed by module and symbol; restatements of what the code says were
   for this spec; the prune is an allowlist — spec, tier, start and completion times and `head_sha`
   stay, findings and importers go (they are in the audit log). The phase label is always cleared
   once `completed_at` is stamped: the old `clear_phase: false` stranded a label no tool could clear
-  without destroying the record. `PhaseVerificationCompleteInput` stays exported where importers
-  expect it (#19).
+  without destroying the record. A `clear_phase` passed anyway is reported in the hints as
+  deprecated, so the caller learns it did nothing instead of finding out from the state; the other
+  top-level fields of the state survive the completion, and a rejected completion leaves the state
+  as it was (the test file's comments, migrated in the 2.20.1 REVIEW). `PhaseVerificationCompleteInput`
+  stays exported where importers expect it (#19).
 
 ---
 

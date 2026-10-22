@@ -160,7 +160,6 @@ describe('phase-verification-complete — block_actions_present', () => {
     expect(out.reject_kind).toBe('block_actions_present')
     expect(out.actions_summary.block).toBe(1)
     expect(out.cleared_verification).toBe(false)
-    // phase-state must remain intact
     expect(existsSync(join(tmpRoot, '.rsct/phase-state.json'))).toBe(true)
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
@@ -242,8 +241,6 @@ describe('phase-verification-complete — happy path', () => {
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    // CAP-28: verification block preserved as audit trail (large arrays
-    // pruned, but metadata + completed_at retained for downstream gate).
     const stateV = state.verification as
       | { spec_ref?: string; spec_tier?: string; completed_at?: string }
       | undefined
@@ -295,16 +292,11 @@ describe('phase-verification-complete — happy path', () => {
 
     expect(out.status).toBe('completed')
     expect(out.cleared_phase).toBe(true)
-    // The deprecation is surfaced, not silent — the caller learns the flag did
-    // nothing rather than discovering it from state that does not match.
     expect(out.hints.some((h) => h.includes('`clear_phase` is deprecated'))).toBe(true)
 
     const state = JSON.parse(
       readFileSync(join(tmpRoot, '.rsct/phase-state.json'), 'utf8'),
     ) as Record<string, unknown>
-    // CAP-28: the verification block is kept as the evidence rsct_phase_code_start
-    // reads (arrays pruned, metadata + completed_at retained). #15: the active
-    // phase label goes regardless of clear_phase, so it cannot strand.
     const stateV = state.verification as
       | { spec_ref?: string; completed_at?: string }
       | undefined
@@ -314,7 +306,6 @@ describe('phase-verification-complete — happy path', () => {
     expect(state.phase).toBeUndefined()
     expect(state.scope_globs).toBeUndefined()
     expect(state.started_at).toBeUndefined()
-    // Untouched top-level fields survive.
     expect(state.spec_slug).toBe('feat-foo')
   })
 })
@@ -328,7 +319,7 @@ describe('phase-verification-complete — input validation', () => {
       {
         project_root: tmpRoot,
         spec_ref: 'feat-foo',
-        dev_approval: { timestamp: VALID_TS }, // missing action_scope + reason
+        dev_approval: { timestamp: VALID_TS },
       },
       { now: FIXED_NOW, promptFn: alwaysYes() },
     )) as PhaseVerificationCompleteOutput
