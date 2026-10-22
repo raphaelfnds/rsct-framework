@@ -79,12 +79,14 @@ Há três combinações, e toda medição deve dizer qual delas foi feita:
 2. dentro do WSL com o clone no disco do Windows (`/mnt/c/...`);
 3. no Windows (Git Bash) com o clone dentro do WSL (`//wsl.localhost/...`).
 
-**Hoje o instalador só alcança a 3.** `scripts/install.sh` e
+**Sem `--wsl`, o instalador só alcança a 3.** `scripts/install.sh` e
 `scripts/uninstall-framework.sh` se recusam a rodar dentro do WSL — trava
 proposital, porque o Claude Code do Windows não lê `/home/<user>/.rsct/`.
-O caso do Claude Code que roda dentro do WSL é a issue #110. Medir um
-trecho dentro do WSL não prova que o produto funciona lá: rode o script
-inteiro antes de afirmar.
+Com `--wsl` (desde a 2.19.0, #110, ADR-032), eles instalam para um Claude
+Code que roda dentro do WSL, nas combinações 1 e 2: o PATH perde as pastas
+do lado Windows e o script para antes de escrever se algum destino estiver
+do lado Windows. Medir um trecho dentro do WSL não prova que o produto
+funciona lá: rode o script inteiro antes de afirmar.
 
 Diferenças medidas (#74, 2026-10-04):
 
