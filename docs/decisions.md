@@ -2127,6 +2127,133 @@ the Linux `claude` by full path, or say to edit the file or install npm inside W
 after every WSL run the Windows install's global link, user-scope entry, `~/.rsct` and slash
 commands were identical.
 
+### ADR-033 — The uninstall keeps the developer's text and names what it keeps; setup never replaces a CLAUDE.md with content; the repository's `.rsct/` gets its own ignore file (#82, 2.20.0)
+**Status**: active. Changes one acceptance criterion of #82 (2026-09-10): "the uninstall also
+cleans the relocated location" becomes "the uninstall names the relocated location and never
+removes it" (maintainer, 2026-10-22). The rest of #82 stands.
+**Tags**: uninstall, setup, claude-md, relocation, gitignore, upgrade
+
+**Context**: MEASURED on `main` @ `210b6d6` (2.19.0), Windows 11, Git Bash 5.2.26, running the real
+prompt blocks in temporary folders.
+- Setup's CREATE writer replaced a `CLAUDE.md` that held the developer's text and no RSCT rules:
+  Phase 2 sent "exists, no rules" to CREATE and the block wrote the template over the file.
+- The uninstall left the header lines and the conventions pointer: setup writes `RSCT_APP` in 29
+  places and the uninstall in none; `RSCT-CONVENTIONS-REF` 5 and none. "Delete the file when only
+  the header is left" was prose with no command, and could not be reached while those lines stayed.
+- The 4.2 `sed` range delete removed section bodies that are the developer's text
+  (`source=migrated-from-ptbr-preserved`, `hand-merged`, never named in the uninstall) and, on a
+  BEGIN with no END, would delete to the end of the file.
+- The unmarked placeholder of an install from before #66 that was linked and then refreshed
+  survived: the awk took the heading inside the filled section (`SKIP hl=3 tl=15`).
+- From a monorepo package, `git cat-file -e $SHA:CLAUDE.md` reads the repository root's file;
+  `$SHA:./CLAUDE.md` reads the package's. From a subfolder, `git ls-tree --name-only "$SHA:./"`
+  prints nothing with exit code 0 (the folder filter is applied a second time to that folder's own
+  tree); `--full-tree` lists its entries from a subfolder and from the root, and a folder missing at
+  that commit exits 128 (git 2.45.1). Found by mutation in the T phase: the first version of 4.3c
+  never saw a package's own `CLAUDE.md` at the commit.
+- Phase 1.0 captured `HEAD` and `INITIAL` on two lines in a repository with no commit.
+- Since #92 a linked worktree, a monorepo package or a project inside another repository keeps
+  `audit.log`, `approvals-seen.json` and the audit-prune files in the repository's `.rsct/`, which
+  the project's `.gitignore` block does not reach, so they showed in `git status`; the uninstall was
+  project-relative. That folder is shared by every RSCT project of the repository: removing it
+  resets the others' audit ceiling, their `plan_revoke` records and their approval store.
+- `rsct_status`, `rsct_audit`, `rsct_classify_task`, rules §B and §C and `mcp-server/README.md` said
+  the approval store was per worktree.
+- 4.6 (partial uninstall) was prose only, so nothing kept an agent from parsing and re-writing
+  `.rsct.json` (anti-pattern #5).
+
+**Decision**:
+- Setup: CREATE only when `CLAUDE.md` is absent or empty (a byte-order mark and whitespace count as
+  empty); 4.3 checks again and stops on a file with content, and without node it stops on any file
+  that is not zero bytes. A read-only Phase 1.5 block classifies the file: a column-1 marker pair
+  decides a rule's presence, and the keywords are searched only outside every RSCT block, header
+  line and `[§X — … inserted here]` line. Step E anchors after the `RSCT_APP` header, else the
+  `# CLAUDE.md` heading, else the first column-1 `# ` heading outside a code fence, else the top;
+  a byte-order mark stays at byte 0. Phase 1.0 uses `git rev-parse --verify -q HEAD || echo INITIAL`.
+- Uninstall, in `CLAUDE.md`: 4.2 is one node pass over column-1 marker pairs that writes nothing
+  when a pair is nested, stray or never closed; `inserted` and `migrated-from-ptbr` go whole, any
+  other `source=` keeps its body; line endings and a byte-order mark are kept. The slot and
+  canonical-section removals match their markers at column 1 only, like the sections, and the
+  legacy placeholder search skips the filled section. 4.3b removes the exact header lines of the
+  leading block and the pointer whose text hashes to the one setup writes, only once no section,
+  canonical section or slot marker is left; an edited pointer is kept. 4.3c decides the file by
+  git: deleted when there was no `CLAUDE.md` at `setup_commit_sha_before` or one with only framework
+  text, and only framework text is left; restore offered when an older CREATE replaced the
+  developer's file; kept otherwise, and always when the commit or the file there cannot be read.
+  It only prints its decision unless `CLAUDE_MD_APPLY=1` is set, so Phase 1 runs it as written and
+  Phase 4 sets the variable. A `CLAUDE.md` that is a symbolic link is touched by no block: its
+  target can be a file another project uses, and the awk removals would replace the link with a
+  copy (MEASURED in the REVIEW with an MSYS link: the link became a regular file and 4.3c then
+  deleted it).
+- Uninstall, elsewhere: without an `install` block it still stops, and now lists the leftovers
+  read-only and gives the route (`/rsct-setup`, then `/rsct-uninstall`). The report says that a
+  framework section goes whole, edits included, worded by whether git keeps a copy (Phase 1.3). A
+  Category K list of what is kept on purpose appears before the OK and in the final report. Phase
+  1.6 finds the repository's `.rsct/` with the server's rule (bash, `-ef`, pinned to
+  `lib/repo-anchor.ts` on eight layouts) and names it; it is never removed. In the main worktree of
+  a repository with linked worktrees it prints `SHARED_WITH_WORKTREES`, and 4.V.c keeps the
+  approval store, which those worktrees use. A kept `audit.log` gets
+  a `.rsct/.gitignore` (4.V.c), removed in 4.7 only when its content is RSCT's and nothing else is
+  left; an empty `.claude/` is removed. 4.6 turns `canonical_source_added` off in a kept
+  `.rsct.json` by a text splice of that one value. An artefact table maps every setup block and
+  every server file to what the uninstall does with it; a test fails when a setup block or a name of
+  the server's shared and local lists has no row.
+- Server: `protectRelocatedState` writes `<repository>/.rsct/.gitignore` with every write to the
+  shared files (after it, or before the retention cut writes its working files, and only when a log
+  or a pending cut exists), only when the folder is relocated, never replacing an existing file
+  (`wx`), never throwing, and writing no audit event. A read writes it only together with the
+  one-time copy of an old project log (#92). It lists the shared files and itself, never `*`.
+- The per-worktree claim is corrected in the tool texts, rules §B and §C and the server README: the
+  phase state and a batch token are per worktree; the audit log and the approval store are the
+  repository's, so an approval spent in one worktree is spent in all.
+
+**Direction**: stricter or neutral; nothing is looser. No gate reads anything new and none changes
+its answer; the server's ignore file changes no write result and adds no audit event. The
+uninstall removes less of the developer's text than before (bodies that are theirs, malformed
+files refused, a deletion of `CLAUDE.md` that needs git's proof) and more framework text (header
+lines and pointer, as #82 asked). The relocated shared state is not removed, which keeps the other
+projects' records intact. The rules text that reaches every project through `/rsct-setup` only
+corrects a false sentence about worktrees.
+
+**Alternatives considered**:
+- Removing the relocated shared state, as #82 first asked — rejected (maintainer, 1A): it resets
+  the other projects' audit ceiling and revoke records.
+- Counting the RSCT projects of the repository to decide that removal — refuted: `git ls-files`
+  from a package undercounts.
+- Deciding the deletion of `CLAUDE.md` by `install.mode` — refuted: a re-setup over leftovers is
+  UPDATE, and a CREATE that replaced the developer's file would have deleted it.
+- Step E at the top of the file when there is no header — refuted in V: it breaks the check in
+  `02-canonical-source.md` that the section comes after the first heading.
+- `*` in the ignore file — rejected: it would hide the developer's own files in that folder.
+- Removing the abort when `.rsct.json` has no `install` block — rejected (2A): it loosens an
+  absolute stop; the listing gives the information without acting on a guess.
+- Asking per edited framework section (a hash check) — not taken (3A): the report line says the
+  sections go whole and whether git has a copy.
+
+**What is given up, by name**: an edit inside a framework section goes with the section (the
+report says so). A `HOME` that is itself a git repository makes `~/.rsct` the shared folder of every
+project under it; it is named like any relocation and never removed, but nothing tells it apart
+from the machine install folder. When the project is the repository root, the uninstall still
+removes the `approvals-seen.json` that packages relocated to that root use (as before: git cannot
+list them reliably); for linked worktrees, which git lists, the store is kept. Any `audit.path`
+other than the default `.rsct/audit.log` is not covered by the ignore file. The slot and
+canonical-section removals use awk, so on Git Bash a file they change comes back with LF line
+endings (as before); the section pass keeps them on every system. Files
+that 2.9.0–2.19.x committed in the shared folder stay tracked until `git rm --cached` (the release
+note gives the command; the framework never changes the git index). With Category E out of scope
+4.V.c does not run, so the kept state files lose their ignore lines (the report says so). Leftovers
+that were never committed and are adopted by an UPDATE setup keep their template lines as the
+developer's text, so that `CLAUDE.md` is kept. 4.2, 4.3b and 4.3c need node (4.2 used only sed). A
+symlinked `CLAUDE.md` keeps every RSCT part: the developer removes them from its target by hand.
+On a git older than 2.7 (no `worktree list`) the main worktree does not say it is shared and
+4.V.c removes the store there.
+
+**Consequences**: new tests `tests/unit/relocated-state-ignore.test.ts`,
+`tests/bash/setup-claude-md.test.ts`, `tests/bash/uninstall-claude-md.test.ts` (with the helper
+`tests/bash/lib/chain-harness.ts`, which runs several blocks in one folder, each in its own shell)
+and `tests/bash/uninstall-inventory.test.ts`; no existing test was edited. Rules §B and §C and the
+hook bundle changed, so each project needs `/rsct-setup` after the installer.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
@@ -3134,6 +3261,46 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ### Tests and build
 
+- The #82 tests of 2.20.0 (ADR-033) run the real prompt blocks. `tests/bash/lib/chain-harness.ts`
+  runs several blocks in one folder, each in its own shell as the agent does, with node steps
+  between them standing in for the agent's edits. `HOME` is the project folder by default; the
+  CREATE steps point it at a separate folder so the template never lands in the project's `.rsct/`.
+  The git helpers set `commit.gpgsign=false` and `core.hooksPath`, as `tests/sweep-repo.ts` does, so a
+  signing or hook setup in the developer's global git config cannot fail them. The symlink cases
+  create the link through bash with `MSYS=winsymlinks:sys`, so they run on Windows without symlink
+  rights too (a native link on Linux and macOS). Each case exists for one mutation, all killed in
+  the T phase: setup — the 4.3 refusal off; a folder or a blank file without node counted as
+  empty; Step E without the fence check, with `RSCT_APP:` anywhere, without the byte-order mark,
+  without the first-heading fallback; Phase 1.5 searching keywords inside RSCT blocks, counting the
+  placeholder lines, taking a mid-line marker; Phase 1.0 back to `rev-parse HEAD` (the anchor of
+  that test is the `echo` line, because the first anchor sat inside the mutated text and the test
+  failed for not finding its block). Uninstall — every body as framework text; an unclosed BEGIN
+  accepted; a mid-line BEGIN; the byte-order mark dropped; the scope ignored; the placeholder search
+  inside the filled section; 4.3b with sections left, removing an edited pointer, keeping the blank
+  line before the pointer or after the header; 4.3c without `--full-tree`, reading the blob from the
+  root, template lines as framework text in UPDATE, an old file counted as framework text without a
+  header, the dry run honouring markers, the real run ignoring them, the restore skipped, any hash
+  taken as a commit; 4.6 splicing every match; 4.V.c replacing an existing ignore file; 4.7
+  removing an edited one or one next to a kept log, and keeping an empty `.claude/`; 1.6 without
+  the linked-worktree check or comparing paths as text; 1.3 reporting uncommitted as committed.
+  Server — the helper acting at `same`, replacing a file, throwing, writing `*`, and each of the
+  six call sites removed. The two calls of a consumed approval cover each other, so each case makes
+  the other write fail: a folder where the log should be, or where the store should be. After the
+  REVIEW fixes, each in turn: every symlink guard off (4.2 sections, placeholder, canonical, 4.3b,
+  4.3c — the 4.3b case links to a file with no section left, since with sections 4.3b writes
+  nothing anyway, and the chain case adds a canonical section to the target so the canonical guard
+  is reached); the slot and canonical markers matched mid-line again (both lines of a pair, which is
+  what the old code did; one line alone leaves the pair unclosed and refused); an unreadable file
+  at the commit counted as absent; 4.3c applying by default; the worktree count dropped; the store
+  removed in a shared main worktree, and kept everywhere; Phase 1.6 ending on a false test; the
+  retention call with no log, and removed. MEASURED on the first CI run of the release (PR #140),
+  green on Windows only: the uninstall 4.4b left a blank line where the block had been in a CRLF
+  `.gitignore` on Linux and macOS, where awk sees the `\r` (anti-pattern #4); it now pipes through
+  `tr -d '\r'`, and the test expects LF exactly on every system — on Windows that case cannot fail,
+  since awk there never sees the `\r`. And `mktemp` with no argument does not fail on macOS when
+  `TMPDIR` names a missing folder, so the unreadable-file case deletes the blob's loose object
+  instead (made writable first: git stores objects read-only).
+
 - `tests/bash/lint.test.ts` (migrated in the 2.19.0 REVIEW) is the static bash lint (T0.a): `bash -n`
   over every prompt block and script (the V2 regression gate), the AP1–AP7 detectors over the real
   corpus with no ERROR finding allowed, one self-test per detector (it must flag a known-bad and
@@ -3357,6 +3524,57 @@ those files. Keyed by module and symbol; restatements of what the code says were
   `.git/modules`), everything else to its toplevel; a bare main repository to its common dir's
   parent. `--path-format=absolute` is not used (AD-003). `repositoryDialogLine` names the target in
   the one channel the agent cannot forge but could aim.
+- `protectRelocatedState` (2.20.0, ADR-033): every writer of a shared file calls it with its own
+  write — after it; the retention cut before it writes its working files, and only when a log or a
+  pending cut exists (MEASURED in the REVIEW: called unconditionally, it created the folder with no
+  log, because `candidatesFor` always names one or two logs). A read reaches it only through the
+  migration copy, which writes. It acts only for `relocated`: at `same` the project's `.gitignore` block
+  already covers the files, and at `not-applicable` or `unavailable` there is no repository to keep
+  them out of. `wx` keeps a developer's file, and the empty `catch` keeps the result of the write it
+  follows. A consumed approval calls it after the audit line and again after the store: when one
+  of the two writes fails, the other still protects the folder. It lives in
+  `repo-anchor.ts` because the SessionStart sanitizer bundle must stay free of zod. The content is
+  built from `SHARED_ANCHORS`; that list is pinned to the real writers by tests that check `git
+  status` stays clean after an append, a consumed approval and a migration copy.
+
+### `lib/dev-approval.ts` (migrated in the 2.20.0 REVIEW)
+
+- The consumed-approval audit event records `action_scope` and `timestamp`, never `reason`: the
+  store omits it too, it is free developer text, and the log must not carry free-form payload
+  that may hold a secret.
+- The `dev_approval` schema is strict: unknown keys are rejected, so a fabricated payload cannot
+  carry extra "trust" markers. Each override block carries a `reason` that lands in the audit log,
+  so every waiver is attributable. The contract-surface waiver (T2/INV-7) has no token path: under
+  a plan token a commit touching a surface stays blocked until a per-action approval.
+- `approvals_store_absent` (#92): MEASURED, `loadStore` reports `corrupt: false` for a missing file,
+  so `rm .rsct/approvals-seen.json` looked like a fresh project. It is raised only when the audit
+  log shows this project consumed approvals before — raising it on absence alone fired on the first
+  approval of every new project and, because any signal forces the dialog, broke the headless
+  `trust` fallback in CI. It stays a signal, not a rejection: a fresh project has no store either,
+  and the audit half of the union is what catches the replay.
+- `auditConfig` is forwarded by every gated call site so the audit half reads the file the
+  consumption was written to; without it a configured `audit.path` would split the two halves from
+  the rest of the log.
+- `EXPECTED_SCOPE_TOKEN` is the per-tool prefix `action_scope` must start with (the token before
+  the first `:`); a tool not in the map skips `scope_mismatch`.
+- The timestamp skew default is 180 s, raised from 60 s in the M2 gate run: MEASURED, 78–155 s passed
+  between the timestamp capture (through the Bash tool) and the tool call when each step raised a
+  Claude Code permission prompt. `approval_modes.timestamp_skew_seconds` overrides it.
+- The store follows the repository, not the declared root (#92): MEASURED before the change, the
+  same payload was rejected as reused at the real root and accepted at a crafted subdirectory of
+  the same repository, and on a host with no dialog channel then approved through `trust` with no
+  fabrication signal.
+- "Consumed" is the union of the store and the append-only, repository-bound audit log: the store
+  alone is defeated by `rm`, the log only by an edit its shape makes visible, so one witness is
+  enough and a partial write failure degrades to safe. REFUTED before it was written: deriving the
+  union from the log as it was — no event carried `action_scope` or `timestamp`, so recording them
+  is what makes it possible. The scan pre-filters lines that are not approval records (it runs on
+  every gated validation); an unreadable log leaves the store as the only witness and never invents
+  a reuse.
+- `validateDevApproval` is a pure read; `recordConsumedApproval` runs after the mutation lands, so a
+  failed mutation does not burn the approval, writes the audit witness first and independently of
+  the store (a store failure cannot leave the approval unrecorded on both sides), writes the store
+  through a temporary file and a rename, and never throws.
 
 ### `tools/capture-issue.ts` (migrated in the 2.18.0 REVIEW)
 
@@ -3402,8 +3620,10 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - The update-check mutations run before the read, so turning the check off is not followed by a
   notice on how to undo it and a decline silences the hint being answered; the environment switch
   outranks the file, so a confirmation never contradicts it on a CI image. Caller input echoed
-  into hints is bounded. In a linked worktree the runtime state (`phase-state.json`, the approval
-  store, a batch token) is that worktree's own, and the status says so.
+  into hints is bounded. In a linked worktree the phase state (`phase-state.json`, a batch token)
+  is that worktree's own, while the approval store and the audit log are the repository's, kept
+  in the main worktree (#92) — an approval spent in one worktree is spent in all; the status says
+  so (corrected in 2.20.0, ADR-033: the text claimed the store was per worktree too).
 - The bootstrap verdict strings are per tool, not shared: `evaluateBootstrapMarker`'s own hints
   tell the reader to run both tools, which is self-referential from inside either. Every
   "recorded" claim depends on `recorded`.

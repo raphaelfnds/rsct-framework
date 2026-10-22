@@ -205,9 +205,10 @@ clear just because the session restarts — end it explicitly with `rsct_plan_re
 plan (overkill).
 
 **Parallel work via git worktrees:** to run isolated tracks in parallel, use
-separate git worktrees (`git worktree add ../<app>-<feat> <feat>`). Because the
-RSCT runtime state (`.rsct/phase-state.json` — including any batch token — and
-`.rsct/approvals-seen.json`) is gitignored and lives in the working tree, **each
-worktree gets its own isolated token and anti-reuse store**: a batch token in
-one worktree grants nothing in another. `rsct_status` / `rsct_phase_status`
-report when you are inside a linked worktree.
+separate git worktrees (`git worktree add ../<app>-<feat> <feat>`). The phase
+state (`.rsct/phase-state.json`, including any batch token) lives in each working
+tree, so **each worktree gets its own token**: a batch token in one worktree
+grants nothing in another. The audit log and the anti-reuse store
+(`.rsct/approvals-seen.json`) belong to the repository and live in the main
+worktree, so an approval spent in one worktree is spent in all of them.
+`rsct_status` / `rsct_phase_status` report when you are inside a linked worktree.

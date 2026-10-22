@@ -23231,6 +23231,19 @@ function commitMessageView(message) {
 }
 
 // src/lib/repo-anchor.ts
+var SHARED_ANCHORS = ["audit.log", "approvals-seen.json", "approvals-seen.json.tmp", "reports/"];
+var SHARED_STATE_IGNORE = `${[...SHARED_ANCHORS, ".gitignore"].join("\n")}
+`;
+function protectRelocatedState(projectRoot) {
+  try {
+    const anchor = anchorFor(projectRoot);
+    if (anchor.status !== "relocated") return;
+    const dir = join(anchor.root, ".rsct");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), SHARED_STATE_IGNORE, { encoding: "utf8", flag: "wx" });
+  } catch {
+  }
+}
 function canonicalPath(p) {
   let current = resolve(p);
   const tail = [];
@@ -23375,6 +23388,7 @@ function migrateLegacyLog(projectRoot, base, target) {
       }) + "\n",
       "utf8"
     );
+    protectRelocatedState(projectRoot);
   } catch {
   }
 }
@@ -23424,6 +23438,7 @@ function appendAuditEntry(projectRoot, entry, config2) {
     const line2 = `${JSON.stringify(stamped)}
 `;
     appendFileSync(path2, line2, { encoding: "utf8" });
+    protectRelocatedState(projectRoot);
     return { ok: true, path: path2 };
   } catch (err2) {
     return {
@@ -24037,7 +24052,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.19.0";
+var RSCT_MCP_VERSION = "2.20.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -24949,7 +24964,7 @@ async function statusHandler(rawInput, deps = {}) {
   const worktree = readWorktreeInfo(resolution.root);
   if (worktree.is_worktree) {
     hints.push(
-      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ""} \u2014 RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated to THIS worktree (independent of the main worktree and sibling worktrees).`
+      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ""} \u2014 RSCT phase-state and any plan-authorization token are this worktree's own; the audit log and the anti-reuse store are shared with the main worktree and its other linked worktrees (they resolve at the repository).`
     );
   }
   const universe = getUniverse(resolution.config, resolution.root);
@@ -44116,9 +44131,6 @@ var DevApprovalSchema = external_exports.object({
   reason: external_exports.string().min(1, "reason required"),
   override_protected_branch: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
   override_secrets_check: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
-  // T2/INV-7: waive the contract-surface block (multi-repo mode). Parallel to
-  // the other overrides — the token path carries none, so under a plan token a
-  // surface-touching commit is a hard block until a per-action dev_approval.
   override_contract_surface: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional()
 }).strict();
 var EXPECTED_SCOPE_TOKEN = {
@@ -44302,6 +44314,7 @@ function recordConsumedApproval(approval, options) {
       }) + "\n",
       "utf8"
     );
+    protectRelocatedState(options.projectRoot);
   } catch {
   }
   try {
@@ -44315,6 +44328,7 @@ function recordConsumedApproval(approval, options) {
     const tmp = `${path2}.tmp`;
     writeFileSync(tmp, JSON.stringify(store, null, 2), { encoding: "utf8" });
     renameSync(tmp, path2);
+    protectRelocatedState(options.projectRoot);
     return { ok: true, path: path2 };
   } catch (err2) {
     return {
@@ -44818,6 +44832,7 @@ function candidatesFor(projectRoot, config2) {
 function pruneAuditLog(projectRoot, config2, now, seams = {}) {
   const { logs, named, paths, refusal } = candidatesFor(projectRoot, config2);
   if (refusal !== null) return logs.map((log) => skipped(log, refusal));
+  if (logs.some(isRegularFile) || pendingSwap(paths) !== "none") protectRelocatedState(projectRoot);
   const outcomes = [];
   for (const log of logs) {
     let outcome;
@@ -50392,7 +50407,7 @@ async function classifyTaskHandler(rawInput) {
       "Complex tier \u2014 run the full cycle (research \u2192 spec \u2192 verification \u2192 code \u2192 test \u2192 review). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). After the tests, the REVIEW is mandatory: rsct_request_commit refuses code that no completed REVIEW covers."
     );
     hints.push(
-      "Complex tier \u2014 if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated per worktree (\xA7C). Decide this against the WRITTEN plan \u2014 this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial."
+      "Complex tier \u2014 if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state and any plan-authorization token are per worktree (\xA7C), while the audit log and the anti-reuse store are shared with the main worktree. Decide this against the WRITTEN plan \u2014 this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial."
     );
   }
   if (activePlan) {
@@ -54114,12 +54129,12 @@ var auditInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
 }).strict();
 var COVERAGE_BOUNDARY = [
-  "Settings drift (.claude/settings.json ownership) is NOT checked here \u2014 it needs two git reads to assemble, and this tool spawns no processes. It already reaches you at the commit gate (rsct_request_commit).",
+  "Settings drift (.claude/settings.json ownership) is NOT checked here \u2014 it needs two git reads to assemble; this report runs git only to find the repository the shared RSCT state belongs to. It already reaches you at the commit gate (rsct_request_commit).",
   "Findings are pruned when a phase closes, so a finding raised and answered in a past phase leaves no trace this report can query.",
   ".rsct/audit.log is not the whole history: about once a day a commit that landed through rsct_request_commit removes the entries older than 10 days. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record; an audit.pruned entry carries the count and a running total (ADR-025).",
-  ".rsct/ state is per-worktree. In a linked git worktree this reports on THAT worktree only, not on the project as a whole.",
+  "In a linked git worktree, the phase state and any batch token belong to THAT worktree, while the audit log and the approval anti-reuse store are shared with the main worktree (they resolve at the repository, #92). This report reads the phase state of the worktree and the log of the repository.",
   "Rule-section bodies in CLAUDE.md are not read by THIS tool. The framework does cover that axis \u2014 every section carries a sha256-body= stamp and /rsct-setup reconciles them (since v2.7.0, #45) \u2014 rsct_audit just does not check it, so a clean report here says nothing either way about rule-body freshness.",
-  'This is a point-in-time read of local files, and it never gates. ONE exception to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records an rsct_json.* entry in .rsct/audit.log \u2014 normally once per hour for the same violation, creating that file if absent, and regardless of audit.enabled. That write belongs to resolveProjectRoot and happens identically for rsct_status and rsct_load_context; it is not specific to this report.',
+  'This is a point-in-time read of local files, and it never gates. Two exceptions to "reads only": if .rsct.json is present but REJECTED (malformed JSON, or a value outside the enforced bounds), the shared config loader records an rsct_json.* entry in .rsct/audit.log \u2014 normally once per hour for the same violation, creating that file if absent, and regardless of audit.enabled; and where the shared state now resolves at the repository rather than the project (#92), the first read copies the old .rsct/audit.log of the project there once, with the ignore file that keeps it out of git. Both writes belong to the shared loaders and happen identically for rsct_status and rsct_load_context; they are not specific to this report.',
   `install_drift.message is relayed VERBATIM from the drift detector and can contain a repair instruction (e.g. "Run /rsct-setup"). That text is the detector's, not this report's recommendation \u2014 nothing here tells you to run a tool that mutates RSCT phase state.`
 ];
 var DAY_MS2 = 864e5;
@@ -54135,7 +54150,7 @@ function explainHealth(faults, historyAbsent) {
 }
 var auditTool = {
   name: "rsct_audit",
-  description: "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files only \u2014 no git, no network \u2014 and it never opens or closes a gate. It reads; the ONE exception is that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log (normally once per hour for the same violation), exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, .rsct/ is per-worktree so the report is per-worktree, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
+  description: "On-demand report on this project's RSCT surface: install drift, the health of the RSCT mechanical layer, how long the current phase has been open, and every plan_/spec_ file at the project root with the state of its progress file. Local files, no network, git only to find the repository the shared state belongs to \u2014 and it never opens or closes a gate. It reads; the exceptions are that a present-but-REJECTED .rsct.json makes the shared config loader record an rsct_json.* entry in .rsct/audit.log (normally once per hour for the same violation), and that the first read after the shared state moved to the repository (#92) copies the old project log there once \u2014 exactly as rsct_status and rsct_load_context already do. STATED COVERAGE BOUNDARY (also returned in the output): a clean report is NOT a clean project. Settings drift is not checked here (it reaches the dev at the commit gate), findings pruned at phase close leave no queryable trace, the phase state is per worktree while the audit log is the repository's, and CLAUDE.md rule-section bodies are not checked here (the framework stamps and reconciles those itself since v2.7.0). Call it when the dev asks how the project is doing \u2014 do NOT call it as a precondition for any other tool, and never treat its output as an approval or a gate.",
   inputSchema: {
     type: "object",
     properties: {

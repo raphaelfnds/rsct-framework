@@ -92,8 +92,11 @@ canonical rule, it re-runs with `SECTIONS_TO_ADOPT="C E"` naming those sections.
 id. Sections wrapped with `source=migrated-from-ptbr-preserved` or `hand-merged` are
 your own prose and are never reconciled at all.
 
-**Recovery.** [`/rsct-uninstall`](#rsct-uninstall) reverses everything it wrote,
-SHA256-protecting any file you edited by hand.
+**Recovery.** [`/rsct-uninstall`](#rsct-uninstall) reverses what it wrote, keeps
+your text outside the RSCT markers, and asks about any generated file you edited by
+hand. Setup never replaces a `CLAUDE.md` that has content: one with your text is
+updated in place (UPDATE mode), and only a missing or empty one is created from the
+template.
 
 ---
 
@@ -157,19 +160,39 @@ modified in **this** project — cleanly, without clobbering your own edits.
 
 **When to use it.** To remove RSCT from a project, in full or selectively.
 
-**Preconditions.** The project was set up by a marker-aware RSCT version
-(1.0.0+). Legacy pre-marker installs cannot be auto-reversed and the command will
-say so.
+**Preconditions.** `.rsct.json` has its `install` block (setup 1.0.0+). Without it
+the command removes nothing: it lists what an earlier install left, read-only, and
+tells you to run `/rsct-setup` first — setup adopts those leftovers, and the next
+uninstall removes them.
 
 **What it does.** Excises each RSCT artifact by its marker. For generated files
 it computes the current body SHA256: an unchanged file is safely deleted; a file
-you edited is **preserved** (it asks rather than deleting your work). Supports a
-**full** uninstall and **selective scopes** (for example memory-only, specific
-rules, docs-only).
+you edited is **preserved** (it asks rather than deleting your work). In
+`CLAUDE.md`:
+- your text outside the markers stays;
+- a framework section goes whole, with any edit you made inside it — the report says
+  so before you answer, and says whether git has a copy (committed, uncommitted,
+  untracked);
+- a section whose body is your own text (`migrated-from-ptbr-preserved`,
+  `hand-merged`) loses only its two marker lines;
+- the header lines and the conventions pointer go once no section is left;
+- the file itself is deleted only when git shows setup created it and only framework
+  text is left. When an older version's CREATE mode replaced a `CLAUDE.md` you had,
+  it offers to restore yours from git;
+- a `CLAUDE.md` that is a symbolic link is not changed at all (its target can be
+  another project's file): remove the RSCT parts there by hand.
+
+Supports a **full** uninstall and **selective scopes** (for example memory-only,
+specific rules, docs-only).
 
 **Outputs.** The RSCT-added content is removed from this repo; your hand-edited
-files are kept. The pre-setup git SHA recorded in `.rsct.json` is the backup —
-no separate backup files are created.
+files are kept. The report lists, before you say OK and again at the end, everything
+it keeps on purpose: the audit log (with a `.rsct/.gitignore` so it stays out of git),
+your edited files, `CONVENTIONS.md`, the setup branch, universe files. In a linked
+worktree or a monorepo package, the audit log and the approval store live in the
+repository's `.rsct/` and are shared with the other RSCT projects there: the report
+names them and the uninstall never removes them. The pre-setup git SHA recorded in
+`.rsct.json` is the backup — no separate backup files are created.
 
 **Consent gates.** Acts only on this repo. It removes the project-scope `.mcp.json`
 `rsct` entry by key (preserving any other servers) when present, and scrubs the

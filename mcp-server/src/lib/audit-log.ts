@@ -1,7 +1,7 @@
 import { appendFileSync, copyFileSync, existsSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { ensureParentDir } from './io-utils.js'
-import { anchorFor, sameDirectory, type AnchorStatus } from './repo-anchor.js'
+import { anchorFor, protectRelocatedState, sameDirectory, type AnchorStatus } from './repo-anchor.js'
 import type { RsctAuditConfig } from './project-root.js'
 
 export interface AuditEntry {
@@ -84,6 +84,7 @@ function migrateLegacyLog(projectRoot: string, base: string, target: string): vo
       }) + '\n',
       'utf8',
     )
+    protectRelocatedState(projectRoot)
   } catch {
   }
 }
@@ -150,6 +151,7 @@ export function appendAuditEntry(
     const stamped = { ...entry, ts: new Date().toISOString() }
     const line = `${JSON.stringify(stamped)}\n`
     appendFileSync(path, line, { encoding: 'utf8' })
+    protectRelocatedState(projectRoot)
     return { ok: true, path }
   } catch (err) {
     return {
