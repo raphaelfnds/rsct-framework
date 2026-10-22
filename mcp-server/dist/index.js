@@ -44131,9 +44131,6 @@ var DevApprovalSchema = external_exports.object({
   reason: external_exports.string().min(1, "reason required"),
   override_protected_branch: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
   override_secrets_check: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional(),
-  // T2/INV-7: waive the contract-surface block (multi-repo mode). Parallel to
-  // the other overrides — the token path carries none, so under a plan token a
-  // surface-touching commit is a hard block until a per-action dev_approval.
   override_contract_surface: external_exports.object({ reason: external_exports.string().min(1, "override reason required") }).strict().optional()
 }).strict();
 var EXPECTED_SCOPE_TOKEN = {
