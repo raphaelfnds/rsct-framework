@@ -39,7 +39,7 @@ describe('bash lint — corpus sanity', () => {
   it('finds the expected bash surface (prompts + scripts)', () => {
     // Guards against an extractor regression silently linting nothing.
     expect(PROMPT_BLOCKS.length).toBeGreaterThanOrEqual(60)
-    expect(SCRIPT_BLOCKS.length).toBe(2)
+    expect(SCRIPT_BLOCKS.length).toBe(3)
   })
 
   it('no scripts/*.sh is ever skipped by the illustrative-sentinel heuristic (#73)', () => {

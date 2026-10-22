@@ -1122,8 +1122,11 @@ Not touched (machine-global RSCT install, shared by every project):
                         rm -f ~/.rsct/mcp-scope first.
   - ~/.claude/commands/rsct-*.md
   - the globally installed rsct-mcp package
-  → Removing RSCT from this MACHINE (not just this project):
-      npm uninstall -g rsct-mcp && rm -rf ~/.rsct ~/.claude/commands/rsct-*.md
+  → Removing RSCT from this MACHINE (not just this project), from your
+    framework clone:
+      bash scripts/uninstall-framework.sh
+    (for an install made for a Claude Code inside WSL: add --wsl). It asks
+    separately about the rsct-mcp companion and its user-scope registration.
 
 Branch: chore/rsct-uninstall ready for review / merge.
 ═══════════════════════════════════════════════════════

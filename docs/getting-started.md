@@ -16,6 +16,9 @@ finish this page first, then read [Multi-repo & contracts](multi-repo.md).
 - **On Windows: Git Bash** — not PowerShell, not WSL. The install scripts are
   POSIX shell and must write to the Windows-side `~/.rsct/` that Claude Code
   reads. See the Windows note in the [root README](../README.md#installation).
+  If your Claude Code runs **inside WSL** instead, run the installer from a shell
+  in that distro with `bash scripts/install.sh --wsl` (Claude Code's CLI installed
+  inside WSL; node and npm there too, or the companion is skipped).
 
 ## Install (once per machine)
 

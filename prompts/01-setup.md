@@ -3528,51 +3528,48 @@ Benign entries (`Bash(npm test)`, `Edit`, `Read`, `WebFetch(domain:*)`,
 `mcp__rsct__*`, even read-only git like `Bash(git status)`) are
 preserved.
 
-**Skipped when:** the `rsct-mcp` companion is NOT installed (sanitizer
-script unavailable). Phase 4.V logs a clear warning and continues —
-the rest of the framework still works; only the §C ceiling is left
-with a bypass surface until `rsct-mcp` is installed and `/rsct-setup`
-is re-run.
+**Skipped when:** the `rsct-mcp` companion is NOT installed by the
+framework installer or linked by a contributor (hook scripts
+unavailable). Phase 4.V logs a clear
+warning and continues — the rest of the framework still works; only the
+§C ceiling is left with a bypass surface until `bash scripts/install.sh`
+has run and `/rsct-setup` is re-run.
 
 **4.V.a — Locate the sanitizer script**
 
-The script ships inside the `rsct-mcp` npm package as
-`dist/scripts/sanitize-permissions.js`. Discover its source path:
+The script ships inside the `rsct-mcp` companion as
+`dist/scripts/sanitize-permissions.js`. It is taken only through the
+link in the global npm folder that the framework installer creates (or
+the link a contributor makes to a clone, CONTRIBUTING.md); a plain
+folder under that name is not used. Discover its source path:
 
 ```bash
+echo "  CHECKPOINT: Phase 4.V.a locating the hook scripts"
 SANITIZER_SRC=""
-
-# Candidate 1: rsct-mcp installed globally via `npm install -g .`
+RSCT_MCP_ROOT=""
 if command -v npm >/dev/null 2>&1; then
-  NPM_GLOBAL_ROOT=$(npm root -g 2>/dev/null)
-  # B3 (field-report): on Windows `npm root -g` returns a NATIVE path
-  # (C:\Users\...\node_modules) with backslashes. The downstream `[ -f ]`,
-  # `dirname`, and `tail` worked only by Git Bash mixed-separator tolerance
-  # (C:\...\node_modules/rsct-mcp/dist/...) — fragile. Normalize to a POSIX
-  # path under MSYS/MinGW/Cygwin via `cygpath -u`. On Linux/macOS cygpath does
-  # not exist, so `command -v` fails and the value is preserved unchanged —
-  # portable across all three OSes.
+  NPM_GLOBAL_ROOT=$(npm root -g 2>/dev/null || true)
   if [ -n "$NPM_GLOBAL_ROOT" ] && command -v cygpath >/dev/null 2>&1; then
     NPM_GLOBAL_ROOT=$(cygpath -u "$NPM_GLOBAL_ROOT" 2>/dev/null || printf '%s' "$NPM_GLOBAL_ROOT")
   fi
-  if [ -n "$NPM_GLOBAL_ROOT" ] && \
-     [ -f "$NPM_GLOBAL_ROOT/rsct-mcp/dist/scripts/sanitize-permissions.js" ]; then
-    SANITIZER_SRC="$NPM_GLOBAL_ROOT/rsct-mcp/dist/scripts/sanitize-permissions.js"
+  if [ -n "$NPM_GLOBAL_ROOT" ]; then
+    RSCT_MCP_ROOT="$NPM_GLOBAL_ROOT/rsct-mcp"
   fi
 fi
 
-# Candidate 2: source-clone development path
-# (Override via env var RSCT_FRAMEWORK_SOURCE pointing at the framework root)
-if [ -z "$SANITIZER_SRC" ] && [ -n "$RSCT_FRAMEWORK_SOURCE" ] && \
-   [ -f "$RSCT_FRAMEWORK_SOURCE/mcp-server/dist/scripts/sanitize-permissions.js" ]; then
-  SANITIZER_SRC="$RSCT_FRAMEWORK_SOURCE/mcp-server/dist/scripts/sanitize-permissions.js"
-fi
-
-if [ -z "$SANITIZER_SRC" ]; then
-  echo "WARN: rsct-mcp sanitizer script not found."
+if [ -n "$RSCT_MCP_ROOT" ] && [ -L "$RSCT_MCP_ROOT" ] && \
+   [ -f "$RSCT_MCP_ROOT/dist/scripts/sanitize-permissions.js" ]; then
+  SANITIZER_SRC="$RSCT_MCP_ROOT/dist/scripts/sanitize-permissions.js"
+elif [ -n "$RSCT_MCP_ROOT" ] && [ -e "$RSCT_MCP_ROOT" ] && [ ! -L "$RSCT_MCP_ROOT" ]; then
+  echo "WARN: $RSCT_MCP_ROOT is a plain folder, not the link the framework installer creates."
+  echo "      Phase 4.V skipped — the hook scripts are not taken from it."
+  echo "      To fix: from your framework clone run 'bash scripts/install.sh'"
+  echo "      (for a Claude Code that runs inside WSL: 'bash scripts/install.sh --wsl'), then re-run /rsct-setup."
+else
+  echo "WARN: rsct-mcp hook scripts not found."
   echo "      Phase 4.V skipped — INV-2.3 poison-pill closer not installed."
-  echo "      To install: install rsct-mcp companion (mcp-server/README.md),"
-  echo "      then re-run /rsct-setup."
+  echo "      To install: from your framework clone run 'bash scripts/install.sh'"
+  echo "      (for a Claude Code that runs inside WSL: 'bash scripts/install.sh --wsl'), then re-run /rsct-setup."
 fi
 ```
 

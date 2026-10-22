@@ -12,6 +12,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-10-21
+
+### Added
+
+- **Claude Code inside WSL can be installed with `--wsl` (#110).** From a shell inside the distro,
+  `bash scripts/install.sh --wsl` installs for a Claude Code whose CLI runs there, and
+  `bash scripts/uninstall-framework.sh --wsl` removes it. With `--wsl` both scripts drop every
+  Windows-side folder from PATH, stop if `node`, `npm` or `claude` is still a Windows program, and
+  stop before writing or removing anything when a folder they would touch (`~/.rsct`,
+  `~/.claude/commands`, Claude Code's config file and folder, npm's global folder) is on the Windows
+  side or cannot be checked. The installer also stops when no Claude Code CLI is installed inside
+  WSL, and does not register the companion while the Windows `rsct-mcp` still comes first on PATH.
+  A Windows install is not touched. Without `--wsl` the scripts still refuse to run under WSL, and
+  `--wsl` outside WSL stops. Both scripts now need `scripts/rsct-lib.sh` beside them. See ADR-032
+  for the limits.
+
+### Changed
+
+- **The uninstaller removes the user-scope registration from the file Claude Code uses (#82).** It
+  reads `$CLAUDE_CONFIG_DIR/.claude.json` when that is set (otherwise `.claude.json` in your home
+  folder, as Claude Code does, also on Windows), finds the entry with node even when no `claude`
+  CLI is on PATH, offers it even when nothing else is left, and re-reads the file after
+  `claude mcp remove` to confirm. When the registration stays — no CLI, the entry still there, or
+  you kept it — the closing line says so instead of "RSCT framework removed"; when the file can no
+  longer be read after the removal it says the removal is not confirmed; without node it says the
+  registration was not checked.
+- On Linux and macOS a `CLAUDE_CONFIG_DIR` that holds a backslash is no longer rewritten when the
+  scripts look for Claude Code's config file, and without node both scripts follow
+  `CLAUDE_CONFIG_DIR` too (before, the installer read `$HOME/.claude.json`).
+- **`/rsct-setup` takes the hook scripts only from the link the installer creates** (or the link a
+  contributor makes to a clone); a plain folder under that name in npm's global folder is not used.
+  The undocumented `RSCT_FRAMEWORK_SOURCE` override is removed. When the scripts are not found, the
+  messages and the session rules point at `bash scripts/install.sh`.
+- `/rsct-uninstall`'s final report points at `scripts/uninstall-framework.sh` for removing RSCT
+  from the machine, instead of a hand-typed `npm uninstall` and `rm -rf`.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE. Run `/rsct-setup` in a project to
+  refresh its session rules (the "not installed" fallback now names the installer).
+- If you installed the companion any other way than the installer or the contributor link, run
+  `bash scripts/install.sh` before `/rsct-setup`; otherwise `/rsct-setup` skips the hook scripts
+  and says why.
+
 ## [2.18.0] - 2026-10-21
 
 ### Security
