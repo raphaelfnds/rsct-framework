@@ -3293,7 +3293,13 @@ those files. Keyed by module and symbol; restatements of what the code says were
   what the old code did; one line alone leaves the pair unclosed and refused); an unreadable file
   at the commit counted as absent; 4.3c applying by default; the worktree count dropped; the store
   removed in a shared main worktree, and kept everywhere; Phase 1.6 ending on a false test; the
-  retention call with no log, and removed.
+  retention call with no log, and removed. MEASURED on the first CI run of the release (PR #140),
+  green on Windows only: the uninstall 4.4b left a blank line where the block had been in a CRLF
+  `.gitignore` on Linux and macOS, where awk sees the `\r` (anti-pattern #4); it now pipes through
+  `tr -d '\r'`, and the test expects LF exactly on every system — on Windows that case cannot fail,
+  since awk there never sees the `\r`. And `mktemp` with no argument does not fail on macOS when
+  `TMPDIR` names a missing folder, so the unreadable-file case deletes the blob's loose object
+  instead (made writable first: git stores objects read-only).
 
 - `tests/bash/lint.test.ts` (migrated in the 2.19.0 REVIEW) is the static bash lint (T0.a): `bash -n`
   over every prompt block and script (the V2 regression gate), the AP1–AP7 detectors over the real

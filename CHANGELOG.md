@@ -49,6 +49,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - A partial uninstall that removes the canonical section sets `canonical_source_added` to
     `false` by changing that one value, without rewriting `.rsct.json`. An empty `.claude/` folder
     is removed.
+  - On Linux and macOS, removing the `.gitignore` block from a CRLF `.gitignore` no longer leaves
+    a blank line behind; the file comes back with LF line endings on every system.
 - **The audit log of a monorepo package or a linked worktree stays out of git.** There the log,
   the approval store and the audit-prune files live in the repository's `.rsct/`, which the
   project's `.gitignore` block does not reach. `rsct-mcp` now writes a `.rsct/.gitignore` there the

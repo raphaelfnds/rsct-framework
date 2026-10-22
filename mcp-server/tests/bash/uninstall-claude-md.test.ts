@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import { nodeAvailable } from './lib/block-harness.js'
@@ -426,9 +426,13 @@ describe.skipIf(!READY)('Phase 4.3c decides by git whether CLAUDE.md itself goes
     repo(dir)
     put(dir, 'CLAUDE.md', '# Ours\nour rules\n')
     const sha = commit(dir)
+    const blob = git(dir, 'rev-parse', `${sha}:CLAUDE.md`)
+    const object = join(dir, '.git', 'objects', blob.slice(0, 2), blob.slice(2))
+    chmodSync(object, 0o644)
+    rmSync(object)
     rmSync(join(dir, 'CLAUDE.md'))
     runBlocks(ROOT, createSteps(homeWithTemplate()), { dir })
-    const env = { SETUP_COMMIT_SHA_BEFORE: sha, MODE_AT_INSTALL: 'CREATE', TMPDIR: posix(join(dir, 'missing', 'tmp')) }
+    const env = { SETUP_COMMIT_SHA_BEFORE: sha, MODE_AT_INSTALL: 'CREATE' }
     const r = runBlocks(ROOT, uninstallChain(env), { dir })
     expect(decision(r.last.out)).toMatch(/^keep \(git cannot prove/)
     expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(true)
@@ -554,8 +558,7 @@ describe.skipIf(!READY)('Phase 4.4b of the uninstall removes only the RSCT block
     const dir = chainDir()
     put(dir, '.gitignore', 'dist/\r\n\r\n# RSCT-BEGIN v=1.0.0 source=01-setup.md/4.4b\r\nplan_*.md\r\n# RSCT-END\r\nmine.txt\r\n')
     runBlockIn(ROOT, dir, block(A.gitignore))
-    const text = read(dir, '.gitignore').replace(/\r/g, '')
-    expect(text).toBe('dist/\nmine.txt\n')
+    expect(read(dir, '.gitignore')).toBe('dist/\nmine.txt\n')
   })
 })
 
