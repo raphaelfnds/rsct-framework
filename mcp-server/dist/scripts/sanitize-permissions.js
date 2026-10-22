@@ -54,6 +54,19 @@ function safeGitRaw(cwd, args) {
 }
 
 // src/lib/repo-anchor.ts
+var SHARED_ANCHORS = ["audit.log", "approvals-seen.json", "approvals-seen.json.tmp", "reports/"];
+var SHARED_STATE_IGNORE = `${[...SHARED_ANCHORS, ".gitignore"].join("\n")}
+`;
+function protectRelocatedState(projectRoot) {
+  try {
+    const anchor = anchorFor(projectRoot);
+    if (anchor.status !== "relocated") return;
+    const dir = join(anchor.root, ".rsct");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), SHARED_STATE_IGNORE, { encoding: "utf8", flag: "wx" });
+  } catch {
+  }
+}
 function canonicalPath(p) {
   let current = resolve(p);
   const tail = [];
@@ -179,6 +192,7 @@ function migrateLegacyLog(projectRoot, base, target) {
       }) + "\n",
       "utf8"
     );
+    protectRelocatedState(projectRoot);
   } catch {
   }
 }
@@ -440,6 +454,7 @@ function defaultAuditWriter(projectRoot, entry, now) {
     mkdirSync(dirname(auditPath), { recursive: true });
     const stamped = { ...entry, ts: now.toISOString() };
     appendFileSync(auditPath, JSON.stringify(stamped) + "\n", "utf8");
+    protectRelocatedState(projectRoot);
   } catch {
   }
 }

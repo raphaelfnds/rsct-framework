@@ -83,7 +83,9 @@ Setup also creates a `chore/sync-rsct-rules` branch to hold the changes, so noth
 lands on your protected branch.
 
 Every artifact carries a reversibility marker, so [`/rsct-uninstall`](commands.md#rsct-uninstall)
-can remove it cleanly and SHA256-protect anything you edited by hand.
+can remove it cleanly, ask before touching a generated file you edited by hand, and
+list what it keeps. A `CLAUDE.md` you already have is never replaced: setup adds its
+sections between markers and leaves your text where it is.
 
 ### One thing that leaves your machine
 
@@ -127,8 +129,8 @@ misbehaves, that's a bug worth filing.
    refused by the terminal guard, which names the RSCT tool to call; you can still run
    it yourself in your own terminal. Without the companion, a commit triggers a
    reauthorization request per the `CLAUDE.md` rules.
-5. **Reverse it.** `/rsct-uninstall` removes everything RSCT added to *this
-   project*; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
+5. **Reverse it.** `/rsct-uninstall` removes what RSCT added to *this
+   project* and lists what it keeps; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes
    the framework from the machine. It asks about the companion separately: keep
    it and `~/.rsct/mcp-server` stays.
 

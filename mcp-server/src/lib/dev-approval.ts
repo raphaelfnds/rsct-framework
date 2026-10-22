@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } f
 import { join } from 'node:path'
 import { z } from 'zod'
 import { ensureParentDir } from './io-utils.js'
-import { anchorFor } from './repo-anchor.js'
+import { anchorFor, protectRelocatedState } from './repo-anchor.js'
 import { decideAuditPath } from './audit-log.js'
 import type { RsctApprovalModes, RsctAuditConfig } from './project-root.js'
 
@@ -436,6 +436,7 @@ export function recordConsumedApproval(
       }) + '\n',
       'utf8',
     )
+    protectRelocatedState(options.projectRoot)
   } catch {
     // The store below is the other witness; never block on this one.
   }
@@ -451,6 +452,7 @@ export function recordConsumedApproval(
     const tmp = `${path}.tmp`
     writeFileSync(tmp, JSON.stringify(store, null, 2), { encoding: 'utf8' })
     renameSync(tmp, path)
+    protectRelocatedState(options.projectRoot)
     return { ok: true, path }
   } catch (err) {
     return {

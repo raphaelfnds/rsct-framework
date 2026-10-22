@@ -135,9 +135,10 @@ NEVER edit code without first presenting the user a plan containing:
    When the approved plan has **3 or more phases** whose file groups are DISJOINT,
    ASK the dev whether to run the non-overlapping groups in parallel via separate
    `git worktree`s — fill the "Phases & parallelization" table in the plan template
-   (`~/.rsct/doc-templates/plan_slug.md.template`). Each worktree carries **isolated** RSCT
-   state (phase-state, any batch token, the anti-reuse store) — see §C "Parallel
-   work via git worktrees" for the mechanics. Phases that share a file group stay
+   (`~/.rsct/doc-templates/plan_slug.md.template`). Each worktree carries its own
+   phase state and batch token, while the audit log and the anti-reuse store are
+   shared at the main worktree — see §C "Parallel work via git worktrees" for the
+   mechanics. Phases that share a file group stay
    **serial**; a repo whose build bundle is tracked (e.g. a committed `dist/`) also
    usually stays serial (parallel worktrees would conflict on the bundle). **Never
    auto-create worktrees** — the dev weighs it against the written plan. For a

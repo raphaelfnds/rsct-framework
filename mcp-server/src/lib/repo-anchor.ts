@@ -1,9 +1,24 @@
 import { resolve, dirname, basename, join } from 'node:path'
-import { realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { readWorktreeInfo, safeGitRead } from './git.js'
 import { DIALOG_PATH_LIMIT, specLabel } from './dialog-text.js'
 
 export const LOCAL_ANCHORS = ['phase-state.json', 'phase-state.lock', 'scripts'] as const
+
+export const SHARED_ANCHORS = ['audit.log', 'approvals-seen.json', 'approvals-seen.json.tmp', 'reports/'] as const
+
+export const SHARED_STATE_IGNORE = `${[...SHARED_ANCHORS, '.gitignore'].join('\n')}\n`
+
+export function protectRelocatedState(projectRoot: string): void {
+  try {
+    const anchor = anchorFor(projectRoot)
+    if (anchor.status !== 'relocated') return
+    const dir = join(anchor.root, '.rsct')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.gitignore'), SHARED_STATE_IGNORE, { encoding: 'utf8', flag: 'wx' })
+  } catch {
+  }
+}
 
 export type AnchorStatus =
   | 'same'

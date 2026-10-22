@@ -501,7 +501,7 @@ export async function classifyTaskHandler(
       'Complex tier — run the full cycle (research → spec → verification → code → test → review). The verification step is required before coding: rsct_phase_code_start will refuse until verification is complete (or pass override_verification_skip=true). After the tests, the REVIEW is mandatory: rsct_request_commit refuses code that no completed REVIEW covers.',
     )
     hints.push(
-      'Complex tier — if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated per worktree (§C). Decide this against the WRITTEN plan — this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial.',
+      'Complex tier — if this expands into a multi-phase plan whose file groups are DISJOINT, consider running the non-overlapping groups in parallel via separate `git worktree`s: RSCT phase-state and any plan-authorization token are per worktree (§C), while the audit log and the anti-reuse store are shared with the main worktree. Decide this against the WRITTEN plan — this classifier runs before the plan, so it cannot see the phase count. Phases that share files must stay serial.',
     )
   }
   if (activePlan) {

@@ -101,7 +101,7 @@ export async function statusHandler(
   const worktree = readWorktreeInfo(resolution.root)
   if (worktree.is_worktree) {
     hints.push(
-      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — RSCT phase-state, any plan-authorization token, and the anti-reuse store are isolated to THIS worktree (independent of the main worktree and sibling worktrees).`,
+      `Running in a linked git worktree${worktree.name ? ` ('${worktree.name}')` : ''} — RSCT phase-state and any plan-authorization token are this worktree's own; the audit log and the anti-reuse store are shared with the main worktree and its other linked worktrees (they resolve at the repository).`,
     )
   }
 
