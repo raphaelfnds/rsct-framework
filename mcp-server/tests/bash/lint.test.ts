@@ -12,13 +12,6 @@ import {
   type Finding,
 } from './lib/bash-lint.js'
 
-// T0.a — Layer 1 static bash lint.
-// Covers: (1) `bash -n` over every real prompt block + script (the V2 regression
-// gate); (2) the AP1–AP7 detectors over the real corpus (no ERROR findings
-// allowed); (3) detector self-tests (each must flag a known-bad and pass a
-// known-good — a detector with no proof it fires is itself a silent-pass risk);
-// (4) the CI anti-silent-skip guard.
-
 const ROOT = repoRoot(__dirname)
 const BASH = bashAvailable()
 const REQUIRE_BASH = !!process.env.RSCT_REQUIRE_BASH
@@ -37,24 +30,11 @@ function label(b: BashBlock): string {
 
 describe('bash lint — corpus sanity', () => {
   it('finds the expected bash surface (prompts + scripts)', () => {
-    // Guards against an extractor regression silently linting nothing.
     expect(PROMPT_BLOCKS.length).toBeGreaterThanOrEqual(60)
-    expect(SCRIPT_BLOCKS.length).toBe(2)
+    expect(SCRIPT_BLOCKS.length).toBe(3)
   })
 
   it('no scripts/*.sh is ever skipped by the illustrative-sentinel heuristic (#73)', () => {
-    // The heuristic exists for PROMPT blocks, which legitimately show a "❌ NÃO
-    // usar" example next to the correct form. A whole script is never
-    // illustrative — but `loadScriptBlocks` runs the same `skipState` over the
-    // entire file, so ONE comment containing ❌, PROIBIDO or "NÃO usar"
-    // silently switches off every detector AND the `bash -n` gate
-    // (`lint.test.ts` skips `b.skip` blocks) for that file. The skip is only
-    // `console.log`ged below, never asserted — a guard that stops guarding and
-    // still reads green.
-    //
-    // This is a live hazard, not a hypothetical: the #73 comments in
-    // scripts/install.sh cite anti-pattern #5 and the removal consent rules by
-    // name, and "PROIBIDO" is exactly the word CLAUDE.md uses for them.
     const skipped = SCRIPT_BLOCKS.filter((b) => b.skip).map((b) => `${b.source} (${b.skipReason})`)
     expect(
       skipped,
@@ -65,7 +45,6 @@ describe('bash lint — corpus sanity', () => {
 
   it('reports skipped (illustrative / opted-out) blocks explicitly — no silent skips', () => {
     const skipped = ALL.filter((b) => b.skip)
-    // Not an assertion on count; surfaces what the lint chose NOT to check.
     if (skipped.length) {
       // eslint-disable-next-line no-console
       console.log(`[bash-lint] skipped ${skipped.length} block(s):`,
@@ -83,14 +62,11 @@ describe('CI anti-silent-skip guard (V11)', () => {
     expect(() => assertBashPolicy(false, false)).not.toThrow()
   })
   it('honours the live policy: if CI set RSCT_REQUIRE_BASH, bash must be present', () => {
-    // In CI (RSCT_REQUIRE_BASH=1) this fails loudly if a runner lacks bash.
     expect(() => assertBashPolicy(REQUIRE_BASH, BASH)).not.toThrow()
   })
 })
 
 describe.skipIf(!BASH)('bash -n syntax gate (V2 regression)', () => {
-  // ~70 synchronous `bash` spawns; bash process startup is slow (esp. Git Bash on
-  // Windows CI) and contends with the rest of the suite — generous timeout.
   it('every non-skipped prompt block + script passes bash -n', () => {
     const failures: string[] = []
     for (const b of ALL) {
@@ -126,8 +102,6 @@ describe('detectors over the real corpus', () => {
   })
 })
 
-// --- detector self-tests: each AP must flag a known-bad and pass a known-good --
-
 function lint(code: string, opts: { isScript?: boolean; phantomVars?: boolean } = {}): Finding[] {
   const [b] = extractBashBlocks('```bash\n' + code + '\n```\n', 'self-test.md')
   return lintBlock(opts.isScript ? { ...b, isScript: true } : b, { phantomVars: opts.phantomVars })
@@ -158,11 +132,8 @@ describe('detector self-tests', () => {
   })
 
   it('AP5 — flags whole-file round-trip, passes exception + safe per-value use', () => {
-    // BAD: parse the whole file + re-stringify the whole object.
     expect(rules(lint('node -e \'const o=JSON.parse(fs.readFileSync(p,"utf8")); fs.writeFileSync(p, JSON.stringify(o,null,2))\''))).toContain('AP5')
-    // GOOD: the documented .mcp.json exception.
     expect(rules(lint('node -e \'const o=JSON.parse(fs.readFileSync(".mcp.json","utf8")); fs.writeFileSync(p, JSON.stringify(o,null,2))\''))).not.toContain('AP5')
-    // GOOD: safe per-value text-splice (decode one string, stringify single values).
     expect(rules(lint('node -e \'const v=JSON.parse("\\""+s+"\\""); out.push(JSON.stringify(p))\''))).not.toContain('AP5')
   })
 
@@ -173,7 +144,7 @@ describe('detector self-tests', () => {
   })
 
   it('AP6 — is OFF by default (cross-phase noise) and suppressed for whole scripts (V6)', () => {
-    expect(rules(lint('echo "$UNSET_PHANTOM_XYZ"'))).not.toContain('AP6') // default off
+    expect(rules(lint('echo "$UNSET_PHANTOM_XYZ"'))).not.toContain('AP6')
     expect(rules(lint('echo "$UNSET_PHANTOM_XYZ"', { isScript: true, phantomVars: true }))).not.toContain('AP6')
   })
 

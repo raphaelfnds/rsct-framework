@@ -108,10 +108,11 @@ If it survives that:
 
 - `ls .rsct/scripts/` should list `sanitize-permissions.js`,
   `edit-scope-guard.js`, `terminal-guard.js` and a small `package.json`. If they are missing,
-  `/rsct-setup` could not find the `rsct-mcp` package to copy them from — it
-  looks in `npm root -g`, so a server registered by absolute path or via `npx`
-  will not be found. Install it with the installer (`bash scripts/install.sh`)
-  and re-run.
+  `/rsct-setup` could not find the `rsct-mcp` companion to copy them from — it
+  takes them only through the link the installer creates in `npm root -g`, so a
+  server registered by absolute path, run via `npx`, or present there as a plain
+  folder is not used. Run the installer (`bash scripts/install.sh`, with
+  `--wsl` when Claude Code itself runs inside WSL) and re-run `/rsct-setup`.
 - If the message is about registration, `.claude/settings.json` should hold a
   `hooks.SessionStart` entry whose command contains
   `.rsct/scripts/sanitize-permissions.js`, and two `hooks.PreToolUse` entries:
@@ -467,6 +468,52 @@ Harmless. RSCT strips `\r` before every SHA it computes, so a CRLF round-trip
 never turns a clean re-run into a spurious update. To silence the warnings, add a
 `.gitattributes` pinning the RSCT artifacts to `eol=lf` — see the
 [root README](../README.md#windows-line-endings-the-lf-will-be-replaced-by-crlf-warning).
+
+## The installer or uninstaller stops under WSL
+
+- **"This script is running under WSL"** — without `--wsl` the scripts refuse to run
+  inside WSL. If your Claude Code runs on Windows, run them from Git Bash instead. If
+  it runs inside this WSL distro, add `--wsl`.
+- **"--wsl was given, but this is not WSL"** — `--wsl` is only for a shell inside a
+  WSL distro. On Windows (Git Bash), Linux or macOS run the script without it.
+- **"--wsl: no Claude Code CLI ('claude') was found inside WSL"** — no `claude` is
+  installed inside WSL (the message also names the Windows one when there is one).
+  Install Claude Code's CLI inside WSL first, or, if the Windows Claude Code is the one
+  you use, install from Git Bash without `--wsl`.
+- **"--wsl: '…' at … is a Windows program, or could not be checked"** — `node`, `npm` or
+  `claude` resolved to a Windows program sitting in a Linux folder, to a link into
+  `/mnt/c`, or to a file that cannot be read. Install a readable Linux one there instead.
+- **"--wsl: no folder on PATH could be confirmed to be on WSL's Linux side"** —
+  `wslpath` gave no Linux answer for any PATH folder, so no program could be trusted.
+  Run the script from a normal shell inside the distro.
+- **"--wsl: 'npm prefix -g' gave no folder"** — npm is installed but did not say where
+  its global folder is, so it could not be checked. Fix npm inside WSL and run again.
+- **"--wsl: … is not on WSL's Linux side, or could not be checked"** — a folder or file
+  the script would touch (`~/.rsct`, `~/.claude/commands`, Claude Code's config file or folder,
+  npm's global folder) lives on `/mnt/c/...` (or is a link there), usually because
+  `HOME`, `CLAUDE_CONFIG_DIR` or npm's prefix points there; a relative path, a path with
+  a `.` or `..` segment, or a link whose target is gone cannot be checked either. Touching
+  it could change the Windows install, so nothing was written or removed. Point them at
+  the Linux disk, as plain paths, and run again.
+- **"--wsl needs /usr/bin/wslpath"** — the shell shares the WSL kernel but is not a
+  WSL distro (a container, for example). Run the script inside the distro itself.
+- **"this shell 'rsct-mcp' still resolves to the Windows one"** — the companion was
+  installed inside WSL, but the Windows `rsct-mcp` comes first on PATH, so a Claude
+  Code inside WSL would start the Windows one. Nothing was registered. Put the Linux
+  folder the message names ahead of the `/mnt/` folders on PATH and run the installer
+  again with `--wsl`.
+
+## The uninstaller says the user-scope registration "is still in place"
+
+It found `rsct` registered at user scope in Claude Code's config file but did not
+remove it: no `claude` CLI was on PATH, the entry was still in the file after
+`claude mcp remove`, or you chose to keep it (`--skip-mcp`, or answering `n`). When the
+file could no longer be read after the removal, the closing line says "Not confirmed"
+instead. The message names the file. Run `claude mcp remove rsct --scope user` (inside
+WSL, use the full path of the Linux `claude` when the message shows one, never a bare
+`claude` that may be the Windows one), or delete the `"rsct"` key under `"mcpServers"` in
+that file, then restart Claude Code. When the closing line says "Not checked", node was
+not on PATH, so the file could not be read: look for the key yourself.
 
 ## `/rsct-setup` stops, saying this is a universe repo
 

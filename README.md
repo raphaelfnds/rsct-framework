@@ -82,18 +82,33 @@ This installer, run from a clone, is the only way the companion is distributed. 
 **not on npm**: a registry package named `rsct-mcp` is not this project's — see
 [SECURITY.md](SECURITY.md#rsct-mcp-is-not-distributed-through-npm).
 
-> ⚠️ **On Windows: open Git Bash, not PowerShell, and not WSL.**
+> ⚠️ **On Windows: open Git Bash, not PowerShell, and not WSL** — unless
+> your Claude Code itself runs inside WSL (see below).
 >
 > The install/uninstall scripts are POSIX shell. PowerShell can invoke
 > `bash`, but Windows ships with several different `bash` binaries
 > (Git Bash, WSL bash, Cygwin) and they mount Windows drives at
-> different paths (`/c/...` vs `/mnt/c/...`). The scripts refuse to run
-> under WSL because that would install to `/home/<user>/.rsct/`, which
-> Claude Code on the Windows side does not read.
+> different paths (`/c/...` vs `/mnt/c/...`). By default the scripts
+> refuse to run under WSL because that would install to
+> `/home/<user>/.rsct/`, which Claude Code on the Windows side does not read.
 >
 > Open **Git Bash** from the Start menu (or right-click a folder →
 > "Git Bash Here") and run the commands below from there. The prompt
 > will look like `MINGW64` followed by your path.
+>
+> **Claude Code inside WSL.** If you run Claude Code from a WSL distro
+> (its CLI installed inside that distro), install from a shell in that
+> distro with `bash scripts/install.sh --wsl`, and uninstall with
+> `bash scripts/uninstall-framework.sh --wsl`. The installer needs Claude
+> Code's CLI installed inside WSL, and node and npm there for the companion
+> (without them only the companion is skipped). With `--wsl` the scripts drop every
+> Windows-side folder from PATH, stop if `node`, `npm` or `claude` is still a
+> Windows program, and stop before writing or removing anything when a folder
+> they would touch (`~/.rsct`, `~/.claude/commands`, Claude Code's config file and folder,
+> npm's global folder) is on the Windows side (`/mnt/c/...`) or cannot be
+> checked. A Windows install, if you also have one, is not touched. `--wsl`
+> outside WSL stops. The limits are listed in ADR-032
+> ([docs/decisions.md](docs/decisions.md)).
 >
 > This applies to the install and uninstall scripts above. If you are
 > *contributing* to the framework, Git Bash matters for the test suite
@@ -149,7 +164,23 @@ RSCT_ASSUME_YES=1 RSCT_SKIP_MCP=1 bash scripts/install.sh
 
 The same flags work for `uninstall-framework.sh` (`--skip-mcp` there leaves the
 global companion, its files in `~/.rsct/mcp-server` and any user-scope
-registration untouched).
+registration untouched). Both scripts also take `--wsl`, for a Claude Code that
+runs inside WSL (see the Windows note above).
+
+The uninstaller finds a user-scope registration in the file Claude Code uses
+(`$CLAUDE_CONFIG_DIR/.claude.json` when that is set, otherwise `.claude.json` in
+your home folder), removes it with `claude mcp remove rsct --scope user`, and
+re-reads the file to confirm. When it cannot remove it (no `claude` on PATH, or the
+entry is still there afterwards), it names the file and how to remove the entry, and its
+closing line says the registration is still in place — as it also does when you keep it
+(answering `n`, or `--skip-mcp`). When the file can no longer be read after the removal,
+the closing line says the removal is not confirmed. Detection needs node;
+without it the closing line says the registration was not checked.
+
+Under `--wsl`, a run where the Windows `rsct-mcp` still comes first on PATH
+installs the companion inside WSL but registers nothing and leaves the recorded
+scope as it was, whatever the table above says; the message names the folder to
+put first.
 
 ### Registering rsct-mcp with Claude Code
 
@@ -288,8 +319,9 @@ with `claude mcp add rsct rsct-mcp --scope project`. Either path writes:
 
 7. **Troubleshooting** — if `rsct_*` tools do not appear after IDE
    restart:
-   - Check `~/.claude.json` and `<project>/.mcp.json` for the `rsct`
-     entry (both are JSON, editable by hand if needed).
+   - Check `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is
+     set) and `<project>/.mcp.json` for the `rsct` entry (both are JSON,
+     editable by hand if needed).
    - If `claude mcp list` says **⏸ Pending approval**, the project has not
      approved the entry — see step 3. Re-run `/rsct-setup`, or answer the
      prompt Claude Code shows on first open.
@@ -523,7 +555,8 @@ rsct-framework/                    # dev/source — version controlled in git
 ├── README.md
 ├── scripts/
 │   ├── install.sh                 # copy framework + companion to ~/.rsct/, register slash commands
-│   └── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level); asks about the companion
+│   ├── uninstall-framework.sh     # remove ~/.rsct/ + slash commands (machine-level); asks about the companion
+│   └── rsct-lib.sh                # functions both scripts share (the --wsl checks, the Claude Code config path)
 ├── prompts/
 │   ├── 01-setup.md                # main: setup or update project
 │   ├── 02-canonical-source.md     # internal engine (link project), invoked by 06-universe.md
