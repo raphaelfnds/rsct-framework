@@ -31,6 +31,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - On Linux with zenity and no display, and on macOS when the dialog program fails, the refusal is no
   longer recorded as your decision: a phase closed on its own stays pending, and the REVIEW's
   unverified-files question stays undecided.
+- On Node 20, a dialog program that is not installed no longer makes the approval tools fail with an
+  error: it is "no channel", as on Node 22 and as documented.
 
 ### Migration for existing projects
 

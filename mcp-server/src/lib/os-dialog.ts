@@ -125,8 +125,8 @@ function normalizeExecError(err: unknown): ExecResult {
   if (err && typeof err === 'object') {
     const e = err as {
       status?: number | null
-      stderr?: string | Buffer
-      stdout?: string | Buffer
+      stderr?: string | Buffer | null
+      stdout?: string | Buffer | null
       code?: string
       message?: string
     }
@@ -143,8 +143,8 @@ function normalizeExecError(err: unknown): ExecResult {
   return { exitCode: -1, stdout: '', stderr: '', error: String(err) }
 }
 
-function bufferOrStringToString(value: string | Buffer | undefined): string {
-  if (value === undefined) return ''
+function bufferOrStringToString(value: string | Buffer | null | undefined): string {
+  if (value === undefined || value === null) return ''
   if (typeof value === 'string') return value
   return value.toString('utf8')
 }

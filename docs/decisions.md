@@ -3361,6 +3361,14 @@ those files. Keyed by module and symbol; restatements of what the code says were
   the zenity error code not passed; the no-desktop branch not ending the script — the real
   no-desktop case runs on top of the echo, so that mutant fails the test instead of opening a window
   (the first version replaced only the check, and only `exit 0` stood between it and a real dialog).
+  MEASURED on the release CI (PR #141, Node 20 cells red on all three systems, Node 22 green): on
+  Node 20 `execFileSync` hands `stdout` and `stderr` as `null` for a program that does not exist, and
+  the old `bufferOrStringToString` called `toString` on it, so a missing dialog program threw instead
+  of returning "no channel" (an older defect: the code was the same before 2.20.1). It now reads
+  `null` as empty. That makes Node 20 follow the documented rule — no dialog program means no
+  channel, where `trust_allowed_for` applies — which is more permissive than the crash for that one
+  case; the maintainer decided it (2026-10-22, "Ok para A"). The test that calls `defaultExecutor`
+  on a missing path is what catches it, on the Node 20 cells only.
 
 - The #82 tests of 2.20.0 (ADR-033) run the real prompt blocks. `tests/bash/lib/chain-harness.ts`
   runs several blocks in one folder, each in its own shell as the agent does, with node steps

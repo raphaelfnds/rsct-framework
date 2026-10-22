@@ -45098,7 +45098,7 @@ function normalizeExecError(err2) {
   return { exitCode: -1, stdout: "", stderr: "", error: String(err2) };
 }
 function bufferOrStringToString2(value) {
-  if (value === void 0) return "";
+  if (value === void 0 || value === null) return "";
   if (typeof value === "string") return value;
   return value.toString("utf8");
 }
