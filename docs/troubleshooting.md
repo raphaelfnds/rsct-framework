@@ -563,12 +563,64 @@ typo with the correctly-cased name to use. The same warning covers every contrac
 likely typo, though only the `producer` gates). If you'd rather check by hand, the
 `producer` string must equal the app's `name` in its `.rsct.json` exactly.
 
-## Uninstall says the project is a legacy (pre-marker) install
+## Uninstall says `.rsct.json` has no `install` block
 
-A project set up by a pre-1.0.0 RSCT version has no reversibility markers, so
-`/rsct-uninstall` can't auto-restore it. Clean it up by hand (or `git checkout`
-the pre-RSCT state). Current installs always write the markers needed for a clean
-reversal.
+Without that block nothing records what setup changed, so `/rsct-uninstall` removes
+nothing. It lists, read-only, what an earlier install left: RSCT lines in `CLAUDE.md`,
+generated files in `documentation/`, files in `.rsct/`, hook entries, the `.gitignore`
+block. This happens on a project set up before 1.0.0, on one whose `.rsct.json` was
+edited or deleted, and on one already uninstalled by a version before 2.20.0, which
+left the `CLAUDE.md` header lines and the conventions pointer behind.
+
+Run `/rsct-setup`, then `/rsct-uninstall`. Setup adopts what is there — a `CLAUDE.md`
+with your text is updated in place, never replaced — and the uninstall then removes
+the framework parts, the old leftovers included. A `CLAUDE.md` that held nothing but
+those leftovers is deleted; one with your text is kept. Or clean up by hand with the
+steps at the end of `prompts/03-uninstall.md`.
+
+## Uninstall kept `CLAUDE.md`
+
+The uninstall deletes `CLAUDE.md` only when git shows that setup created it — no
+`CLAUDE.md` at the commit recorded in `install.setup_commit_sha_before`, or one with
+only framework text — and nothing but framework text is left. The report gives the
+reason when it keeps the file:
+- **"git cannot prove setup created it"** — the recorded commit is `INITIAL` (the
+  repository had no commit at setup) or no longer exists here. Delete the file
+  yourself if you want it gone.
+- **"your text is in it"** / **"you had a CLAUDE.md before setup"** — it is your file.
+- **"RSCT text you kept is still in it"** — a section left out of the uninstall scope,
+  or a conventions pointer you edited.
+
+What can stay in a kept file: the lines the CREATE template writes with no marker
+(`# CLAUDE.md — <app>`, two intro lines, `---`), and the body of a section that was
+your own text (`hand-merged`, `migrated-from-ptbr-preserved`).
+
+## Uninstall offers to restore `CLAUDE.md` from git
+
+Versions before 2.20.0 routed a `CLAUDE.md` that had your text but no RSCT rules to
+CREATE mode, which replaced it with the template. When git still has your file at the
+commit recorded before that setup, the uninstall offers to put it back
+(`git checkout <commit> -- CLAUDE.md`). Answer `keep` to leave the current file. Since
+2.20.0 setup refuses to create over a `CLAUDE.md` that has content.
+
+## `.rsct/audit.log` shows up in `git status` of a monorepo or worktree
+
+In a linked git worktree, a monorepo package or a project inside another repository,
+`rsct-mcp` writes the audit log and the approval store into the `.rsct/` folder of the
+repository (the main worktree, or the repository root) — outside the project's own
+`.gitignore`. Since 2.20.0 the server writes a `.rsct/.gitignore` there the first time
+it writes one of those files, so new files stay out of git. Files that versions 2.9.0
+to 2.19.x left there and that were **committed** stay tracked; untrack them once, from
+the repository root:
+
+```bash
+git rm --cached --ignore-unmatch .rsct/audit.log .rsct/approvals-seen.json
+git rm -r --cached --ignore-unmatch .rsct/reports
+```
+
+Then commit. The files stay on disk. `/rsct-uninstall` never removes that folder: it
+is shared by every RSCT project of the repository, and removing it would reset their
+approval store and audit history.
 
 ---
 

@@ -968,9 +968,10 @@ is revoked and the file is left untouched.
 - Output: `status: 'revoked' | 'no_token' | 'state_write_failed'`, `revoked_plan_slug`, `audit_path`, `audit_error`, `hints`.
 
 The active token + git-worktree context are also surfaced by `rsct_phase_status`
-(`plan_authorization`, `worktree`) and `rsct_status` (`worktree`). Because the
-runtime state is gitignored and per-working-tree, each `git worktree` gets its
-own isolated token and anti-reuse store.
+(`plan_authorization`, `worktree`) and `rsct_status` (`worktree`). The phase state
+lives in each working tree, so each `git worktree` gets its own token; the audit
+log and the anti-reuse store resolve at the repository (the main worktree), so
+an approval spent in one worktree is spent in all of them.
 
 ### SessionStart sanitizer hook (INV-2.3 closer)
 
@@ -1172,9 +1173,17 @@ the project. Since 2.18.0 the same happens to a path no file can sit at — a co
 character, a folder or a path through a file, and on Windows a stream (`:`), `< > " | ? *`,
 a reserved device name or a trailing dot or space (ADR-031).
 
-> **Known limitation.** `/rsct-uninstall` and the `.gitignore` block are still
-> project-relative, so in the three relocating shapes above they do not follow the
-> log. Tracked on [#82](https://github.com/raphaelfnds/rsct-framework/issues/82).
+In the three relocating shapes the project's `.gitignore` block does not reach the
+repository's `.rsct/`, so since 2.20.0 the server writes a `.rsct/.gitignore` there the
+first time it writes the log, the approval store or an audit-prune file. It lists
+exactly those files and itself, never `*`; an existing one is never replaced, and a
+failure to write it never changes the result of the write it follows. It is written
+only when the folder is relocated, and a read writes it only together with the
+one-time copy of an old project log. `/rsct-uninstall` names that folder in its report
+and never removes it: it is shared by every RSCT project of the repository (#82).
+Files that versions 2.9.0–2.19.x committed there stay tracked until `git rm --cached`
+(see `docs/troubleshooting.md`). Not covered: any configured `audit.path` other than
+the default `.rsct/audit.log`.
 
 Event naming convention: `<tool>.<outcome>` where outcome ∈
 {`rejected`, `override_invoked`, `committed`, `pushed`, `merged`,

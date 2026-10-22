@@ -1,4 +1,5 @@
 import { decideAuditPath } from './audit-log.js'
+import { protectRelocatedState } from './repo-anchor.js'
 import {
   appendFileSync,
   existsSync,
@@ -271,6 +272,7 @@ function defaultAuditWriter(
     mkdirSync(dirname(auditPath), { recursive: true })
     const stamped = { ...entry, ts: now.toISOString() }
     appendFileSync(auditPath, JSON.stringify(stamped) + '\n', 'utf8')
+    protectRelocatedState(projectRoot)
   } catch {
   }
 }

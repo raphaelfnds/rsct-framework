@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync, copyFileSync } from 'fs';
 import { isAbsolute, resolve, dirname, sep, relative, basename, join } from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
@@ -141,6 +141,19 @@ function safeGitRaw(cwd2, args) {
 }
 
 // src/lib/repo-anchor.ts
+var SHARED_ANCHORS = ["audit.log", "approvals-seen.json", "approvals-seen.json.tmp", "reports/"];
+var SHARED_STATE_IGNORE = `${[...SHARED_ANCHORS, ".gitignore"].join("\n")}
+`;
+function protectRelocatedState(projectRoot) {
+  try {
+    const anchor = anchorFor(projectRoot);
+    if (anchor.status !== "relocated") return;
+    const dir = join(anchor.root, ".rsct");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), SHARED_STATE_IGNORE, { encoding: "utf8", flag: "wx" });
+  } catch {
+  }
+}
 function canonicalPath(p) {
   let current = resolve(p);
   const tail = [];
@@ -4470,6 +4483,7 @@ function migrateLegacyLog(projectRoot, base, target) {
       }) + "\n",
       "utf8"
     );
+    protectRelocatedState(projectRoot);
   } catch {
   }
 }
@@ -4516,6 +4530,7 @@ function appendAuditEntry(projectRoot, entry, config) {
     const line = `${JSON.stringify(stamped)}
 `;
     appendFileSync(path, line, { encoding: "utf8" });
+    protectRelocatedState(projectRoot);
     return { ok: true, path };
   } catch (err) {
     return {

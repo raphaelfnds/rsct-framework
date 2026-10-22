@@ -22,6 +22,7 @@ import {
 import { join } from 'node:path'
 import { decideAuditPath } from './audit-log.js'
 import { ensureParentDir } from './io-utils.js'
+import { protectRelocatedState } from './repo-anchor.js'
 import type { RsctAuditConfig } from './project-root.js'
 
 export const AUDIT_RETENTION_DAYS = 10
@@ -640,6 +641,7 @@ export function pruneAuditLog(
 ): RetentionOutcome[] {
   const { logs, named, paths, refusal } = candidatesFor(projectRoot, config)
   if (refusal !== null) return logs.map((log) => skipped(log, refusal))
+  if (logs.some(isRegularFile) || pendingSwap(paths) !== 'none') protectRelocatedState(projectRoot)
   const outcomes: RetentionOutcome[] = []
   for (const log of logs) {
     let outcome: RetentionOutcome
