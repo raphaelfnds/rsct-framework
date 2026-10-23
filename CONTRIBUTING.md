@@ -20,7 +20,7 @@ than any other: **cross-OS correctness**.
 | Path | What it is |
 |---|---|
 | `prompts/` | The slash-command playbooks (`/rsct-setup`, `/rsct-uninstall`, …) — portable bash. |
-| `rules/` | The §0 + §A–§H governance rules inserted into each project's `CLAUDE.md`. |
+| `rules/` | The §0 + §A–§H governance rules and the §I–§M conduct rules inserted into each project's `CLAUDE.md`. |
 | `doc-templates/` · `memory-templates/` · `universe-templates/` | Scaffolding rendered into target projects. |
 | `mcp-server/` | The `rsct-mcp` companion (TypeScript MCP server) — the mechanical enforcement layer. |
 | `scripts/install.sh` | Cross-OS installer. |

@@ -69,7 +69,7 @@ updates what changed.
 
 | Artifact | What it is |
 |---|---|
-| `CLAUDE.md` | The governance rules the AI reads at session start. |
+| `CLAUDE.md` | The governance rules the AI reads at session start, plus five conduct rules (§I–§M: critical review, short answers, questions in the chat, verify before claiming, an RSCT reference in commits, ADRs and issues). All five are on; setup asks once which to switch off, and later you can ask in the chat to switch any of them off or on. |
 | `documentation/` | Architecture, decisions, knowledge, and impact templates you fill over time. |
 | `.rsct.json` | Project config — protected branches, topology, the `install` block (the uninstall marker). |
 | Memory entries | Under `.claude/projects/.../memory/` — durable facts for the agent. |
