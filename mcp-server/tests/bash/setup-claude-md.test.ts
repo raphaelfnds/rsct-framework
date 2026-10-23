@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import { runBlock, nodeAvailable, assertNodePolicy, readIn, type RunBlockResult } from './lib/block-harness.js'
@@ -41,7 +41,7 @@ function classify(content?: string): Record<string, string> {
   for (const line of r.out.replace(/\r/g, '').split('\n')) {
     const m = line.match(/^(CLAUDE_MD_STATE|CLAUDE_MD_MARKERS)=(.*)$/)
     if (m) out[m[1]!] = m[2]!
-    const rule = line.match(new RegExp(`^RULE ${S}([0A-H])=(.*)$`))
+    const rule = line.match(new RegExp(`^RULE ${S}([0A-M])=(.*)$`))
     if (rule) out[rule[1]!] = rule[2]!
   }
   return out
@@ -89,7 +89,17 @@ describe.skipIf(!BASH || !NODE)('Phase 1.5 classifies the current CLAUDE.md', ()
   it('a CLAUDE.md the developer wrote, with no rules, is content with every rule missing', () => {
     const got = classify('# Acme API\n\nHow we work here.\n')
     expect(got.CLAUDE_MD_STATE).toBe('content')
-    for (const id of ['0', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']) expect(got[id], id).toBe('missing')
+    for (const id of ['0', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) expect(got[id], id).toBe('missing')
+    expect(got.CLAUDE_MD_MARKERS).toBeUndefined()
+  })
+
+  it('the conduct sections count by their markers, and their text never reads as another rule', () => {
+    const conduct = ['I', 'J', 'K', 'L', 'M']
+    const files = readdirSync(join(ROOT, 'rules'))
+    const body = conduct.map((id) => section(id, `${readFileSync(join(ROOT, 'rules', files.find((f) => f.startsWith(`${id}-`))!), 'utf8').trimEnd()}\nbug mode, mandatory plan, does not reuse, protected branches, secrets leak, state reversibility, qa planner, decisions.md`)).join('\n')
+    const got = classify(`# CLAUDE.md\n\n${body}`)
+    for (const id of conduct) expect(got[id], id).toBe('present-en (markers)')
+    for (const id of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']) expect(got[id], id).toBe('missing')
     expect(got.CLAUDE_MD_MARKERS).toBeUndefined()
   })
 

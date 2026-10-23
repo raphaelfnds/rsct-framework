@@ -314,7 +314,7 @@ node -e '
   if (state === "content") classify(raw);
   function classify(raw) {
   var S = String.fromCharCode(167);
-  var ids = ["0", "A", "B", "C", "D", "E", "F", "G", "H"];
+  var ids = ["0", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"];
   var lines = raw.split(/\r?\n/);
   var marked = {}, outside = [], open = null, bad = "";
   var blocks = [["<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN", "<!-- RSCT-CANONICAL-SOURCE-SLOT-END"],
@@ -673,7 +673,12 @@ RSCT_JSON_INSTALL_SHA_BEFORE=$(extract_json_string "setup_commit_sha_before")
 # DX-1b ask-once: PRESENCE (not value) of install.create_universe_declined_at —
 # robust to nesting + CRLF (literal-key match). Set => suppress the 🌱 create offer.
 RSCT_CREATE_DECLINED=$(grep -q '"create_universe_declined_at"' .rsct.json 2>/dev/null && echo 1 || echo "")
+RSCT_JSON_CONDUCT_RULES_OFF_SET=$(grep -qE '"conduct_rules_off"[[:space:]]*:' .rsct.json 2>/dev/null && echo 1 || echo "")
 ```
+
+`RSCT_JSON_CONDUCT_RULES_OFF_SET` records only whether `conduct_rules_off` is present
+(ask-once). Its value is read and checked by Phase 4.4c: `extract_json_array` gives the
+same empty result for a missing key, for `[]` and for a list spread over several lines.
 
 `install.canonical_source_added` is a boolean (`true`/`false`, no quotes), so
 `extract_json_string` cannot read it. Take it from the `.rsct.json` printed by the
@@ -721,7 +726,8 @@ fields** are subject to discrepancy resolution.
 or without RSCT rules. An existing CLAUDE.md is never rewritten from the template; the
 rules it lacks are added in markers and the text outside the markers is left alone.
 → Migrate `present-ptbr` rules to English (wrap result in RSCT markers).
-→ Add `missing` rules (wrap in RSCT markers).
+→ Add `missing` rules among §0 and §A–§H (wrap in RSCT markers). §I–§M are added or
+  removed only by Phase 4.4c, from the conduct-rules list.
 → Reconcile `present-en` sections in Phase 4.3b — **never blindly**. A body is
   rewritten only when its authorship is PROVED (its hash matches the marker, or it
   already matches the shipped rule). Anything unproved is preserved and reported, and
@@ -785,6 +791,15 @@ Mode: [UPDATE | CREATE]
     §F State reversibility : [✅ EN | 🔄 PT-BR→will migrate | ❌ missing]
     §G Testing             : [✅ EN | 🔄 PT-BR→will migrate | ❌ missing]
     §H ADR auto-learning   : [✅ EN | 🔄 PT-BR→will migrate | ❌ missing]
+    §I Critical review     : [✅ on | ➕ on, will be added | ⏸ off | ➖ off, will be removed]
+    §J Short answers       : [same states as §I]
+    §K Questions in chat   : [same states as §I]
+    §L Verify first        : [same states as §I]
+    §M RSCT reference      : [same states as §I]
+    (§I–§M states come from the Phase 4.4c block run WITHOUT `CONDUCT_APPLY` — it changes
+     nothing. Show its "edited body" note when it prints one, and its STOP line when it
+     stops. When CLAUDE.md or .rsct.json does not exist yet the block refuses: show ➕ for
+     each id left on, ⏸ for each id off.)
 
   Documentation:
     documentation/         : [exists | not found]
@@ -957,6 +972,27 @@ else
 fi
 ```
 
+🧭 CONDUCT RULES (#129) — present ONLY when `RSCT_JSON_CONDUCT_RULES_OFF_SET` is empty
+  (ask-once: once `.rsct.json` carries `conduct_rules_off`, even as `[]`, this question
+  stays quiet and the developer switches rules in the chat instead — §0 item 10). Ask it
+  whether or not the MCP is installed: these rules are text in CLAUDE.md.
+  [Present as ONE plain-language question, Recommended (§B item 1):]
+  "RSCT also puts five conduct rules in CLAUDE.md:
+     §I critical review — the AI points out problems before agreeing
+     §J short, plain answers in the chat
+     §K questions in the chat text, numbered, with the recommended option marked
+     §L verify before claiming — checks change nothing outside a test environment
+     §M RSCT reference at the end of commits, ADRs and issues
+   Keep all five on?
+   ✅ Recommended: all on.
+   To switch some off, name them (for example `J M`). You can switch any of them off
+   or back on later just by asking in the chat."
+  - Store the answer as `CONDUCT_RULES_OFF`: `none` for all on, else the ids named
+    (`J M`). Phase 4.4c validates it; an id outside I–M stops that block with nothing
+    changed.
+  - When the question is not asked, leave `CONDUCT_RULES_OFF` unset: Phase 4.4c then
+    keeps the stored list.
+
 ```bash
 echo "  CHECKPOINT: Phase 3 recording create-universe decline (ask-once, text-splice)"
 RSCT_JSON=".rsct.json"
@@ -1013,10 +1049,12 @@ fi
 
 ──────────────────────────────────────────────────────
 Plan:
-  CLAUDE.md      → migrate PT-BR: [list] | add missing: [list] | create from scratch (no
+  CLAUDE.md      → migrate PT-BR: [list] | add missing (§0, §A–§H): [list] | create from scratch (no
                    CLAUDE.md yet, or an empty one) | update in place (your text outside
                    the RSCT markers is never touched)
                    ALL inserted/migrated sections wrapped in RSCT markers
+  Conduct rules  → on: [ids] | off: [ids] (§I–§M; Phase 4.4c adds or removes them and
+                   records conduct_rules_off in .rsct.json)
   .rsct.json     → [create | already exists — update install.applied_at]
   documentation/ → create: [list — each with RSCT-GENERATED header] | up to date
   memory/        → create: [list — each with RSCT-GENERATED header] | up to date
@@ -1037,7 +1075,7 @@ Wait for explicit OK before any mutation.
 - `~/.rsct/doc-templates/` (after install via `scripts/install.sh`)
   or `<framework-source>/doc-templates/` (when running from a source clone)
 - `~/.rsct/memory-templates/` (same fallback rule)
-- `~/.rsct/rules/` (same fallback rule — for §A–§H content)
+- `~/.rsct/rules/` (same fallback rule — for §0 and §A–§M content)
 
 When this prompt references `doc-templates/...`, `memory-templates/...`, or
 `rules/...`, resolve those paths from the RSCT install root, **not from the
@@ -1116,8 +1154,10 @@ Migration map:
 
 **Step B — Add missing rules (wrapped in RSCT markers)**
 
-For each rule marked `missing`, append the content of the corresponding `rules/`
-file, **wrapped in markers**:
+For each rule among §0 and §A–§H marked `missing`, append the content of the
+corresponding `rules/` file, **wrapped in markers**. §I–§M are never added here, even
+when Phase 1.5 printed `missing` for them: Phase 4.4c is the only step that adds or removes
+them, because it also honours the ones the developer switched off.
 ```
 <!-- RSCT-§X-BEGIN v=1.0.0 source=inserted -->
 <content from rules/X-*.md>
@@ -1145,7 +1185,7 @@ Insertion order when creating new sections:
 
 §0 is **required** when `rsct-mcp` is installed (the typical case for
 new projects starting from v0.6.4+). When `rsct-mcp` is NOT installed,
-§0 still ships in CLAUDE.md but Claude falls back to the §A–§H prose
+§0 still ships in CLAUDE.md but Claude falls back to the §A–§M prose
 because none of the `mcp__rsct__*` calls referenced in §0 are
 available. The §0 rule explicitly documents this fallback at its end.
 
@@ -1414,6 +1454,8 @@ After the header is in place, insert the rule sections into the
    <!-- RSCT-§X-END -->
    ```
    For §0, the marker is `<!-- RSCT-§0-BEGIN ... -->` / `<!-- RSCT-§0-END -->`.
+   §I–§M are not inserted here and the template has no placeholder for them: Phase 4.4c
+   adds the ones that are on, after `.rsct.json` exists.
 2. The CLAUDE.md `## 0. Canonical architectural source` placeholder block
    (lines 20–24 of the template, wrapped in a
    `<!-- RSCT-CANONICAL-SOURCE-SLOT-BEGIN -->` / `-END` pair) is left
@@ -1514,7 +1556,12 @@ D|D-branch-protection.md
 E|E-secrets-leak.md
 F|F-state-reversibility.md
 G|G-testing.md
-H|H-adr-learning.md"
+H|H-adr-learning.md
+I|I-critical-review.md
+J|J-short-answers.md
+K|K-questions-in-chat.md
+L|L-verify-before-claiming.md
+M|M-rsct-reference.md"
 
 SEC_SKIP=0; SEC_STAMP=0; SEC_UPDATE=0; SEC_ADOPT=0
 SEC_PRESERVE=0; SEC_UNVERIFIED=0; SEC_DEVOWNED=0; SEC_ABSENT=0; SEC_MALFORMED=0
@@ -1536,7 +1583,7 @@ while IFS='|' read -r SEC RULE_NAME; do
   N_BEGIN=$(grep -cF "<!-- RSCT-§${SEC}-BEGIN" "$CLAUDE_MD" || true)
   N_END=$(grep -cF "<!-- RSCT-§${SEC}-END" "$CLAUDE_MD" || true)
   if [ "$N_BEGIN" = "0" ] && [ "$N_END" = "0" ]; then
-    echo "  ABSENT     §${SEC}: no marker pair (insertion is Phase 4.2 Step B / 4.3)"
+    echo "  ABSENT     §${SEC}: no marker pair (insertion is Phase 4.2 Step B / 4.3; §I–§M: Phase 4.4c)"
     SEC_ABSENT=$((SEC_ABSENT + 1)); continue
   fi
   if [ "$N_BEGIN" != "1" ] || [ "$N_END" != "1" ]; then
@@ -1618,9 +1665,10 @@ while IFS='|' read -r SEC RULE_NAME; do
     var fs = require("fs");
     var S = String.fromCharCode(167);
     var file = process.argv[1], id = process.argv[2], newBegin = process.argv[3];
-    var txt = fs.readFileSync(file, "utf8");
-    var nl = txt.indexOf("\r\n") !== -1 ? "\r\n" : "\n";
-    var lines = txt.split(nl);
+    var buf = fs.readFileSync(file);
+    var txt = buf.toString("utf8");
+    if (Buffer.compare(Buffer.from(txt, "utf8"), buf) !== 0) { console.error("  CLAUDE.md is not valid UTF-8 text — " + id + " untouched"); process.exit(3); }
+    var lines = txt.match(/[^\n]*\n|[^\n]+$/g) || [];
     var b = "<!-- RSCT-" + S + id + "-BEGIN";
     var e = "<!-- RSCT-" + S + id + "-END";
     var bi = -1, ei = -1, i;
@@ -1629,9 +1677,10 @@ while IFS='|' read -r SEC RULE_NAME; do
       else if (lines[i].indexOf(e) === 0) { ei = i; break; }
     }
     if (bi < 0 || ei < 0) { console.error("  marker pair not found for " + id + " — untouched"); process.exit(3); }
+    var eol = /\r\n$/.test(lines[bi]) ? "\r\n" : "\n";
     var body = fs.readFileSync(0, "utf8").replace(/\r/g, "").replace(/\n+$/, "").split("\n");
-    var out = lines.slice(0, bi).concat([newBegin], body, lines.slice(ei));
-    fs.writeFileSync(file, out.join(nl), "utf8");
+    var out = lines.slice(0, bi).concat([newBegin + eol], body.map(function (l) { return l + eol; }), lines.slice(ei));
+    fs.writeFileSync(file, out.join(""), "utf8");
   ' "$CLAUDE_MD" "$SEC" "$NEW_BEGIN" || { echo "  ⚠ ERROR: §${SEC} splice failed — inspect $CLAUDE_MD manually" >&2; continue; }
 
   # Post-mutation verification (mirrors Phase 4.5's A2 guard): a writer that claims it
@@ -2632,6 +2681,326 @@ identify the rsct entry by its server name (`"rsct"` key under
 `"mcpServers"`) — JSON does not accept inline comment markers, so the
 entry name IS the marker. `/rsct-uninstall` scrubs by that key, never by
 name pattern, preserving any other servers the dev added.
+
+### 4.4c — Conduct rules §I–§M (switched on or off)
+
+§I–§M are the developer's conduct rules (#129). `.rsct.json` `conduct_rules_off` lists the
+ones switched off; `[]` means all on. This block is the **only** step that adds or removes
+§I–§M in CLAUDE.md (4.3b keeps their bodies current) and the only writer of that key, in
+every path: setup runs it here on every run, and §0 item 10 runs it from the chat when the
+developer asks to switch a rule.
+
+- `CONDUCT_RULES_OFF` is the whole new off-list: ids among `I J K L M` (`J M`), or `none`
+  for all on. Unset or empty keeps the stored list (absent = all on). Any other id stops the
+  block with nothing changed — the switch can never remove §0 or §A–§H.
+- Without `CONDUCT_APPLY=1` it only prints what it would change (Phase 3 and the chat
+  restatement use that). In this phase run it with `CONDUCT_APPLY=1`, and with
+  `CONDUCT_RULES_OFF` set to the Phase 3 answer when the question was asked.
+- It stops with nothing changed when CLAUDE.md or `.rsct.json` is missing or a symbolic
+  link, when a stored value is not a list of those ids, when the RSCT section markers are
+  malformed, or when a rule to add is not in `~/.rsct/rules/`. Setup reports the stop and
+  goes on; nothing else depends on this block.
+- A section switched on is placed after the nearest earlier RSCT section in the order
+  §0 §B §A §C … §H §I … §M, with the line ending of the line it follows, and carries the same
+  `sha256-body` that 4.3b computes, so 4.3b keeps it up to date on later runs. A section
+  switched off is removed whole, with the blank line before it; when its body was edited
+  after install the block says so first, because the edit goes with it. A section whose
+  `source=` is not exactly framework text (`inserted`, `migrated-from-ptbr`) — another value,
+  none, or more than one — holds the developer's own text: switching it off stops the block,
+  the developer edits it by hand and then asks for the switch again. Each line
+  keeps its own line ending; a CLAUDE.md that is not valid UTF-8 text stops the block.
+  CLAUDE.md is written first and `.rsct.json` last, and both are checked after writing.
+
+> ▶ Run from a file (execution mandate, rule 6).
+
+```bash
+echo "  CHECKPOINT: Phase 4.4c executing canonical conduct-rules switch"
+CLAUDE_MD="$(pwd)/CLAUDE.md"
+RSCT_JSON="$(pwd)/.rsct.json"
+RULES_DIR="$HOME/.rsct/rules"
+CONDUCT_RULES_OFF="${CONDUCT_RULES_OFF:-keep}"
+CONDUCT_APPLY="${CONDUCT_APPLY:-0}"
+CONDUCT_RULES="I|I-critical-review.md
+J|J-short-answers.md
+K|K-questions-in-chat.md
+L|L-verify-before-claiming.md
+M|M-rsct-reference.md"
+
+sha256_compute() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
+  else openssl dgst -sha256 | awk '{print $NF}'; fi
+}
+canon_body() {
+  tr -d '\r' | awk '{ n++; L[n] = $0 } END { while (n > 0 && L[n] == "") n--; for (k = 1; k <= n; k++) print L[k] }'
+}
+section_body() {
+  awk -v b="<!-- RSCT-§$1-BEGIN" -v e="<!-- RSCT-§$1-END" \
+    'index($0,b)==1 {f=1; next} f && index($0,e)==1 {f=0; next} f' "$CLAUDE_MD" | canon_body
+}
+rule_path() {
+  printf '%s/%s\n' "$RULES_DIR" "$(printf '%s\n' "$CONDUCT_RULES" | awk -F'|' -v id="$1" '$1 == id { print $2 }')"
+}
+
+config_js() {
+  node -e '
+  var fs = require("fs");
+  var mode = process.argv[1], f = process.argv[2];
+  var want = (process.argv[3] || "").split(" ").filter(Boolean);
+  var ok = ["I", "J", "K", "L", "M"];
+  var s;
+  try { s = fs.readFileSync(f, "utf8"); } catch (e) { console.log("invalid: .rsct.json cannot be read"); process.exit(mode === "read" ? 0 : 3); }
+  if (s.charCodeAt(0) === 65279) s = s.slice(1);
+  var j;
+  try { j = JSON.parse(s); } catch (e) { console.log("invalid: .rsct.json is not valid JSON"); process.exit(mode === "read" ? 0 : 3); }
+  if (mode === "read") {
+    if (!j || typeof j !== "object" || Array.isArray(j)) { console.log("invalid: .rsct.json is not an object"); process.exit(0); }
+    if (!Object.prototype.hasOwnProperty.call(j, "conduct_rules_off")) { console.log("absent"); process.exit(0); }
+    var v = j.conduct_rules_off;
+    if (!Array.isArray(v) || v.some(function (x) { return ok.indexOf(x) < 0; })) { console.log("invalid: conduct_rules_off must be a list of ids among I J K L M"); process.exit(0); }
+    var ids = ok.filter(function (x) { return v.indexOf(x) >= 0; });
+    console.log("list" + (ids.length ? " " + ids.join(" ") : ""));
+    process.exit(0);
+  }
+  if (j && Array.isArray(j.conduct_rules_off) && j.conduct_rules_off.slice().sort().join(" ") === want.join(" ")) { console.log("same"); process.exit(0); }
+  var value = "[" + want.map(function (x) { return "\"" + x + "\""; }).join(", ") + "]";
+  var cur = s.match(/"conduct_rules_off"[ \t\r\n]*:[ \t\r\n]*\[[^\]]*\]/);
+  var out;
+  if (cur) {
+    out = s.slice(0, cur.index) + "\"conduct_rules_off\": " + value + s.slice(cur.index + cur[0].length);
+  } else if (/"conduct_rules_off"[ \t\r\n]*:/.test(s)) {
+    console.log("conduct_rules_off is not a list"); process.exit(3);
+  } else {
+    var m = s.match(/^([ \t\r\n]*\{[ \t\r\n]*)/);
+    if (!m) { console.log("root object not found"); process.exit(3); }
+    var eol = /\r\n/.test(s) ? "\r\n" : "\n";
+    var at = m[0].length;
+    var indent = m[0].match(/\n([ \t]*)$/);
+    var sep = (s.charAt(at) === "}") ? "" : (indent ? "," + eol + indent[1] : ", ");
+    out = s.slice(0, at) + "\"conduct_rules_off\": " + value + sep + s.slice(at);
+  }
+  var back;
+  try { back = JSON.parse(out).conduct_rules_off; } catch (e) { console.log("the change would make .rsct.json invalid JSON"); process.exit(3); }
+  if (!Array.isArray(back) || back.join(" ") !== want.join(" ")) { console.log("the value read back is not the one written (a second or nested conduct_rules_off key?)"); process.exit(3); }
+  if (mode === "write") { fs.writeFileSync(f, out, "utf8"); console.log("changed"); }
+  ' "$@"
+}
+
+claude_js() {
+  node -e '
+  var fs = require("fs");
+  var S = String.fromCharCode(167);
+  var mode = process.argv[1], file = process.argv[2], id = process.argv[3], sha = process.argv[4];
+  var order = ["0", "B", "A", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"];
+  var buf = fs.readFileSync(file);
+  var raw = buf.toString("utf8");
+  if (Buffer.compare(Buffer.from(raw, "utf8"), buf) !== 0) { console.log("notutf8"); process.exit(mode === "scan" ? 0 : 3); }
+  var bom = raw.charCodeAt(0) === 65279 ? raw.charAt(0) : "";
+  var lines = raw.slice(bom.length).match(/[^\n]*\n|[^\n]+$/g) || [];
+  var at = {}, open = null, bad = "", last = -1;
+  for (var i = 0; i < lines.length && !bad; i++) {
+    for (var k = 0; k < order.length; k++) {
+      var x = order[k];
+      if (lines[i].indexOf("<!-- RSCT-" + S + x + "-BEGIN") === 0) {
+        if (open !== null) { bad = "BEGIN of " + S + x + " inside " + S + open + " at line " + (i + 1); }
+        else if (at[x]) { bad = "a second " + S + x + " section at line " + (i + 1); }
+        else { open = x; at[x] = { b: i }; }
+      } else if (lines[i].indexOf("<!-- RSCT-" + S + x + "-END") === 0) {
+        if (open !== x) { bad = "END of " + S + x + " with no BEGIN at line " + (i + 1); }
+        else { at[x].e = i; open = null; last = i; }
+      }
+    }
+  }
+  if (!bad && open !== null) bad = "BEGIN of " + S + open + " never closed";
+  if (bad) { console.log("malformed " + bad); process.exit(mode === "scan" ? 0 : 3); }
+  var source = function (y) {
+    var all = lines[at[y].b].replace(/\r?\n$/, "").match(/ source=\S*/g) || [];
+    return all.length === 1 ? all[0].slice(8) : (all.length > 1 ? "several" : "");
+  };
+  var framework = function (y) { return source(y) === "inserted" || source(y) === "migrated-from-ptbr"; };
+  if (mode === "scan") {
+    if (last < 0) { console.log("none"); process.exit(0); }
+    var found = order.filter(function (y) { return at[y]; });
+    console.log("ok " + found.join(" "));
+    found.forEach(function (y) { console.log("src " + y + " " + (framework(y) ? "framework" : "dev") + " " + source(y)); });
+    process.exit(0);
+  }
+  var out;
+  if (mode === "remove") {
+    if (!at[id]) process.exit(0);
+    var b = at[id].b, e = at[id].e;
+    if (!framework(id)) { console.log(S + id + " holds the developer text"); process.exit(3); }
+    var from = b > 0 && /^\r?\n$/.test(lines[b - 1]) ? b - 1 : b;
+    out = lines.slice(0, from).concat(lines.slice(e + 1));
+    if (e === lines.length - 1 && !/\n$/.test(lines[e]) && out.length) out[out.length - 1] = out[out.length - 1].replace(/\r?\n$/, "");
+  } else {
+    if (at[id]) process.exit(0);
+    var after = -1;
+    for (var n = order.indexOf(id) - 1; n >= 0 && after < 0; n--) if (at[order[n]]) after = at[order[n]].e;
+    if (after < 0) after = last;
+    if (after < 0) { console.log("no RSCT section to place it after"); process.exit(3); }
+    var prev = lines[after];
+    var eol = /\r\n$/.test(prev) ? "\r\n" : (/\n$/.test(prev) ? "\n" : (raw.indexOf("\r\n") !== -1 ? "\r\n" : "\n"));
+    var body = fs.readFileSync(0, "utf8").replace(/\r/g, "").replace(/\n+$/, "").split("\n");
+    var head = "<!-- RSCT-" + S + id + "-BEGIN v=1.0.0 source=inserted sha256-body=" + sha + " -->";
+    var add = ["", head].concat(body, ["<!-- RSCT-" + S + id + "-END -->"]).map(function (l) { return l + eol; });
+    if (!/\n$/.test(prev)) { lines[after] = prev + eol; add[add.length - 1] = add[add.length - 1].slice(0, -eol.length); }
+    out = lines.slice(0, after + 1).concat(add, lines.slice(after + 1));
+  }
+  fs.writeFileSync(file, bom + out.join(""), "utf8");
+  ' "$@"
+}
+
+conduct_switch() {
+  if [ -L "$CLAUDE_MD" ] || [ -L "$RSCT_JSON" ]; then
+    echo "  ⚠ STOP: CLAUDE.md or .rsct.json is a symbolic link — this switch never writes through a link. Nothing changed." >&2
+    return 1
+  fi
+  if [ ! -f "$CLAUDE_MD" ] || [ ! -f "$RSCT_JSON" ]; then
+    echo "  ⚠ STOP: run this from the project root, once CLAUDE.md and .rsct.json exist. Nothing changed." >&2
+    return 1
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "  ⚠ STOP: node is required. Nothing changed." >&2
+    return 1
+  fi
+
+  STORED=$(config_js read "$RSCT_JSON")
+  case "$STORED" in
+    absent) STORED_IDS="" ;;
+    list|"list "*) STORED_IDS="${STORED#list}" ;;
+    *) echo "  ⚠ STOP: ${STORED} — fix .rsct.json by hand. Nothing changed." >&2; return 1 ;;
+  esac
+
+  REQ=$(printf '%s' "$CONDUCT_RULES_OFF" | tr -d '\r' | tr ',' ' ' | tr 'a-z' 'A-Z')
+  set -f
+  set -- $REQ
+  set +f
+  if [ "$#" = 0 ] || { [ "$#" = 1 ] && [ "$1" = KEEP ]; }; then
+    WANT_SRC="$STORED_IDS"
+  elif [ "$#" = 1 ] && [ "$1" = NONE ]; then
+    WANT_SRC=""
+  else
+    WANT_SRC=""
+    for t in "$@"; do
+      case "$t" in
+        I|J|K|L|M) WANT_SRC="$WANT_SRC $t" ;;
+        *) echo "  ⚠ STOP: \"$t\" is not a conduct rule — the switch takes only I J K L M, or none. Nothing changed." >&2; return 1 ;;
+      esac
+    done
+  fi
+  WANT=""; OLD=""
+  for id in I J K L M; do
+    case " $WANT_SRC " in *" $id "*) WANT="${WANT:+$WANT }$id" ;; esac
+    case " $STORED_IDS " in *" $id "*) OLD="${OLD:+$OLD }$id" ;; esac
+  done
+  if [ "$STORED" = absent ]; then
+    echo "  conduct_rules_off: absent (all on) -> [${WANT}]"
+  else
+    echo "  conduct_rules_off: [${OLD}] -> [${WANT}]"
+  fi
+
+  SCAN=$(claude_js scan "$CLAUDE_MD")
+  SCAN_HEAD=$(printf '%s\n' "$SCAN" | head -n 1)
+  case "$SCAN_HEAD" in
+    "ok "*) PRESENT="${SCAN_HEAD#ok }" ;;
+    none) echo "  ⚠ STOP: CLAUDE.md has no RSCT section to place these rules after. Nothing changed." >&2; return 1 ;;
+    notutf8) echo "  ⚠ STOP: CLAUDE.md is not valid UTF-8 text — writing it back would replace those bytes. Nothing changed." >&2; return 1 ;;
+    *) echo "  ⚠ STOP: RSCT section markers in CLAUDE.md are ${SCAN_HEAD} — fix them by hand. Nothing changed." >&2; return 1 ;;
+  esac
+
+  TO_REMOVE=""; TO_ADD=""
+  for id in I J K L M; do
+    RF=$(rule_path "$id")
+    case " $WANT " in *" $id "*) IS_OFF=yes ;; *) IS_OFF=no ;; esac
+    case " $PRESENT " in *" $id "*) IS_HERE=yes ;; *) IS_HERE=no ;; esac
+    if [ "$IS_OFF" = yes ] && [ "$IS_HERE" = yes ]; then
+      SEC_KIND=$(printf '%s\n' "$SCAN" | awk -v id="$id" '$1 == "src" && $2 == id { print $3 }')
+      SEC_SOURCE=$(printf '%s\n' "$SCAN" | awk -v id="$id" '$1 == "src" && $2 == id { print $4 }')
+      if [ "$SEC_KIND" != framework ]; then
+        echo "  ⚠ STOP: §${id} holds text marked as your own (source=${SEC_SOURCE:-<none>}) — edit or delete it in CLAUDE.md yourself; if .rsct.json does not list it as off yet, then ask again to switch it off. Nothing changed." >&2
+        return 1
+      fi
+      TO_REMOVE="$TO_REMOVE $id"
+      BEGIN_LINE=$(awk -v b="<!-- RSCT-§${id}-BEGIN" 'index($0,b)==1 { print; exit }' "$CLAUDE_MD" | tr -d '\r')
+      MARKER_SHA=$(printf '%s\n' "$BEGIN_LINE" | sed -n 's/.*sha256-body=\([a-f0-9]\{64\}\).*/\1/p')
+      BODY_SHA=$(printf '%s\n' "$(section_body "$id")" | sha256_compute)
+      RULE_SHA=none
+      [ -f "$RF" ] && RULE_SHA=$(printf '%s\n' "$(canon_body < "$RF")" | sha256_compute)
+      if [ "$BODY_SHA" != "$MARKER_SHA" ] && [ "$BODY_SHA" != "$RULE_SHA" ]; then
+        echo "  ➖ §${id}: off — will be removed; its body was edited after install and that edit goes with it (commit it first to keep a copy in git)"
+      else
+        echo "  ➖ §${id}: off — will be removed"
+      fi
+    elif [ "$IS_OFF" = yes ]; then
+      echo "  ⏸ §${id}: off"
+    elif [ "$IS_HERE" = yes ]; then
+      echo "  ✅ §${id}: on"
+    elif [ ! -f "$RF" ]; then
+      echo "  ⚠ STOP: §${id} is on but ${RF} is missing — run the installer again. Nothing changed." >&2
+      return 1
+    else
+      TO_ADD="$TO_ADD $id"
+      echo "  ➕ §${id}: on — will be added"
+    fi
+  done
+
+  if ! CHECK=$(config_js check "$RSCT_JSON" "$WANT"); then
+    echo "  ⚠ STOP: .rsct.json cannot take the new list (${CHECK}). Nothing changed." >&2
+    return 1
+  fi
+  if [ "$CONDUCT_APPLY" != 1 ]; then
+    echo "  dry run — nothing changed. Run again with CONDUCT_APPLY=1 to apply."
+    return 0
+  fi
+
+  for id in $TO_REMOVE; do
+    if ! ERR=$(claude_js remove "$CLAUDE_MD" "$id"); then
+      echo "  ⚠ ERROR: removing §${id} failed (${ERR}) — .rsct.json left as it was; inspect CLAUDE.md" >&2
+      return 1
+    fi
+  done
+  for id in $TO_ADD; do
+    RULE_BODY=$(canon_body < "$(rule_path "$id")")
+    RULE_SHA=$(printf '%s\n' "$RULE_BODY" | sha256_compute)
+    if ! ERR=$(printf '%s\n' "$RULE_BODY" | claude_js insert "$CLAUDE_MD" "$id" "$RULE_SHA"); then
+      echo "  ⚠ ERROR: adding §${id} failed (${ERR}) — .rsct.json left as it was; inspect CLAUDE.md" >&2
+      return 1
+    fi
+    if [ "$(printf '%s\n' "$(section_body "$id")" | sha256_compute)" != "$RULE_SHA" ]; then
+      echo "  ⚠ ERROR: §${id} was not written as shipped — .rsct.json left as it was; inspect CLAUDE.md" >&2
+      return 1
+    fi
+  done
+  if ! WROTE=$(config_js write "$RSCT_JSON" "$WANT"); then
+    echo "  ⚠ ERROR: CLAUDE.md is switched but .rsct.json was not written (${WROTE}) — set conduct_rules_off to [${WANT}] by hand" >&2
+    return 1
+  fi
+
+  AFTER=$(config_js read "$RSCT_JSON")
+  SCAN=$(claude_js scan "$CLAUDE_MD")
+  FAIL=""
+  [ "$AFTER" = "list${WANT:+ $WANT}" ] || FAIL="$FAIL .rsct.json"
+  SCAN_HEAD=$(printf '%s\n' "$SCAN" | head -n 1)
+  case "$SCAN_HEAD" in "ok "*) PRESENT="${SCAN_HEAD#ok }" ;; none) PRESENT="" ;; *) PRESENT=""; FAIL="$FAIL CLAUDE.md" ;; esac
+  for id in I J K L M; do
+    case " $WANT " in *" $id "*) IS_OFF=yes ;; *) IS_OFF=no ;; esac
+    case " $PRESENT " in *" $id "*) IS_HERE=yes ;; *) IS_HERE=no ;; esac
+    [ "$IS_OFF" = "$IS_HERE" ] && FAIL="$FAIL §${id}"
+  done
+  if [ -n "$FAIL" ]; then
+    echo "  ⚠ ERROR: after the switch these do not match the list:${FAIL} — inspect CLAUDE.md and .rsct.json" >&2
+    return 1
+  fi
+  if [ -z "$TO_REMOVE$TO_ADD" ] && [ "$WROTE" != changed ]; then
+    echo "  OK: nothing to change — off: [${WANT}]"
+  else
+    echo "  OK: conduct rules switched — off: [${WANT}]"
+  fi
+}
+
+conduct_switch
+```
 
 ### 4.5 — Documentation structure
 
@@ -4417,6 +4786,7 @@ session boot.
    ```
    chore: apply RSCT v1.0.0 [migrated: §X §Y] [added: §Z] + docs
    ```
+   When §M is on, the message ends with the §M trailer (`Governed-by: …`), as §M says.
 6. **Wait for updated OK** before `git add` / `commit` / `push`. Commit through
    `rsct_request_commit` and push through `rsct_request_push` — once 4.V.e has
    run, the terminal guard refuses a `git commit` or `git push` from the agent's

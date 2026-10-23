@@ -79,7 +79,7 @@ function homeWithTemplate(): string {
 
 const fillSections = (cwd: string) => {
   const text = read(cwd)
-  writeFileSync(join(cwd, 'CLAUDE.md'), text.replace(new RegExp(`^\\[${S}([0A-H]) — [^\\n]* inserted here\\]$`, 'gm'), (_m, id: string) => sec(id, `rule ${id} body`).trimEnd()))
+  writeFileSync(join(cwd, 'CLAUDE.md'), text.replace(new RegExp(`^\\[${S}([0A-M]) — [^\\n]* inserted here\\]$`, 'gm'), (_m, id: string) => sec(id, `rule ${id} body`).trimEnd()))
 }
 
 const block = (anchor: string, env: Record<string, string> = {}, cwd?: string): BlockStep => ({ prompt: P03, anchor, env, cwd })
@@ -149,6 +149,16 @@ describe.skipIf(!READY)('Phase 4.2 excises sections by column-1 marker pairs', (
     expect(r.exit).not.toBe(0)
     expect(r.out).toContain('NOT touched')
     expect(read(dir)).toBe(content)
+  })
+
+  it('a CLAUDE.md that is not valid UTF-8 text is left byte for byte', () => {
+    const dir = chainDir()
+    const bytes = Buffer.concat([Buffer.from(`# Mine\n${sec('A', 'rule a')}`, 'utf8'), Buffer.from([0x43, 0x6f, 0x72, 0x61, 0xe7, 0xe3, 0x0a])])
+    writeFileSync(join(dir, 'CLAUDE.md'), bytes)
+    const r = runBlockIn(ROOT, dir, block(A.sections))
+    expect(r.exit).not.toBe(0)
+    expect(r.out).toContain('is not valid UTF-8 text')
+    expect(readFileSync(join(dir, 'CLAUDE.md')).equals(bytes)).toBe(true)
   })
 
   it('a marker quoted mid-line is the developer text', () => {
@@ -284,6 +294,26 @@ describe.skipIf(!READY)('Phase 4.3c decides by git whether CLAUDE.md itself goes
 
   it('a CLAUDE.md that setup created is deleted once only framework text is left', () => {
     const { dir, env } = created()
+    const r = runBlocks(ROOT, uninstallChain(env), { dir })
+    expect(decision(r.last.out)).toMatch(/^delete \(setup created it/)
+    expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(false)
+  })
+
+  it('with the conduct sections switched on, the dry run still names the deletion and the uninstall deletes it', () => {
+    const dir = chainDir()
+    repo(dir)
+    put(dir, 'README.md', '# app\n')
+    const sha = commit(dir)
+    const home = homeWithTemplate()
+    for (const f of readdirSync(join(ROOT, 'rules'))) put(home, `.rsct/rules/${f}`, read(join(ROOT, 'rules'), f))
+    put(dir, '.rsct.json', '{}\n')
+    runBlocks(ROOT, [
+      ...createSteps(home),
+      { prompt: P01, anchor: 'Phase 4.4c executing canonical conduct-rules switch', env: { HOME: posix(home), CONDUCT_APPLY: '1' } },
+    ], { dir })
+    for (const id of ['I', 'J', 'K', 'L', 'M']) expect(read(dir), id).toContain(`<!-- RSCT-${S}${id}-BEGIN`)
+    const env = { SETUP_COMMIT_SHA_BEFORE: sha, MODE_AT_INSTALL: 'CREATE' }
+    expect(decision(runBlockIn(ROOT, dir, block(A.decide, env)).out)).toMatch(/^delete \(setup created it/)
     const r = runBlocks(ROOT, uninstallChain(env), { dir })
     expect(decision(r.last.out)).toMatch(/^delete \(setup created it/)
     expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(false)

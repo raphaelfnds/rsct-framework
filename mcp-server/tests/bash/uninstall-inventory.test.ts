@@ -105,10 +105,25 @@ describe('the lists the uninstall shares with setup and the server agree', () =>
   it('the default sections to remove are the sections setup reconciles', () => {
     const setup = prompt('01-setup.md')
     const rules = setup.slice(setup.indexOf('SECTION_RULES="'), setup.indexOf('"', setup.indexOf('SECTION_RULES="') + 15))
-    const ids = [...rules.matchAll(/^(?:SECTION_RULES=")?([0A-H])[|]/gm)].map((m) => m[1]).sort()
+    const ids = [...rules.matchAll(/^(?:SECTION_RULES=")?([0A-Z])[|]/gm)].map((m) => m[1]).sort()
     const fallback = (UNINSTALL.match(/SECTIONS_TO_REMOVE="\$\{SECTIONS_TO_REMOVE:-([^}]+)\}"/) ?? [])[1]!.split(' ').sort()
-    expect(ids).toEqual(['0', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'])
+    expect(ids).toEqual(['0', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'])
     expect(fallback).toEqual(ids)
+  })
+
+  it('every section id list in setup and uninstall is the list setup reconciles', () => {
+    const setup = prompt('01-setup.md')
+    const start = setup.indexOf('SECTION_RULES="')
+    const ids = [...setup.slice(start, setup.indexOf('"', start + 15)).matchAll(/^(?:SECTION_RULES=")?([0A-Z])[|]/gm)].map((m) => m[1]!)
+    const arrays = [...`${setup}\n${UNINSTALL}`.matchAll(/var ids = \[([^\]]*)\];/g)].map((m) => m[1]!.split(',').map((x) => x.trim().replace(/"/g, '')))
+    expect(arrays).toHaveLength(3)
+    for (const list of arrays) expect(list).toEqual(ids)
+    const scan = (UNINSTALL.match(/^for SECTION in ([0A-Z ]+); do$/m) ?? [])[1]!.split(' ')
+    expect(scan).toEqual(ids)
+    const order = (setup.match(/var order = \[([^\]]*)\];/) ?? [])[1]!.split(',').map((x) => x.trim().replace(/"/g, ''))
+    expect([...order].sort()).toEqual([...ids].sort())
+    const fileOf = (id: string) => (setup.match(new RegExp(`^(?:SECTION_RULES=")?${id}[|]([^"\\s]+)`, 'm')) ?? [])[1] ?? 'missing'
+    for (const id of ids) expect(existsSync(join(ROOT, 'rules', fileOf(id))), id).toBe(true)
   })
 
   it('the .gitignore block of setup ignores the state files the server writes, except the temporary file of the store and the scripts folder', () => {

@@ -180,12 +180,14 @@ Prohibited without explicit user authorization in this session:
 - Perform branch merge
 - Execute deploy or release
 - Execute migration in real environment
+- Run a migration, seed, reset or wipe, or a test suite, against a database not known to be a
+  disposable test one (§G says how to find out)
 - Apply changes to auth, tenant context, persistence core or public contracts
 
 **Authorization does not reuse.** Each occurrence requires an updated OK.
 "Already authorized" does not apply to the next action.
 
-**Universal override path:** the dev can bypass ANY framework rule (§A–§H)
+**Universal override path:** the dev can bypass ANY framework rule (§A–§M)
 with an explicit, single-action OK. Examples: "commit direto na main", "skip
 plan and apply directly". Before acting: restate override in 1 line, wait
 for OK, apply once. Next similar action requires fresh OK. Framework guides;

@@ -32,7 +32,7 @@ Capture an anti-decision when **any** of the following is true:
 - An experiment was conducted (proof-of-concept, spike, partial migration)
 and abandoned.
 - A plan option was formally rejected by the dev with a stated reason.
-- A `§A-§H` rule was overridden — capture the override AND the underlying
+- A `§A-§M` rule was overridden — capture the override AND the underlying
 tacit rule it revealed.
 - During discussion, someone said "we already tried that" — get the story
 and write it down so the next person doesn't have to ask.
