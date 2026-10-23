@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-22
+
 ### Added
 
 - **Five conduct rules in `CLAUDE.md`, on by default (#129):** §I critical review — the agent
