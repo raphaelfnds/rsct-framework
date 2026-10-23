@@ -5,12 +5,14 @@ type: feedback
 
 Prohibited without explicit user authorization in this session: create commit,
 push to any branch, perform branch merge, execute deploy or release, run
-migration in a real environment, apply changes to auth, tenant context,
-persistence core, or public contracts. Authorization does not reuse — each
+migration in a real environment, run a migration, seed, reset or wipe — or a test
+suite — against a database not known to be a disposable test one, apply changes
+to auth, tenant context, persistence core, or public contracts. Authorization
+does not reuse — each
 occurrence requires an updated OK. "Already authorized" does not apply to the
 next action, even if it looks similar.
 
-**Universal override path:** the dev can bypass ANY framework rule (§A–§H)
+**Universal override path:** the dev can bypass ANY framework rule (§A–§M)
 with an explicit, single-action OK. Examples: "commit direto na main",
 "skip plan and apply directly", "skip reverse-op planning for this".
 Before acting: restate the override in 1 line, wait for "OK", apply once.
@@ -24,7 +26,9 @@ Why: A single approval can authorize an accidental cascade of mutations. Each
 risky action needs explicit confirmation at the moment it happens, not by
 inheritance from an earlier OK.
 
-How to apply: Before any commit / push / merge / deploy / real-env migration,
+How to apply: Before any commit / push / merge / deploy / real-env migration /
+migration, seed, reset, wipe or test suite against a database not known to be
+a disposable test one,
 or before touching auth / tenant / persistence / public contract code, stop
 and request fresh OK. Do not infer authorization from prior actions in the
 same session.

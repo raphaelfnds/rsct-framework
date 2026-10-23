@@ -5,7 +5,7 @@ substantive than a typo / doc-only fix — execute the following
 **before** proposing a plan, before reading source code beyond what
 the request explicitly names, and before any code edit.
 
-This section is the bridge between the prose contract (§A–§H below)
+This section is the bridge between the prose contract (§A–§M below)
 and the `rsct-mcp` enforcement tools. **Skipping it is the most common
 way Claude drifts off the framework** — the dev catches it
 retroactively and has to regularize via `rsct_phase_abandon` or
@@ -47,7 +47,7 @@ In order, with NO other tool call in between:
    before editing again.
 
 If either call returns `rsct_installed: false`, the rsct-mcp is not
-configured for this project — proceed with the §A–§H prose only, and
+configured for this project — proceed with the §A–§M prose only, and
 suggest the dev run `/rsct-setup` to enable the enforcement layer.
 
 **Universe (org layer).** Both calls return a `universe` block. When
@@ -274,6 +274,25 @@ candidate) — **do NOT scope-creep into fixing it**. Call
 a GitHub issue body the dev can paste later, or `mode: 'create'`
 (§C-gated) to file it via `gh issue create` immediately.
 
+### 10. Conduct rules §I–§M — switched on or off only by the developer
+
+§I–§M are the developer's conduct preferences; `.rsct.json` `conduct_rules_off` lists the ones
+switched off. When the developer asks in the chat to switch one or more of them off or on:
+
+0. If a phase is open (`rsct_phase_status`), say that the switch writes CLAUDE.md and
+   `.rsct.json`, outside any phase scope, and do it only after that phase closes.
+1. From the project root, run the Phase 4.4c block of `~/.rsct/prompts/01-setup.md` (CHECKPOINT
+   `Phase 4.4c executing canonical conduct-rules switch`) with `CONDUCT_RULES_OFF` set to the
+   whole new list of switched-off ids (`none` when all are on) and without `CONDUCT_APPLY`: it
+   only reports what it would change. If it stops, show its message and go no further.
+2. Restate that report in one line and wait for the OK (§C protocol). When it says an edited
+   body goes with a section, say so: that edit is lost unless it is committed.
+3. Run the block again, the same way, with `CONDUCT_APPLY=1`. Log it in `progress_<slug>.md`
+   when a plan is active (§C).
+
+Never switch a rule off or on at your own initiative. The switch takes only §I–§M; every other
+section stays.
+
 ### Bootstrap is OPT-OUT, not opt-in
 
 The bootstrap calls (§0.1, §0.2, §0.3) are cheap: no LLM cost, no
@@ -285,7 +304,7 @@ classifier returns `tier: trivial` and tells you to skip the rest —
 **the classifier IS the bypass; you don't bypass it manually**.
 
 If `rsct-mcp` is not installed (any `mcp__rsct__rsct_*` call returns
-"tool not found"), fall back to the §A–§H prose contract below and
+"tool not found"), fall back to the §A–§M prose contract below and
 explicitly mention to the dev that they should run
 `bash scripts/install.sh` from the framework clone
 (`bash scripts/install.sh --wsl` when Claude Code itself runs inside

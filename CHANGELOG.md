@@ -12,6 +12,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-22
+
+### Added
+
+- **Five conduct rules in `CLAUDE.md`, on by default (#129):** §I critical review — the agent
+  points out a problem before agreeing, once; §J short, plain answers in the chat; §K questions in
+  the chat text, numbered, with the recommended option marked; §L verify before claiming, with
+  checks that change nothing outside a test environment; §M an RSCT reference at the end of
+  commits, ADRs and issues (it counts toward the commit-message cap, which is never raised for
+  it). `/rsct-setup` asks once which to switch off and records them in `.rsct.json` as
+  `conduct_rules_off`. Later, ask in the chat to switch any of them off or back on: the agent
+  first shows what would change and waits for your OK, and never switches during an open phase.
+  The switch takes only §I–§M. Switching one off removes its section whole, an edit you made to
+  it included (the agent names that first; commit the edit to keep it). A section marked as your
+  own text, or with no clear mark, is never switched: the agent stops; edit or delete it
+  yourself, then ask again so the list records it. See ADR-035.
+- **§G asks which database a test suite, migration, seed or reset reaches** before the agent runs
+  or suggests it; if it may not be a disposable test database, the agent stops and tells you first.
+  §C lists running them against such a database among the actions that need your OK. This is text:
+  a mechanical check on database access is #84.
+
+### Fixed
+
+- `/rsct-setup` can update a rule section in a `CLAUDE.md` with mixed line endings. Before, that
+  update could fail on every run (safely, with an error).
+- The rule-section update of `/rsct-setup` and the section removal of `/rsct-uninstall` stop with
+  `CLAUDE.md` untouched when it is not valid UTF-8 text, instead of writing it back with those
+  bytes replaced; the new conduct-rules switch does the same. Other setup and uninstall steps that
+  rewrite `CLAUDE.md` do not check this yet.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone, restart the IDE, then run `/rsct-setup` in each
+  project. It asks once about the conduct rules, adds the ones you keep on, and updates §0, §C, §G,
+  two memory entries and `documentation/knowledge/anti-decisions.md` where you did not edit them. A
+  section you edited is kept as it is and reported; to take the new text, answer with its id
+  (`SECTIONS_TO_ADOPT`, as setup's report explains).
+
 ## [2.20.1] - 2026-10-22
 
 ### Security

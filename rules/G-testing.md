@@ -2,6 +2,20 @@
 
 Tests are evaluated in §B (planning), not after implementation.
 
+**Which database? — before running or suggesting tests, migrations, seeds or resets**
+
+A test suite can drop and recreate its database during setup, and the database it uses comes from
+the project's configuration, not from the command line. For example, in a Laravel project the
+tests that use `RefreshDatabase` can drop every table, and when `phpunit.xml` and `.env.testing`
+name no test database they can use the one in `.env`. Before running or suggesting any of these
+commands, yourself or for the developer to run:
+
+1. Find which database it reaches: read the test configuration and the environment files it
+   loads. Say it in one line, before the command.
+2. If it is not known to be a disposable test database — it is shared, staging, production or
+   the developer's own working data, or you cannot tell — do not run it. Tell the developer the
+   risk in plain words first, and follow §C.
+
 **Project without automated tests**
 
 If the project has no automated test suite:

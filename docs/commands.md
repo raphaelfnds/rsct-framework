@@ -71,7 +71,8 @@ overwritten. See
 **Re-run behavior.** Idempotent. It compares content by SHA and only creates or
 updates what changed; markers it already wrote are recognized, not duplicated.
 
-That now includes the nine governance sections of `CLAUDE.md`. Before v2.7.0 a
+That now includes the rule sections of `CLAUDE.md` (§0, §A–§H and the conduct rules
+§I–§M). Before v2.7.0 a
 section froze at whatever release first installed it, so a changed rule never reached
 your project and `CLAUDE.md` slowly drifted away from the MCP enforcing it. A re-run
 now reconciles them, and the rule is simple: **a section body is rewritten only when
@@ -91,6 +92,18 @@ canonical rule, it re-runs with `SECTIONS_TO_ADOPT="C E"` naming those sections.
 **not** overwrite a section the hash proves you edited; that always costs an explicit
 id. Sections wrapped with `source=migrated-from-ptbr-preserved` or `hand-merged` are
 your own prose and are never reconciled at all.
+
+**Conduct rules (§I–§M, since 2.21.0).** Five more sections go into `CLAUDE.md`:
+§I critical review, §J short and plain answers, §K questions in the chat text,
+§L verify before claiming, and §M an RSCT reference at the end of commits, ADRs and
+issues. All five are on by default. Setup asks once which to switch off and records the
+answer in `.rsct.json` as `conduct_rules_off` (`[]` = all on). Later, ask in the chat
+to switch any of them off or back on: the agent runs setup's switch block once to show
+what would change, waits for your OK, then applies it (after any open phase closes). The block takes only §I–§M —
+never §0 or §A–§H — and a section switched off goes whole, edits included. A section
+marked as your own text, or with no clear `source=` mark, is never switched: edit or
+delete it yourself, then ask again. They are text the agent reads; no gate depends on
+them.
 
 **Recovery.** [`/rsct-uninstall`](#rsct-uninstall) reverses what it wrote, keeps
 your text outside the RSCT markers, and asks about any generated file you edited by

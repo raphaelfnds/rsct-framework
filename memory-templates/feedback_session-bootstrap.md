@@ -122,7 +122,7 @@ How to apply: The bootstrap chain (steps 1–3) runs FIRST in every
 session and FIRST again for every new task within a session. Do not
 read code beyond what the dev explicitly named, do not present a §B
 plan, and do not edit any file before steps 1–3 complete. If
-rsct-mcp is not installed (tool-not-found), fall back to §A–§H prose
+rsct-mcp is not installed (tool-not-found), fall back to §A–§M prose
 and tell the dev to run `bash scripts/install.sh` from the framework
 clone (`bash scripts/install.sh --wsl` when Claude Code itself runs inside
 WSL), then /rsct-setup.

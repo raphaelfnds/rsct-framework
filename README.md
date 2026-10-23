@@ -13,7 +13,7 @@ Operational implementation of the [RSCT Workflow Framework](https://medium.com/@
 plans, lose context between sessions, reuse stale authorizations, and quietly
 drift from a project's standards. RSCT addresses this at two layers:
 
-- a **passive** layer — project memory + the §A–§H rules in `CLAUDE.md` that the
+- a **passive** layer — project memory + the §0–§M rules in `CLAUDE.md` that the
   agent reads at session start;
 - a **mechanical** layer — `rsct-mcp`, an MCP server that *enforces* the rules
   (authorization gates, phase machine, branch protection) instead of trusting
@@ -574,6 +574,7 @@ rsct-framework/                    # dev/source — version controlled in git
 │   ├── 05-clean-code.md           # sweep duplication/scalability/dep updates; route via cycle
 │   └── 06-universe.md             # unified /rsct-universe dispatcher (routes to 02 + 04)
 ├── rules/                         # individual rule files (inserted into CLAUDE.md)
+│   ├── 0-session-bootstrap.md
 │   ├── A-bug-mode.md
 │   ├── B-architect-plan.md
 │   ├── C-reauthorize.md
@@ -581,8 +582,13 @@ rsct-framework/                    # dev/source — version controlled in git
 │   ├── E-secrets-leak.md
 │   ├── F-state-reversibility.md
 │   ├── G-testing.md
-│   └── H-adr-learning.md
-├── memory-templates/              # memory entries for each rule (with marker)
+│   ├── H-adr-learning.md
+│   ├── I-critical-review.md       # §I–§M: conduct rules, each one can be switched off
+│   ├── J-short-answers.md
+│   ├── K-questions-in-chat.md
+│   ├── L-verify-before-claiming.md
+│   └── M-rsct-reference.md
+├── memory-templates/              # memory entries for the governance rules (with marker)
 ├── doc-templates/                 # per-project documentation/ templates
 │   ├── CLAUDE.md.template
 │   ├── architecture.md.template

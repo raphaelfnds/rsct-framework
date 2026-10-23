@@ -2333,6 +2333,123 @@ fakes returned `'unavailable'`, a value the dialog never returns, and now return
 refusal they pin is unchanged). No hook script bundled into projects contains the dialog code
 (measured in `dist/scripts/`), so the installer and an IDE restart are enough; no `/rsct-setup`.
 
+### ADR-035 — Five conduct rules §I–§M ship on by default and are switched only through one setup block; §G and §C ask which database a test or migration reaches (#129, 2.21.0)
+**Status**: active.
+**Tags**: rules, setup, uninstall, cross-os
+
+**Context**: MEASURED on `main` @ `1181794` (2.20.1), unless marked.
+- None of the five rules of #129 shipped. A shipped rule is a marked `RSCT-§X` section of the
+  project's `CLAUDE.md`, kept current by `sha256-body` in setup 4.3b. The server never reads rule
+  sections, and the `.rsct.json` top level strips unknown keys, so a new key needs no server change.
+- The section ids were written out by hand in seven places across setup and uninstall.
+- Setup's `extract_json_array` gives the same empty result for a missing key, for `[]` and for a list
+  spread over several lines.
+- A section hash taken without the trailing newline 4.3b adds (`printf '%s\n'`) reads as "edited
+  after install" after the next rule change, and the section then stops updating.
+- REPORTED (Laravel sources, read, not run): tests that use `RefreshDatabase` run `migrate:fresh`
+  on the test connection unless it is in memory; laravel/laravel 10.x ships the in-memory lines of
+  `phpunit.xml` commented out, so tests use the database in `.env`. A developer reported an agent
+  suggesting that test command in a real project where it would have wiped a database that was not
+  a disposable test one.
+- MEASURED in REVIEW on the first version of the block: splitting `CLAUDE.md` on one line ending
+  for the whole file glued the LF lines of a mixed file onto the line before them, so switching a
+  section off removed the developer's text after it and printed OK; the terminal guard refuses
+  `node -e "$VARIABLE"` (it cannot read the code), so every node script of the block is written out
+  inside a shell function.
+
+**Decision**:
+- Five sections, one file each in `rules/`: §I critical review, §J short answers, §K questions in
+  the chat text, §L verify before claiming, §M an RSCT reference in commits, ADRs and issues. The
+  maintainer's texts in #129, adjusted in S and V: third person ("the developer"); §I states a
+  disagreement once, then follows the developer's decision, and a gated action still needs its own
+  OK (§C); §J's length limit is for chat answers, not for recorded files nor for the reports, plans
+  and questions RSCT's rules, prompts and tools require; §K keeps those required questions and says
+  RSCT's Yes/No approval windows are not the option box; §L's checks that back a claim change
+  nothing outside a disposable test environment, and a shared or production system is checked only
+  with the developer's OK; §M's trailer sits in
+  the commit's trailer block and counts toward `commit_message_max_lines`, the message is shortened
+  and the cap never raised, and with a cap of 1 the trailer is left out; the ADR and issue line ends
+  the text the agent writes (a tool may add its footer after it). English, the repository's
+  language; the chat language stays the user's choice. No memory entries for them.
+- `.rsct.json` `conduct_rules_off` lists the ids switched off; `[]` means all on. Setup asks once,
+  when the key is absent.
+- Setup Phase 4.4c is the only step that adds or removes §I–§M (4.3b keeps their bodies current)
+  and the only writer of that key. It takes the whole new off-list
+  (`none` = all on; unset keeps the stored list), accepts only `I`–`M`, reads the key with a
+  read-only `JSON.parse`, and stops with nothing changed on any other id, on a stored value that is
+  not such a list, on malformed markers, on a missing rule file, a missing file or a symbolic link.
+  Without `CONDUCT_APPLY=1` it only reports. It writes `CLAUDE.md` first — a section switched on goes
+  after the nearest earlier RSCT section, with the hash 4.3b computes — then `.rsct.json`, and checks
+  both after writing. Every line keeps its own line ending, as in the uninstall. A section switched
+  off goes whole when its `source=` is exactly framework text; any other value, no `source=` or more
+  than one is the developer's own text, and switching it stops the block so the developer edits it
+  by hand and asks again (keeping its body would leave the rule in force, and switching it back on
+  would add a second copy). A `CLAUDE.md` that is not valid UTF-8 text stops the block.
+- Setup 4.3b's splice and uninstall 4.2 also gain the UTF-8 stop, and 4.3b splices line by line
+  with the section's own line ending, so a section in a file with mixed line endings can still be
+  updated (before, its splice could fail on every run, safely).
+- §0 item 10: the developer can ask in the chat to switch rules; the agent runs the block without
+  `CONDUCT_APPLY` first, restates what it reports (an edited body that would go with a section
+  included), waits for the OK, applies, and logs it in the progress file when a plan is active;
+  with a phase open it waits until the phase closes. Never on its own initiative.
+- §C's override covers §A–§M. §G asks which database a test suite, migration, seed or reset
+  reaches, before running or suggesting it; §C's authorization list keeps "Execute migration in
+  real environment" and adds running those commands, or a test suite, against a database not known
+  to be a disposable test one; the memory entry for §C says the same.
+- Every section id list in setup and uninstall carries §I–§M, pinned to `SECTION_RULES` by a test.
+
+**Direction**: stricter or neutral; nothing is looser. The rules and the §G/§C text are new
+instructions, and no gate changes. The switch can remove only §I–§M; an id outside them stops the
+block. Whoever can edit `.rsct.json` or `CLAUDE.md` could already delete these sections by hand, and
+both files show the change in the diff. What is recorded: one new `.rsct.json` key; the audit log is
+unchanged.
+
+**Alternatives considered**:
+- Memory entries for the five rules — dropped in S: one source per rule.
+- A fixed phrase in chat answers (the issue's rule 5, item 2) — dropped in S: the chat language is
+  the user's choice.
+- Rule 5 as a check in `rsct_request_commit` / `rsct_capture_issue` — not taken: text only.
+- Placeholders for §I–§M in the CREATE template — rejected in V: two writers, and a placeholder left
+  behind for an id switched off.
+- The database text inside §L — rejected: §L can be switched off, and a safety rule must not be.
+- A ban on a named test command — rejected: other stacks have the same shape; the rule asks which
+  database a command reaches.
+
+**What is given up, by name**: the rules are text; nothing blocks an agent command, or a
+recommendation, that reaches a production database — that is #84. A section switched on lands after
+the nearest earlier RSCT section, so in a `CLAUDE.md` laid out by hand it can land mid-file. A
+framework section switched off is removed whole, a body edited after install included: the block
+names that case before anything is written, and the edit is lost unless it was committed. The
+switch writes no audit line; the diff of `CLAUDE.md` and `.rsct.json` is the record. Switching §L
+off also drops its lines on checks that change nothing and on the OK for production; what destroys
+data stays in §C and §G, which cannot be switched off. Like 4.3b and the uninstall, the block reads
+markers at column 1 even inside a fenced code block; like the uninstall, it drops text written after
+an END marker on the same line; and it drops a byte-order mark from `.rsct.json` when it writes the
+key. Other setup and uninstall steps that rewrite `CLAUDE.md` (setup 4.2 Step E, uninstall 4.3b)
+still replace bytes that are not valid UTF-8 — a gap from before this change, left as it was.
+
+**Consequences**: tests in `tests/bash/conduct-rules.test.ts` (report only without
+`CONDUCT_APPLY`; insertion order; 4.3b reads what it wrote as up to date and updates it after a rule
+change; off and back on gives the same bytes, with and without a final newline; a rerun says
+nothing changed; ids outside I–M; invalid stored values; a second key; a list over several lines or
+in another order; malformed markers; CRLF with a byte-order mark; LF lines inside a CRLF file and
+the reverse; a section the developer owns stops it; a `CLAUDE.md` that is not UTF-8 stops it and
+4.3b; 4.3b updates a section in a mixed file; `.rsct.json` in CRLF, another indent or one line,
+with the key name as a value elsewhere, or with a byte-order mark; a blank list; a stale marker
+hash; a missing rule file; no RSCT section; symbolic links; an edited body named; the rule file
+list), `setup-claude-md.test.ts` (the conduct sections count by their markers, and rule
+keywords inside them never read as another rule), `uninstall-claude-md.test.ts` (a `CLAUDE.md`
+setup created with §I–§M on is still deleted, and the dry run says so; a `CLAUDE.md` that is not
+UTF-8 is left byte for byte), `uninstall-inventory.test.ts`
+(every id list equals `SECTION_RULES`), `terminal-guard-prompts.test.ts` (unchanged; it caught the
+node code passed through a variable). Edited tests, each with the guarantee it held: the
+default-removal list test expects 14 ids (it still pins the uninstall default to `SECTION_RULES`);
+the classifier's rule pattern widens to `[0A-M]` and "every rule missing" lists §I–§M (a
+`CLAUDE.md` with no rules still reads every rule missing); the uninstall fixture's placeholder
+pattern widens to `[0A-M]` (it still fills only the template's placeholders, which stay §0–§H).
+Migration: `/rsct-setup` asks once, adds the sections that are on, records the key, and updates §0,
+§C, §G, two memory entries and the anti-decisions knowledge file wherever they were not edited.
+
 ---
 
 ## Anti-decisions (tried, rejected, do not retry)
