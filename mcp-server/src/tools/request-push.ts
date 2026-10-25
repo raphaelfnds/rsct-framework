@@ -10,12 +10,15 @@ import { planCleanupReport } from '../lib/plan-cleanup.js'
 import {
   defaultGitExecutor,
   getRangePaths,
+  getTreePaths,
   gitPush,
   readGitState,
+  resolveCommit,
   type GitExecutor,
   type GitState,
   type RangePathsResult,
 } from '../lib/git.js'
+import { defaultPushProbe, type PushProbe } from '../lib/push-probe.js'
 import {
   effectiveProtectedList,
   isProtectedBranch,
@@ -44,7 +47,9 @@ import {
   type BootstrapMarker,
 } from '../lib/phase-scope.js'
 import {
+  crossCheckBlockedReason,
   evaluatePreMergeAck,
+  MAX_FILES_SWEPT,
   preMergeAckHint,
   preMergeAckSchema,
   preMergeAckJsonSchema,
@@ -110,6 +115,7 @@ export type RequestPushRejectKind =
   | 'pre_merge_ack_incomplete'
   | 'unsafe_push_target'
   | 'unknown_remote'
+  | 'hygiene_range_unreadable'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -139,12 +145,42 @@ export interface RequestPushInternal {
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
   rangeReader?: typeof getRangePaths
+  treeReader?: typeof getTreePaths
+  pushProbe?: PushProbe
+}
+
+interface ProbeRead {
+  projectRoot: string
+  remote: string
+  refspec: string
+  destinationRef: string
+  head: string
+  probe: PushProbe
+  treeReader: typeof getTreePaths
+  rangeReader: typeof getRangePaths
+}
+
+function carriedByProbe(read: ProbeRead): { range: RangePathsResult; parsed: boolean } {
+  const probed = read.probe(read.projectRoot, read.remote, read.refspec)
+  if (probed.status !== 'parsed') return { range: { status: 'unavailable' }, parsed: false }
+  const mine = probed.refs.filter((r) => r.to === read.destinationRef)
+  if (mine.length === 0) return { range: { status: 'unavailable' }, parsed: false }
+  const paths = new Set<string>()
+  for (const r of mine) {
+    if (r.flag === '=' || r.flag === '-') continue
+    const old = r.old !== null ? resolveCommit(read.projectRoot, r.old) : null
+    let carried = old !== null ? read.rangeReader(read.projectRoot, old, read.head) : read.treeReader(read.projectRoot, read.head)
+    if (carried.status !== 'ok' && old !== null) carried = read.treeReader(read.projectRoot, read.head)
+    if (carried.status !== 'ok') return { range: carried, parsed: true }
+    for (const p of carried.paths) paths.add(p)
+  }
+  return { range: { status: 'ok', paths: [...paths] }, parsed: true }
 }
 
 export const requestPushTool: Tool = {
   name: 'rsct_request_push',
   description:
-    "§C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote> <branch>`. No secrets scan — the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
+    "§C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote>` with an explicit full refspec built from the parsed request (so a remote.<name>.push mapping cannot redirect it). No secrets scan — the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -282,7 +318,12 @@ export async function requestPushHandler(
 
   const candidates = new Set(refspec.ok ? refspec.candidates : [])
   let rangeBase: string | null = null
+  let rangeLabel: string | null = null
   let rangeHead: string | null = null
+  let destinationRef: string | null = null
+  let destinationLabel: string | null = null
+  let sourceSha: string | null = null
+  let explicitRefspec: string | null = null
   if (refspec.ok) {
     const rp = gitExecutor(projectRoot, [
       'rev-parse',
@@ -296,9 +337,34 @@ export async function requestPushHandler(
       destBare = stripRefsPrefix(resolved)
       candidates.add(destBare)
     }
+    destinationLabel = destBare
+    destinationRef = resolved.startsWith('refs/')
+      ? resolved
+      : refspec.destination.startsWith('refs/')
+        ? refspec.destination
+        : destBare === 'HEAD'
+          ? null
+          : `refs/heads/${destBare}`
+    if (refspec.source.length > 0) {
+      const peel = (rev: string): string => {
+        const sv = gitExecutor(projectRoot, ['rev-parse', '--verify', '-q', `${rev}^{object}`])
+        const out = sv.ok ? sv.stdout.trim() : ''
+        return /^[0-9a-f]{40,64}$/.test(out) ? out : ''
+      }
+      const bare = !refspec.source.startsWith('refs/') && !/^[0-9a-f]{7,64}$/i.test(refspec.source)
+      const head = bare ? peel(`refs/heads/${refspec.source}`) : ''
+      sourceSha = (head || peel(refspec.source)) || null
+    }
+    if (destinationRef !== null) {
+      const source = refspec.source.length === 0 ? '' : (sourceSha ?? refspec.source)
+      explicitRefspec = `${refspec.forced ? '+' : ''}${source}:${destinationRef}`
+    }
     if (refspec.source.length > 0 && destBare !== 'HEAD') {
-      rangeBase = `${remote}/${destBare}`
-      rangeHead = refspec.source
+      rangeLabel = `${remote}/${destBare}`
+      rangeBase = destinationRef?.startsWith('refs/heads/')
+        ? `refs/remotes/${remote}/${destinationRef.slice('refs/heads/'.length)}`
+        : rangeLabel
+      rangeHead = sourceSha ?? refspec.source
     }
   }
   const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList))
@@ -309,20 +375,90 @@ export async function requestPushHandler(
     const source = refspec.ok ? refspec.source : ''
     const pushedBranch = /^(?:head|@)$/i.test(source) ? gitState.branch : source
     const progressOpen = branchPlansHaveOpenItems(projectRoot, [pushedBranch])
-    const range: RangePathsResult =
+    const rangeReader = internal.rangeReader ?? getRangePaths
+    let range: RangePathsResult =
       rangeBase !== null && rangeHead !== null
-        ? (internal.rangeReader ?? getRangePaths)(projectRoot, rangeBase, rangeHead)
+        ? rangeReader(projectRoot, rangeBase, rangeHead)
         : { status: 'unavailable' }
+    let probeParsed = false
+    if (range.status === 'unavailable' && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
+      const carried = carriedByProbe({
+        projectRoot,
+        remote,
+        refspec: explicitRefspec,
+        destinationRef,
+        head: sourceSha ?? rangeHead,
+        probe: internal.pushProbe ?? defaultPushProbe,
+        treeReader: internal.treeReader ?? getTreePaths,
+        rangeReader,
+      })
+      range = carried.range
+      probeParsed = carried.parsed
+    }
     crossCheck = describeCrossCheck(range)
+    if (range.status === 'ok' && range.paths.length > MAX_FILES_SWEPT) {
+      const reason =
+        `refusing to push: this push carries ${range.paths.length} files, over the ${MAX_FILES_SWEPT} the ` +
+        'coverage check can attest. A first publication this large is one the developer pushes by hand in their own terminal.'
+      const audit = appendAudit(
+        projectRoot,
+        { event: 'request_push.rejected', tool: 'rsct_request_push', reject_kind: 'hygiene_range_unreadable', reason, branch, remote, path_crosscheck: crossCheck },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch,
+        remote,
+        channel: null,
+        reject_kind: 'hygiene_range_unreadable',
+        reason,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
     const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
       progressHasOpenItems: progressOpen,
       carriedPaths: range.status === 'ok' ? range.paths : null,
     })
+    if (ackDecision.ok && range.status !== 'ok' && probeParsed) {
+      const reason = crossCheckBlockedReason(range, 'push')
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_push.rejected',
+          tool: 'rsct_request_push',
+          reject_kind: 'hygiene_range_unreadable',
+          reason,
+          branch,
+          remote,
+          path_crosscheck: crossCheck,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch,
+        remote,
+        channel: null,
+        reject_kind: 'hygiene_range_unreadable',
+        reason,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
     if (ackDecision.ok && range.status !== 'ok') {
       const named = rangeBase !== null && rangeHead !== null
       degradedHint = named
         ? `⚠ pre_merge_ack coverage check DEGRADED (${crossCheck}): the paths this push carries ` +
-          `could not be read from git (${rangeBase}...${rangeHead}). The push proceeds — an ` +
+          `could not be read from git (${rangeLabel}...${rangeHead}). The push proceeds — an ` +
           'unfetched remote-tracking ref is an ordinary state, not a fault — but files_swept was ' +
           `NOT verified against what is actually being sent. Run \`git fetch ${remote}\` and ` +
           're-check if that matters here.'
@@ -338,7 +474,7 @@ export async function requestPushHandler(
           branch,
           remote,
           path_crosscheck: crossCheck,
-          range_base: rangeBase,
+          range_base: rangeLabel,
           range_head: rangeHead,
         },
         config?.audit,
@@ -392,6 +528,15 @@ export async function requestPushHandler(
         `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
         ...(refspec.ok && refspec.destination !== refspec.source
           ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`]
+          : []),
+        ...(sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : []),
+        ...(branchProtected && crossCheck === 'degraded'
+          ? [
+              '⚠ files_swept NOT checked: RSCT could not read what this push carries.' +
+                (rangeHead !== null
+                  ? ` If the remote has no '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' yet, this push carries the whole branch.`
+                  : ''),
+            ]
           : []),
         ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
       ].join('\n') + gateDialogFooter(projectRoot, config),
@@ -512,7 +657,7 @@ export async function requestPushHandler(
     }
   }
 
-  const push = gitPush(projectRoot, remote, branch, gitExecutor)
+  const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor)
   if (!push.ok) {
     const reason = push.error ?? push.stderr ?? 'git push failed'
     const audit = appendAudit(

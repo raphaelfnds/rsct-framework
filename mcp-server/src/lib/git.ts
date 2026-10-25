@@ -77,6 +77,21 @@ export function getRangePaths(
   return { status: 'ok', paths: splitNulPaths(raw) }
 }
 
+export function getTreePaths(projectRoot: string, rev: string): RangePathsResult {
+  if (!isSafeRevisionToken(rev)) return { status: 'unsafe_revision', revision: rev }
+  if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
+  const raw = safeGitRaw(projectRoot, ['ls-tree', '-r', '--full-tree', '--name-only', '-z', rev])
+  if (raw === null) return { status: 'unavailable' }
+  return { status: 'ok', paths: splitNulPaths(raw) }
+}
+
+export function resolveCommit(projectRoot: string, rev: string): string | null {
+  if (!isSafeRevisionToken(rev)) return null
+  const raw = safeGitRaw(projectRoot, ['rev-parse', '--verify', '-q', `${rev}^{commit}`])
+  const sha = raw?.trim() ?? ''
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+}
+
 export interface StagedStats {
   files: number
   insertions: number
@@ -397,12 +412,12 @@ export interface GitPushResult {
 export function gitPush(
   projectRoot: string,
   remote: string,
-  branch: string,
+  refspec: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitPushResult {
-  const bad = unsafeOperand({ remote, branch })
+  const bad = unsafeOperand({ remote, refspec })
   if (bad) return { ok: false, error: bad }
-  const exec = executor(projectRoot, ['push', '--', remote, branch])
+  const exec = executor(projectRoot, ['push', '--', remote, refspec])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()
