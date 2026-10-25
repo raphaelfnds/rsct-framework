@@ -403,7 +403,7 @@ function resolveProjectRootFromArgs(options) {
   return cwd2;
 }
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -515,7 +515,7 @@ __export(external_exports, {
   void: () => voidType
 });
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {
@@ -649,7 +649,7 @@ var getParsedType = (data) => {
   }
 };
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -767,7 +767,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -870,7 +870,7 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -879,7 +879,7 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -989,14 +989,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../../../../../../../../../VSCode/rsct-framework/mcp-server/node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
