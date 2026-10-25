@@ -10,6 +10,7 @@ import {
   getStagedPaths,
   gitCommit,
   readGitState,
+  readHeadBirth,
   type GitExecutor,
   type GitState,
 } from '../lib/git.js'
@@ -400,12 +401,15 @@ export async function requestCommitHandler(
       return { ok: false, reject_kind: 'review_unreadable', reason: `${refusal.error} No commit was made.`, paths: [] }
     }
     const sweepState = read.state
+    const ceiling = deriveAuditCeiling(projectRoot, config ?? null)
     return checkStagedSweep({
       projectRoot,
       options: { sqlDialect: config?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       ledger: sweepState?.review_sweep,
       drift: sweepState?.review_drift,
-      unverifiedDecisions: deriveAuditCeiling(projectRoot, config ?? null).unverifiedDecisions,
+      unverifiedDecisions: ceiling.unverifiedDecisions,
+      legacyBaselineDecisions: ceiling.legacyBaselineDecisions,
+      headUnborn: ceiling.legacyBaselineDecisions.size > 0 && readHeadBirth(projectRoot).status === 'unborn',
     })
   }
   const rejectSweep = (check: Extract<StagedSweepCheck, { ok: false }>, stage: 'before_authorization' | 'before_commit'): RequestCommitOutput => {

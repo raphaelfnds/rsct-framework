@@ -368,6 +368,27 @@ export function getHeadShaFull(
   return r.stdout.trim() || null
 }
 
+export type HeadBirth = { status: 'unborn'; branch: string } | { status: 'born' } | { status: 'unknown'; detail: string }
+
+export function readHeadBirth(projectRoot: string, executor: GitExecutor = defaultGitExecutor): HeadBirth {
+  const symbolic = executor(projectRoot, ['symbolic-ref', '-q', 'HEAD'])
+  if (!symbolic.ok) {
+    return symbolic.exitCode === 1 ? { status: 'born' } : { status: 'unknown', detail: `git symbolic-ref exited ${symbolic.exitCode}` }
+  }
+  const ref = symbolic.stdout.trim()
+  if (!ref.startsWith('refs/heads/')) return { status: 'unknown', detail: `HEAD names ${JSON.stringify(ref)}, not a branch` }
+  const shown = executor(projectRoot, ['show-ref', '--verify', '--quiet', ref])
+  if (shown.ok) return { status: 'born' }
+  if (shown.exitCode === 1) return { status: 'unborn', branch: ref.slice('refs/heads/'.length) }
+  return { status: 'unknown', detail: `git show-ref exited ${shown.exitCode}` }
+}
+
+export function countRepositoryCommits(projectRoot: string, executor: GitExecutor = defaultGitExecutor): number | null {
+  const r = executor(projectRoot, ['rev-list', '--all', '--reflog', '--count'])
+  const n = r.ok ? Number.parseInt(r.stdout.trim(), 10) : Number.NaN
+  return Number.isInteger(n) && n >= 0 ? n : null
+}
+
 function unsafeOperand(operands: Record<string, string>): string | null {
   for (const [name, value] of Object.entries(operands)) {
     if (!isSafeRevisionToken(value)) {

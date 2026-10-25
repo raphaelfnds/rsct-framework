@@ -29,7 +29,7 @@ import {
 import { gitFailureDetail, withGitFailures } from '../git.js'
 import { isShippedScriptCopy } from '../version-drift.js'
 
-export type ExemptReason = 'generated' | 'vendored'
+export type ExemptReason = 'generated' | 'vendored' | 'legacy_baseline'
 
 export interface SweepFile {
   path: string
@@ -38,6 +38,7 @@ export interface SweepFile {
   kind: 'clean' | 'comments_present' | 'unverified' | 'deleted'
   language: string | null
   reason: UnverifiedReason | ExemptReason | 'head_unverified' | null
+  comment_count?: number
   comments: SweepComment[]
   allowlist_changes: SweepComment[]
   removed: Array<SweepComment & { path: string }>
@@ -189,7 +190,13 @@ async function sweepTheWorkingTree(projectRoot: string, options: SweepOptions): 
     const base = { path, status, blob, comments: [], allowlist_changes: [], removed: [] }
     const exempt = options.exempt?.get(path)
     if (exempt) {
-      files.push({ ...base, kind: 'unverified', language: scan.language, reason: exempt })
+      files.push({
+        ...base,
+        kind: 'unverified',
+        language: scan.language,
+        reason: exempt,
+        ...(exempt === 'legacy_baseline' && scan.kind === 'scanned' && { comment_count: scan.comments.length }),
+      })
       continue
     }
     if (scan.kind === 'unverified') {
@@ -412,6 +419,8 @@ export async function checkStagedSweep(args: {
   ledger: unknown
   drift: { paths: string[] } | undefined
   unverifiedDecisions: ReadonlySet<string>
+  legacyBaselineDecisions: ReadonlySet<string>
+  headUnborn: boolean
 }): Promise<StagedSweepCheck> {
   const repo = openSweepRepo(args.projectRoot)
   if (!repo) return { ok: true, skipped: 'not_git_repo', checked: [] }
@@ -456,8 +465,10 @@ export async function checkStagedSweep(args: {
       continue
     }
     const entry = ledgerEntries(args.ledger, path).find((e) => e.blob === blob)
+    const key = decisionKey(path, blob)
     const authorized =
-      entry?.verdict === 'unverified_authorized' && args.unverifiedDecisions.has(decisionKey(path, blob))
+      entry?.verdict === 'unverified_authorized' &&
+      (args.unverifiedDecisions.has(key) || (args.headUnborn && args.legacyBaselineDecisions.has(key)))
     if (scan.kind === 'scanned' && scan.comments.length > 0 && !authorized) {
       withComments.push(path)
       continue
