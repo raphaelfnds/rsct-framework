@@ -101,7 +101,14 @@ installed, the terminal guard refuses `git commit`, `push`, `merge`, `rebase`,
 `cherry-pick`, `revert`, `am` and `gh pr merge` from the agent's terminal (the
 Bash, PowerShell and Monitor tools). A refusal is a STOP: call the RSCT tool it
 names, or ask the developer to run the command in their own terminal — never
-work around it. If `rsct-mcp` is not
+work around it. The same guard refuses commands that change a database: a
+client statement that writes or that it cannot read, a migration, seed, reset
+or wipe, a restore, `docker compose down -v`, and — in a Laravel project whose
+tests are not pointed at a disposable database — the test run. There is no RSCT
+tool for these: the developer runs them in their own terminal. The developer can
+switch these database rules off in `.rsct.json` (`database_guard: false`, or
+`database_test_guard: false` for the Laravel test check alone); that switch is
+their own edit, never yours. If `rsct-mcp` is not
 installed, the §C prose contract above is the only enforcement — follow it
 strictly.
 

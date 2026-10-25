@@ -4426,7 +4426,13 @@ Registered as a **PreToolUse** hook on the three tools that run commands —
 `powershell -Command …`, `wsl …`, `ssh host …`, an alias, a `node -e` that
 calls git), and names the RSCT tool to call instead (for `gh pr merge`, the
 developer merges on GitHub). Recovery forms (`--abort`,
-`--quit`, `--continue`, `--skip`) pass when nothing else follows the verb. The
+`--quit`, `--continue`, `--skip`) pass when nothing else follows the verb. It
+also refuses commands that change a database (a client statement that writes or
+that it cannot read, a migration, seed, reset or wipe, a restore,
+`docker compose down -v`, and a Laravel test run whose tests are not pointed at a
+disposable database); the developer switches those rules off in `.rsct.json`
+(`database_guard: false`, or `database_test_guard: false` for the Laravel test
+check alone). The
 developer runs anything else they want by hand in their own terminal; the
 guard only sees the agent's tools. It fails **closed**: the command clears
 `NODE_OPTIONS` and ends in `|| exit 2`, so a guard that cannot start blocks

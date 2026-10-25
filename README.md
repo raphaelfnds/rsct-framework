@@ -517,6 +517,12 @@ step doesn't behave as described, that's a bug worth filing.
      run any of them yourself, in your own
      terminal. Without `rsct-mcp`, the rules in `CLAUDE.md` ask Claude for a
      §C reauthorization instead.
+   - The same guard refuses commands that change a database — a client
+     statement that writes, a migration, seed, reset or wipe, `docker compose
+     down -v` — and, in a Laravel project whose `phpunit.xml` does not force a
+     disposable test database, the test run. You run those yourself;
+     `database_guard: false` in `.rsct.json` switches these rules off, and
+     `database_test_guard: false` only the Laravel check.
    - With `rsct-mcp` installed: Claude proposes
      `mcp__rsct__rsct_request_commit` instead. Every commit pops a native OS
      dialog to confirm out-of-band before it lands — with no dialog channel the
