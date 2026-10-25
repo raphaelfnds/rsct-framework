@@ -23,6 +23,7 @@ export interface AuditCeiling {
   classifyEvidencePresent: boolean
   auditTierMax: string | null
   unverifiedDecisions: Set<string>
+  legacyBaselineDecisions: Set<string>
   deadCodeKeepDecisions: Set<string>
   publicApiApprovals: Set<string>
 }
@@ -46,6 +47,7 @@ export function deriveAuditCeiling(
     classifyEvidencePresent: false,
     auditTierMax: null,
     unverifiedDecisions: new Set<string>(),
+    legacyBaselineDecisions: new Set<string>(),
     deadCodeKeepDecisions: new Set<string>(),
     publicApiApprovals: new Set<string>(),
   }
@@ -62,6 +64,7 @@ export function deriveAuditCeiling(
   let maxRank = -1
   let auditTierMax: string | null = null
   const unverifiedDecisions = new Set<string>()
+  const legacyBaselineDecisions = new Set<string>()
   const deadCodeKeepDecisions = new Set<string>()
   const publicApiApprovals = new Set<string>()
 
@@ -90,7 +93,9 @@ export function deriveAuditCeiling(
       typeof entry.path === 'string' &&
       typeof entry.blob === 'string'
     ) {
-      unverifiedDecisions.add(decisionKey(entry.path, entry.blob))
+      const key = decisionKey(entry.path, entry.blob)
+      if (entry.reason === 'legacy_baseline') legacyBaselineDecisions.add(key)
+      else unverifiedDecisions.add(key)
     } else if (
       event === DEAD_CODE_KEPT_EVENT &&
       typeof entry.path === 'string' &&
@@ -113,6 +118,7 @@ export function deriveAuditCeiling(
     classifyEvidencePresent,
     auditTierMax,
     unverifiedDecisions,
+    legacyBaselineDecisions,
     deadCodeKeepDecisions,
     publicApiApprovals,
   }

@@ -77,6 +77,21 @@ export function getRangePaths(
   return { status: 'ok', paths: splitNulPaths(raw) }
 }
 
+export function getTreePaths(projectRoot: string, rev: string): RangePathsResult {
+  if (!isSafeRevisionToken(rev)) return { status: 'unsafe_revision', revision: rev }
+  if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
+  const raw = safeGitRaw(projectRoot, ['ls-tree', '-r', '--full-tree', '--name-only', '-z', rev])
+  if (raw === null) return { status: 'unavailable' }
+  return { status: 'ok', paths: splitNulPaths(raw) }
+}
+
+export function resolveCommit(projectRoot: string, rev: string): string | null {
+  if (!isSafeRevisionToken(rev)) return null
+  const raw = safeGitRaw(projectRoot, ['rev-parse', '--verify', '-q', `${rev}^{commit}`])
+  const sha = raw?.trim() ?? ''
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+}
+
 export interface StagedStats {
   files: number
   insertions: number
@@ -353,6 +368,27 @@ export function getHeadShaFull(
   return r.stdout.trim() || null
 }
 
+export type HeadBirth = { status: 'unborn'; branch: string } | { status: 'born' } | { status: 'unknown'; detail: string }
+
+export function readHeadBirth(projectRoot: string, executor: GitExecutor = defaultGitExecutor): HeadBirth {
+  const symbolic = executor(projectRoot, ['symbolic-ref', '-q', 'HEAD'])
+  if (!symbolic.ok) {
+    return symbolic.exitCode === 1 ? { status: 'born' } : { status: 'unknown', detail: `git symbolic-ref exited ${symbolic.exitCode}` }
+  }
+  const ref = symbolic.stdout.trim()
+  if (!ref.startsWith('refs/heads/')) return { status: 'unknown', detail: `HEAD names ${JSON.stringify(ref)}, not a branch` }
+  const shown = executor(projectRoot, ['show-ref', '--verify', '--quiet', ref])
+  if (shown.ok) return { status: 'born' }
+  if (shown.exitCode === 1) return { status: 'unborn', branch: ref.slice('refs/heads/'.length) }
+  return { status: 'unknown', detail: `git show-ref exited ${shown.exitCode}` }
+}
+
+export function countRepositoryCommits(projectRoot: string, executor: GitExecutor = defaultGitExecutor): number | null {
+  const r = executor(projectRoot, ['rev-list', '--all', '--reflog', '--count'])
+  const n = r.ok ? Number.parseInt(r.stdout.trim(), 10) : Number.NaN
+  return Number.isInteger(n) && n >= 0 ? n : null
+}
+
 function unsafeOperand(operands: Record<string, string>): string | null {
   for (const [name, value] of Object.entries(operands)) {
     if (!isSafeRevisionToken(value)) {
@@ -397,12 +433,12 @@ export interface GitPushResult {
 export function gitPush(
   projectRoot: string,
   remote: string,
-  branch: string,
+  refspec: string,
   executor: GitExecutor = defaultGitExecutor,
 ): GitPushResult {
-  const bad = unsafeOperand({ remote, branch })
+  const bad = unsafeOperand({ remote, refspec })
   if (bad) return { ok: false, error: bad }
-  const exec = executor(projectRoot, ['push', '--', remote, branch])
+  const exec = executor(projectRoot, ['push', '--', remote, refspec])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()

@@ -68,11 +68,17 @@ It is **mandatory at every tier** and anchored mechanically at the commit gate �
   `sql_dialect_missing`, `parse_error`, `binary_or_encoding`,
   `engine_unavailable`, `git_filter`, `head_unverified` — the HEAD version could not be
   scanned) and files listed in `exempt_files`
-  (generated / vendored) go to one forced OS dialog only the dev answers: Yes
+  (generated / vendored / legacy_baseline) go to one forced OS dialog only the dev answers: Yes
   makes those exact file versions committable without a mechanical comment or
   dead-code check, No
   rejects the REVIEW (`unverified_declined`), no channel or a dialog that ends
-  without a Yes or No rejects (`unverified_undecided`).
+  without a Yes or No rejects (`unverified_undecided`). `legacy_baseline` is for
+  comments that predate the no-comments rule on the first commit of a branch: it
+  is accepted only while the branch has no commit yet (`legacy_baseline_refused`
+  otherwise, before any dialog), the dialog names the branch, how many commits the
+  repository already has on its other refs and the comment count per file, and
+  says RSCT did not check that the comments predate the rule; the approval counts
+  at commit only while the branch is still unborn (ADR-037).
 - When comments were removed, files are unverified or an allowlisted comment
   changed, the §C dialog is forced (`trust_allowed_for` ignored) and names a
   report under `.rsct/reports/`. On success the tool stamps a sweep ledger —
@@ -897,6 +903,19 @@ branch protection cannot see, so it is not available through this tool. Add the
 destination with `git remote add` first. Only an *unreadable* remote list (e.g.
 outside a git repo) skips the check; an *empty* one rejects.
 
+**The push sends an explicit refspec.** Since 2.22.0 git is called with
+`[+]<sha>:refs/heads/<destination>` (or `:<ref>` for a delete), built from the
+push the dialog shows, so a `remote.<name>.push` mapping cannot send it somewhere
+else; a bare source prefers the branch over a tag of the same name. For a
+protected destination with no `refs/remotes/<remote>/<destination>` (a first push,
+or one never fetched), the tool first runs `git push --dry-run --porcelain` with
+prompts and credential helpers off (20 s), reads what the push would carry — the
+whole tree for a new branch — and checks it against `files_swept` before the
+dialog; over 2000 files the push is refused and you push by hand. When that dry
+run cannot answer, the push proceeds as before and the dialog says the carried
+files were not checked; when it answered but the files cannot be read, the push
+is refused (`hygiene_range_unreadable`), as merge and rebase are (ADR-036).
+
 #### `rsct_request_merge`
 
 Merges `source_branch` into `target_branch` (extra-strict — refuses
@@ -1102,13 +1121,71 @@ the verb: `--abort`, `--quit`, `--continue` and `--skip` of merge, rebase,
 cherry-pick, revert and am. Text a program only prints or searches
 (`echo "git push"`, `grep "git commit"`) passes.
 
+Since 2.22.0 (ADR-036) it also reads: code piped into a program that runs what
+it reads — a shell, an interpreter with no script, `iex`, `cmd` without `/c`,
+`xargs` into a shell or git, `curl … | sh` — which is refused and named; a git
+call written inside another program's argument text (a database client's shell
+escape, `awk 'BEGIN{system("git …")}'`, `vim -c`, a `git -c` value that stores a
+program), while text a program only prints or searches still passes; and the
+package scripts a manager runs (`npm|pnpm|yarn|bun run <x>`, the bare forms,
+`composer <x>`, the lifecycle hooks of install, test, start, publish, pack and
+version, composer's install events, `npx`, `pnpm|yarn exec|dlx`, `bunx`), read
+from the `package.json`/`composer.json` the call would use — walking up from the
+folder the command is in after any `cd`/`pushd` — and judged like typed commands;
+a workspace-wide run reads that script in every package under the repository.
+`--ignore-scripts`/`--no-scripts` skip the hooks but not the named script.
+`npm|pnpm|yarn version <new>` is refused unless `--no-git-tag-version` is given.
+A command that changes a package file and runs scripts in one go is refused. A
+command over 64 KiB, or one command over 2048 words, is refused with a pointer to
+the Write tool, and judging stops at 5 s with a refusal.
+
 It fails **closed**: a payload it cannot read, a terminal call with no command
 text and a fault inside it exit 2. A `Monitor` call that watches a WebSocket
 (`ws`) runs no command and passes. It enforces whenever its hook runs, whether
 or not `.rsct.json` is present or valid. It writes nothing.
 
+**Database rules (#84, ADR-038).** The same guard refuses commands that change
+a database; there is no RSCT tool for them, the developer runs them in their own
+terminal:
+
+- a database client (`psql`, `mysql`, `mariadb`, `mysqlsh`, `sqlite3`, `mongosh`,
+  `redis-cli`, `cqlsh`, `clickhouse-client`, `sqlcmd`, `usql`, …) whose statement
+  writes data or schema, or cannot be read — from `-f`, `<`, a pipe or a variable.
+  A SQL statement passes only when it starts with a read keyword and carries no
+  changing one; it is read under several dialect readings (comments, quotes,
+  `/*! */`), psql meta-commands and sqlite dot-commands by closed read lists. A
+  heredoc's statements are read; a bare client (an interactive session) passes;
+- a migration, seed, reset, wipe or restore of the common tools (Prisma,
+  Sequelize, Knex, TypeORM, Drizzle, Alembic, Flyway, dbmate, goose, Atlas, sqlx,
+  Diesel, Phinx, Supabase, Wrangler D1, Turso, PlanetScale, MikroORM, Laravel
+  `artisan`, Django, Rails/rake, Flask), while status, list, diff and
+  print-only forms pass (`migrate:status`, `sqlmigrate`, `migrate --plan`,
+  `--sql`, `pg_restore` without `-d`);
+- a console fed code from a pipe or a file (`artisan tinker`, `rails console`,
+  `manage.py shell|dbshell`, `flask shell`);
+- `docker compose down -v` and other volume removals.
+
+It reads these through `docker|podman exec|run`, compose `exec|run`, `kubectl
+exec --`, Sail, `herd`, `winpty`, `cross-env`, `dotenv`, `bundle exec`, versioned
+`php`/`python` and package scripts. In a Laravel project (`laravel/framework` and
+an `artisan` file), `php artisan test`, `phpunit`, `pest` and `paratest` are
+refused unless the phpunit configuration PHPUnit loads — the one named by
+`-c`/`--configuration`, else the first of `phpunit.xml`, `phpunit.xml.dist`,
+`phpunit.dist.xml` — forces (`force="true"`) `DB_DATABASE=:memory:` with
+`DB_CONNECTION=sqlite`, or a `DB_DATABASE` named as a test database; a `DB_URL`
+or `DATABASE_URL` set in `.env` and not forced, `--no-configuration` and `php
+artisan dusk` are refused. `.rsct.json` `database_guard: false` turns the
+database rules off and `database_test_guard: false` only the Laravel check; the
+switches are read from the nearest `.rsct.json` above `CLAUDE_PROJECT_DIR` (or
+the reported call folder when the host does not set it), an unreadable file counts
+as on, the agent cannot set them (the edit guard and this guard refuse it), and
+`rsct_status` says when one is off. What these rules do not see is listed in
+ADR-038: a statement inside application code or a script file, a database MCP
+server's tools, startup files such as `~/.psqlrc`, a function called inside a
+`SELECT` that writes.
+
 What it does not see: a script file the agent writes or downloads and then runs
-(`./x.sh`, `npm run …`, `make`), git called from a program it does not read,
+(`./x.sh`, `make`), git called from a program it does not read,
 git's plumbing commands other than `git commit-tree` (refused since 2.17.0, as are
 `filter-branch`, `fast-import`, `quiltimport`, `replay`, and every `git pull` but a
 `--ff-only` one with plain options, every word written out, from a repository not
@@ -1339,6 +1416,7 @@ Bounds:
 | `commit_message_max_lines` | unbounded in schema; clamped to `1 ≤ n ≤ 500` at use | nulling the entire config over a cosmetic message cap would be wildly disproportionate |
 | `sql_dialect` | enum of `postgresql`, `mysql`, `none`; optional | an unknown dialect would make the REVIEW comment sweep read SQL with the wrong comment syntax; rejecting loudly beats sweeping wrongly |
 | `public_api` | array of non-empty path globs, relative to the project root (the directory holding `.rsct.json`) or to the repository root; optional; a malformed value is dropped, not fatal | exports reachable through a matching file — a re-export barrel included — are consumed outside the repository and are never reported dead; each exempted export is put to the developer once — the REVIEW dialog is forced until the audit log holds their yes for that declaration and that list (`review.public_api_approved`), so a new export, a changed declaration or a changed list asks again, and `rsct_request_commit` refuses a staged export the exemption covers while that yes is missing — and every export it exempts is written to the report that dialog names, so a broad glob is visible rather than silent |
+| `database_guard`, `database_test_guard` | `boolean`, optional; any other value is dropped (reads as on). The terminal guard reads them itself from the nearest `.rsct.json` above the project folder, so they hold even when the rest of the file is rejected | `false` turns the database rules (or only the Laravel test check) off; the edit guard refuses an agent edit that sets either to `false`, the terminal guard refuses a command that names either, and `rsct_status` reports one that is off |
 | `conduct_rules_off` | not in the schema, so it is stripped like any unknown top-level key; `/rsct-setup` reads it (Phase 1.10 checks that it is there) and only its switch block (Phase 4.4c, also run from the chat) writes it (ids among `I`–`M`) | the §I–§M conduct rules are text in `CLAUDE.md`; no gate depends on them |
 | top-level fields | strip unknown silently | forward-compat: new optional fields don't break older `mcp-server` |
 

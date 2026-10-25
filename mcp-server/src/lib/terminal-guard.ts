@@ -1,4 +1,49 @@
 import { spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
+import {
+  EXEC_RUNNERS,
+  MANAGERS,
+  PACKAGE_FILE_NAME,
+  defaultPackageLister,
+  defaultPackageReader,
+  findUp,
+  parsePackage,
+  planExecRunner,
+  planManager,
+  repoRoot,
+  resolveFolder,
+  scriptTexts,
+  type Manager,
+  type ManagerPlan,
+  type PackageLister,
+  type PackageReader,
+} from './package-scripts.js'
+import {
+  ARTISAN_GLOBAL_VALUES,
+  ARTISAN_REFUSE,
+  ARTISAN_TESTS,
+  containerCommandAt,
+  containerDataLoss,
+  DB_CLIENTS,
+  DJANGO_READ_FLAGS,
+  DJANGO_REFUSE,
+  LARAVEL_TEST,
+  MIGRATION_TOOLS,
+  mongoVerdict,
+  PG_RESTORE_TO_DATABASE,
+  railsTaskChangesDatabase,
+  redisVerdict,
+  REPL_COMMANDS,
+  skipOptions,
+  SQLITE_READ_DOT,
+  statementVerdict,
+  toolSubVerdict,
+  WRANGLER_D1,
+  WRITE_PROGRAMS,
+  type ClientSpec,
+  type DbVerdict,
+} from './database-guard.js'
 
 export type ShellDialect = 'bash' | 'powershell'
 
@@ -13,7 +58,12 @@ export interface JudgeOptions {
   cwd?: string
   resolveAlias?: AliasResolver
   aliasBudgetMs?: number
+  workBudgetMs?: number
   now?: () => number
+  readPackage?: PackageReader
+  listPackages?: PackageLister
+  database?: boolean
+  databaseTestGuard?: boolean
 }
 
 const BLOCKED_GIT_VERBS: ReadonlyMap<string, string> = new Map([
@@ -55,6 +105,24 @@ const START_PROCESS_PARAMS: ReadonlyMap<string, 'program' | 'arguments' | 'value
   ['confirm', 'switch'],
 ])
 const WRAPPERS = new Set(['sudo', 'doas', 'env', 'command', 'exec', 'nohup', 'time', 'nice', 'xargs', 'builtin'])
+const RUNNERS = new Set([...WRAPPERS, 'timeout', 'busybox', 'stdbuf', 'ionice', 'chrt', 'taskset'])
+const POWERSHELL_INVOKE = new Set(['&', '.'])
+
+function isRunnerName(name: string, dialect: ShellDialect): boolean {
+  return RUNNERS.has(name) || (dialect === 'powershell' && POWERSHELL_INVOKE.has(name))
+}
+const RUNNER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['sudo', new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T', '--user', '--group', '--chdir', '--host', '--prompt', '--role', '--type', '--other-user', '--close-from', '--command-timeout'])],
+  ['doas', new Set(['-u', '-C'])],
+  ['nice', new Set(['-n', '--adjustment'])],
+  ['xargs', new Set(['-I', '-n', '-L', '-P', '-s', '-d', '-E', '-a', '--max-args', '--max-lines', '--max-procs', '--max-chars', '--delimiter', '--eof', '--arg-file', '--process-slot-var'])],
+  ['time', new Set(['-o', '-f', '--output', '--format'])],
+  ['timeout', new Set(['-s', '-k', '--signal', '--kill-after'])],
+  ['env', new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string'])],
+  ['ionice', new Set(['-c', '-n', '-p', '-P', '-u', '--class', '--classdata'])],
+  ['stdbuf', new Set(['-i', '-o', '-e'])],
+])
+const RUNNER_POSITIONALS: ReadonlyMap<string, number> = new Map([['timeout', 1], ['taskset', 1], ['chrt', 1]])
 const SHELL_KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!'])
 const POWERSHELL_VALUE_OPTIONS = [
   'executionpolicy', 'windowstyle', 'inputformat', 'outputformat', 'version', 'psconsolefile',
@@ -116,38 +184,83 @@ const SU_COMMAND_FLAG: CodeFlag = {
 }
 const ENV_SPLIT_FLAG: CodeFlag = { separate: /^(-[a-zA-Z0]*S|--split-string)$/, attached: /^(?:-[a-zA-Z0]*?S|--split-string=)(.+)$/s }
 const STDIN_SCRIPTS = new Set(['-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'])
+const BASH_QUOTED_ESCAPES = new Set(['$', '`', '"', '\\'])
+const BASH_FOLDER_CHANGES = new Set(['cd', 'pushd', 'popd', 'chdir'])
+const POWERSHELL_FOLDER_CHANGES = new Set(['cd', 'chdir', 'sl', 'set-location', 'pushd', 'push-location', 'popd', 'pop-location'])
+const READ_ONLY_PROGRAMS = new Set([
+  'cat', 'head', 'tail', 'less', 'more', 'grep', 'egrep', 'fgrep', 'zgrep', 'rg', 'ag', 'ack', 'jq', 'wc', 'diff', 'cmp',
+  'ls', 'dir', 'stat', 'file', 'sha256sum', 'sha1sum', 'sha512sum', 'md5sum', 'shasum', 'cksum', 'echo', 'printf', 'test',
+  '[', '[[', 'type', 'realpath', 'readlink', 'basename', 'dirname', 'get-content', 'gc', 'select-string', 'sls', 'test-path',
+  'get-item', 'gi', 'get-childitem', 'gci', 'get-filehash', 'write-output', 'write-host', 'convertfrom-json',
+])
+const GIT_READ_VERBS = new Set(['add', 'diff', 'show', 'log', 'status', 'blame', 'annotate', 'ls-files', 'ls-tree', 'grep', 'check-ignore', 'check-attr', 'cat-file', 'rev-parse', 'shortlog', 'whatchanged'])
+const COPY_PROGRAMS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'rsync', 'install', 'ln', 'mv', 'move', 'move-item', 'mi', 'scp'])
 
 const VERBS_PATTERN = 'commit-tree|commit|push|merge|rebase|cherry-pick|revert|am|pull|filter-branch|fast-import|quiltimport|replay'
 const VALUE_OPTIONS_PATTERN = ['-C', ...GIT_VALUE_OPTIONS].join('|')
+const FLAG_TOKEN = String.raw`-[\w.=:/-]+`
+const VALUE_TOKEN = String.raw`(?:"[^"]*"|'[^']*'|[^\s"'])+`
+const QUOTE = String.raw`["'\x60]`
+const NOT_QUOTE = String.raw`[^"'\x60]`
 const CODE_GIT_TEXT = new RegExp(
-  `\\bgit(?:\\.exe)?\\s+(?:(?:${VALUE_OPTIONS_PATTERN})\\s+(?:"[^"]*"|'[^']*'|\\S+)\\s+|-{1,2}[\\w.=:/-]+\\s+)*(${VERBS_PATTERN})(?![\\w-])`,
+  String.raw`\bgit(?:\.exe)?\s+(?:${FLAG_TOKEN}\s+|(?<=(?:^|\s)(?:${VALUE_OPTIONS_PATTERN})\s+)(?!${FLAG_TOKEN}\s)${VALUE_TOKEN}\s+)*(${VERBS_PATTERN})(?![\w-])`,
   'i',
 )
 const CODE_GIT_ARGV = new RegExp(
-  `["'\`]git(?:\\.exe)?["'\`]\\s*,\\s*(?:\\{[^}]*?\\bargs\\s*:\\s*)?(?:\\[\\s*)?` +
-    `(?:["'\`](?:${VALUE_OPTIONS_PATTERN})["'\`]\\s*,\\s*(?:["'\`][^"'\`]*["'\`]|[\\w.$]+)\\s*,\\s*|["'\`]-[^"'\`]*["'\`]\\s*,\\s*)*` +
-    `["'\`](${VERBS_PATTERN})["'\`]`,
+  String.raw`${QUOTE}git(?:\.exe)?${QUOTE}\s*,\s*(?:\{[^}]*?\bargs\s*:\s*)?(?:\[\s*)?` +
+    String.raw`(?:${QUOTE}-${NOT_QUOTE}*${QUOTE}\s*,\s*|(?<=${QUOTE}(?:${VALUE_OPTIONS_PATTERN})${QUOTE}\s*,\s*)(?!${QUOTE}-)(?:${QUOTE}${NOT_QUOTE}*${QUOTE}|[\w.$]+)\s*,\s*)*` +
+    String.raw`${QUOTE}(${VERBS_PATTERN})${QUOTE}`,
   'i',
 )
-const CODE_GH_MERGE = /\bgh(?:\.exe)?\s+(?:-\S+\s+(?:\S+\s+)?)*pr\s+merge\b/i
+const CODE_GH_MERGE = /\bgh(?:\.exe)?\s+(?:-\S+\s+|(?<=(?:^|\s)-\S+\s+)(?!-)\S+\s+)*pr\s+merge\b/i
 const CODE_GH_ARGV = new RegExp(
   `["'\`]gh(?:\\.exe)?["'\`]\\s*,\\s*(?:\\[\\s*)?(?:["'\`][^"'\`]*["'\`]\\s*,\\s*)*?["'\`]pr["'\`]\\s*,\\s*(?:["'\`]-[^"'\`]*["'\`]\\s*,\\s*)*["'\`]merge["'\`]`,
   'i',
 )
 const HOOKS_OFF_KEY = /disableallhooks/i
+const DATABASE_SWITCH_KEY = /database_(?:test_)?guard/i
 
 const MAX_DEPTH = 8
 const MAX_ALIAS_DEPTH = 5
 const DEFAULT_ALIAS_BUDGET_MS = 3000
+const WORK_BUDGET_MS = 5000
+export const MAX_COMMAND_BYTES = 64 * 1024
+export const MAX_COMMAND_WORDS = 2048
+const MAX_FOLDER_LENGTH = 4096
 
 type Token =
-  | { kind: 'word'; value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true; redirect?: true }
-  | { kind: 'sep' }
+  | { kind: 'word'; value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true; redirect?: true; stdin?: true; procsub?: true }
+  | { kind: 'sep'; pipe?: true; opens?: number; closes?: number }
   | { kind: 'body'; text: string; via: 'heredoc' | 'herestring' }
 
 interface Lexed {
   tokens: Token[]
-  nested: Array<{ text: string; dialect: ShellDialect }>
+  nested: Array<{ text: string; dialect: ShellDialect; piped?: true }>
+}
+
+interface Command {
+  tokens: Token[]
+  piped: boolean
+  opens: number
+  closes: number
+}
+
+interface Folder {
+  start: string | undefined
+  current: string | undefined
+  stack: Array<string | undefined>
+}
+
+interface ScriptUnit {
+  wrote: Set<string>
+  wroteUnknown: boolean
+}
+
+interface PackageState {
+  read: PackageReader
+  list: PackageLister
+  memo: Map<string, TerminalVerdict | null>
+  bytes: number
 }
 
 interface Ctx {
@@ -156,7 +269,13 @@ interface Ctx {
   cwd: string | undefined
   resolveAlias: AliasResolver
   deadline: number
+  workDeadline: number
   now: () => number
+  folder: Folder
+  unit: ScriptUnit
+  pkg: PackageState
+  database: boolean
+  databaseTestGuard: boolean
 }
 
 const ALLOW: TerminalVerdict = { verdict: 'allow' }
@@ -175,7 +294,7 @@ export function decodeUnicodeEscapes(text: string): string {
 
 export function programName(word: string): string {
   const last = word.split(/[\\/]/).pop() ?? word
-  return last.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '')
+  return last.toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, '')
 }
 
 type Heredoc = { delim: string; strip: boolean; quoted: boolean }
@@ -337,7 +456,10 @@ function lex(text: string, dialect: ShellDialect): Lexed {
   let afterComma = false
   let bare = ''
   let spliced = false
+  let redirectIn = false
   let i = 0
+  let parenDepth = 0
+  let pendingPipes: Array<Extract<Token, { kind: 'sep' }>> = []
 
   const endWord = (): void => {
     if (inWord) {
@@ -348,8 +470,10 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       if (quoted) token.quoted = true
       if (afterComma) token.listed = true
       if (redirectTarget) token.redirect = true
+      if (redirectIn) token.stdin = true
       tokens.push(token)
       redirectTarget = false
+      redirectIn = false
       afterComma = false
     }
     word = ''
@@ -363,7 +487,36 @@ function lex(text: string, dialect: ShellDialect): Lexed {
     endWord()
     redirectTarget = false
     afterComma = false
+    pendingPipes = []
     if (tokens.length > 0 && tokens[tokens.length - 1]!.kind !== 'sep') tokens.push({ kind: 'sep' })
+  }
+  const pipeSep = (): void => {
+    endWord()
+    redirectTarget = false
+    afterComma = false
+    const last = tokens[tokens.length - 1]
+    if (last === undefined) return
+    if (last.kind === 'sep') {
+      last.pipe = true
+      pendingPipes.push(last)
+      return
+    }
+    const token: Extract<Token, { kind: 'sep' }> = { kind: 'sep', pipe: true }
+    tokens.push(token)
+    pendingPipes.push(token)
+  }
+  const markScope = (side: 'opens' | 'closes'): void => {
+    if (dialect !== 'bash') return
+    const last = tokens[tokens.length - 1]
+    if (last?.kind === 'sep') last[side] = (last[side] ?? 0) + 1
+    else tokens.push({ kind: 'sep', [side]: 1 })
+  }
+  const closeParen = (): void => {
+    const subshell = parenDepth > 0
+    if (subshell) parenDepth--
+    else for (const p of pendingPipes) delete p.pipe
+    sep()
+    if (subshell) markScope('closes')
   }
   const literal = (s: string): void => {
     word += s
@@ -463,10 +616,22 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       const startJ = j
       let substitutions = 0
       let literalChars = false
+      let expands = false
       while (j < text.length) {
         const d = text[j]!
         if (d === escape && j + 1 < text.length) {
-          value += text[j + 1]
+          const e = text[j + 1]!
+          if (dialect === 'bash' && e === '\n') {
+            j += 2
+            continue
+          }
+          if (dialect === 'bash' && !BASH_QUOTED_ESCAPES.has(e)) {
+            value += d
+            literalChars = true
+            j++
+            continue
+          }
+          value += e
           literalChars = true
           j += 2
           continue
@@ -494,6 +659,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
           j = end
           continue
         }
+        if (d === '$' && /^\$[\w{(@*#?!$-]/.test(text.slice(j, j + 2))) expands = true
         value += d
         literalChars = true
         j++
@@ -506,7 +672,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
         if (!/^\$(@|\{[^}]*\[@\]\})$/.test(rawInner)) quoted = true
       } else {
         literal(value)
-        if (substitutions > 0 || /\$[\w{(@*#?!$-]/.test(rawInner)) spliced = true
+        if (substitutions > 0 || expands) spliced = true
       }
       i = j + 1
       continue
@@ -571,8 +737,9 @@ function lex(text: string, dialect: ShellDialect): Lexed {
     }
     if (dialect === 'bash' && (c === '<' || c === '>') && next === '(') {
       const { inner, end } = readBalanced(text, i + 2, '(', ')')
-      nested.push({ text: inner, dialect })
+      nested.push({ text: inner, dialect, ...(c === '>' && { piped: true as const }) })
       endWord()
+      if (c === '<') tokens.push({ kind: 'word', value: '/dev/fd/63', expansion: true, procsub: true })
       i = end
       continue
     }
@@ -611,6 +778,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       continue
     }
     if (c === '<' || c === '>') {
+      const input = c === '<' && text[i + 1] !== '>'
       if (inWord && (/^\d+$/.test(word) || (dialect === 'powershell' && word === '*'))) {
         word = ''
         bare = ''
@@ -628,6 +796,7 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       } else {
         if (text[i] === '&') i++
         redirectTarget = true
+        if (input) redirectIn = true
       }
       continue
     }
@@ -678,7 +847,29 @@ function lex(text: string, dialect: ShellDialect): Lexed {
       i++
       continue
     }
-    if (c === ';' || c === '|' || c === '&' || c === '(' || c === ')' || c === '{' || c === '}') {
+    if (c === '|' && next === '|') {
+      sep()
+      i += 2
+      continue
+    }
+    if (c === '|') {
+      pipeSep()
+      i += next === '&' ? 2 : 1
+      continue
+    }
+    if (c === ')') {
+      closeParen()
+      i++
+      continue
+    }
+    if (c === '(') {
+      parenDepth++
+      sep()
+      markScope('opens')
+      i++
+      continue
+    }
+    if (c === ';' || c === '&' || c === '{' || c === '}') {
       sep()
       i++
       continue
@@ -708,19 +899,572 @@ function shellPattern(bare: string, dialect: ShellDialect): 'brace' | 'glob' | n
   return /[*?]/.test(bare) || /\[[^\]]+\]/.test(bare) ? 'glob' : null
 }
 
-function splitCommands(tokens: Token[]): Token[][] {
-  const commands: Token[][] = [[]]
+function splitCommands(tokens: Token[], firstPiped = false): Command[] {
+  const commands: Command[] = [{ tokens: [], piped: firstPiped, opens: 0, closes: 0 }]
   for (const t of tokens) {
     if (t.kind === 'sep') {
-      if (commands[commands.length - 1]!.length > 0) commands.push([])
+      let current = commands[commands.length - 1]!
+      if (current.tokens.length > 0) {
+        current.closes += t.closes ?? 0
+        current = { tokens: [], piped: t.pipe === true, opens: 0, closes: 0 }
+        commands.push(current)
+      } else {
+        if (t.pipe === true) current.piped = true
+        const previous = commands[commands.length - 2]
+        if (previous !== undefined) previous.closes += t.closes ?? 0
+      }
+      current.opens += t.opens ?? 0
       continue
     }
-    commands[commands.length - 1]!.push(t)
+    commands[commands.length - 1]!.tokens.push(t)
   }
-  return commands.filter((c) => c.length > 0)
+  return commands.filter((c) => c.tokens.length > 0)
 }
 
-type Word = { value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true }
+type Word = { value: string; expansion: boolean; glob?: true; spliced?: true; quoted?: true; listed?: true; procsub?: true }
+
+function programPositions(values: string[], program: number, dialect: ShellDialect): { at: boolean[]; xargs: boolean[] } {
+  const at: boolean[] = []
+  const xargs: boolean[] = []
+  if (program === -1) return { at, xargs }
+  let viaXargs = false
+  let k = program
+  while (k < values.length) {
+    const name = programName(values[k]!)
+    at[k] = true
+    xargs[k] = viaXargs
+    if (!isRunnerName(name, dialect) || (name === 'command' && /^-[a-zA-Z]*[vV]/.test(values[k + 1] ?? ''))) break
+    if (name === 'xargs') viaXargs = true
+    const valueOptions = RUNNER_VALUE_OPTIONS.get(name)
+    let positionals = RUNNER_POSITIONALS.get(name) ?? 0
+    k++
+    while (k < values.length) {
+      const x = values[k]!
+      if (x.startsWith('-') && x !== '-') {
+        k += valueOptions?.has(x) ? 2 : 1
+        continue
+      }
+      if (name === 'env' && /^[A-Za-z_][A-Za-z0-9_]*=/.test(x)) {
+        k++
+        continue
+      }
+      if (positionals > 0) {
+        positionals--
+        k++
+        continue
+      }
+      break
+    }
+  }
+  return { at, xargs }
+}
+
+const TEXT_ONLY_PROGRAMS = new Set([
+  'echo', 'printf', 'cat', 'tee', 'grep', 'egrep', 'fgrep', 'zgrep', 'rg', 'ag', 'ack', 'curl', 'jq', 'yq',
+  'write-output', 'write-host', 'select-string', 'set-content', 'add-content', 'out-file', 'invoke-webrequest',
+  'invoke-restmethod', 'iwr', 'irm', 'gh', 'glab',
+])
+const SELF_JUDGED_PROGRAMS = new Set([
+  ...POSIX_SHELLS, ...POWERSHELLS, ...INTERPRETER_FLAGS.keys(), 'cmd', 'wsl', 'ssh', 'su', 'script', 'eval', 'env',
+  'deno', 'invoke-expression', 'iex', 'start-process', 'saps', 'start', 'source', '.',
+])
+const SHELL_BUILTINS = new Set(['[', '[[', 'test', 'export', 'declare', 'local', 'readonly', 'typeset', 'set', 'unset', 'alias'])
+const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+
+function denyDb(reason: string): TerminalVerdict {
+  return deny(`${reason}, so it is refused from the terminal: the developer runs it in their own terminal where a database change is their decision`)
+}
+
+const SAIL_CLIENTS: ReadonlyMap<string, string> = new Map([['redis', 'redis-cli'], ['mongodb', 'mongosh']])
+const SAIL_ARTISAN = new Set(['test', 'dusk', 'tinker'])
+const PHP_NAME = /^php[\d.]*$/
+const PYTHON_NAME = /^(python|python2|python3|py|pythonw)(\d[\d.]*)?$/
+const PYTHON_MODULES = /^(alembic|flask|django)$/
+const DJANGO_NAMES = new Set(['manage.py', 'django-admin', 'django'])
+const BUNDLE_VALUES: ReadonlySet<string> = new Set(['--gemfile'])
+const DOTENV_VALUES: ReadonlySet<string> = new Set(['-e', '-v'])
+const FLASK_VALUES: ReadonlySet<string> = new Set(['--app', '-A', '-e', '--env-file'])
+const TURSO_VALUES: ReadonlySet<string> = new Set(['--instance', '--location', '--proxy'])
+const RUN_WRAPPERS = new Set(['uv', 'poetry', 'pipenv', 'pdm', 'rye', 'hatch', 'dotenvx', 'doppler'])
+const RUN_VALUE_OPTIONS: ReadonlySet<string> = new Set(['--with', '--python', '-p', '--project', '-C', '--directory', '--env', '-e', '--config', '-c', '-f', '--env-file'])
+const ENV_CMD_VALUES: ReadonlySet<string> = new Set(['-f', '--file', '-e', '--environments', '--rc-file'])
+const MAX_UNWRAP_DEPTH = 8
+
+type Unwrapped = { name: string; args: Word[]; scriptPath: string | null; tooDeep?: true }
+
+function scriptPathOf(word: string): string | null {
+  return /[\\/]/.test(word) || programName(word) === 'artisan' ? word : null
+}
+
+function minimistCommandAt(values: string[]): number {
+  let k = 0
+  while (k < values.length && values[k]!.startsWith('-') && values[k] !== '--') {
+    const next = values[k + 1]
+    k += !values[k]!.includes('=') && next !== undefined && !next.startsWith('-') ? 2 : 1
+  }
+  return k
+}
+
+function dbUnwrap(name: string, args: Word[], scriptPath: string | null, depth = 0): Unwrapped[] {
+  const here: Unwrapped = { name, args, scriptPath }
+  if (depth >= MAX_UNWRAP_DEPTH) return [{ ...here, tooDeep: true }]
+  const values = args.map((w) => w.value)
+  const enter = (at: number): Unwrapped[] =>
+    at >= 0 && at < values.length ? dbUnwrap(programName(values[at]!), args.slice(at + 1), scriptPathOf(values[at]!) ?? scriptPath, depth + 1) : [here]
+
+  const inner = execInnerCommand(name, args)
+  if (inner !== null && inner.length > 0) return enter(args.length - inner.length)
+  if (RUNNERS.has(name)) {
+    const marks = programPositions([name, ...values], 0, 'bash').at
+    const idx = marks.lastIndexOf(true)
+    if (idx > 0) return enter(idx - 1)
+    return [here]
+  }
+  if (RUN_WRAPPERS.has(name)) {
+    const r = values.indexOf('run')
+    if (r !== -1) {
+      let k = skipOptions(values, r + 1, RUN_VALUE_OPTIONS)
+      if (values[k] === '--') k++
+      return enter(k)
+    }
+  }
+  if (name === 'env-cmd') return enter(skipOptions(values, 0, ENV_CMD_VALUES))
+  const phpAt = PHP_NAME.test(name) ? (values.indexOf('-f') !== -1 ? values.indexOf('-f') + 1 : scriptIndex(values, INTERPRETER_FLAGS.get('php')!)) : -1
+  const flag = INTERPRETER_FLAGS.get(PYTHON_NAME.test(name) ? 'python' : name)
+  const at = PHP_NAME.test(name) ? phpAt : flag !== undefined ? scriptIndex(values, flag) : -1
+  const script = programName(values[at] ?? '')
+  if (PHP_NAME.test(name) && (script === 'artisan' || LARAVEL_TEST.has(script))) return enter(at)
+  if (PYTHON_NAME.test(name) && (script === 'manage.py' || (values[at - 1] === '-m' && PYTHON_MODULES.test(values[at] ?? '')))) return enter(at)
+  if (name === 'ruby' && (script === 'rails' || script === 'rake')) return enter(at)
+  if (name === 'bundle') {
+    const e = skipOptions(values, 0, BUNDLE_VALUES)
+    if (values[e] === 'exec') return enter(skipOptions(values, e + 1, BUNDLE_VALUES))
+  }
+  if (name === 'herd' || name === 'winpty') return enter(0)
+  if (name === 'cross-env') return enter(values.findIndex((v) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(v)))
+  if (name === 'dotenv') {
+    const dash = values.indexOf('--')
+    if (dash !== -1) return enter(dash + 1)
+    return [...new Set([skipOptions(values, 0, DOTENV_VALUES), minimistCommandAt(values)])].flatMap(enter)
+  }
+  if (name === 'sail' && values.length > 0) {
+    const sub = values[0]!.toLowerCase()
+    if (SAIL_ARTISAN.has(sub)) return [{ name: 'artisan', args, scriptPath }]
+    if (sub === 'bin') return enter(1)
+    const client = SAIL_CLIENTS.get(sub)
+    if (client !== undefined) return [{ name: client, args: args.slice(1), scriptPath }]
+    return enter(0)
+  }
+  return [here]
+}
+
+function fromDbVerdict(v: DbVerdict): TerminalVerdict {
+  return v.ok ? ALLOW : denyDb(v.reason)
+}
+
+function databaseVerdict(rawName: string, rawArgs: Word[], bodies: string[], piped: boolean, ctx: Ctx, programWord: string): TerminalVerdict {
+  for (const u of dbUnwrap(rawName, rawArgs, scriptPathOf(programWord))) {
+    const v = unwrappedVerdict(u, bodies, piped, ctx)
+    if (isDeny(v)) return v
+    if (u.name !== rawName && u.tooDeep !== true) {
+      const call = managerCall(u.name, u.args)
+      if (call !== null) {
+        const mv = judgeManager(call, ctx, piped)
+        if (isDeny(mv)) return mv
+      }
+    }
+  }
+  return ALLOW
+}
+
+function replFromPipe(name: string, sub: string, piped: boolean): TerminalVerdict {
+  if (!piped || REPL_COMMANDS.get(name)?.has(sub) !== true) return ALLOW
+  return denyDb(`\`${name} ${sub}\` reads code or statements from a pipe or file, which the guard cannot read`)
+}
+
+function unwrappedVerdict({ name, args, scriptPath, tooDeep }: Unwrapped, bodies: string[], piped: boolean, ctx: Ctx): TerminalVerdict {
+  if (tooDeep) return denyDb(`the command runs through more than ${MAX_UNWRAP_DEPTH} wrappers, too many to read`)
+  const values = args.map((w) => w.value)
+  const positional = values.filter((v) => !v.startsWith('-')).map((v) => v.toLowerCase())
+
+  const container = containerDataLoss(name, values)
+  if (!container.ok) return denyDb(container.reason)
+  if (WRITE_PROGRAMS.has(name)) return denyDb(`\`${name}\` loads or restores data into a database`)
+  if (name === 'pg_restore' && values.some((v) => PG_RESTORE_TO_DATABASE.test(v))) return denyDb('`pg_restore -d` restores data into a database')
+
+  const spec = DB_CLIENTS.get(name)
+  if (spec) return clientVerdict(spec, name, args, bodies, piped)
+  if (name === 'wrangler' && positional[0] === 'd1' && positional[1] === 'execute') return clientVerdict(WRANGLER_D1, 'wrangler d1 execute', args, bodies, piped)
+  if (name === 'turso' && positional[0] === 'db' && positional[1] === 'shell') return tursoShellVerdict(args, bodies, piped)
+  if ((name === 'pscale' || name === 'planetscale') && positional[0] === 'shell') {
+    if (values.some((v) => /^(-e|--execute)(=|$)/.test(v))) return denyDb(`\`${name} shell\` runs a statement the guard does not read`)
+    if (bodies.length > 0) return bodies.map(statementVerdict).map(fromDbVerdict).find(isDeny) ?? ALLOW
+    return piped ? denyDb(`\`${name} shell\` reads its statements from a pipe or file, which the guard cannot read`) : ALLOW
+  }
+
+  const tool = MIGRATION_TOOLS.get(name)
+  if (tool) return fromDbVerdict(toolSubVerdict(tool, values, name))
+
+  if (name === 'artisan') {
+    const k = skipOptions(values, 0, ARTISAN_GLOBAL_VALUES)
+    const sub = (values[k] ?? '').toLowerCase()
+    const rest = args.slice(k + 1)
+    if (ARTISAN_REFUSE.has(sub)) return denyDb(`\`artisan ${sub}\` changes the database`)
+    if (sub === 'tinker' && allFlagValues(rest, /^(--execute|--command)$/, /^--(?:execute|command)=([\s\S]+)$/).length > 0) {
+      return denyDb('`artisan tinker --execute` runs arbitrary code against the database')
+    }
+    if (ARTISAN_TESTS.has(sub)) return laravelTestVerdict(ctx, scriptPath, rest, sub)
+    return replFromPipe('artisan', sub, piped)
+  }
+  if (DJANGO_NAMES.has(name)) {
+    const sub = (values[0] ?? '').toLowerCase()
+    if (sub === 'migrate' && values.some((v) => DJANGO_READ_FLAGS.test(v))) return ALLOW
+    if (DJANGO_REFUSE.has(sub)) return denyDb(`\`manage.py ${sub}\` changes the database`)
+    if (sub === 'shell' && values.some((v) => /^(-c|--command)(=|$)/.test(v))) return denyDb('`manage.py shell -c` runs arbitrary code against the database')
+    if (sub === 'dbshell' && values.includes('--')) return denyDb('`manage.py dbshell --` hands arguments the guard does not read to the database client')
+    return replFromPipe('manage.py', sub, piped)
+  }
+  if (name === 'rails' || name === 'rake') {
+    const sub = positional[0] ?? ''
+    if (name === 'rails' && (sub === 'runner' || sub === 'r')) return denyDb('`rails runner` runs arbitrary code against the database')
+    const task = positional.find(railsTaskChangesDatabase)
+    if (task !== undefined) return denyDb(`\`${name} ${task}\` changes the database`)
+    return replFromPipe(name, sub, piped)
+  }
+  if (name === 'flask') {
+    const k = skipOptions(values, 0, FLASK_VALUES)
+    const sub = (values[k] ?? '').toLowerCase()
+    const rest = values.slice(k + 1)
+    const action = (rest[0] ?? '').toLowerCase()
+    if (sub === 'db' && /^(upgrade|downgrade|stamp)$/.test(action) && !rest.includes('--sql')) return denyDb(`\`flask db ${action}\` changes the database`)
+    return replFromPipe('flask', sub, piped)
+  }
+  if (LARAVEL_TEST.has(name)) return laravelTestVerdict(ctx, scriptPath, args, null)
+  return ALLOW
+}
+
+function tursoShellVerdict(args: Word[], bodies: string[], piped: boolean): TerminalVerdict {
+  const positional: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (v.startsWith('-')) {
+      if (TURSO_VALUES.has(v)) k++
+      continue
+    }
+    positional.push(args[k]!)
+  }
+  const statements = positional.slice(3)
+  if (statements.length > 0) return statements.map((s) => sqliteVerdict('turso db shell', s)).find(isDeny) ?? ALLOW
+  if (bodies.length > 0) return bodies.map(statementVerdict).map(fromDbVerdict).find(isDeny) ?? ALLOW
+  return piped ? denyDb('`turso db shell` reads its statements from a pipe or file, which the guard cannot read') : ALLOW
+}
+
+const DB_ENV_KEYS = new Set(['DB_CONNECTION', 'DB_DATABASE', 'DB_URL', 'DATABASE_URL'])
+const DB_URL_KEYS = ['DB_URL', 'DATABASE_URL']
+const TEST_DB_NAME = /(^|[^a-z])test(s|ing)?([^a-z]|$)/i
+const PHPUNIT_FILES = ['phpunit.xml', 'phpunit.dist.xml', 'phpunit.xml.dist']
+const NO_TEST_RUN =
+  /^(--version|--help|-h|--list-tests|--list-tests-xml|--list-suites|--list-groups|--list-test-files|--check-version|--generate-configuration|--migrate-configuration|--atleast-version)(=|$)/
+
+type PhpunitEnv = { forced: Map<string, string>; unforced: string[] }
+
+function phpunitEnv(xml: string): PhpunitEnv {
+  const forced = new Map<string, string>()
+  const unforced: string[] = []
+  for (const element of xml.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<(?:server|env)\s([^>]*)>/g)) {
+    const attrs = new Map<string, string>()
+    for (const a of element[1]!.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs.set(a[1]!, a[2] ?? a[3] ?? '')
+    const key = attrs.get('name')
+    if (key === undefined || !DB_ENV_KEYS.has(key)) continue
+    if ((attrs.get('force') ?? '').toLowerCase() === 'true') forced.set(key, attrs.get('value') ?? '')
+    else unforced.push(key)
+  }
+  return { forced, unforced }
+}
+
+function isDisposableDb(env: PhpunitEnv): boolean {
+  if (DB_URL_KEYS.some((k) => (env.forced.get(k) ?? '') !== '')) return false
+  const database = env.forced.get('DB_DATABASE')
+  if (database === undefined) return false
+  if (database === ':memory:') return (env.forced.get('DB_CONNECTION') ?? '').toLowerCase() === 'sqlite'
+  return TEST_DB_NAME.test(database.split(/[\\/]/).pop() ?? '')
+}
+
+function readTextAt(ctx: Ctx, path: string): string | null {
+  const read = ctx.pkg.read(path)
+  return read.kind === 'text' ? read.text : null
+}
+
+function laravelProject(ctx: Ctx, here: string, scriptPath: string | null): string | null {
+  const script = scriptPath === null ? undefined : resolveFolder(here, scriptPath)
+  for (const start of [script === undefined ? undefined : dirname(script), here]) {
+    if (start === undefined) continue
+    const found = findUp(start, 'composer.json', ctx.pkg.read)
+    if (found === null) continue
+    const dir = dirname(found.path)
+    const laravel = found.read.kind === 'unreadable' || /laravel\/framework/.test(found.read.text)
+    if (laravel && ctx.pkg.read(join(dir, 'artisan')).kind !== 'missing') return dir
+  }
+  return null
+}
+
+function configOption(args: Word[]): { path: string | null; dynamic: boolean } | 'none' | null {
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (v === '--no-configuration') return 'none'
+    if (v === '-c' || v === '--configuration') {
+      const next = args[k + 1]
+      return next === undefined ? { path: null, dynamic: false } : { path: next.value, dynamic: isDynamicWord(next) }
+    }
+    const m = /^(?:--configuration=|-c)(.+)$/.exec(v)
+    if (m) return { path: m[1]!, dynamic: isDynamicWord(args[k]!) }
+  }
+  return null
+}
+
+function laravelTestVerdict(ctx: Ctx, scriptPath: string | null, args: Word[], artisanSub: string | null): TerminalVerdict {
+  if (!ctx.databaseTestGuard) return ALLOW
+  if (args.some((w) => NO_TEST_RUN.test(w.value))) return ALLOW
+  const here = ctx.folder.current
+  if (here === undefined) {
+    if (ctx.cwd === undefined) return ALLOW
+    return deny(
+      'this test run is refused: the guard lost track of the folder it runs in (a `cd` through a variable, or `cd -`), so it cannot ' +
+        'confirm the tests use a throwaway database — write the folder out, run it from the project, or the developer runs it themselves. ' +
+        'Turn this check off with database_test_guard=false in .rsct.json if it does not fit this project.',
+    )
+  }
+  const project = laravelProject(ctx, here, scriptPath)
+  if (project === null) return ALLOW
+  if (artisanSub === 'dusk') return refuseLaravelTest(project, null, ['Dusk swaps in its own environment file, which the guard does not read'])
+
+  const option = configOption(args)
+  if (option === 'none') return refuseLaravelTest(project, null, ['--no-configuration runs the tests without phpunit.xml'])
+  if (option !== null && (option.dynamic || option.path === null)) return refuseLaravelTest(project, null, ['the phpunit configuration file comes from a variable the guard cannot read'])
+  const configDir = artisanSub === null ? here : project
+  const named = option === null ? undefined : resolveFolder(configDir, option.path!)
+  const candidates = option === null ? PHPUNIT_FILES.map((f) => join(configDir, f)) : named === undefined ? [] : [...PHPUNIT_FILES.map((f) => join(named, f)), named]
+  let file: string | undefined
+  let xml: string | null = null
+  for (const c of candidates) {
+    const read = ctx.pkg.read(c)
+    if (read.kind === 'missing') continue
+    file = c
+    xml = read.kind === 'text' ? read.text : null
+    break
+  }
+  if (file === undefined) {
+    return deny(
+      `this Laravel test run is refused: no phpunit configuration file was found in ${option === null ? configDir : named} ` +
+        `(${project} is a Laravel project), so the guard cannot confirm a throwaway test database. Run it from the project root, ` +
+        'pass -c <file>, or the developer runs it themselves. Turn this check off with database_test_guard=false in .rsct.json.',
+    )
+  }
+  if (xml === null) return refuseLaravelTest(project, file, [`${basename(file)} could not be read`])
+
+  const env = phpunitEnv(xml)
+  const reasons: string[] = []
+  const loose = [...new Set(env.unforced.filter((k) => !env.forced.has(k)))]
+  if (loose.length > 0) reasons.push(`${basename(file)} sets ${loose.join(', ')} without force="true", so a value from the environment or .env wins`)
+  const envFiles = ['.env', '.env.testing'].map((f) => readTextAt(ctx, join(project, f)) ?? '')
+  const urlSet = DB_URL_KEYS.some((k) => !env.forced.has(k) && envFiles.some((t) => new RegExp(`^[ \\t]*(?:export[ \\t]+)?${k}[ \\t]*=[ \\t]*["']?[^\\s"'#]`, 'm').test(t)))
+  if (urlSet) reasons.push('DB_URL or DATABASE_URL is set in .env or .env.testing and overrides the database phpunit.xml names')
+  if (urlSet || !isDisposableDb(env)) return refuseLaravelTest(project, file, reasons)
+  return ALLOW
+}
+
+function refuseLaravelTest(dir: string | null, file: string | null, reasons: string[]): TerminalVerdict {
+  return deny(
+    `this Laravel test run is refused: the guard cannot confirm it uses a throwaway test database, and a suite with RefreshDatabase recreates whatever database it connects to${dir === null ? '' : ` (${dir})`}. ` +
+      (reasons.length > 0 ? `${reasons.join('; ')}. ` : '') +
+      `Point the tests at a disposable database — add \`<env name="DB_CONNECTION" value="sqlite" force="true"/>\` and \`<env name="DB_DATABASE" value=":memory:" force="true"/>\` to ${file === null ? 'phpunit.xml' : basename(file)} — ` +
+      'or the developer runs the tests themselves. Turn this check off with database_test_guard=false in .rsct.json if it does not fit this project.',
+  )
+}
+
+function allFlagValues(args: Word[], flag: RegExp, attached: RegExp): Array<{ text: string; dynamic: boolean }> {
+  const found: Array<{ text: string; dynamic: boolean }> = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (flag.test(v)) {
+      const next = args[k + 1]
+      found.push(next === undefined ? { text: '', dynamic: false } : { text: next.value, dynamic: isDynamicWord(next) })
+      k++
+      continue
+    }
+    const m = attached.exec(v)
+    if (m) found.push({ text: m[1]!, dynamic: isDynamicWord(args[k]!) })
+  }
+  return found
+}
+
+const SQLITE_VALUE_OPTIONS = new Set(['-separator', '-newline', '-nullvalue', '-vfs', '-lookaside', '-maxsize', '-mmap', '-pagecache', '-heap', '-escape'])
+
+function sqliteStatements(args: Word[]): Word[] {
+  const positionals: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (v.startsWith('-')) {
+      if (SQLITE_VALUE_OPTIONS.has(v)) k++
+      continue
+    }
+    positionals.push(args[k]!)
+  }
+  return positionals.slice(1)
+}
+
+function sqliteVerdict(name: string, statement: Word): TerminalVerdict {
+  if (isDynamicWord(statement)) return denyDb(`\`${name}\` runs a statement built from a variable the guard cannot read`)
+  const dot = statement.value.trim().split(/\s+/)[0]!.toLowerCase()
+  if (dot.startsWith('.')) return SQLITE_READ_DOT.has(dot) ? ALLOW : denyDb(`\`${name} ${dot}\` is not a read-only command`)
+  return fromDbVerdict(statementVerdict(statement.value))
+}
+
+function clientVerdict(spec: ClientSpec, name: string, args: Word[], bodies: string[], piped: boolean): TerminalVerdict {
+  for (const w of args) {
+    if (spec.unreadable?.test(w.value) || w.value === '-') return denyDb(`\`${name}\` reads its statements from a file or stdin, which the guard cannot read`)
+  }
+  if (spec.mode === 'redis') return fromDbVerdict(redisVerdict(args.map((w) => w.value), piped))
+
+  if (spec.mode === 'sqlite') {
+    const statements = sqliteStatements(args)
+    if (statements.length > 0) return statements.map((s) => sqliteVerdict(name, s)).find(isDeny) ?? ALLOW
+    if (bodies.length > 0) return bodies.map(statementVerdict).map(fromDbVerdict).find(isDeny) ?? ALLOW
+    if (piped) return denyDb(`\`${name}\` reads its statements from a pipe or file, which the guard cannot read`)
+    return ALLOW
+  }
+
+  const statements = spec.sqlFlags && spec.attachedSql ? allFlagValues(args, spec.sqlFlags, spec.attachedSql) : []
+  if (statements.some((s) => s.dynamic)) return denyDb(`\`${name}\` runs a statement built from a variable the guard cannot read`)
+
+  if (statements.length > 0) {
+    const judge = spec.mode === 'mongo' ? mongoVerdict : statementVerdict
+    return statements.map((s) => fromDbVerdict(judge(s.text))).find(isDeny) ?? ALLOW
+  }
+  if (bodies.length > 0 && spec.mode === 'sql') return bodies.map(statementVerdict).map(fromDbVerdict).find(isDeny) ?? ALLOW
+  if (piped) return denyDb(`\`${name}\` reads its statements from a pipe, which the guard cannot read`)
+  return ALLOW
+}
+
+function literalGitVerdict(name: string, args: Word[], bodies: string[], dialect: ShellDialect): TerminalVerdict {
+  if (TEXT_ONLY_PROGRAMS.has(name) || SELF_JUDGED_PROGRAMS.has(name) || SHELL_BUILTINS.has(name) || DISTRO_LAUNCHERS.test(name)) return ALLOW
+  if (dialect === 'powershell' && (name.startsWith('$') || name.startsWith('-') || name.startsWith("'") || name.startsWith('"'))) return ALLOW
+  const values = args.map((a) => a.value)
+  if (name === 'git') {
+    const configValues: string[] = []
+    for (let k = 0; k < values.length; k++) {
+      if (values[k] === '-c' || values[k] === '--config-env') configValues.push(values[k + 1] ?? '')
+      else if (/^-c./.test(values[k]!)) configValues.push(values[k]!.slice(2))
+    }
+    const at = gitGlobalEnd(values)
+    if (values[at]?.toLowerCase() === 'config') configValues.push(...values.slice(at + 1).filter((v) => !v.startsWith('-')))
+    return configValues.map(judgeCode).find(isDeny) ?? ALLOW
+  }
+  if (name === 'find') {
+    for (let k = 0; k < args.length; k++) {
+      if (!FIND_EXEC.has(values[k]!)) {
+        const v = judgeCode(values[k]!)
+        if (isDeny(v)) return v
+        continue
+      }
+      let end = k + 1
+      while (end < args.length && values[end] !== ';' && values[end] !== '+') end++
+      const span = args.slice(k + 1, end)
+      if (span.length > 0) {
+        const v = literalGitVerdict(programName(span[0]!.value), span.slice(1), [], dialect)
+        if (isDeny(v)) return v
+      }
+      k = end
+    }
+    return bodies.map(judgeCode).find(isDeny) ?? ALLOW
+  }
+  return [...values, ...bodies].map(judgeCode).find(isDeny) ?? ALLOW
+}
+
+function denyReader(name: string): TerminalVerdict {
+  return deny(`'${name}' here would run commands it reads from a pipe or from another command's output; the guard cannot read them, so the command was refused — write the commands out`)
+}
+
+function shellScriptArg(args: Word[]): { code: boolean; stdin: boolean; script: Word | undefined } {
+  let code = false
+  let stdin = false
+  for (let k = 0; k < args.length; k++) {
+    const x = args[k]!.value
+    if (x === '--') return { code, stdin, script: args[k + 1] }
+    if (/^[-+]o$|^[-+]O$/.test(x)) {
+      k++
+      continue
+    }
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(x)) code = true
+    if (/^-[a-zA-Z]*s[a-zA-Z]*$/.test(x)) stdin = true
+    if (x.startsWith('-') || x.startsWith('+')) {
+      if (x === '-') return { code, stdin: true, script: undefined }
+      continue
+    }
+    return { code, stdin, script: args[k] }
+  }
+  return { code, stdin, script: undefined }
+}
+
+function execInnerCommand(name: string, args: Word[]): Word[] | null {
+  const sub = args[0]?.value
+  const at = containerCommandAt(name, args.map((a) => a.value))
+  if (at !== null) return args.slice(at)
+  if (name === 'kubectl' && sub === 'exec') {
+    const dash = args.findIndex((a) => a.value === '--')
+    return dash === -1 ? null : args.slice(dash + 1)
+  }
+  return null
+}
+
+function readerVerdict(name: string, args: Word[], dialect: ShellDialect, piped: boolean, viaXargs: boolean): TerminalVerdict {
+  const values = args.map((a) => a.value)
+  if (POSIX_SHELLS.has(name)) {
+    if (piped && viaXargs) return denyReader(name)
+    const s = shellScriptArg(args)
+    if (s.script?.procsub === true) return denyReader(name)
+    if (s.code) return ALLOW
+    if (piped && (s.stdin || s.script === undefined || STDIN_SCRIPTS.has(s.script.value))) return denyReader(name)
+    return ALLOW
+  }
+  if (dialect === 'bash' && (name === 'source' || name === '.')) {
+    const target = args[0]
+    if (target !== undefined && (target.procsub === true || STDIN_SCRIPTS.has(target.value))) return denyReader(name)
+    return ALLOW
+  }
+  if (POWERSHELLS.has(name)) {
+    if (!piped) return ALLOW
+    const named = values.findIndex((v) => /^-(c|co|com|comm|comma|comman|command|f|fi|fil|file)$/i.test(v))
+    if (named !== -1) return values[named + 1] === '-' ? denyReader(name) : ALLOW
+    return values.some((v) => !v.startsWith('-')) && !values.includes('-') ? ALLOW : denyReader(name)
+  }
+  if (name === 'cmd') return piped && !values.some((v) => /^\/[ckCK]$/.test(v)) ? denyReader(name) : ALLOW
+  if (dialect === 'powershell' && (name === 'iex' || name === 'invoke-expression')) return piped && values.length === 0 ? denyReader(name) : ALLOW
+  if (INTERPRETER_FLAGS.has(name)) {
+    const flag = INTERPRETER_FLAGS.get(name)!
+    if (flagValues(values, flag).length > 0) return ALLOW
+    const at = scriptIndex(values, flag)
+    const script = args[at]
+    if (script?.procsub === true) return denyReader(name)
+    if (piped && (script === undefined || STDIN_SCRIPTS.has(script.value))) return denyReader(name)
+    return ALLOW
+  }
+  if (name === 'at' || name === 'batch') return piped ? denyReader(name) : ALLOW
+  if (name === 'su') return piped && !values.some((v) => /^(-[a-zA-Z]*c|--command|--session-command)(=|$)/.test(v)) ? denyReader(name) : ALLOW
+  if (name === 'ssh') {
+    let k = 0
+    while (k < values.length && values[k]!.startsWith('-')) k += SSH_VALUE_OPTIONS.has(values[k]!) ? 2 : 1
+    return piped && k + 1 >= values.length ? denyReader(name) : ALLOW
+  }
+  if (name === 'git' && viaXargs && piped) {
+    const at = gitGlobalEnd(values)
+    const verb = values[at]
+    return verb === undefined || verb.includes('{}') ? denyReader('xargs git') : ALLOW
+  }
+  const inner = execInnerCommand(name, args)
+  if (inner !== null && inner.length > 0) return readerVerdict(programName(inner[0]!.value), inner.slice(1), 'bash', piped, false)
+  return ALLOW
+}
 
 function isVariable(w: Word): boolean {
   return w.expansion && w.value.startsWith('$')
@@ -753,6 +1497,11 @@ function gitGlobalEnd(args: string[]): number {
     break
   }
   return j
+}
+
+function mayNameGatedVerb(next: string): boolean {
+  const lower = next.toLowerCase()
+  return next.startsWith('-') || BLOCKED_GIT_VERBS.has(lower) || lower === 'pr'
 }
 
 function judgeDynamicProgram(after: Word[]): TerminalVerdict {
@@ -814,87 +1563,343 @@ function bodiesOf(command: Token[]): string[] {
   return command.filter((t): t is Extract<Token, { kind: 'body' }> => t.kind === 'body').map((t) => t.text)
 }
 
-function judgeText(text: string, dialect: ShellDialect, ctx: Ctx): TerminalVerdict {
-  if (ctx.depth > MAX_DEPTH) return deny('the command nests shells or substitutions too deeply to be read; write it out plainly')
-  const inner: Ctx = { ...ctx, depth: ctx.depth + 1 }
-  const lexed = lex(text, dialect)
-  for (const n of lexed.nested) {
-    const v = judgeText(n.text, n.dialect, inner)
-    if (isDeny(v)) return v
-  }
-  for (const command of splitCommands(lexed.tokens)) {
-    const v = judgeCommandWords(command, dialect, inner)
-    if (isDeny(v)) return v
+function switchKeyVerdict(text: string): TerminalVerdict {
+  const decoded = decodeUnicodeEscapes(text)
+  if (HOOKS_OFF_KEY.test(text) || HOOKS_OFF_KEY.test(decoded)) return denyHooksOff()
+  if (DATABASE_SWITCH_KEY.test(text) || DATABASE_SWITCH_KEY.test(decoded)) {
+    return deny('a command that mentions database_guard or database_test_guard is refused: switching the database guard off is the developer\'s own edit of .rsct.json')
   }
   return ALLOW
 }
 
-function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx): TerminalVerdict {
-  const words = wordsOf(command)
-  const bodies = bodiesOf(command)
-  const program = words.findIndex((x) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x.value) && !SHELL_KEYWORDS.has(x.value))
-  const runsHere = (i: number): boolean => {
-    if (program === -1 || i < program) return false
-    for (let k = program; k < i; k++) {
-      const x = words[k]!.value
-      if (programName(x) === 'command' && /^-[a-zA-Z]*[vV]/.test(words[k + 1]?.value ?? '')) return false
-      if (!WRAPPERS.has(programName(x)) && !(k > program && x.startsWith('-'))) return false
-    }
-    return true
+function judgeText(text: string, dialect: ShellDialect, ctx: Ctx, firstPiped = false): TerminalVerdict {
+  if (ctx.depth > MAX_DEPTH) return deny('the command nests shells or substitutions too deeply to be read; write it out plainly')
+  const keys = switchKeyVerdict(text)
+  if (isDeny(keys)) return keys
+  const here = ctx.folder.current
+  const inner: Ctx = { ...ctx, depth: ctx.depth + 1, folder: { start: here, current: here, stack: [] } }
+  const lexed = lex(text, dialect)
+  for (const n of lexed.nested) {
+    const v = judgeText(n.text, n.dialect, inner, n.piped === true)
+    if (isDeny(v)) return v
   }
+  const commands = splitCommands(lexed.tokens, firstPiped)
+  const saved: Array<string | undefined> = []
+  for (let k = 0; k < commands.length; k++) {
+    const command = commands[k]!
+    for (let n = 0; n < command.opens; n++) saved.push(inner.folder.current)
+    const before = inner.folder.current
+    const v = judgeCommandWords(command.tokens, dialect, inner, command.piped)
+    if (isDeny(v)) return v
+    if (dialect === 'bash' && (command.piped || commands[k + 1]?.piped === true)) inner.folder.current = before
+    for (let n = 0; n < command.closes && saved.length > 0; n++) inner.folder.current = saved.pop()
+  }
+  return ALLOW
+}
+
+function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx, piped = false): TerminalVerdict {
+  const words = wordsOf(command)
+  if (words.length > MAX_COMMAND_WORDS) {
+    return deny(`a single command with more than ${MAX_COMMAND_WORDS} words is refused: the guard cannot judge it in time. Split it into shorter commands, or write long input to a file with the Write tool`)
+  }
+  const bodies = bodiesOf(command)
+  const values = words.map((x) => x.value)
+  const dynamic = words.map(isDynamicWord)
+  const program = words.findIndex((x) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x.value) && !SHELL_KEYWORDS.has(x.value))
+  const runsHere: boolean[] = []
+  let chain = program !== -1
+  for (let k = 0; k < words.length; k++) {
+    runsHere.push(chain && k >= program)
+    if (k < program) continue
+    const x = values[k]!
+    if (programName(x) === 'command' && /^-[a-zA-Z]*[vV]/.test(values[k + 1] ?? '')) chain = false
+    else if (!WRAPPERS.has(programName(x)) && !(k > program && x.startsWith('-'))) chain = false
+  }
+  const runner = programPositions(values, program, dialect)
+  recordPackageWrites(command, values, bodies, runner.at, ctx)
   for (let i = 0; i < words.length; i++) {
+    if (ctx.now() > ctx.workDeadline) return denySlow()
     const w = words[i]!
     const name = programName(w.value)
-    const rest = words.slice(i + 1).map((x) => x.value)
+    let restCache: string[] | null = null
+    const rest = (): string[] => (restCache ??= values.slice(i + 1))
+    const restDynamic = (): boolean[] => dynamic.slice(i + 1)
 
-    if (dialect === 'bash' && w.expansion && !w.quoted && w.glob !== true && runsHere(i)) {
+    if (dialect === 'bash' && w.expansion && !w.quoted && w.glob !== true && (runsHere[i] || runner.at[i] === true)) {
       return deny(`a command run from an unquoted variable, substitution or brace or glob pattern ('${w.value}') cannot be read: the shell splits it into a whole command line, so the command was refused — write the program name out (or quote the variable when it holds only a program path)`)
     }
-    if (w.expansion && rest.length > 0) {
+    if (runner.at[i] === true && !isRunnerName(name, dialect)) {
+      const after = words.slice(i + 1)
+      const reader = readerVerdict(name, after, dialect, piped, runner.xargs[i] === true)
+      if (isDeny(reader)) return reader
+      const literal = literalGitVerdict(name, after, bodies, dialect)
+      if (isDeny(literal)) return literal
+      if (ctx.database) {
+        const stdinFile = command.some((t) => t.kind === 'word' && (t.stdin === true || t.procsub === true))
+        const db = databaseVerdict(name, after, bodies, piped || stdinFile || bodies.length > 0, ctx, w.value)
+        if (isDeny(db)) return db
+      }
+      const call = managerCall(name, after)
+      if (call !== null) {
+        const v = judgeManager(call, ctx, piped)
+        if (isDeny(v)) return v
+      }
+      if ((dialect === 'bash' ? BASH_FOLDER_CHANGES : POWERSHELL_FOLDER_CHANGES).has(name)) changeFolder(name, after, dialect, ctx.folder)
+    }
+    if (w.expansion && i + 1 < words.length && mayNameGatedVerb(values[i + 1]!)) {
       const v = judgeDynamicProgram(words.slice(i + 1))
       if (isDeny(v)) return v
     }
 
     let v: TerminalVerdict = ALLOW
     const dashed = w.value.includes('://') ? undefined : /^git-(.+)$/.exec(name)?.[1]
-    if (name === 'git') v = judgeGit(rest, ctx, {}, words.slice(i + 1).map(isDynamicWord))
-    else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest, words.slice(i + 1).map(isDynamicWord)) ? ALLOW : denyGit(dashed)
-    else if (name === 'gh') v = judgeGh(rest, words.slice(i + 1).map(isDynamicWord))
-    else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest, bodies, ctx)
-    else if (POWERSHELLS.has(name)) v = judgePowerShellRunner(rest, words.slice(i + 1).map(isVariable), bodies, ctx, name !== 'pwsh')
+    if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic())
+    else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest(), restDynamic()) ? ALLOW : denyGit(dashed)
+    else if (name === 'gh') v = judgeGh(rest(), restDynamic())
+    else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest(), bodies, ctx)
+    else if (POWERSHELLS.has(name)) v = judgePowerShellRunner(rest(), words.slice(i + 1).map(isVariable), bodies, ctx, name !== 'pwsh')
     else if (dialect === 'powershell' && START_PROCESS.has(name)) v = judgeStartProcess(words.slice(i + 1), { ...ctx, depth: ctx.depth + 1 })
-    else if (name === 'cmd') v = judgeCmdRunner(rest, ctx)
-    else if (name === 'wsl') v = judgeWslRunner(rest, ctx)
-    else if (DISTRO_LAUNCHERS.test(name) && rest[0]?.toLowerCase() === 'run') v = judgeText(rest.slice(1).join(' '), 'bash', ctx)
-    else if (name === 'ssh') v = judgeSshRunner(rest, ctx)
-    else if (name === 'su' || name === 'script') v = flagValues(rest, SU_COMMAND_FLAG).map((c) => judgeText(c.text, 'bash', ctx)).find(isDeny) ?? ALLOW
-    else if (name === 'eval' && dialect === 'bash' && runsHere(i)) v = judgeText(rest.join(' '), 'bash', ctx)
-    else if ((name === 'invoke-expression' || name === 'iex') && dialect === 'powershell' && (i === 0 || ['=', '&', '.'].includes(words[i - 1]!.value))) {
+    else if (name === 'cmd') v = judgeCmdRunner(rest(), ctx)
+    else if (name === 'wsl') v = judgeWslRunner(rest(), ctx)
+    else if (DISTRO_LAUNCHERS.test(name) && values[i + 1]?.toLowerCase() === 'run') v = judgeText(rest().slice(1).join(' '), 'bash', ctx)
+    else if (name === 'ssh') v = judgeSshRunner(rest(), ctx)
+    else if (name === 'su' || name === 'script') v = flagValues(rest(), SU_COMMAND_FLAG).map((c) => judgeText(c.text, 'bash', ctx)).find(isDeny) ?? ALLOW
+    else if (name === 'eval' && dialect === 'bash' && runsHere[i]) v = judgeText(rest().join(' '), 'bash', ctx)
+    else if ((name === 'invoke-expression' || name === 'iex') && dialect === 'powershell' && (i === 0 || ['=', '&', '.'].includes(values[i - 1]!))) {
       v = words.slice(i + 1).some(isVariable)
         ? deny('Invoke-Expression with code built from a variable cannot be read, so the command was refused — write the command out')
-        : judgeText(rest.join(' '), 'powershell', ctx)
+        : judgeText(rest().join(' '), 'powershell', ctx)
     }
-    else if (name === 'env') v = envSplitStrings(rest).map((t) => judgeText(t, 'bash', ctx)).find(isDeny) ?? ALLOW
-    else if (name === 'deno' && rest[0] === 'eval') {
+    else if (name === 'env') v = envSplitStrings(rest()).map((t) => judgeText(t, 'bash', ctx)).find(isDeny) ?? ALLOW
+    else if (name === 'deno' && values[i + 1] === 'eval') {
       v = words.slice(i + 2).some((x) => x.expansion)
         ? deny('code passed to deno from a variable or a substitution cannot be read, so the command was refused — write the code out')
-        : judgeCode(rest.slice(1).join(' '))
+        : judgeCode(rest().slice(1).join(' '))
     }
     else if (INTERPRETER_FLAGS.has(name)) {
       const flag = INTERPRETER_FLAGS.get(name)!
-      const scriptAt = scriptIndex(rest, flag)
-      const codes = flagValues(rest, flag, words.slice(i + 1).map((x) => x.expansion))
+      const scriptAt = scriptIndex(rest(), flag)
+      const codes = flagValues(rest(), flag, words.slice(i + 1).map((x) => x.expansion))
       if (codes.some((c) => c.dynamic && c.at < scriptAt)) {
         v = deny(`code passed to ${name} from a variable or a substitution cannot be read, so the command was refused — write the code out`)
       } else if (codes.length > 0) v = codes.map((c) => judgeCode(c.text)).find(isDeny) ?? ALLOW
       else {
-        const script = rest[scriptAt]
+        const script = rest()[scriptAt]
         if (script === undefined || STDIN_SCRIPTS.has(script)) v = bodies.map(judgeCode).find(isDeny) ?? ALLOW
       }
     }
     if (isDeny(v)) return v
   }
   return ALLOW
+}
+
+function changeFolder(name: string, args: Word[], dialect: ShellDialect, folder: Folder): void {
+  if (name === 'popd' || name === 'pop-location') {
+    if (folder.stack.length > 0) folder.current = folder.stack.pop()
+    return
+  }
+  let target: Word | undefined
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k]!.value
+    if (a === '--') {
+      target = args[k + 1]
+      break
+    }
+    if (a.startsWith('-') && a !== '-') {
+      if (dialect === 'powershell' && /^-stackname$/i.test(a)) k++
+      continue
+    }
+    target = args[k]
+    break
+  }
+  if (name === 'pushd' || name === 'push-location') folder.stack.push(folder.current)
+  if (target === undefined) {
+    if (name === 'pushd') folder.current = undefined
+    else if (name !== 'push-location') folder.current = homedir()
+  } else if (target.value === '-' || isDynamicWord(target)) folder.current = undefined
+  else {
+    const next = resolveFolder(folder.current, target.value)
+    folder.current = next !== undefined && next.length <= MAX_FOLDER_LENGTH ? next : undefined
+  }
+}
+
+function copyDestination(args: string[]): string {
+  const flag = args.findIndex((a) => /^-(destination|t)$/i.test(a) || a === '--target-directory')
+  if (flag !== -1) return args[flag + 1] ?? ''
+  const attached = args.find((a) => a.startsWith('--target-directory='))
+  if (attached !== undefined) return attached.slice('--target-directory='.length)
+  const positional = args.filter((a) => !a.startsWith('-'))
+  return positional[positional.length - 1] ?? ''
+}
+
+function recordWrite(ctx: Ctx, rel: string | undefined): void {
+  const folder = rel === undefined ? ctx.folder.current : resolveFolder(ctx.folder.current, rel)
+  if (folder === undefined) ctx.unit.wroteUnknown = true
+  else ctx.unit.wrote.add(folder)
+}
+
+function recordPackageWrites(command: Token[], values: string[], bodies: string[], at: boolean[], ctx: Ctx): void {
+  for (const t of command) {
+    if (t.kind === 'word' && t.redirect === true && PACKAGE_FILE_NAME.test(t.value)) recordWrite(ctx, dirname(t.value))
+  }
+  const main = at.lastIndexOf(true)
+  if (main === -1) return
+  const args = values.slice(main + 1)
+  const inBodies = bodies.some((b) => PACKAGE_FILE_NAME.test(b))
+  const named = args.find((a) => PACKAGE_FILE_NAME.test(a))
+  if (!inBodies && named === undefined) return
+  const name = programName(values[main]!)
+  if (READ_ONLY_PROGRAMS.has(name) || MANAGERS.has(name) || EXEC_RUNNERS.has(name)) return
+  if (name === 'git' && GIT_READ_VERBS.has(args[gitGlobalEnd(args)]?.toLowerCase() ?? '')) return
+  if (COPY_PROGRAMS.has(name)) {
+    if (inBodies) return
+    const dest = copyDestination(args)
+    recordWrite(ctx, PACKAGE_FILE_NAME.test(basename(dest)) ? dirname(dest) : dest)
+    return
+  }
+  recordWrite(ctx, inBodies || named === undefined ? undefined : dirname(named))
+}
+
+function wroteInto(ctx: Ctx, folder: string): boolean {
+  return ctx.unit.wroteUnknown || ctx.unit.wrote.has(folder)
+}
+
+type ManagerCall = { manager: Manager; args: Word[]; exec: boolean }
+
+function managerCall(name: string, after: Word[]): ManagerCall | null {
+  const manager = MANAGERS.get(name)
+  if (manager !== undefined) return { manager, args: after, exec: false }
+  if (EXEC_RUNNERS.has(name)) return { manager: 'npm', args: after, exec: true }
+  if (name === 'corepack' && after[0] !== undefined) {
+    const inner = MANAGERS.get(programName(after[0].value).replace(/@.*$/, ''))
+    if (inner !== undefined) return { manager: inner, args: after.slice(1), exec: false }
+  }
+  if (name === 'php') {
+    const at = scriptIndex(after.map((w) => w.value), INTERPRETER_FLAGS.get('php')!)
+    const script = after[at]
+    if (script !== undefined && MANAGERS.get(programName(script.value)) === 'composer') return { manager: 'composer', args: after.slice(at + 1), exec: false }
+  }
+  return null
+}
+
+function wordToken(w: Word): Token {
+  return {
+    kind: 'word',
+    value: w.value,
+    expansion: w.expansion,
+    ...(w.spliced ? { spliced: true as const } : {}),
+    ...(w.quoted ? { quoted: true as const } : {}),
+    ...(w.glob ? { glob: true as const } : {}),
+  }
+}
+
+function judgeManager(call: ManagerCall, ctx: Ctx, piped: boolean): TerminalVerdict {
+  const values = call.args.map((w) => w.value)
+  const plan: ManagerPlan | null = call.exec ? null : planManager(call.manager, values)
+  const exec = plan ?? planExecRunner(values)
+  for (const code of exec.execCode) {
+    if (isDynamicWord(call.args[code.at]!)) return deny('code passed to a package manager from a variable or a substitution cannot be read, so the command was refused — write the code out')
+    const v = judgeText(code.value, 'bash', ctx)
+    if (isDeny(v)) return v
+  }
+  if (exec.execAt !== null && !isDynamicWord(call.args[exec.execAt]!)) {
+    const v = judgeCommandWords(call.args.slice(exec.execAt).map(wordToken), 'bash', { ...ctx, depth: ctx.depth + 1 }, piped)
+    if (isDeny(v)) return v
+  }
+  if (plan === null) return ALLOW
+  if (plan.versionCommit) return denyVersion(call.manager)
+  const base = ctx.folder.current ?? ctx.folder.start
+  if (plan.writesPackage) {
+    recordWrite(ctx, base === undefined ? undefined : '.')
+    return ALLOW
+  }
+  if (plan.global) return ALLOW
+  if (plan.nameAt.some((at) => isDynamicWord(call.args[at]!))) {
+    return deny('a package script named by a variable or a substitution cannot be read, so the command was refused — write the script name out')
+  }
+  if (plan.names.length === 0) return ALLOW
+  const options = plan.folders.filter((f) => !isDynamicWord(call.args[f.at]!))
+  const dirs = options.length === 0 ? [base] : options.map((f) => resolveFolder(base, f.value))
+  for (const dir of new Set(dirs)) {
+    if (dir === undefined) continue
+    const v = judgePackageScripts(call.manager, plan, dir, ctx)
+    if (isDeny(v)) return v
+  }
+  return ALLOW
+}
+
+function judgePackageScripts(manager: Manager, plan: ManagerPlan, dir: string, ctx: Ctx): TerminalVerdict {
+  if (ctx.now() > ctx.workDeadline) return denySlow()
+  if (wroteInto(ctx, resolve(dir))) return denyWriteThenRun()
+  const found = findUp(dir, plan.file, ctx.pkg.read)
+  if (found === null) return ALLOW
+  if (wroteInto(ctx, dirname(found.path))) return denyWriteThenRun()
+  const first = parsePackage(found.path, found.read)
+  if (!first.ok) return denyPackage(first.reason)
+  const files = [{ path: found.path, json: first.json }]
+  if (plan.workspaces) {
+    const root = repoRoot(dirname(found.path), ctx.pkg.read) ?? dirname(found.path)
+    const listing = ctx.pkg.list(root, plan.file)
+    if (!listing.complete) {
+      return deny(`this command runs a package script in every workspace, and ${root} holds more package files than the guard reads, so it was refused — run the script in one package, or the developer runs it`)
+    }
+    for (const path of listing.files) {
+      if (resolve(path) === resolve(found.path)) continue
+      if (ctx.now() > ctx.workDeadline) return denySlow()
+      const read = ctx.pkg.read(path)
+      if (read.kind === 'missing') continue
+      const parsed = parsePackage(path, read)
+      if (!parsed.ok) return denyPackage(parsed.reason)
+      files.push({ path, json: parsed.json })
+    }
+  }
+  for (const f of files) {
+    for (const name of plan.names) {
+      const v = judgeScriptName(manager, f.path, f.json, name, ctx)
+      if (isDeny(v)) return v
+    }
+  }
+  return ALLOW
+}
+
+function judgeScriptName(manager: Manager, path: string, json: Record<string, unknown>, name: string, ctx: Ctx): TerminalVerdict {
+  const key = `${path}\u0000${name}`
+  if (ctx.pkg.memo.has(key)) return ctx.pkg.memo.get(key) ?? ALLOW
+  const texts = scriptTexts(manager, json, name)
+  if (texts.length === 0) return ALLOW
+  ctx.pkg.memo.set(key, null)
+  const v = judgeScriptTexts(texts, dirname(path), ctx)
+  const verdict = isDeny(v) ? deny(`the ${basename(path)} script '${name}' that this command runs is refused (${path}): ${v.reason}`) : ALLOW
+  ctx.pkg.memo.set(key, verdict)
+  return verdict
+}
+
+function judgeScriptTexts(texts: string[], dir: string, ctx: Ctx): TerminalVerdict {
+  for (const text of texts) {
+    ctx.pkg.bytes += Buffer.byteLength(text, 'utf8')
+    if (ctx.pkg.bytes > MAX_COMMAND_BYTES) {
+      return deny(`the command and the package scripts it runs are over ${MAX_COMMAND_BYTES / 1024} KiB together, too long to judge in time; the developer runs it`)
+    }
+    const unit: ScriptUnit = { wrote: new Set(), wroteUnknown: false }
+    const scriptCtx: Ctx = { ...ctx, unit, folder: { start: dir, current: dir, stack: [] } }
+    for (const variant of text.includes('^') ? [text, text.replace(/\^(.)/gs, '$1')] : [text]) {
+      const v = judgeText(variant, 'bash', scriptCtx)
+      if (isDeny(v)) return v
+    }
+  }
+  return ALLOW
+}
+
+function denyVersion(manager: Manager): TerminalVerdict {
+  return deny(`\`${manager} version\` with a new version commits and tags with git, so it is refused from the terminal: add --no-git-tag-version and commit with rsct_request_commit, or the developer runs it in their own terminal`)
+}
+
+function denyPackage(reason: string): TerminalVerdict {
+  return deny(`the package file this command runs scripts from could not be read (${reason}), so the command was refused — fix the file, or the developer runs the command`)
+}
+
+function denyWriteThenRun(): TerminalVerdict {
+  return deny('this command changes a package file and runs package scripts in the same go; the guard reads the scripts before anything runs, so it cannot judge the changed ones — make the change and run the scripts in separate commands')
 }
 
 function joinWords(words: string[], dialect: ShellDialect): string {
@@ -1156,7 +2161,6 @@ function judgePowerShellRunner(args: string[], dynamic: boolean[], bodies: strin
       } catch {
         return deny('an encoded PowerShell command could not be decoded, so it was refused')
       }
-      if (HOOKS_OFF_KEY.test(decodeUnicodeEscapes(decoded))) return denyHooksOff()
       return judgeText(decoded, 'powershell', ctx)
     }
     if (a === '-file' || a === '-f') break
@@ -1179,13 +2183,20 @@ function judgeCmdRunner(args: string[], ctx: Ctx): TerminalVerdict {
   return judgeText(args.slice(at + 1).join(' '), 'bash', ctx)
 }
 
+function remoteCtx(ctx: Ctx): Ctx {
+  return { ...ctx, folder: { start: undefined, current: undefined, stack: [] } }
+}
+
 function judgeWslRunner(args: string[], ctx: Ctx): TerminalVerdict {
   let j = 0
+  let cwdChanged = false
   while (j < args.length) {
     const a = args[j]!
-    if (a === '-e' || a === '--exec') return judgeText(joinWords(args.slice(j + 1), 'bash'), 'bash', ctx)
-    if (a === '--') return judgeText(args.slice(j + 1).join(' '), 'bash', ctx)
+    const inner = cwdChanged ? remoteCtx(ctx) : ctx
+    if (a === '-e' || a === '--exec') return judgeText(joinWords(args.slice(j + 1), 'bash'), 'bash', inner)
+    if (a === '--') return judgeText(args.slice(j + 1).join(' '), 'bash', inner)
     if (WSL_VALUE_OPTIONS.has(a)) {
+      if (a === '--cd') cwdChanged = true
       j += 2
       continue
     }
@@ -1193,7 +2204,7 @@ function judgeWslRunner(args: string[], ctx: Ctx): TerminalVerdict {
       j++
       continue
     }
-    return judgeText(args.slice(j).join(' '), 'bash', ctx)
+    return judgeText(args.slice(j).join(' '), 'bash', inner)
   }
   return ALLOW
 }
@@ -1210,7 +2221,7 @@ function judgeSshRunner(args: string[], ctx: Ctx): TerminalVerdict {
       j++
       continue
     }
-    return judgeText(args.slice(j + 1).join(' '), 'bash', ctx)
+    return judgeText(args.slice(j + 1).join(' '), 'bash', remoteCtx(ctx))
   }
   return ALLOW
 }
@@ -1235,15 +2246,33 @@ export function defaultAliasResolver(name: string, gitDir: string | null, cwd: s
 }
 
 export function judgeCommand(text: string, options: JudgeOptions = {}): TerminalVerdict {
-  if (HOOKS_OFF_KEY.test(text) || HOOKS_OFF_KEY.test(decodeUnicodeEscapes(text))) return denyHooksOff()
+  if (Buffer.byteLength(text, 'utf8') > MAX_COMMAND_BYTES) {
+    return deny(`a command over ${MAX_COMMAND_BYTES / 1024} KiB is refused: the guard cannot judge it in time. Write long text to a file with the Write tool and run a short command`)
+  }
   const now = options.now ?? Date.now
+  const start = now()
   const ctx: Ctx = {
     depth: 0,
     aliasDepth: 0,
     cwd: options.cwd,
     resolveAlias: options.resolveAlias ?? defaultAliasResolver,
-    deadline: now() + (options.aliasBudgetMs ?? DEFAULT_ALIAS_BUDGET_MS),
+    deadline: start + (options.aliasBudgetMs ?? DEFAULT_ALIAS_BUDGET_MS),
+    workDeadline: start + (options.workBudgetMs ?? WORK_BUDGET_MS),
     now,
+    folder: { start: options.cwd, current: options.cwd, stack: [] },
+    unit: { wrote: new Set(), wroteUnknown: false },
+    pkg: {
+      read: options.readPackage ?? defaultPackageReader,
+      list: options.listPackages ?? defaultPackageLister,
+      memo: new Map(),
+      bytes: Buffer.byteLength(text, 'utf8'),
+    },
+    database: options.database ?? false,
+    databaseTestGuard: options.databaseTestGuard ?? true,
   }
   return judgeText(text, options.dialect ?? 'bash', ctx)
+}
+
+function denySlow(): TerminalVerdict {
+  return deny('the guard could not finish judging this command in time, so it was refused. Split it into shorter commands')
 }

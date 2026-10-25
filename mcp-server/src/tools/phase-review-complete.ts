@@ -20,7 +20,7 @@ import {
   type PhaseState,
   type SweepLedgerEntry,
 } from '../lib/phase-scope.js'
-import { getHeadShaFull } from '../lib/git.js'
+import { countRepositoryCommits, getHeadShaFull, readHeadBirth } from '../lib/git.js'
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { promptYesNo } from '../lib/os-dialog.js'
 import {
@@ -88,7 +88,7 @@ const dispositionSchema = z
 const exemptFileSchema = z
   .object({
     path: z.string().min(1),
-    reason: z.enum(['generated', 'vendored']),
+    reason: z.enum(['generated', 'vendored', 'legacy_baseline']),
   })
   .strict()
 
@@ -148,6 +148,7 @@ export type PhaseReviewSweepRejectKind =
   | 'migration_missing'
   | 'unverified_declined'
   | 'unverified_undecided'
+  | 'legacy_baseline_refused'
   | DeadCodeRejectKind
 
 export type PhaseReviewCompleteRejectKind =
@@ -192,7 +193,7 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
 export const phaseReviewCompleteTool: Tool = {
   name: 'rsct_phase_review_complete',
   description:
-    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code — a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle — an importer it cannot parse, an import() or require(), a file nothing imports — is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+    '§C-gated REVIEW phase closure — the last phase of the cycle (R→S→V→C→T→REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions — "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the §C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code — a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle — an importer it cannot parse, an import() or require(), a file nothing imports — is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start — leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the §C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: 'object',
     required: ['spec_ref', 'dev_approval'],
@@ -257,13 +258,13 @@ export const phaseReviewCompleteTool: Tool = {
       exempt_files: {
         type: 'array',
         description:
-          'Generated or vendored code files that keep their comments, as repository-relative or project-relative paths (either slash). Each goes to the developer-only unverified dialog, bound to its exact version.',
+          'Code files that keep their comments, as repository-relative or project-relative paths (either slash): generated, vendored, or legacy_baseline — comments that predate the rule, accepted only for the first commit of a branch (HEAD has no commit yet). Each goes to the developer-only unverified dialog, bound to its exact version; a legacy_baseline approval counts at commit only while the branch still has no commit.',
         items: {
           type: 'object',
           required: ['path', 'reason'],
           properties: {
             path: { type: 'string' },
-            reason: { type: 'string', enum: ['generated', 'vendored'] },
+            reason: { type: 'string', enum: ['generated', 'vendored', 'legacy_baseline'] },
           },
           additionalProperties: false,
         },
@@ -438,6 +439,15 @@ export async function phaseReviewCompleteHandler(
     return reject({ ...base, rejectKind: 'sweep_input_invalid', reason, hints: [reason], comment_sweep: null })
   }
   const dispositions: Disposition[] = sweepInput.data.comment_dispositions ?? []
+  const legacyAsked = (sweepInput.data.exempt_files ?? []).some((e) => e.reason === 'legacy_baseline')
+  const birth = legacyAsked ? readHeadBirth(projectRoot) : null
+  if (birth !== null && birth.status !== 'unborn') {
+    const reason =
+      birth.status === 'born'
+        ? 'legacy_baseline is accepted only for the first commit of a branch, and HEAD already has a commit — remove the comments in this REVIEW, or the developer commits these files in their own terminal'
+        : `legacy_baseline needs a branch with no commit yet, and git could not tell (${birth.detail}) — only the developer can commit these files in their own terminal`
+    return reject({ ...base, rejectKind: 'legacy_baseline_refused', reason, hints: [reason], comment_sweep: null })
+  }
 
   const precheck = precheckPhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -617,14 +627,25 @@ export async function phaseReviewCompleteHandler(
         comment_sweep: summary,
       })
     }
+    const legacy = unverified.filter((f) => f.reason === 'legacy_baseline')
+    const commits = legacy.length > 0 ? countRepositoryCommits(projectRoot) : null
+    const legacyLine =
+      legacy.length > 0 && birth?.status === 'unborn'
+        ? `\n\nlegacy_baseline (${legacy.length} file(s)): the first commit of branch '${specLabel(birth.branch, 100)}', which has no commit yet. ` +
+          `This repository has ${commits ?? 'an unknown number of'} commit(s) on its other refs. RSCT did NOT check that these comments predate the rule.`
+        : ''
     const dialog = await promptFn({
       title: `RSCT — ${unverified.length} file(s) the comment sweep cannot verify`,
       message:
         'These exact file versions would become committable WITHOUT a mechanical comment or dead-code check. Yes = allow these versions. No = reject this REVIEW.' +
+        legacyLine +
         gateDialogFooter(projectRoot) +
         '\n\n' +
         dialogList(
-          unverified.map((f) => `${f.path} — ${f.reason} (${(f.blob ?? '').slice(0, 10)})`),
+          unverified.map((f) => {
+            const counted = f.reason === 'legacy_baseline' ? `, comments: ${f.comment_count ?? 'not counted'}` : ''
+            return `${f.path} — ${f.reason}${counted} (${(f.blob ?? '').slice(0, 10)})`
+          }),
           40,
           DIALOG_UNCUT,
         ) +

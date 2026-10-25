@@ -12,6 +12,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-10-25
+
+### Security
+
+- **The terminal guard now reads three more ways an AI agent could reach a gated git verb (commit,
+  push, merge, rebase) without the approval dialog**, all present since the guard shipped in 2.15.0:
+  - code piped into a shell or interpreter (`echo '…' | sh`, `printf … | python3`, `… | iex`);
+  - a git call written inside another program's argument text (a database client's shell escape,
+    `awk 'BEGIN{system("git …")}'`, `vim -c '!git …'`, a `git -c <key>=<value>` that stores a
+    program);
+  - the package scripts a manager runs — `npm run <x>`, `yarn <x>`, `pnpm <x>`, `bun run <x>`,
+    `composer <x>`, lifecycle hooks (install/test/publish/version), `npx`/`pnpm exec`/`bunx`,
+    read from the package.json/composer.json the call would use.
+  See ADR-036.
+- **`npm|pnpm|yarn version <new>` is refused** (it commits and tags with git) unless
+  `--no-git-tag-version` is given.
+- **The guard is bounded**: a command over 64 KiB or over 2048 words is refused with a pointer to
+  the Write tool; a crafted input can no longer make the match run long (the code-search patterns
+  were rewritten to run in linear time).
+- **`rsct_request_push` sends an explicit full refspec** built from the push it showed you, so a
+  `remote.<name>.push` mapping in the repository config can no longer send the push to a different
+  branch. For a protected branch with no local remote-tracking ref (a first push, or a never-fetched
+  one) it runs a no-prompt `git push --dry-run` to read exactly what the push carries and checks it
+  against `files_swept` before the dialog; a first publication over 2000 files is one you push by
+  hand. A local branch literally named `origin/main` no longer makes the coverage check pass
+  silently. See ADR-036 (and ADR-031).
+- **An edit of a Claude Code settings file or of `.rsct.json` whose old text is not in the file
+  exactly as written is refused**: the edit guard cannot tell what such an edit would write.
+
+### Added
+
+- **The terminal guard refuses commands that change a database (#84):** a database client
+  statement that writes or that the guard cannot read (from a file, stdin, a pipe or a variable), a
+  migration, seed, reset, wipe or restore of the common tools (Prisma, Sequelize, Knex, TypeORM,
+  Drizzle, Alembic, Flyway, dbmate, goose, Atlas, sqlx, Diesel, Phinx, Supabase, Wrangler D1, Turso,
+  PlanetScale, MikroORM, Laravel `artisan`, Django, Rails, Flask), a console fed code from a pipe,
+  and `docker compose down -v` or a volume removal. It reads them through wrappers (`docker compose
+  exec`, `docker exec`, Sail, `kubectl exec`, `bundle exec`, `cross-env`, `dotenv`, `herd`) and in
+  package scripts. Read-only statements and commands pass (`psql -c "select …"`, `migrate:status`,
+  `sqlmigrate`, `--sql`, a bare interactive client). There is no RSCT tool for these: you run them in
+  your own terminal. See ADR-038.
+- **A Laravel test run needs a disposable test database (#84):** in a Laravel project, `php artisan
+  test`, `phpunit`, `pest` and `paratest` are refused unless the phpunit configuration PHPUnit loads
+  forces (`force="true"`) an in-memory sqlite database or a database named as a test one
+  (`app_test`, `testing`). The refusal names the two lines to add. `php artisan dusk` is refused
+  (it swaps in its own environment file).
+- **Two switches in `.rsct.json`, yours to set:** `database_guard: false` turns the database rules
+  off, `database_test_guard: false` turns only the Laravel test check off. The agent cannot set
+  either (the edit guard and the terminal guard refuse it); `rsct_status` tells you when one is off.
+- **First publication of an existing project (#130):** in the REVIEW, `exempt_files` accepts a third
+  reason, `legacy_baseline`, for comments that predate the no-comments rule — accepted only for the
+  first commit of a branch (the branch has no commit yet), through your dialog, bound to the exact
+  file versions, and honoured at commit only while the branch is still unborn. The dialog names the
+  branch, how many commits the repository already has on its other refs, and says RSCT did not check
+  that the comments predate the rule. See ADR-037.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE (the push tool and the REVIEW change
+  travel with it), then run `/rsct-setup` in each project: its bundled copies of the terminal guard
+  and the edit guard (`.rsct/scripts/`) are refreshed with the new rules, and §C and a memory entry
+  say what the database rules refuse. A project not re-set-up keeps the old guards.
+- In a Laravel project, check `phpunit.xml` before the first test run: if it sets `DB_CONNECTION` and
+  `DB_DATABASE` without `force="true"`, the guard refuses the run until you add it (or switch the
+  check off with `database_test_guard: false`).
+
 ## [2.21.0] - 2026-10-22
 
 ### Added

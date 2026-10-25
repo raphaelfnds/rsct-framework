@@ -151,6 +151,10 @@ rejected — the guard lets scope through, while `rsct_check_edit_scope` still
 answers from the recorded list. Two refusals hold everywhere: a Claude Code
 settings write that would switch every hook off, change or remove an RSCT hook entry, leave such a file unparseable, or set
 an env key such as `NODE_OPTIONS`, `PATH` or `BASH_ENV` (`claude_settings` — make that edit yourself),
+an edit of `.rsct.json` that sets `database_guard` or `database_test_guard` to
+`false` (`rsct_config`, since 2.22.0 — make that edit yourself), an `Edit` of
+either file whose old text is not in the file exactly as written (since 2.22.0 —
+the guard cannot tell what it would write; quote the file exactly),
 and a fault inside the guard (`guard_failed` — the edit did not run; make it
 yourself, and if every edit is refused see "Every terminal command, or every
 edit, is refused" below).
@@ -214,6 +218,42 @@ or Monitor tool. The message names the reason:
   five. Either way, use the full command.
 - **"a command that mentions disableAllHooks"** — switching Claude Code hooks
   off is your edit, not the agent's.
+- **"… so it is refused from the terminal: the developer runs it in their own
+  terminal where a database change is their decision"** (since 2.22.0) — the
+  command changes a database, or the guard cannot read what it would run: a
+  client statement that writes, a statement from a file, stdin, a pipe or a
+  variable, a migration, seed, reset, wipe or restore, a console fed from a pipe,
+  a volume removal. Run it yourself if you mean it. A read-only form passes
+  (`psql -c "select …"`, `migrate:status`, `--sql`), so the agent can check
+  state without you. To switch these rules off in a project, set
+  `database_guard: false` in `.rsct.json` yourself.
+- **"this Laravel test run is refused: the guard cannot confirm it uses a
+  throwaway test database …"** — a test suite with `RefreshDatabase` recreates
+  whatever database it connects to. Add to the `<php>` block of the
+  `phpunit.xml` PHPUnit loads:
+  `<env name="DB_CONNECTION" value="sqlite" force="true"/>` and
+  `<env name="DB_DATABASE" value=":memory:" force="true"/>` (or force a
+  database whose name is a test one, such as `app_test`). Only `force="true"`
+  counts: without it a value from your environment wins, and `.env.testing` is
+  not read for the same reason. The message names the lines set without
+  `force="true"`, a `DB_URL`/`DATABASE_URL` in `.env` that would override them,
+  or `--no-configuration`. `php artisan dusk` is always refused (Dusk swaps in
+  its own environment file). To switch only this check off, set
+  `database_test_guard: false` in `.rsct.json` yourself.
+- **"a command that mentions database_guard or database_test_guard"** —
+  switching the database rules off is your edit of `.rsct.json`, not the
+  agent's.
+- **"'…' here would run commands it reads from a pipe or from another command's
+  output"** (since 2.22.0) — `… | sh`, `curl … | bash`, `… | iex`; the guard
+  cannot read piped code. Write the commands out.
+- **"the package.json script '…' that this command runs is refused"** (since
+  2.22.0) — the script `npm run`, `yarn`, `pnpm`, `bun` or `composer` would run
+  does something the guard refuses; the reason follows. Run it yourself, or call
+  the RSCT tool for the git step.
+- **"a command over 64 KiB is refused"**, **"a single command with more than
+  2048 words is refused"**, **"could not finish judging this command in time"**
+  (since 2.22.0) — write long input to a file with the Write tool and run a short
+  command.
 - **"the command nests shells or substitutions too deeply to be read"** — more
   than eight levels of shells, substitutions or `Start-Process`; write it out
   plainly. **"could not read the tool call"**, **"names no tool"**, **"carries

@@ -69,6 +69,14 @@ filesystem path is refused, and branch protection compares the resolved push
 DESTINATION, so `+main`, `HEAD:main` and `refs/heads/main` are all recognised as
 `main`.
 
+The same terminal guard refuses commands that change a database: a client
+statement that writes or that it cannot read, a migration, seed, reset or wipe,
+a restore, `docker compose down -v`, and — in a Laravel project whose tests are
+not pointed at a disposable database — the test run. There is no RSCT tool for
+these: the developer runs them in their own terminal. Switching those rules off
+is the developer's own edit of `.rsct.json` (`database_guard`,
+`database_test_guard`), never yours.
+
 The MCP layer, the SessionStart sanitizer hook and the PreToolUse terminal
 guard close the "trust-forever" bypass surface that pure prose cannot. The
 guard is a backstop, not the rule: every commit, push, merge and rebase goes

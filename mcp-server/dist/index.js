@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, fstatSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { randomUUID, createHash } from 'crypto';
 import { homedir, tmpdir } from 'os';
 
@@ -3016,7 +3016,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve9.call(this, root, ref);
+      let _sch = resolve10.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3043,7 +3043,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve9(root, ref) {
+    function resolve10(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3873,7 +3873,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve9(baseURI, relativeURI, options) {
+    function resolve10(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4242,7 +4242,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve9,
+      resolve: resolve10,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -9223,7 +9223,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join35 } = __require("path");
+    var { join: join36 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9266,7 +9266,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join35(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join36(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9669,7 +9669,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join35, isAbsolute: isAbsolute9, sep: sep4 } = __require("path");
+    var { join: join36, isAbsolute: isAbsolute10, sep: sep4 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9732,7 +9732,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join35(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join36(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9750,7 +9750,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join35(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join36(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9768,11 +9768,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute9(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute10(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join35(__dirname$1, "..", "file.js");
+          return join36(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10762,7 +10762,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join35 = ",";
+            let join36 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10776,7 +10776,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join35 = `,
+                join36 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10784,13 +10784,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join35;
+                res += join36;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join36}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10811,7 +10811,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join35 = `,
+              join36 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10825,13 +10825,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join35;
+                separator = join36;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join35;
+              separator = join36;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10872,7 +10872,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join35 = ",";
+            let join36 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10885,7 +10885,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join35 = `,
+                join36 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10893,13 +10893,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join35;
+                res += join36;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join35}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join36}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10912,7 +10912,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join35 = `,
+              join36 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10921,7 +10921,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join35;
+                separator = join36;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -10979,20 +10979,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join36 = `,
+              const join37 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join36;
+                res2 += join37;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join36}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join37}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11008,16 +11008,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join35 = `,
+            const join36 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join35, maximumBreadth);
+              res += stringifyTypedArray(value, join36, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join35;
+              separator = join36;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11028,13 +11028,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join35;
+                separator = join36;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join35;
+              separator = join36;
             }
             if (separator !== "") {
               res = `
@@ -21644,7 +21644,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve9) => setTimeout(resolve9, pollInterval));
+        await new Promise((resolve10) => setTimeout(resolve10, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21661,7 +21661,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve9, reject2) => {
+    return new Promise((resolve10, reject2) => {
       const earlyReject = (error2) => {
         reject2(error2);
       };
@@ -21739,7 +21739,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject2(parseResult.error);
           } else {
-            resolve9(parseResult.data);
+            resolve10(parseResult.data);
           }
         } catch (error2) {
           reject2(error2);
@@ -22001,12 +22001,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve9, reject2) => {
+    return new Promise((resolve10, reject2) => {
       if (signal.aborted) {
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve9, interval);
+      const timeoutId = setTimeout(resolve10, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22873,12 +22873,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve9) => {
+    return new Promise((resolve10) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve9();
+        resolve10();
       } else {
-        this._stdout.once("drain", resolve9);
+        this._stdout.once("drain", resolve10);
       }
     });
   }
@@ -22963,6 +22963,19 @@ function getRangePaths(projectRoot, base, head) {
   ]);
   if (raw === null) return { status: "unavailable" };
   return { status: "ok", paths: splitNulPaths(raw) };
+}
+function getTreePaths(projectRoot, rev) {
+  if (!isSafeRevisionToken(rev)) return { status: "unsafe_revision", revision: rev };
+  if (!isGitRepo(projectRoot)) return { status: "unavailable" };
+  const raw = safeGitRaw(projectRoot, ["ls-tree", "-r", "--full-tree", "--name-only", "-z", rev]);
+  if (raw === null) return { status: "unavailable" };
+  return { status: "ok", paths: splitNulPaths(raw) };
+}
+function resolveCommit(projectRoot, rev) {
+  if (!isSafeRevisionToken(rev)) return null;
+  const raw = safeGitRaw(projectRoot, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
+  const sha = raw?.trim() ?? "";
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
 }
 function getFileAtHead(projectRoot, relPath) {
   if (!isGitRepo(projectRoot)) return null;
@@ -23113,6 +23126,23 @@ function getHeadShaFull(projectRoot, executor = defaultGitExecutor) {
   if (!r.ok) return null;
   return r.stdout.trim() || null;
 }
+function readHeadBirth(projectRoot, executor = defaultGitExecutor) {
+  const symbolic = executor(projectRoot, ["symbolic-ref", "-q", "HEAD"]);
+  if (!symbolic.ok) {
+    return symbolic.exitCode === 1 ? { status: "born" } : { status: "unknown", detail: `git symbolic-ref exited ${symbolic.exitCode}` };
+  }
+  const ref = symbolic.stdout.trim();
+  if (!ref.startsWith("refs/heads/")) return { status: "unknown", detail: `HEAD names ${JSON.stringify(ref)}, not a branch` };
+  const shown = executor(projectRoot, ["show-ref", "--verify", "--quiet", ref]);
+  if (shown.ok) return { status: "born" };
+  if (shown.exitCode === 1) return { status: "unborn", branch: ref.slice("refs/heads/".length) };
+  return { status: "unknown", detail: `git show-ref exited ${shown.exitCode}` };
+}
+function countRepositoryCommits(projectRoot, executor = defaultGitExecutor) {
+  const r = executor(projectRoot, ["rev-list", "--all", "--reflog", "--count"]);
+  const n = r.ok ? Number.parseInt(r.stdout.trim(), 10) : Number.NaN;
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
 function unsafeOperand(operands) {
   for (const [name2, value] of Object.entries(operands)) {
     if (!isSafeRevisionToken(value)) {
@@ -23133,10 +23163,10 @@ function gitCommit(projectRoot, message, executor = defaultGitExecutor) {
   const sha_after = getHeadSha(projectRoot, executor);
   return { ok: true, sha_before, sha_after };
 }
-function gitPush(projectRoot, remote, branch, executor = defaultGitExecutor) {
-  const bad = unsafeOperand({ remote, branch });
+function gitPush(projectRoot, remote, refspec, executor = defaultGitExecutor) {
+  const bad = unsafeOperand({ remote, refspec });
   if (bad) return { ok: false, error: bad };
-  const exec = executor(projectRoot, ["push", "--", remote, branch]);
+  const exec = executor(projectRoot, ["push", "--", remote, refspec]);
   if (!exec.ok) {
     const result = { ok: false };
     if (exec.stderr) result.stderr = exec.stderr.trim();
@@ -24052,7 +24082,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.21.0";
+var RSCT_MCP_VERSION = "2.22.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -24924,6 +24954,60 @@ function getInstallDriftNotice(args2) {
   };
 }
 
+// src/lib/database-switches.ts
+init_esm_shims();
+
+// src/lib/package-scripts.ts
+init_esm_shims();
+var MAX_PACKAGE_BYTES = 1024 * 1024;
+var defaultPackageReader = (path2) => {
+  let st;
+  try {
+    st = statSync(path2);
+  } catch {
+    return { kind: "missing" };
+  }
+  if (!st.isFile()) return { kind: "unreadable", reason: `${path2} is not a regular file` };
+  if (st.size > MAX_PACKAGE_BYTES) return { kind: "unreadable", reason: `${path2} is larger than ${MAX_PACKAGE_BYTES / 1024} KiB` };
+  try {
+    return { kind: "text", text: readFileSync(path2, "utf8") };
+  } catch (e) {
+    return { kind: "unreadable", reason: `${path2} could not be read (${e.message})` };
+  }
+};
+function findUp(dir, file, reader) {
+  let current = resolve(dir);
+  for (; ; ) {
+    const path2 = join(current, file);
+    const read = reader(path2);
+    if (read.kind !== "missing") return { path: path2, read };
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+function parsePackage(path2, read) {
+  if (read.kind === "unreadable") return { ok: false, reason: read.reason };
+  const text2 = read.text.charCodeAt(0) === 65279 ? read.text.slice(1) : read.text;
+  try {
+    const json = JSON.parse(text2);
+    if (!json || typeof json !== "object" || Array.isArray(json)) return { ok: false, reason: `${path2} is not a JSON object` };
+    return { ok: true, json };
+  } catch {
+    return { ok: false, reason: `${path2} is not valid JSON` };
+  }
+}
+
+// src/lib/database-switches.ts
+var ON = { database: true, test: true };
+function readDatabaseSwitches(start2, reader = defaultPackageReader) {
+  const found = findUp(start2, ".rsct.json", reader);
+  if (found === null) return ON;
+  const parsed = parsePackage(found.path, found.read);
+  if (!parsed.ok) return ON;
+  return { database: parsed.json.database_guard !== false, test: parsed.json.database_test_guard !== false };
+}
+
 // src/tools/status.ts
 var statusInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
@@ -24980,6 +25064,13 @@ async function statusHandler(rawInput, deps = {}) {
       mcpVersion: MCP_VERSION
     });
     if (drift.hint) hints.push(drift.hint);
+  }
+  const switches = readDatabaseSwitches(resolution.root);
+  const off = [!switches.database ? "database_guard" : null, !switches.test ? "database_test_guard" : null].filter((k) => k !== null);
+  if (off.length > 0) {
+    hints.push(
+      `For the DEV: the database guard is switched off in .rsct.json (${off.map((k) => `${k}: false`).join(", ")}) \u2014 ` + (!switches.database ? "commands that change a database are NOT refused in this project." : "the Laravel test check is off; other database-changing commands are still refused.") + " Switching it back on is the developer's own edit of .rsct.json."
+    );
   }
   return {
     mcp_server: { name: "rsct-mcp", version: MCP_VERSION },
@@ -28413,6 +28504,7 @@ function deriveAuditCeiling(projectRoot, config2) {
     classifyEvidencePresent: false,
     auditTierMax: null,
     unverifiedDecisions: /* @__PURE__ */ new Set(),
+    legacyBaselineDecisions: /* @__PURE__ */ new Set(),
     deadCodeKeepDecisions: /* @__PURE__ */ new Set(),
     publicApiApprovals: /* @__PURE__ */ new Set()
   };
@@ -28428,6 +28520,7 @@ function deriveAuditCeiling(projectRoot, config2) {
   let maxRank = -1;
   let auditTierMax = null;
   const unverifiedDecisions = /* @__PURE__ */ new Set();
+  const legacyBaselineDecisions = /* @__PURE__ */ new Set();
   const deadCodeKeepDecisions = /* @__PURE__ */ new Set();
   const publicApiApprovals = /* @__PURE__ */ new Set();
   for (const line2 of raw.split("\n")) {
@@ -28450,7 +28543,9 @@ function deriveAuditCeiling(projectRoot, config2) {
         auditTierMax = entry.tier;
       }
     } else if (event === "review.unverified_decision" && entry.answer === "yes" && typeof entry.path === "string" && typeof entry.blob === "string") {
-      unverifiedDecisions.add(decisionKey(entry.path, entry.blob));
+      const key = decisionKey(entry.path, entry.blob);
+      if (entry.reason === "legacy_baseline") legacyBaselineDecisions.add(key);
+      else unverifiedDecisions.add(key);
     } else if (event === DEAD_CODE_KEPT_EVENT && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
       deadCodeKeepDecisions.add(deadCodeKeepKey(entry.path, entry.name, entry.declaration_sha256));
     } else if (event === PUBLIC_API_APPROVED_EVENT && typeof entry.public_api_sha256 === "string" && typeof entry.path === "string" && typeof entry.name === "string" && typeof entry.declaration_sha256 === "string") {
@@ -28461,6 +28556,7 @@ function deriveAuditCeiling(projectRoot, config2) {
     classifyEvidencePresent,
     auditTierMax,
     unverifiedDecisions,
+    legacyBaselineDecisions,
     deadCodeKeepDecisions,
     publicApiApprovals
   };
@@ -39162,8 +39258,8 @@ var Module2 = (() => {
     var moduleRtn;
     var Module = moduleArg;
     var readyPromiseResolve, readyPromiseReject;
-    var readyPromise = new Promise((resolve9, reject2) => {
-      readyPromiseResolve = resolve9;
+    var readyPromise = new Promise((resolve10, reject2) => {
+      readyPromiseResolve = resolve10;
       readyPromiseReject = reject2;
     });
     var ENVIRONMENT_IS_WEB = typeof window == "object";
@@ -39245,13 +39341,13 @@ var Module2 = (() => {
         }
         readAsync = /* @__PURE__ */ __name(async (url) => {
           if (isFileURI(url)) {
-            return new Promise((resolve9, reject2) => {
+            return new Promise((resolve10, reject2) => {
               var xhr = new XMLHttpRequest();
               xhr.open("GET", url, true);
               xhr.responseType = "arraybuffer";
               xhr.onload = () => {
                 if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                  resolve9(xhr.response);
+                  resolve10(xhr.response);
                   return;
                 }
                 reject2(xhr.status);
@@ -39474,10 +39570,10 @@ var Module2 = (() => {
       __name(receiveInstantiationResult, "receiveInstantiationResult");
       var info2 = getWasmImports();
       if (Module["instantiateWasm"]) {
-        return new Promise((resolve9, reject2) => {
+        return new Promise((resolve10, reject2) => {
           Module["instantiateWasm"](info2, (mod, inst) => {
             receiveInstance(mod, inst);
-            resolve9(mod.exports);
+            resolve10(mod.exports);
           });
         });
       }
@@ -42042,7 +42138,13 @@ async function sweepTheWorkingTree(projectRoot, options) {
     const base = { path: path2, status, blob, comments: [], allowlist_changes: [], removed: [] };
     const exempt = options.exempt?.get(path2);
     if (exempt) {
-      files.push({ ...base, kind: "unverified", language: scan.language, reason: exempt });
+      files.push({
+        ...base,
+        kind: "unverified",
+        language: scan.language,
+        reason: exempt,
+        ...exempt === "legacy_baseline" && scan.kind === "scanned" && { comment_count: scan.comments.length }
+      });
       continue;
     }
     if (scan.kind === "unverified") {
@@ -42255,7 +42357,8 @@ async function checkStagedSweep(args2) {
       continue;
     }
     const entry = ledgerEntries(args2.ledger, path2).find((e) => e.blob === blob);
-    const authorized = entry?.verdict === "unverified_authorized" && args2.unverifiedDecisions.has(decisionKey(path2, blob));
+    const key = decisionKey(path2, blob);
+    const authorized = entry?.verdict === "unverified_authorized" && (args2.unverifiedDecisions.has(key) || args2.headUnborn && args2.legacyBaselineDecisions.has(key));
     if (scan.kind === "scanned" && scan.comments.length > 0 && !authorized) {
       withComments.push(path2);
       continue;
@@ -43078,7 +43181,7 @@ function createModuleResolver(args2) {
     }
     return [...files];
   };
-  const resolve9 = (fromRel, specifier) => {
+  const resolve10 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
@@ -43164,7 +43267,7 @@ function createModuleResolver(args2) {
     const source = settingsFor(fromRel)?.jsxImportSource;
     return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
   };
-  return { resolve: resolve9, prefixFiles, jsxFactories, jsxRuntimes };
+  return { resolve: resolve10, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -46326,12 +46429,15 @@ async function requestCommitHandler(rawInput, internal = {}) {
       return { ok: false, reject_kind: "review_unreadable", reason: `${refusal.error} No commit was made.`, paths: [] };
     }
     const sweepState = read.state;
+    const ceiling = deriveAuditCeiling(projectRoot, config2 ?? null);
     return checkStagedSweep({
       projectRoot,
       options: { sqlDialect: config2?.sql_dialect, shippedScriptsDir: internal.shippedScriptsDir },
       ledger: sweepState?.review_sweep,
       drift: sweepState?.review_drift,
-      unverifiedDecisions: deriveAuditCeiling(projectRoot, config2 ?? null).unverifiedDecisions
+      unverifiedDecisions: ceiling.unverifiedDecisions,
+      legacyBaselineDecisions: ceiling.legacyBaselineDecisions,
+      headUnborn: ceiling.legacyBaselineDecisions.size > 0 && readHeadBirth(projectRoot).status === "unborn"
     });
   };
   const rejectSweep = (check2, stage) => {
@@ -47051,6 +47157,57 @@ function planCleanupReport(projectRoot, slug, config2, executor = defaultGitExec
   return { slug, artifacts, completion, can_suggest_delete, hint };
 }
 
+// src/lib/push-probe.ts
+init_esm_shims();
+var PUSH_PROBE_TIMEOUT_MS = 2e4;
+var LINE = /^([ +\-*!=])\t([^\t]*)\t(.*)$/;
+var RANGE = /^([0-9a-f]{4,64})\.{2,3}([0-9a-f]{4,64})/i;
+function parsePushPorcelain(stdout) {
+  const refs = [];
+  let url = null;
+  for (const raw of stdout.replace(/\r\n?/g, "\n").split("\n")) {
+    if (raw.startsWith("To ")) {
+      url = raw.slice(3);
+      continue;
+    }
+    if (url === null) continue;
+    const m = LINE.exec(raw);
+    if (!m) continue;
+    const colon = m[2].lastIndexOf(":");
+    if (colon < 0) continue;
+    const range = RANGE.exec(m[3].trim());
+    refs.push({
+      url,
+      flag: m[1],
+      to: m[2].slice(colon + 1),
+      old: range ? range[1] : null,
+      next: range ? range[2] : null
+    });
+  }
+  return refs.length > 0 ? { status: "parsed", refs } : { status: "unavailable" };
+}
+function probeEnv(base) {
+  const env = { ...base, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", SSH_ASKPASS_REQUIRE: "never" };
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+  return env;
+}
+var PROBE_GIT_OPTIONS = ["-c", "core.askPass=", "-c", "credential.helper=", "-c", "credential.interactive=never"];
+var defaultPushProbe = (projectRoot, remote, refspec) => {
+  const r = spawnSync("git", [...PROBE_GIT_OPTIONS, "push", "--dry-run", "--porcelain", "--no-verify", "--", remote, refspec], {
+    cwd: projectRoot,
+    env: probeEnv(process.env),
+    encoding: "utf8",
+    timeout: PUSH_PROBE_TIMEOUT_MS,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 4 * 1024 * 1024
+  });
+  if (r.error || typeof r.stdout !== "string") return { status: "unavailable" };
+  if (r.status !== 0 && r.status !== 1) return { status: "unavailable" };
+  return parsePushPorcelain(r.stdout);
+};
+
 // src/lib/pre-merge-ack.ts
 init_esm_shims();
 var preMergeAckSchema = external_exports.object({
@@ -47167,9 +47324,25 @@ var requestPushInputSchema = external_exports.object({
     'PH-5 pre-integration hygiene checklist (self-attested). Required when pushing to a PROTECTED branch: absence \u21D2 rejected in chat (no OS dialog). Feature/WIP pushes to a non-protected branch do not require it. Set plan_complete/adr_confirmed/issues_resolved true ONLY after confirming each with the dev; when adr_confirmed or issues_resolved is true, `note` must state WHAT (e.g. "ADR-012 recorded; issue #7 closed").'
   )
 }).strict();
+function carriedByProbe(read) {
+  const probed = read.probe(read.projectRoot, read.remote, read.refspec);
+  if (probed.status !== "parsed") return { range: { status: "unavailable" }, parsed: false };
+  const mine = probed.refs.filter((r) => r.to === read.destinationRef);
+  if (mine.length === 0) return { range: { status: "unavailable" }, parsed: false };
+  const paths = /* @__PURE__ */ new Set();
+  for (const r of mine) {
+    if (r.flag === "=" || r.flag === "-") continue;
+    const old = r.old !== null ? resolveCommit(read.projectRoot, r.old) : null;
+    let carried = old !== null ? read.rangeReader(read.projectRoot, old, read.head) : read.treeReader(read.projectRoot, read.head);
+    if (carried.status !== "ok" && old !== null) carried = read.treeReader(read.projectRoot, read.head);
+    if (carried.status !== "ok") return { range: carried, parsed: true };
+    for (const p of carried.paths) paths.add(p);
+  }
+  return { range: { status: "ok", paths: [...paths] }, parsed: true };
+}
 var requestPushTool = {
   name: "rsct_request_push",
-  description: "\xA7C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote> <branch>`. No secrets scan \u2014 the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
+  description: "\xA7C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote>` with an explicit full refspec built from the parsed request (so a remote.<name>.push mapping cannot redirect it). No secrets scan \u2014 the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
   inputSchema: {
     type: "object",
     properties: {
@@ -47289,7 +47462,12 @@ async function requestPushHandler(rawInput, internal = {}) {
   }
   const candidates = new Set(refspec.ok ? refspec.candidates : []);
   let rangeBase = null;
+  let rangeLabel = null;
   let rangeHead = null;
+  let destinationRef = null;
+  let destinationLabel = null;
+  let sourceSha = null;
+  let explicitRefspec = null;
   if (refspec.ok) {
     const rp = gitExecutor(projectRoot, [
       "rev-parse",
@@ -47303,9 +47481,26 @@ async function requestPushHandler(rawInput, internal = {}) {
       destBare = stripRefsPrefix(resolved);
       candidates.add(destBare);
     }
+    destinationLabel = destBare;
+    destinationRef = resolved.startsWith("refs/") ? resolved : refspec.destination.startsWith("refs/") ? refspec.destination : destBare === "HEAD" ? null : `refs/heads/${destBare}`;
+    if (refspec.source.length > 0) {
+      const peel = (rev) => {
+        const sv = gitExecutor(projectRoot, ["rev-parse", "--verify", "-q", `${rev}^{object}`]);
+        const out2 = sv.ok ? sv.stdout.trim() : "";
+        return /^[0-9a-f]{40,64}$/.test(out2) ? out2 : "";
+      };
+      const bare = !refspec.source.startsWith("refs/") && !/^[0-9a-f]{7,64}$/i.test(refspec.source);
+      const head = bare ? peel(`refs/heads/${refspec.source}`) : "";
+      sourceSha = head || peel(refspec.source) || null;
+    }
+    if (destinationRef !== null) {
+      const source = refspec.source.length === 0 ? "" : sourceSha ?? refspec.source;
+      explicitRefspec = `${refspec.forced ? "+" : ""}${source}:${destinationRef}`;
+    }
     if (refspec.source.length > 0 && destBare !== "HEAD") {
-      rangeBase = `${remote}/${destBare}`;
-      rangeHead = refspec.source;
+      rangeLabel = `${remote}/${destBare}`;
+      rangeBase = destinationRef?.startsWith("refs/heads/") ? `refs/remotes/${remote}/${destinationRef.slice("refs/heads/".length)}` : rangeLabel;
+      rangeHead = sourceSha ?? refspec.source;
     }
   }
   const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList));
@@ -47315,15 +47510,83 @@ async function requestPushHandler(rawInput, internal = {}) {
     const source = refspec.ok ? refspec.source : "";
     const pushedBranch = /^(?:head|@)$/i.test(source) ? gitState.branch : source;
     const progressOpen = branchPlansHaveOpenItems(projectRoot, [pushedBranch]);
-    const range = rangeBase !== null && rangeHead !== null ? (internal.rangeReader ?? getRangePaths)(projectRoot, rangeBase, rangeHead) : { status: "unavailable" };
+    const rangeReader = internal.rangeReader ?? getRangePaths;
+    let range = rangeBase !== null && rangeHead !== null ? rangeReader(projectRoot, rangeBase, rangeHead) : { status: "unavailable" };
+    let probeParsed = false;
+    if (range.status === "unavailable" && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
+      const carried = carriedByProbe({
+        projectRoot,
+        remote,
+        refspec: explicitRefspec,
+        destinationRef,
+        head: sourceSha ?? rangeHead,
+        probe: internal.pushProbe ?? defaultPushProbe,
+        treeReader: internal.treeReader ?? getTreePaths,
+        rangeReader
+      });
+      range = carried.range;
+      probeParsed = carried.parsed;
+    }
     crossCheck = describeCrossCheck(range);
+    if (range.status === "ok" && range.paths.length > MAX_FILES_SWEPT) {
+      const reason = `refusing to push: this push carries ${range.paths.length} files, over the ${MAX_FILES_SWEPT} the coverage check can attest. A first publication this large is one the developer pushes by hand in their own terminal.`;
+      const audit2 = appendAudit(
+        projectRoot,
+        { event: "request_push.rejected", tool: "rsct_request_push", reject_kind: "hygiene_range_unreadable", reason, branch, remote, path_crosscheck: crossCheck },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch,
+        remote,
+        channel: null,
+        reject_kind: "hygiene_range_unreadable",
+        reason,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason])
+      };
+    }
     const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
       progressHasOpenItems: progressOpen,
       carriedPaths: range.status === "ok" ? range.paths : null
     });
+    if (ackDecision.ok && range.status !== "ok" && probeParsed) {
+      const reason = crossCheckBlockedReason(range, "push");
+      const audit2 = appendAudit(
+        projectRoot,
+        {
+          event: "request_push.rejected",
+          tool: "rsct_request_push",
+          reject_kind: "hygiene_range_unreadable",
+          reason,
+          branch,
+          remote,
+          path_crosscheck: crossCheck
+        },
+        config2?.audit
+      );
+      return {
+        status: "rejected",
+        branch,
+        remote,
+        channel: null,
+        reject_kind: "hygiene_range_unreadable",
+        reason,
+        fabrication_signals: [],
+        branch_check: { protected: true, override_used: false },
+        ...auditFields(audit2),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason])
+      };
+    }
     if (ackDecision.ok && range.status !== "ok") {
       const named = rangeBase !== null && rangeHead !== null;
-      degradedHint = named ? `\u26A0 pre_merge_ack coverage check DEGRADED (${crossCheck}): the paths this push carries could not be read from git (${rangeBase}...${rangeHead}). The push proceeds \u2014 an unfetched remote-tracking ref is an ordinary state, not a fault \u2014 but files_swept was NOT verified against what is actually being sent. Run \`git fetch ${remote}\` and re-check if that matters here.` : `\u26A0 pre_merge_ack coverage check DEGRADED (${crossCheck}): this push names no readable range \u2014 either it deletes a ref (which carries no files) or its destination could not be resolved to a branch. The push proceeds and files_swept was not verified. Fetching will not change this; name the branch explicitly if you expected a coverage check.`;
+      degradedHint = named ? `\u26A0 pre_merge_ack coverage check DEGRADED (${crossCheck}): the paths this push carries could not be read from git (${rangeLabel}...${rangeHead}). The push proceeds \u2014 an unfetched remote-tracking ref is an ordinary state, not a fault \u2014 but files_swept was NOT verified against what is actually being sent. Run \`git fetch ${remote}\` and re-check if that matters here.` : `\u26A0 pre_merge_ack coverage check DEGRADED (${crossCheck}): this push names no readable range \u2014 either it deletes a ref (which carries no files) or its destination could not be resolved to a branch. The push proceeds and files_swept was not verified. Fetching will not change this; name the branch explicitly if you expected a coverage check.`;
       appendAudit(
         projectRoot,
         {
@@ -47332,7 +47595,7 @@ async function requestPushHandler(rawInput, internal = {}) {
           branch,
           remote,
           path_crosscheck: crossCheck,
-          range_base: rangeBase,
+          range_base: rangeLabel,
           range_head: rangeHead
         },
         config2?.audit
@@ -47383,6 +47646,10 @@ async function requestPushHandler(rawInput, internal = {}) {
       message: [
         `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
         ...refspec.ok && refspec.destination !== refspec.source ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`] : [],
+        ...sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : [],
+        ...branchProtected && crossCheck === "degraded" ? [
+          "\u26A0 files_swept NOT checked: RSCT could not read what this push carries." + (rangeHead !== null ? ` If the remote has no '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' yet, this push carries the whole branch.` : "")
+        ] : [],
         ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []
       ].join("\n") + gateDialogFooter(projectRoot, config2)
     },
@@ -47496,7 +47763,7 @@ async function requestPushHandler(rawInput, internal = {}) {
       hints: withAdvisories([reason])
     };
   }
-  const push = gitPush(projectRoot, remote, branch, gitExecutor);
+  const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor);
   if (!push.ok) {
     const reason = push.error ?? push.stderr ?? "git push failed";
     const audit2 = appendAudit(
@@ -51760,7 +52027,7 @@ var dispositionSchema = external_exports.object({
 }).strict();
 var exemptFileSchema = external_exports.object({
   path: external_exports.string().min(1),
-  reason: external_exports.enum(["generated", "vendored"])
+  reason: external_exports.enum(["generated", "vendored", "legacy_baseline"])
 }).strict();
 var deadCodeKeepSchema = external_exports.object({
   path: external_exports.string().min(1),
@@ -51791,7 +52058,7 @@ var phaseReviewCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated or vendored go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -51851,13 +52118,13 @@ var phaseReviewCompleteTool = {
       },
       exempt_files: {
         type: "array",
-        description: "Generated or vendored code files that keep their comments, as repository-relative or project-relative paths (either slash). Each goes to the developer-only unverified dialog, bound to its exact version.",
+        description: "Code files that keep their comments, as repository-relative or project-relative paths (either slash): generated, vendored, or legacy_baseline \u2014 comments that predate the rule, accepted only for the first commit of a branch (HEAD has no commit yet). Each goes to the developer-only unverified dialog, bound to its exact version; a legacy_baseline approval counts at commit only while the branch still has no commit.",
         items: {
           type: "object",
           required: ["path", "reason"],
           properties: {
             path: { type: "string" },
-            reason: { type: "string", enum: ["generated", "vendored"] }
+            reason: { type: "string", enum: ["generated", "vendored", "legacy_baseline"] }
           },
           additionalProperties: false
         }
@@ -51990,6 +52257,12 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
     return reject({ ...base, rejectKind: "sweep_input_invalid", reason, hints: [reason], comment_sweep: null });
   }
   const dispositions = sweepInput.data.comment_dispositions ?? [];
+  const legacyAsked = (sweepInput.data.exempt_files ?? []).some((e) => e.reason === "legacy_baseline");
+  const birth = legacyAsked ? readHeadBirth(projectRoot) : null;
+  if (birth !== null && birth.status !== "unborn") {
+    const reason = birth.status === "born" ? "legacy_baseline is accepted only for the first commit of a branch, and HEAD already has a commit \u2014 remove the comments in this REVIEW, or the developer commits these files in their own terminal" : `legacy_baseline needs a branch with no commit yet, and git could not tell (${birth.detail}) \u2014 only the developer can commit these files in their own terminal`;
+    return reject({ ...base, rejectKind: "legacy_baseline_refused", reason, hints: [reason], comment_sweep: null });
+  }
   const precheck = precheckPhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
     config2,
@@ -52145,10 +52418,18 @@ async function phaseReviewCompleteHandler(rawInput, internal = {}) {
         comment_sweep: summary
       });
     }
+    const legacy = unverified.filter((f) => f.reason === "legacy_baseline");
+    const commits = legacy.length > 0 ? countRepositoryCommits(projectRoot) : null;
+    const legacyLine = legacy.length > 0 && birth?.status === "unborn" ? `
+
+legacy_baseline (${legacy.length} file(s)): the first commit of branch '${specLabel(birth.branch, 100)}', which has no commit yet. This repository has ${commits ?? "an unknown number of"} commit(s) on its other refs. RSCT did NOT check that these comments predate the rule.` : "";
     const dialog = await promptFn({
       title: `RSCT \u2014 ${unverified.length} file(s) the comment sweep cannot verify`,
-      message: "These exact file versions would become committable WITHOUT a mechanical comment or dead-code check. Yes = allow these versions. No = reject this REVIEW." + gateDialogFooter(projectRoot) + "\n\n" + dialogList(
-        unverified.map((f) => `${f.path} \u2014 ${f.reason} (${(f.blob ?? "").slice(0, 10)})`),
+      message: "These exact file versions would become committable WITHOUT a mechanical comment or dead-code check. Yes = allow these versions. No = reject this REVIEW." + legacyLine + gateDialogFooter(projectRoot) + "\n\n" + dialogList(
+        unverified.map((f) => {
+          const counted = f.reason === "legacy_baseline" ? `, comments: ${f.comment_count ?? "not counted"}` : "";
+          return `${f.path} \u2014 ${f.reason}${counted} (${(f.blob ?? "").slice(0, 10)})`;
+        }),
         40,
         DIALOG_UNCUT
       ) + `

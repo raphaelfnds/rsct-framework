@@ -275,7 +275,7 @@ describe('rsct_request_push — failure surfaces', () => {
     }
     const internal: RequestPushInternal = {
       gitStateOverride: gitState('feat/foo'),
-      gitExecutor: gitExec({ 'push -- origin feat/foo': pushFail }),
+      gitExecutor: gitExec({ 'push -- origin feat/foo:refs/heads/feat/foo': pushFail }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
     }
@@ -289,7 +289,7 @@ describe('rsct_request_push — failure surfaces', () => {
 
     const out2 = (await requestPushHandler(
       { project_root: tmpRoot, dev_approval: approval() },
-      { ...internal, gitExecutor: gitExec({ 'push -- origin feat/foo': PUSH_OK }) },
+      { ...internal, gitExecutor: gitExec({ 'push -- origin feat/foo:refs/heads/feat/foo': PUSH_OK }) },
     )) as RequestPushOutput
     expect(out2.status).toBe('pushed')
   })
@@ -715,7 +715,8 @@ describe('rsct_request_push — B5 argv shape', () => {
         gitExecutor: strictGitExec({
           remote: { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 },
           'rev-parse --symbolic-full-name feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
-          'push -- origin feat/foo': PUSH_OK,
+          'rev-parse --verify -q refs/heads/feat/foo^{object}': { ok: true, stdout: `${'a'.repeat(40)}\n`, stderr: '', exitCode: 0 },
+          [`push -- origin ${'a'.repeat(40)}:refs/heads/feat/foo`]: PUSH_OK,
         }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -778,7 +779,7 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
       { project_root: tmpRoot, branch: 'feat/x:main', dev_approval: override(), pre_merge_ack: ack() },
       { rangeReader: spy.fn, gitStateOverride: gitState('feat/x'), gitExecutor: gitExec({ 'push -- origin feat/x:main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
     )
-    expect(spy.seen).toEqual([['origin/main', 'feat/x']])
+    expect(spy.seen).toEqual([['refs/remotes/origin/main', 'feat/x']])
   })
 
   it('reads <remote>/<branch>...<branch> for a plain protected push', async () => {
@@ -788,7 +789,7 @@ describe('rsct_request_push — #62 carried-path coverage cross-check', () => {
       { project_root: tmpRoot, dev_approval: override(), pre_merge_ack: ack() },
       { rangeReader: spy.fn, gitStateOverride: gitState('main'), gitExecutor: gitExec({ 'push -- origin main': PUSH_OK }), promptFn: alwaysYes(), now: FIXED_NOW },
     )
-    expect(spy.seen).toEqual([['origin/main', 'main']])
+    expect(spy.seen).toEqual([['refs/remotes/origin/main', 'main']])
   })
 
   it('fails OPEN — pushes, warns, and audits the degradation', async () => {
@@ -890,7 +891,7 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
   const push = (branch: string) =>
     requestPushHandler(
       { project_root: realRoot, branch, dev_approval: approval(), pre_merge_ack: ack() },
-      { gitStateOverride: gitState('main'), gitExecutor: realExceptPush, promptFn: alwaysYes(), now: FIXED_NOW },
+      { gitStateOverride: gitState('main'), gitExecutor: realExceptPush, pushProbe: () => ({ status: 'unavailable' }), promptFn: alwaysYes(), now: FIXED_NOW },
     ) as Promise<RequestPushOutput>
 
   it.each([['HEAD'], ['@']])(
@@ -907,7 +908,8 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
     g(['checkout', '-qb', 'feat/real'])
     const out = await push('HEAD')
     expect(out.branch_check.protected).toBe(false)
-    expect(attempted).toEqual([['push', '--', 'origin', 'HEAD']])
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: realRoot, encoding: 'utf8' }).trim()
+    expect(attempted).toEqual([['push', '--', 'origin', `${sha}:refs/heads/feat/real`]])
   })
 
   it('recognises refs/heads/main and heads/main through the string arm', async () => {

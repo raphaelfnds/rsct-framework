@@ -127,7 +127,10 @@ misbehaves, that's a bug worth filing.
    gate can still use and the override and skip records stay for good (see "Audit
    log" in `mcp-server/README.md`). A plain `git commit` from Claude's terminal is
    refused by the terminal guard, which names the RSCT tool to call; you can still run
-   it yourself in your own terminal. Without the companion, a commit triggers a
+   it yourself in your own terminal. The same guard refuses commands that change a
+   database (a migration, a reset, a client statement that writes) and, in a Laravel
+   project whose tests are not pointed at a disposable database, the test run — those
+   are yours to run. Without the companion, a commit triggers a
    reauthorization request per the `CLAUDE.md` rules.
 5. **Reverse it.** `/rsct-uninstall` removes what RSCT added to *this
    project* and lists what it keeps; `bash ~/dev/rsct-framework/scripts/uninstall-framework.sh` removes

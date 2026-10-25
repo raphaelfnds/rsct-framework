@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import { cwd } from 'process';
+import 'os';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -4749,14 +4750,61 @@ function readTail(path, maxBytes) {
     closeSync(fd);
   }
 }
+
+// src/lib/terminal-guard.ts
 var GIT_VALUE_OPTIONS = /* @__PURE__ */ new Set(["-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--list-cmds", "--attr-source"]);
+var WRAPPERS = /* @__PURE__ */ new Set(["sudo", "doas", "env", "command", "exec", "nohup", "time", "nice", "xargs", "builtin"]);
+/* @__PURE__ */ new Set([...WRAPPERS, "timeout", "busybox", "stdbuf", "ionice", "chrt", "taskset"]);
 new Set(
   "add am annotate apply archive backfill bisect blame branch bugreport bundle cat-file check-attr check-ignore check-mailmap check-ref-format checkout checkout-index cherry cherry-pick citool clean clone column commit commit-graph commit-tree config count-objects credential credential-cache credential-store describe diagnose diff diff-files diff-index diff-pairs diff-tree difftool fast-export fast-import fetch fetch-pack filter-branch fmt-merge-msg for-each-ref for-each-repo format-patch fsck fsck-objects gc get-tar-commit-id grep gui hash-object help hook http-backend http-fetch http-push imap-send index-pack init init-db instaweb interpret-trailers last-modified log ls-files ls-remote ls-tree mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-one-file merge-tree mergetool mktag mktree multi-pack-index mv name-rev notes pack-objects pack-redundant pack-refs patch-id prune prune-packed pull push quiltimport range-diff read-tree rebase receive-pack reflog refs remote repack replace replay repo request-pull rerere reset restore rev-list rev-parse revert rm scalar send-email send-pack sh-i18n sh-setup shortlog show show-branch show-index show-ref sparse-checkout stage stash status stripspace submodule switch symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive upload-pack var verify-commit verify-pack verify-tag version whatchanged worktree write-tree".split(" ")
 );
+var POSIX_SHELLS = /* @__PURE__ */ new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "yash", "posh"]);
+var POWERSHELLS = /* @__PURE__ */ new Set(["powershell", "pwsh", "powershell_ise"]);
+var NODE_CODE_FLAG = { separate: /^(-e|--eval|-p|--print|-pe|-ep)$/, attached: /^--(?:eval|print)=(.*)$/s };
+var PYTHON_CODE_FLAG = {
+  separate: /^-[bBdEhiIOPqsSuvVxR]*c$/,
+  attached: /^-[bBdEhiIOPqsSuvVxR]*c(.+)$/s,
+  switches: /^-[bBdEhiIOPqsSuvVxR]+$/
+};
+var INTERPRETER_FLAGS = /* @__PURE__ */ new Map([
+  ["node", NODE_CODE_FLAG],
+  ["nodejs", NODE_CODE_FLAG],
+  ["bun", NODE_CODE_FLAG],
+  ["tsx", NODE_CODE_FLAG],
+  ["ts-node", NODE_CODE_FLAG],
+  ["python", PYTHON_CODE_FLAG],
+  ["python3", PYTHON_CODE_FLAG],
+  ["python2", PYTHON_CODE_FLAG],
+  ["py", PYTHON_CODE_FLAG],
+  ["pythonw", PYTHON_CODE_FLAG],
+  ["perl", { separate: /^-[acnpstTuUvwWXl0-9fg]*[eE]$/, attached: /^-[acnpstTuUvwWXl0-9fg]*[eE](.+)$/s, switches: /^-[acnpstTuUvwWXl0-9fg]+$/ }],
+  ["ruby", { separate: /^-[acdlnpsSvwyU0-9]*e$/, attached: /^-[acdlnpsSvwyU0-9]*e(.+)$/s, switches: /^-[acdlnpsSvwyU0-9]+$/ }],
+  ["php", { separate: /^-r$/, attached: /^-r(.+)$/s, switches: /^-[aChHiqsvw]+$/ }]
+]);
 ["-C", ...GIT_VALUE_OPTIONS].join("|");
 function decodeUnicodeEscapes(text) {
   return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
+/* @__PURE__ */ new Set([
+  ...POSIX_SHELLS,
+  ...POWERSHELLS,
+  ...INTERPRETER_FLAGS.keys(),
+  "cmd",
+  "wsl",
+  "ssh",
+  "su",
+  "script",
+  "eval",
+  "env",
+  "deno",
+  "invoke-expression",
+  "iex",
+  "start-process",
+  "saps",
+  "start",
+  "source",
+  "."
+]);
 
 // src/lib/settings-write-guard.ts
 var RSCT_HOOK_MARKERS = [
@@ -4803,34 +4851,42 @@ function namesSettingsFile(path) {
   const name = bare(basename(path));
   return (name === "settings.json" || name === "settings.local.json") && bare(basename(dirname(path))) === ".claude";
 }
-function isClaudeSettingsFile(filePath) {
+function namesRsctConfig(path) {
+  return bare(basename(path)) === ".rsct.json";
+}
+function anySpellingNames(filePath, names) {
   const lexical = resolve(filePath);
   const realDir = realOrNull(dirname(lexical));
   const candidates = [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))];
-  return candidates.some((c) => c !== null && namesSettingsFile(c));
+  return candidates.some((c) => c !== null && names(c));
 }
-function applyEdit(text, edit) {
-  if (!edit || typeof edit !== "object") return text;
+function isClaudeSettingsFile(filePath) {
+  return anySpellingNames(filePath, namesSettingsFile);
+}
+function applyEdit(applied, edit) {
+  if (!edit || typeof edit !== "object") return applied;
   const e = edit;
-  if (typeof e.old_string !== "string" || typeof e.new_string !== "string") return text;
+  if (typeof e.old_string !== "string" || typeof e.new_string !== "string") return applied;
   const from = lf(e.old_string);
   const to = lf(e.new_string);
-  if (from === "") return text === "" ? to : text;
-  if (!text.includes(from)) return text;
-  return e.replace_all === true ? text.split(from).join(to) : text.replace(from, () => to);
+  const text = applied.text;
+  if (from === "") return { text: text === "" ? to : text, missed: applied.missed || text !== "" };
+  if (!text.includes(from)) return { text, missed: true };
+  return { text: e.replace_all === true ? text.split(from).join(to) : text.replace(from, () => to), missed: applied.missed };
 }
 function lf(text) {
   return text.replace(/\r\n/g, "\n");
 }
 function resultingText(toolName, input, current) {
-  if (toolName === "Write") return typeof input.content === "string" ? input.content : null;
-  if (toolName === "Edit") return applyEdit(current, input);
+  if (toolName === "Write") return typeof input.content === "string" ? { text: input.content, missed: false } : null;
+  if (toolName === "Edit") return applyEdit({ text: current, missed: false }, input);
   if (toolName === "MultiEdit") {
     if (!Array.isArray(input.edits)) return null;
-    return input.edits.reduce((text, edit) => applyEdit(text, edit), current);
+    return input.edits.reduce((applied, edit) => applyEdit(applied, edit), { text: current, missed: false });
   }
   return null;
 }
+var INEXACT_EDIT = "this edit does not quote the file exactly, so the guard cannot tell what it would write; an edit of this file must match its text exactly";
 function parseObject(text) {
   try {
     const parsed = JSON.parse(text.replace(/^﻿/, ""));
@@ -4886,12 +4942,34 @@ function changedRsctEntry(before, after) {
   }
   return null;
 }
+var DATABASE_SWITCH_KEYS = ["database_guard", "database_test_guard"];
+function judgeRsctConfigWrite(toolName, input, filePath, read = readOrNull) {
+  if (toolName !== "Write" && toolName !== "Edit" && toolName !== "MultiEdit") return PASS;
+  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS;
+  const current = lf(read(filePath) ?? "");
+  const applied = resultingText(toolName, input, current);
+  if (applied === null) return PASS;
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT };
+  const after = applied.text;
+  const afterJson = parseObject(after);
+  const beforeJson = parseObject(current);
+  for (const key of DATABASE_SWITCH_KEYS) {
+    const offAfter = afterJson ? afterJson[key] === false : new RegExp(`"${key}"\\s*:\\s*false`, "i").test(decodeUnicodeEscapes(after));
+    const offBefore = beforeJson !== null && beforeJson[key] === false;
+    if (offAfter && !offBefore) {
+      return { block: true, reason: `this write would switch the database guard off ("${key}": false in .rsct.json); that is the developer's own edit` };
+    }
+  }
+  return PASS;
+}
 function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
   if (toolName !== "Write" && toolName !== "Edit" && toolName !== "MultiEdit") return PASS;
   if (!isClaudeSettingsFile(filePath)) return PASS;
   const current = lf(read(filePath) ?? "");
-  const after = resultingText(toolName, input, current);
-  if (after === null) return PASS;
+  const applied = resultingText(toolName, input, current);
+  if (applied === null) return PASS;
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT };
+  const after = applied.text;
   const afterJson = parseObject(after);
   const beforeJson = parseObject(current);
   const decodedAfter = decodeUnicodeEscapes(after);
@@ -4973,6 +5051,8 @@ function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
       const absolute = isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath);
       const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute);
       if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` };
+      const configWrite = judgeRsctConfigWrite(toolName, toolInput, absolute);
+      if (configWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (rsct_config): ${configWrite.reason}` };
     }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve });
     const resolution = resolveProjectRoot(projectRoot);
