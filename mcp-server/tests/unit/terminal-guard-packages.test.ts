@@ -62,11 +62,12 @@ const SHOP: Tree = {
   }),
 }
 
-function judge(command: string, opts: { dialect?: ShellDialect; cwd?: string; tree?: Tree; complete?: boolean } = {}): TerminalVerdict {
+function judge(command: string, opts: { dialect?: ShellDialect; cwd?: string; tree?: Tree; complete?: boolean; database?: boolean } = {}): TerminalVerdict {
   return judgeCommand(command, {
     dialect: opts.dialect ?? 'bash',
     cwd: opts.cwd ?? ROOT,
     resolveAlias: NO_ALIASES,
+    database: opts.database,
     ...memoryFs(opts.tree ?? SHOP, opts.complete ?? true),
   })
 }
@@ -335,6 +336,67 @@ describe('terminal guard — package scripts, false refusals closed in REVIEW', 
       expect(judge(c).verdict).toBe('deny')
     }
     expect(judge('cp package.json dist/ && npm test').verdict).toBe('allow')
+  })
+
+  it('skips the hooks a no-scripts switch turns off, but still runs the script named on the command line', () => {
+    const hooks = { 'package.json': pkg({ postinstall: 'git push', pretest: 'git push', test: 'vitest run', release: 'git push', prestage: 'git push', stage: 'echo stage' }) }
+    for (const c of ['npm install --ignore-scripts', 'npm install --ignore-scripts=true', 'npm install --ignore-scripts true', 'npm ci --ignore-scripts', 'npm test --ignore-scripts', 'npm run stage --ignore-scripts']) {
+      expect(judge(c, { tree: hooks }).verdict).toBe('allow')
+    }
+    for (const c of ['npm install', 'npm install --ignore-scripts=false', 'npm install --ignore-scripts false', 'npm --ignore-scripts false install', 'npm run release --ignore-scripts', 'npm run stage -- --ignore-scripts']) {
+      expect(judge(c, { tree: hooks }).verdict).toBe('deny')
+    }
+    expect(judge('npm test --ignore-scripts', { tree: { 'package.json': pkg({ test: 'git push' }) } }).verdict).toBe('deny')
+  })
+
+  it('reads a true or false after a flag as that flag\'s value, the way npm does', () => {
+    expect(judge('npm --json false run release').verdict).toBe('deny')
+    expect(judge('npm --loglevel-quiet true install', { tree: { 'package.json': pkg({ postinstall: 'git push' }) } }).verdict).toBe('deny')
+  })
+
+  it('runs the composer install events but not the create-project ones on composer install', () => {
+    const laravel = { 'composer.json': JSON.stringify({ scripts: { 'post-create-project-cmd': ['git push'], 'post-root-package-install': ['git push'] } }) }
+    expect(judge('composer install', { tree: laravel }).verdict).toBe('allow')
+    expect(judge('composer update', { tree: laravel }).verdict).toBe('allow')
+    expect(judge('composer create-project', { tree: laravel }).verdict).toBe('deny')
+    const install = { 'composer.json': JSON.stringify({ scripts: { 'post-install-cmd': ['git push'] } }) }
+    expect(judge('composer install', { tree: install }).verdict).toBe('deny')
+    expect(judge('composer install --no-scripts', { tree: install }).verdict).toBe('allow')
+  })
+
+  it('honours a no-scripts switch only for npm and composer, never after the script name for pnpm/yarn/bun', () => {
+    const hooks = { 'package.json': pkg({ preship: 'git push', ship: 'echo ship', dbship: 'echo x', predbship: 'git push', pretest: 'git push', test: 'echo t' }) }
+    for (const c of ['pnpm run ship --ignore-scripts', 'yarn run ship --ignore-scripts', 'yarn ship --ignore-scripts', 'bun run ship --ignore-scripts', 'pnpm test --ignore-scripts', 'pnpm run dbship --ignore-scripts']) {
+      expect(judge(c, { tree: hooks }).verdict).toBe('deny')
+    }
+    expect(judge('npm run ship --ignore-scripts', { tree: hooks }).verdict).toBe('allow')
+  })
+
+  it('reads npm t and npm tst as the test script, like npm does', () => {
+    const t = { 'package.json': pkg({ pretest: 'git push', test: 'vitest run' }) }
+    for (const c of ['npm t', 'npm tst', 'pnpm t']) {
+      expect(judge(c, { tree: t }).verdict).toBe('deny')
+    }
+  })
+
+  it('keeps npm start/stop/restart under a no-scripts switch', () => {
+    const tree = { 'package.json': pkg({ start: 'git push', stop: 'git push', restart: 'git push' }) }
+    for (const c of ['npm start --ignore-scripts', 'npm stop --ignore-scripts', 'npm restart --ignore-scripts']) {
+      expect(judge(c, { tree }).verdict).toBe('deny')
+    }
+  })
+
+  it('reads a true or false after an npm flag, but a composer argument is not a flag value', () => {
+    expect(judge('npm --loglevel false run release').verdict).toBe('deny')
+    expect(judge('composer true', { tree: { 'composer.json': JSON.stringify({ scripts: { true: 'git push' } }) } }).verdict).toBe('deny')
+  })
+
+  it('reads a package script a database command runs behind a wrapper', () => {
+    const tree = { 'package.json': pkg({ migrate: 'prisma migrate deploy', build: 'tsc' }) }
+    for (const c of ['docker compose exec app npm run migrate', 'cross-env NODE_ENV=test npm run migrate', 'dotenv -- npm run migrate', 'sail npm run migrate']) {
+      expect(judge(c, { tree, database: true }).verdict).toBe('deny')
+    }
+    expect(judge('docker compose exec app npm run build', { tree, database: true }).verdict).toBe('allow')
   })
 
   it('reads a Windows 8.3 short name as the package file it stands for', () => {

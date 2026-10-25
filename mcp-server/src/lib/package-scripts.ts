@@ -185,10 +185,12 @@ const INSTALL_LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepublish',
 const TEST_LIFECYCLE = ['pretest', 'test', 'posttest']
 const COMPOSER_INSTALL_EVENTS = [
   'pre-install-cmd', 'post-install-cmd', 'pre-update-cmd', 'post-update-cmd', 'pre-autoload-dump', 'post-autoload-dump',
-  'post-root-package-install', 'post-create-project-cmd', 'pre-operations-exec', 'pre-pool-create', 'pre-package-install',
+  'pre-operations-exec', 'pre-pool-create', 'pre-package-install',
   'post-package-install', 'pre-package-update', 'post-package-update', 'pre-package-uninstall', 'post-package-uninstall',
 ]
 const COMPOSER_EVENT_WORDS = new Set(['install', 'i', 'update', 'u', 'upgrade', 'require', 'r', 'remove', 'rm', 'dump-autoload', 'dumpautoload', 'reinstall', 'create-project'])
+const COMPOSER_CREATE_PROJECT_EVENTS = ['post-root-package-install', 'post-create-project-cmd']
+const NO_SCRIPT_SWITCHES = new Set(['--no-scripts', '--ignore-scripts', '--ignore-scripts=true'])
 const COMPOSER_ARCHIVE_EVENTS = ['pre-archive-cmd', 'post-archive-cmd']
 const DIRECT_LIFECYCLE: ReadonlyMap<string, string[]> = new Map([
   ['test', TEST_LIFECYCLE],
@@ -316,6 +318,12 @@ export function planManager(manager: Manager, args: string[]): ManagerPlan {
       continue
     }
     if (a.startsWith('-') && a !== '-') {
+      const takesValue = folderOptions.has(a) || workspaceValues.has(a) || VALUE_OPTIONS.has(a)
+      if (manager !== 'composer' && !takesValue && /^(true|false)$/.test(args[k + 1] ?? '')) {
+        switches.add(`${a}=${args[k + 1]}`)
+        k++
+        continue
+      }
       switches.add(a)
       if (GLOBAL_SWITCHES.has(a)) global = true
       if (workspaceSwitches.has(a)) workspaces = true
@@ -332,6 +340,7 @@ export function planManager(manager: Manager, args: string[]): ManagerPlan {
   }
   const file: PackageFile = manager === 'composer' ? 'composer.json' : 'package.json'
   const first = words[0]?.value
+  const lifecycleFirst = (manager === 'npm' || manager === 'pnpm') && (first === 't' || first === 'tst') ? 'test' : first
   const builtins = FALLBACK_BUILTINS.get(manager)
 
   let nameWord: ArgValue | undefined
@@ -340,6 +349,7 @@ export function planManager(manager: Manager, args: string[]): ManagerPlan {
     if ((first === 'run' || first === 'run-script') && words[1] !== undefined) nameWord = words[1]
     else if (first !== undefined && !COMPOSER_BUILTINS.has(first)) nameWord = words[0]
     if (first !== undefined && COMPOSER_EVENT_WORDS.has(first)) for (const n of COMPOSER_INSTALL_EVENTS) names.add(n)
+    if (first === 'create-project') for (const n of COMPOSER_CREATE_PROJECT_EVENTS) names.add(n)
     if (first === 'archive') for (const n of COMPOSER_ARCHIVE_EVENTS) names.add(n)
     if (nameWord !== undefined) names.add(nameWord.value)
   } else {
@@ -353,13 +363,18 @@ export function planManager(manager: Manager, args: string[]): ManagerPlan {
     }
     if (first !== undefined) {
       if (INSTALL_WORDS.has(first)) for (const n of INSTALL_LIFECYCLE) names.add(n)
-      for (const n of DIRECT_LIFECYCLE.get(first) ?? []) names.add(n)
+      for (const n of DIRECT_LIFECYCLE.get(lifecycleFirst ?? first) ?? []) names.add(n)
       if (first === 'version' && (words.length > 1 || manager === 'yarn')) for (const n of VERSION_HOOKS) names.add(n)
     }
     if (manager === 'yarn' && words.length === 0) for (const n of INSTALL_LIFECYCLE) names.add(n)
     if (nameWord !== undefined) for (const n of withHooks(nameWord.value)) names.add(n)
   }
   if (manager === 'yarn' && WORKSPACE_WORDS.has(first ?? '')) workspaces = true
+  if ((manager === 'npm' || manager === 'composer') && [...switches].some((s) => NO_SCRIPT_SWITCHES.has(s))) {
+    names.clear()
+    if (nameWord !== undefined) names.add(nameWord.value)
+    if (lifecycleFirst !== undefined && ['test', 'start', 'stop', 'restart'].includes(lifecycleFirst)) names.add(lifecycleFirst)
+  }
 
   const nameAt = [...new Set([words[0]?.at, nameWord?.at].filter((n): n is number => n !== undefined))]
 

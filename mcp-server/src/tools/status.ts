@@ -22,6 +22,7 @@ import {
   type UpdateOptions,
 } from '../lib/update-check.js'
 import { getInstallDriftNotice } from '../lib/version-drift.js'
+import { readDatabaseSwitches } from '../lib/database-switches.js'
 
 export const statusInputSchema = z
   .object({
@@ -121,6 +122,17 @@ export async function statusHandler(
       mcpVersion: MCP_VERSION,
     })
     if (drift.hint) hints.push(drift.hint)
+  }
+  const switches = readDatabaseSwitches(resolution.root)
+  const off = [!switches.database ? 'database_guard' : null, !switches.test ? 'database_test_guard' : null].filter((k): k is string => k !== null)
+  if (off.length > 0) {
+    hints.push(
+      `For the DEV: the database guard is switched off in .rsct.json (${off.map((k) => `${k}: false`).join(', ')}) — ` +
+        (!switches.database
+          ? 'commands that change a database are NOT refused in this project.'
+          : 'the Laravel test check is off; other database-changing commands are still refused.') +
+        ' Switching it back on is the developer\'s own edit of .rsct.json.',
+    )
   }
 
   return {

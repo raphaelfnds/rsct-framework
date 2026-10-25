@@ -49,37 +49,51 @@ function namesSettingsFile(path: string): boolean {
   return (name === 'settings.json' || name === 'settings.local.json') && bare(basename(dirname(path))) === '.claude'
 }
 
-export function isClaudeSettingsFile(filePath: string): boolean {
+function namesRsctConfig(path: string): boolean {
+  return bare(basename(path)) === '.rsct.json'
+}
+
+function anySpellingNames(filePath: string, names: (path: string) => boolean): boolean {
   const lexical = resolve(filePath)
   const realDir = realOrNull(dirname(lexical))
   const candidates = [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))]
-  return candidates.some((c) => c !== null && namesSettingsFile(c))
+  return candidates.some((c) => c !== null && names(c))
 }
 
-function applyEdit(text: string, edit: unknown): string {
-  if (!edit || typeof edit !== 'object') return text
+export function isClaudeSettingsFile(filePath: string): boolean {
+  return anySpellingNames(filePath, namesSettingsFile)
+}
+
+type Applied = { text: string; missed: boolean }
+
+function applyEdit(applied: Applied, edit: unknown): Applied {
+  if (!edit || typeof edit !== 'object') return applied
   const e = edit as Record<string, unknown>
-  if (typeof e.old_string !== 'string' || typeof e.new_string !== 'string') return text
+  if (typeof e.old_string !== 'string' || typeof e.new_string !== 'string') return applied
   const from = lf(e.old_string)
   const to = lf(e.new_string)
-  if (from === '') return text === '' ? to : text
-  if (!text.includes(from)) return text
-  return e.replace_all === true ? text.split(from).join(to) : text.replace(from, () => to)
+  const text = applied.text
+  if (from === '') return { text: text === '' ? to : text, missed: applied.missed || text !== '' }
+  if (!text.includes(from)) return { text, missed: true }
+  return { text: e.replace_all === true ? text.split(from).join(to) : text.replace(from, () => to), missed: applied.missed }
 }
 
 function lf(text: string): string {
   return text.replace(/\r\n/g, '\n')
 }
 
-function resultingText(toolName: string, input: Record<string, unknown>, current: string): string | null {
-  if (toolName === 'Write') return typeof input.content === 'string' ? input.content : null
-  if (toolName === 'Edit') return applyEdit(current, input)
+function resultingText(toolName: string, input: Record<string, unknown>, current: string): Applied | null {
+  if (toolName === 'Write') return typeof input.content === 'string' ? { text: input.content, missed: false } : null
+  if (toolName === 'Edit') return applyEdit({ text: current, missed: false }, input)
   if (toolName === 'MultiEdit') {
     if (!Array.isArray(input.edits)) return null
-    return input.edits.reduce<string>((text, edit) => applyEdit(text, edit), current)
+    return input.edits.reduce<Applied>((applied, edit) => applyEdit(applied, edit), { text: current, missed: false })
   }
   return null
 }
+
+const INEXACT_EDIT =
+  'this edit does not quote the file exactly, so the guard cannot tell what it would write; an edit of this file must match its text exactly'
 
 function parseObject(text: string): Record<string, unknown> | null {
   try {
@@ -142,6 +156,33 @@ function changedRsctEntry(before: Record<string, unknown>, after: Record<string,
   return null
 }
 
+const DATABASE_SWITCH_KEYS = ['database_guard', 'database_test_guard'] as const
+
+export function judgeRsctConfigWrite(
+  toolName: string,
+  input: Record<string, unknown>,
+  filePath: string,
+  read: Reader = readOrNull,
+): SettingsWriteVerdict {
+  if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'MultiEdit') return PASS
+  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS
+  const current = lf(read(filePath) ?? '')
+  const applied = resultingText(toolName, input, current)
+  if (applied === null) return PASS
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT }
+  const after = applied.text
+  const afterJson = parseObject(after)
+  const beforeJson = parseObject(current)
+  for (const key of DATABASE_SWITCH_KEYS) {
+    const offAfter = afterJson ? afterJson[key] === false : new RegExp(`"${key}"\\s*:\\s*false`, 'i').test(decodeUnicodeEscapes(after))
+    const offBefore = beforeJson !== null && beforeJson[key] === false
+    if (offAfter && !offBefore) {
+      return { block: true, reason: `this write would switch the database guard off ("${key}": false in .rsct.json); that is the developer's own edit` }
+    }
+  }
+  return PASS
+}
+
 export function judgeSettingsWrite(
   toolName: string,
   input: Record<string, unknown>,
@@ -151,8 +192,10 @@ export function judgeSettingsWrite(
   if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'MultiEdit') return PASS
   if (!isClaudeSettingsFile(filePath)) return PASS
   const current = lf(read(filePath) ?? '')
-  const after = resultingText(toolName, input, current)
-  if (after === null) return PASS
+  const applied = resultingText(toolName, input, current)
+  if (applied === null) return PASS
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT }
+  const after = applied.text
 
   const afterJson = parseObject(after)
   const beforeJson = parseObject(current)
