@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { evaluateEditGuard } from './edit-guard.js'
 import { resolveProjectRootFromArgs } from './hook-project-root.js'
 import { resolveProjectRoot } from './project-root.js'
-import { judgeSettingsWrite } from './settings-write-guard.js'
+import { judgeRsctConfigWrite, judgeSettingsWrite } from './settings-write-guard.js'
 
 export interface GuardDecision {
   exitCode: 0 | 2
@@ -43,6 +43,8 @@ export function decide(
       const absolute = isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath)
       const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute)
       if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` }
+      const configWrite = judgeRsctConfigWrite(toolName, toolInput, absolute)
+      if (configWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (rsct_config): ${configWrite.reason}` }
     }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve })
     const resolution = resolveProjectRoot(projectRoot)

@@ -1,3 +1,4 @@
+import { readDatabaseSwitches } from './database-switches.js'
 import { judgeCommand, type JudgeOptions, type ShellDialect } from './terminal-guard.js'
 
 export interface TerminalGuardDecision {
@@ -46,7 +47,14 @@ export function decideTerminal(
     }
 
     const callCwd = typeof p.cwd === 'string' && p.cwd.length > 0 ? p.cwd : (env.CLAUDE_PROJECT_DIR ?? cwd)
-    const verdict = judgeCommand(command, { ...judge, dialect, cwd: callCwd })
+    const switches = readDatabaseSwitches(env.CLAUDE_PROJECT_DIR ?? callCwd)
+    const verdict = judgeCommand(command, {
+      ...judge,
+      dialect,
+      cwd: callCwd,
+      database: switches.database,
+      databaseTestGuard: switches.test,
+    })
     if (verdict.verdict === 'allow') return { exitCode: 0, message: null }
     return refuse(verdict.reason)
   } catch (err) {

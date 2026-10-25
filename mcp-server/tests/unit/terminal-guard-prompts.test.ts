@@ -37,7 +37,7 @@ describe('terminal guard — the framework\'s own prompt blocks still run', () =
   for (const f of files) {
     it(`allows every bash block of prompts/${f}`, () => {
       const refused = bashBlocks(readFileSync(join(PROMPTS_DIR, f), 'utf8'))
-        .map((b) => ({ ...b, v: judgeCommand(b.code, { resolveAlias: () => ({ found: false }) }) }))
+        .map((b) => ({ ...b, v: judgeCommand(b.code, { resolveAlias: () => ({ found: false }), database: true }) }))
         .filter((b) => b.v.verdict === 'deny')
         .map((b) => `${f}:${b.line} — ${b.v.verdict === 'deny' ? b.v.reason : ''}`)
       expect(refused).toEqual([])

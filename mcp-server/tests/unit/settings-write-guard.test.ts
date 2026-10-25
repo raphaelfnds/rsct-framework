@@ -34,6 +34,25 @@ function blocked(tool: string, input: Record<string, unknown>, file: string): bo
   return judgeSettingsWrite(tool, input, file).block
 }
 
+describe('judgeSettingsWrite — an edit must quote the file exactly', () => {
+  it('refuses an edit whose old text is not in the file, also when it differs only in its quote marks', () => {
+    const root = project({ permissions: { allow: [] } })
+    const file = join(root, '.claude', 'settings.local.json')
+    expect(blocked('Edit', { old_string: '“permissions”', new_string: '"disableAllHooks": true, "permissions"' }, file)).toBe(true)
+    expect(blocked('Edit', { old_string: 'not there', new_string: 'x' }, file)).toBe(true)
+    expect(blocked('Edit', { old_string: '', new_string: '{}' }, file)).toBe(true)
+    expect(blocked('MultiEdit', { edits: [{ old_string: '"allow"', new_string: '"allow"' }, { old_string: 'missing', new_string: 'y' }] }, file)).toBe(true)
+  })
+
+  it('still allows an exact edit, and an edit that fills an empty file', () => {
+    const root = project({ permissions: { allow: [] } })
+    expect(blocked('Edit', { old_string: '"allow": []', new_string: '"allow": ["Bash(ls)"]' }, join(root, '.claude', 'settings.local.json'))).toBe(false)
+    const empty = join(project(null), '.claude', 'settings.local.json')
+    writeFileSync(empty, '')
+    expect(blocked('Edit', { old_string: '', new_string: '{}' }, empty)).toBe(false)
+  })
+})
+
 describe('judgeSettingsWrite — what it refuses', () => {
   it('refuses writing disableAllHooks: true, also when the key is written with a unicode escape', () => {
     const root = project(null)
