@@ -383,19 +383,18 @@ log records `request_commit.tree_drift`.
 - The same status, with "RSCT could not compare the commit", means git committed but RSCT could
   not read the commit back. Check it the same way.
 
-## A commit returns `mutation_failed` and says HEAD moved
+## A commit returns `mutation_failed` and says HEAD moved or the branch changed
 
-`git commit` reported a failure, but HEAD now points at a commit RSCT did not check. Either a
-`pre-commit` hook ran its own `git commit` (git then refuses the outer commit with `cannot lock
-ref 'HEAD'`), or git created this commit and failed afterwards. The audit entry carries
-`head_moved_to`. The approval counts as used and a plan token's action is not refunded.
+`git commit` reported a failure, but HEAD now points at a commit RSCT did not check, or at another
+branch — most likely a git hook. The audit entry carries `head_moved_to` or `head_ref_now`. The
+approval counts as used and a plan token's action is not refunded.
 
-- Look at that commit (`git show <sha>`) before any push.
-- To take it back, `git reset --soft HEAD~1` keeps its changes staged (on a first commit,
+- Look at what is there before any push: `git show <sha>`, or `git log --all --oneline -5` when
+  the branch changed.
+- Switch back to your branch if it changed, and undo only a commit you find that you did not
+  want: `git reset --soft HEAD~1` keeps its changes staged (on a first commit,
   `git update-ref -d HEAD`).
 - Then fix or remove the hook, and ask for the commit again with a fresh approval.
-- If the hint says HEAD now points at another branch, nothing was committed: a hook switched the
-  branch and git refused the commit. Switch back (`git switch <branch>`) and do not run the reset.
 
 ## The first commit of a new repository is refused with `protected_branch`
 

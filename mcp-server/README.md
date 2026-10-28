@@ -1096,8 +1096,7 @@ resulting text would set `"disableAllHooks": true`, change or remove an entry fo
 one of the three RSCT hooks (its event, matcher or any field of the hook), leave a
 settings file that holds RSCT hooks unparseable, or add, change or remove any `env`
 entry — since 2.23.0 every key, not only the ones that change how a hook shell or node starts
-(ADR-041) — or leave a result that does not parse with an `env` block in it. Any other edit of
-those files passes.
+(ADR-041) — or leave a result that does not parse with an `env` block in it.
 
 It needs no server, which cuts both ways: it enforces in a session where
 `rsct-mcp` is not connected, and there it cannot be told the context was

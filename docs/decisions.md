@@ -2776,11 +2776,8 @@ mutant per rule. A project keeps the old guard until `/rsct-setup` refreshes `.r
   ids the commit records (ADR-040).
   - `diff.relative=false` is set through `-c` rather than `--no-relative`, which needs git 2.28 and
     exits 129 on an older git.
-  - `core.fsmonitor` is set empty. MEASURED on git 2.45 and 2.43: an fsmonitor command in the
-    repository config ran 4 times across `diff --cached` and `write-tree`, and 0 times with the
-    empty value or with `false`. Before git 2.36 the setting is a command path, so `false` would
-    run a program of that name; the empty value turns it off on every version (from git's
-    source, not measured on an old git).
+  - `core.fsmonitor` is set empty, which turns it off on every git version (an empty value is
+    accepted both before and after git 2.36 changed what the setting means).
   - The read is streamed line by line into the scanner, so its size has no cap; it is bounded by a
     120 s time budget.
 - File headers are recognised only outside a hunk: the hunk header's counts decide what is content.
@@ -2802,7 +2799,6 @@ would commit, and every read that failed now refuses.
 **What is given up, by name**:
 - Content that lives outside the repository is not scanned: Git LFS and git-annex store a pointer.
 - A file encrypted on the way in (git-crypt) is scanned as ciphertext.
-- A clean filter's output IS scanned, because the scan reads the staged blob.
 - With `--text`, a genuinely binary file is scanned as bytes; a credential-shaped byte run can raise
   a false finding, which the developer answers in the dialog.
 - `secrets_extra_patterns` are the developer's own regexes and are not bounded.
@@ -2839,7 +2835,8 @@ dialog captured.
     `.rsct/reports/commit-contracts-<sha16>.md`;
   - an inactive contract gate.
   Then the agent's reason for each exception, quoted and flattened, then the commit message, last.
-  A commit with nothing to approve beyond itself shows the same dialog as before.
+  A commit with nothing to approve beyond itself shows the same dialog as before, apart from the
+  inactive-contract-gate line, which used to be a hint only.
 - The staged tree (`git write-tree`), HEAD and branch are recorded before the dialog (or token).
   The secrets scan and the contract paths read that recorded tree against HEAD's tree (the empty
   tree for a first commit), so what is scanned is what was recorded. The same three values are
@@ -2861,11 +2858,9 @@ dialog captured.
   could never be cleared. A commit RSCT cannot read back is `committed_with_drift` too, and so is
   a commit that lands with HEAD on another branch than the approved one (a hook that switched it;
   `request_commit.branch_drift`).
-- MEASURED: a `pre-commit` hook that runs its own `git commit` makes RSCT's `git commit` fail
-  (`cannot lock ref 'HEAD'`), while the hook's commit stays on the branch. When the commit fails
-  and HEAD moved, the hints and the audit (`head_moved_to`) say so — or, when a hook switched the
-  branch and git refused the commit, that the branch changed (`head_ref_now`). The approval is
-  recorded as used and a plan token's action is not refunded.
+- When `git commit` fails and HEAD moved or the branch changed meanwhile, the hints and the audit
+  (`head_moved_to`, `head_ref_now`) say so and point at the commit to check before any push. The
+  approval is recorded as used and a plan token's action is not refunded.
 - When a report under `.rsct/reports/` cannot be written, the dialog shows the whole list instead
   of the first 10; a dialog over its size limit is refused, as every dialog is.
 - `rsct_plan_authorize`, `rsct_request_merge` and `rsct_request_rebase` keep refusing a branch
@@ -2894,7 +2889,7 @@ that a hook changed is reported.
   - a formatting hook on a non-code file that does not lock later commits;
   - a hook that changes nothing.
 - `tests/unit/secrets-git-reads.test.ts` covers the tree scan, the empty tree, the
-  `index.lock` retry and a repository fsmonitor command that must not run.
+  `index.lock` retry, and that fsmonitor stays off.
 
 ### ADR-041 — The agent cannot add, change or remove any env entry in Claude Code settings (2.23.0)
 **Status**: active. Extends ADR-028 (the settings write guard).
@@ -2902,9 +2897,7 @@ that a hook changed is reported.
 
 **Context**: READ on `main` @ `148f108`.
 - The settings write guard refused only a fixed list of `env` keys (`NODE_OPTIONS`, `PATH`,
-  `BASH_ENV`, `LD_*`, …).
-- Keys that redirect Claude Code's traffic or trust (`ANTHROPIC_BASE_URL`, proxy and certificate
-  variables, `NODE_TLS_REJECT_UNAUTHORIZED`) and `GIT_*` keys the MCP server inherits passed.
+  `BASH_ENV`, `LD_*`, …); other keys passed.
 
 **Decision**:
 - In `.claude/settings*.json`, every agent add, change or removal of an `env` entry is refused.
@@ -2915,8 +2908,7 @@ that a hook changed is reported.
 hand.
 
 **What is given up, by name**:
-- The guard judges the agent's Write/Edit/MultiEdit calls only. A write from a shell script is not
-  refused here (ADR-028).
+- ADR-028's named limits apply.
 - The guard is a hook: it reaches a project only through `/rsct-setup`.
 
 **Consequences**: `tests/unit/settings-write-guard.test.ts` covers every env case. Two earlier
