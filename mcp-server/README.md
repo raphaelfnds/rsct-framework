@@ -867,7 +867,8 @@ Since 2.23.0 (ADR-039, ADR-040):
   that needs an exception the request does not carry is refused before any dialog opens.
 - The dialog lists each exception it approves: the protected branch, each secret finding as
   `"file":line — rule` (never the value; over 10 goes to `.rsct/reports/commit-secrets-*.md`), the
-  contract surfaces with their declared consumers, and an inactive contract gate. Then come the
+  contract surfaces with their declared consumers (over 10 of either goes to
+  `.rsct/reports/commit-contracts-*.md`), and an inactive contract gate. Then come the
   agent's reasons, then the commit message.
 - The staged tree, HEAD and branch are recorded before the dialog; the secrets scan and the
   contract paths read that recorded tree. All three are checked again right before `git commit`

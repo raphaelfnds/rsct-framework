@@ -115,7 +115,7 @@ const STAGED_PATHS_UNREADABLE =
 const STAGED_STATE_UNREADABLE =
   'git could not record what is staged for this commit, so it is refused rather than committed unchecked — retry, or the developer commits this by hand in their own terminal'
 
-const DIALOG_FINDINGS_SHOWN = 10
+const DIALOG_LIST_SHOWN = 10
 
 interface CommitOverrides {
   branch?: { reason: string } | undefined
@@ -160,10 +160,9 @@ function findingLabel(finding: SecretFinding): string {
   return `"${finding.file}":${finding.line_number ?? '?'} — ${findingRule(finding)}`
 }
 
-function writeSecretsReport(projectRoot: string, findings: readonly SecretFinding[]): string | null {
-  const lines = ['# Secret scan findings for one commit approval', '', ...findings.map((f) => `- ${findingLabel(f)} — ${f.excerpt}`), '']
-  const content = lines.join('\n')
-  const rel = join('.rsct', 'reports', `commit-secrets-${createHash('sha256').update(content).digest('hex').slice(0, 16)}.md`)
+function writeListReport(projectRoot: string, kind: string, title: string, entries: readonly string[]): string | null {
+  const content = [`# ${title}`, '', ...entries.map((e) => `- ${e}`), ''].join('\n')
+  const rel = join('.rsct', 'reports', `commit-${kind}-${createHash('sha256').update(content).digest('hex').slice(0, 16)}.md`)
   try {
     mkdirSync(join(projectRoot, '.rsct', 'reports'), { recursive: true })
     writeFileSync(join(projectRoot, rel), content, 'utf8')
@@ -175,6 +174,11 @@ function writeSecretsReport(projectRoot: string, findings: readonly SecretFindin
 
 function quoted(text: string): string {
   return `"${specLabel(text)}"`
+}
+
+function inlineList(items: readonly string[]): string {
+  const shown = items.slice(0, DIALOG_LIST_SHOWN).map(quoted).join(', ')
+  return items.length > DIALOG_LIST_SHOWN ? `${shown} … and ${items.length - DIALOG_LIST_SHOWN} more` : shown
 }
 
 function commitExceptionLines(
@@ -194,15 +198,27 @@ function commitExceptionLines(
   }
   if (facts.findings.length > 0) {
     lines.push(`⚠ The secrets scan found ${facts.findings.length} line(s) that look like a credential (file:line — rule; values are never shown):`)
-    lines.push(dialogList(facts.findings.map(findingLabel), DIALOG_FINDINGS_SHOWN))
-    if (facts.findings.length > DIALOG_FINDINGS_SHOWN) {
-      const report = writeSecretsReport(projectRoot, facts.findings)
+    lines.push(dialogList(facts.findings.map(findingLabel), DIALOG_LIST_SHOWN))
+    if (facts.findings.length > DIALOG_LIST_SHOWN) {
+      const report = writeListReport(
+        projectRoot,
+        'secrets',
+        'Secret scan findings for one commit approval',
+        facts.findings.map((f) => `${findingLabel(f)} — ${f.excerpt}`),
+      )
       lines.push(report ? `Full list: ${report}` : 'The full list is in this tool result.')
     }
   }
   if (facts.contract.ids.length > 0) {
-    const consumers = facts.contract.consumers.length > 0 ? facts.contract.consumers.map(quoted).join(', ') : 'none listed'
-    lines.push(`⚠ This commit changes contract surface ${facts.contract.ids.map(quoted).join(', ')}; declared consumers: ${consumers}.`)
+    const { ids, consumers } = facts.contract
+    lines.push(`⚠ This commit changes contract surface ${inlineList(ids)}; declared consumers: ${consumers.length > 0 ? inlineList(consumers) : 'none listed'}.`)
+    if (ids.length > DIALOG_LIST_SHOWN || consumers.length > DIALOG_LIST_SHOWN) {
+      const report = writeListReport(projectRoot, 'contracts', 'Contract surfaces for one commit approval', [
+        ...ids.map((id) => `surface ${JSON.stringify(id)}`),
+        ...consumers.map((c) => `consumer ${JSON.stringify(c)}`),
+      ])
+      lines.push(report ? `Full list: ${report}` : 'The full list is in this tool result.')
+    }
   }
   if (facts.contract.inactive) {
     lines.push('⚠ The contract gate is inactive: no readable contracts.json for this universe, so cross-repo impact is not checked.')

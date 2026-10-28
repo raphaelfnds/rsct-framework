@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
@@ -222,5 +222,58 @@ describe.skipIf(!GIT)('the commit is exactly what the developer approved', () =>
     git('add', 'b.txt')
     const { out } = await commit(approval())
     expect(out.status).toBe('committed')
+  })
+})
+
+describe.skipIf(!GIT)('the commit dialog cuts a long contract list', () => {
+  const pad = (i: number): string => String(i).padStart(2, '0')
+
+  async function contractCommit(contracts: Array<{ id: string; dirs: number[]; consumers: string[] }>): Promise<{ text: string; report: string | null }> {
+    initRepo()
+    const universe = mkdtempSync(join(tmpdir(), 'rsct-dialog-uni-'))
+    try {
+      mkdirSync(join(universe, 'applications', 'registered-app'), { recursive: true })
+      writeFileSync(join(universe, '.universe.json'), JSON.stringify({ name: 'x', registered_apps: ['registered-app'] }))
+      const graph = contracts.map((c) => ({ id: c.id, producer: 'registered-app', surface: c.dirs.map((d) => `api/c${d}/**`), consumers: c.consumers }))
+      writeFileSync(join(universe, 'contracts.json'), JSON.stringify({ contract_version: '1.0.0', contracts: graph }))
+      writeFileSync(
+        join(root, '.rsct.json'),
+        JSON.stringify({ rsct_version: '1.0.0', app: { name: 'registered-app', org: 'acme' }, topology: { mode: 'multi-repo' }, universe: { local: universe } }),
+      )
+      for (const d of contracts.flatMap((c) => c.dirs)) {
+        mkdirSync(join(root, 'api', `c${d}`), { recursive: true })
+        writeFileSync(join(root, 'api', `c${d}`, 'spec.yaml'), `v: ${d}\n`)
+      }
+      git('add', 'api')
+      const { out, dialogs } = await commit(approval({ override_contract_surface: { reason: 'coordinated bump' } }))
+      expect(out.status).toBe('committed')
+      const text = dialogs[0]!
+      const rel = /Full list: (\.rsct\/reports\/commit-contracts-[0-9a-f]{16}\.md)/.exec(text)?.[1]
+      return { text, report: rel === undefined ? null : readFileSync(join(root, rel), 'utf8') }
+    } finally {
+      rmSync(universe, { recursive: true, force: true })
+    }
+  }
+
+  it('shows ten contract surfaces and ten consumers, and writes the full lists to a report', async () => {
+    const { text, report } = await contractCommit(Array.from({ length: 12 }, (_, i) => ({ id: `surface-${pad(i)}`, dirs: [i], consumers: [`consumer-${pad(i)}`] })))
+    expect(text).toContain('"surface-09" … and 2 more; declared consumers: ')
+    expect(text).not.toContain('"surface-10"')
+    expect(text).toContain('"consumer-09" … and 2 more.')
+    expect(report?.match(/^- surface "surface-\d+"$/gm)).toHaveLength(12)
+    expect(report?.match(/^- consumer "consumer-\d+"$/gm)).toHaveLength(12)
+  })
+
+  it('writes the report when only the consumers are too many', async () => {
+    const { text, report } = await contractCommit([{ id: 'one-surface', dirs: [0], consumers: Array.from({ length: 12 }, (_, i) => `consumer-${pad(i)}`) }])
+    expect(text).toContain('contract surface "one-surface"; declared consumers: ')
+    expect(text).toContain('"consumer-09" … and 2 more.')
+    expect(report?.match(/^- consumer "consumer-\d+"$/gm)).toHaveLength(12)
+  })
+
+  it('writes no report when every name fits', async () => {
+    const { text, report } = await contractCommit([{ id: 'one-surface', dirs: [0], consumers: ['web'] }])
+    expect(text).toContain('⚠ This commit changes contract surface "one-surface"; declared consumers: "web".')
+    expect(report).toBeNull()
   })
 })

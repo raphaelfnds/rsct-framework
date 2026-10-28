@@ -37,6 +37,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     the overrides filled in by the agent. They now run before the dialog.
   - The dialog lists the protected branch, each secret finding (`"file":line — rule`, never the
     value), the contract surfaces and their consumers, then the agent's reason for each exception.
+    Over 10 findings, surfaces or consumers, the dialog shows the first 10 and names a report under
+    `.rsct/reports/` with the full list.
   - A check that needs an exception the request does not carry is refused before any dialog opens.
   - The staged tree, HEAD and branch are recorded before the dialog, the scan reads that recorded
     tree, and all three are checked again right before `git commit` (`staged_changed`).
