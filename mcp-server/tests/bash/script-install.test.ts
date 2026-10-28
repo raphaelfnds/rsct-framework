@@ -8,7 +8,7 @@ import { bashBin } from './lib/resolve-bash.js'
 
 const BASH = bashAvailable()
 
-const THIS_IS_WSL = (() => {
+const THIS_IS_WSL = process.platform === 'linux' && (() => {
   try {
     return /microsoft|wsl/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8'))
   } catch {
