@@ -252,6 +252,13 @@ describe.skipIf(!GIT)('a read that fails is a refusal, never an empty scan', () 
     if (process.platform === 'win32') expect(performance.now() - started).toBeLessThan(1800)
   })
 
+  it('a zero time budget stops the read at once, however fast git is', async () => {
+    initRepo()
+    for (let i = 0; i < 5; i++) {
+      expect(await streamGitLines(root, ['--version'], () => {}, 0)).toEqual({ ok: false, reason: 'git did not finish reading within 0 ms' })
+    }
+  })
+
   it('fails when the line consumer throws, even once', async () => {
     initRepo()
     let calls = 0
