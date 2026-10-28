@@ -70,10 +70,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Run the installer from an updated clone (`scripts/install.sh`, with `--wsl` for a Claude Code
   inside WSL) and restart the IDE: the commit scan and the commit dialog travel with `rsct-mcp`.
-- The first commit of a new repository on `main` (or any protected branch) now asks for the
-  protected-branch exception: approve it in the dialog, or start on a feature branch.
 - Then run `/rsct-setup` in each project: its bundled copy of the edit guard (`.rsct/scripts/`) is
   refreshed with the env rule. A project not re-set-up keeps the old guard.
+- The first commit of a new repository on `main` (or any protected branch) now asks for the
+  protected-branch exception: approve it in the dialog, or start on a feature branch.
 
 ## [2.22.0] - 2026-10-25
 
