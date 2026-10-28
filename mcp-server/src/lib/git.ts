@@ -20,7 +20,7 @@ export function readGitState(projectRoot: string): GitState {
     ? symbolic.slice(BRANCH_REF_PREFIX.length)
     : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
-  const status = safeGit(projectRoot, ['status', '--porcelain'])
+  const status = safeGit(projectRoot, ['-c', 'core.fsmonitor=', 'status', '--porcelain'])
 
   return {
     available: true,
@@ -36,9 +36,9 @@ export function branchRef(branch: string | null): string | null {
   return branch === null || branch === 'HEAD' ? null : `${BRANCH_REF_PREFIX}${branch}`
 }
 
-export function readHeadCommit(projectRoot: string): string | null {
-  const head = gitReadC(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).stdout.trim()
-  return OBJECT_ID.test(head) ? head : null
+export function readHeadRef(projectRoot: string): string | null {
+  const ref = gitReadC(projectRoot, ['symbolic-ref', '-q', 'HEAD']).stdout.trim()
+  return ref.length > 0 ? ref : null
 }
 
 const GATE_READ_CONFIG: readonly string[] = [

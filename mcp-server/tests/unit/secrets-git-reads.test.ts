@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { baseTreeOf, getStagedPaths, gitRepoStatus, readStagedTreeState, streamGitLines } from '../../src/lib/git.js'
+import { baseTreeOf, getStagedPaths, gitRepoStatus, readGitState, readStagedTreeState, streamGitLines } from '../../src/lib/git.js'
 import { scanGitDiff, scanTreeDiff } from '../../src/lib/staged-scan.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import { checkSecretsHandler } from '../../src/tools/check-secrets.js'
@@ -165,7 +165,10 @@ describe.skipIf(!GIT)('the staged scan reads what git will commit, whatever the 
     expect(await stagedFiles()).toEqual(['a.env'])
     expect(getStagedPaths(root)).toEqual(['a.env'])
     expect((await readStagedTreeState(root))?.tree).toMatch(/^[0-9a-f]{40,64}$/)
+    expect(readGitState(root).is_clean).toBe(false)
     expect(existsSync(join(root, 'fsmonitor-ran.txt'))).toBe(false)
+    git('status', '--porcelain')
+    expect(existsSync(join(root, 'fsmonitor-ran.txt'))).toBe(true)
   })
 
   it('lists both sides of a staged rename', () => {

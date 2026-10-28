@@ -14,7 +14,8 @@ import {
   readCommittedTree,
   readGitState,
   readHeadBirth,
-  readHeadCommit,
+  readHeadRef,
+  resolveCommit,
   readStagedTreeState,
   baseTreeOf,
   branchRef,
@@ -186,8 +187,8 @@ function inlineList(items: readonly string[], limit: number): string {
   return items.length > limit ? `${shown} … and ${items.length - limit} more` : shown
 }
 
-function shownLimit(cut: boolean, report: string | null): number {
-  return cut && report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN
+function shownLimit(report: string | null): number {
+  return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN
 }
 
 function commitExceptionLines(
@@ -216,7 +217,7 @@ function commitExceptionLines(
             facts.findings.map((f) => `${findingLabel(f)} — ${f.excerpt}`),
           )
         : null
-    lines.push(dialogList(facts.findings.map(findingLabel), shownLimit(facts.findings.length > DIALOG_LIST_SHOWN, report)))
+    lines.push(dialogList(facts.findings.map(findingLabel), shownLimit(report)))
     if (report !== null) lines.push(`Full list: ${report}`)
   }
   if (facts.contract.ids.length > 0) {
@@ -228,7 +229,7 @@ function commitExceptionLines(
           ...consumers.map((c) => `consumer ${JSON.stringify(c)}`),
         ])
       : null
-    const limit = shownLimit(cut, report)
+    const limit = shownLimit(report)
     lines.push(`⚠ This commit changes contract surface ${inlineList(ids, limit)}; declared consumers: ${consumers.length > 0 ? inlineList(consumers, limit) : 'none listed'}.`)
     if (report !== null) lines.push(`Full list: ${report}`)
   }
@@ -1092,10 +1093,11 @@ export async function requestCommitHandler(
   const commit = gitCommit(projectRoot, input.message, gitExecutor)
   if (!commit.ok) {
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
-    const headNow = approvedState.tree === null ? null : readHeadCommit(projectRoot)
+    const headNow = approvedState.tree === null ? null : resolveCommit(projectRoot, 'HEAD')
     const movedTo = headNow !== null && headNow !== approvedState.head ? headNow : null
-    let refundNote = ''
-    if (tokenCtx) {
+    if (approval && movedTo !== null) recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
+    let refundNote = movedTo === null ? '' : ' The reserved token action was NOT refunded: a commit landed.'
+    if (tokenCtx && movedTo === null) {
       const fresh = readPhaseState(projectRoot)
       const stillReserved = fresh.parse_error === undefined && sameToken(readToken(fresh.state), reservedToken!)
       const refund = stillReserved
@@ -1149,13 +1151,14 @@ export async function requestCommitHandler(
       anti_replay_error: null,
       hints: withAdvisories([
         ...(movedTo === null
-          ? []
+          ? [
+              authorizedVia === 'plan_token'
+                ? `git commit failed — fix the underlying error and retry.${refundNote}`
+                : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
+            ]
           : [
-              `⚠ git did not create this commit, but HEAD moved to ${movedTo.slice(0, 12)} meanwhile — most likely a git hook committed on its own. That commit was not approved: check it (\`git show ${movedTo.slice(0, 12)}\`) before any push.`,
+              `⚠ git commit reported a failure, but HEAD moved to ${movedTo.slice(0, 12)} meanwhile: a commit landed that RSCT did not check — a git hook's own commit, or this commit with an error after it. Check it (\`git show ${movedTo.slice(0, 12)}\`) before any push, and ask again with a fresh approval.${refundNote}`,
             ]),
-        authorizedVia === 'plan_token'
-          ? `git commit failed — fix the underlying error and retry.${refundNote}`
-          : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
       ]),
     }
   }
@@ -1166,7 +1169,8 @@ export async function requestCommitHandler(
   const bookkeepingHints: string[] = []
 
   const treeDrift = async (cleanRewrites: ReadonlySet<string>): Promise<{ paths: string[]; secrets: number; unverified: boolean }> => {
-    if (!commit.sha_after || approvedState.tree === null) return { paths: [], secrets: 0, unverified: false }
+    if (approvedState.tree === null) return { paths: [], secrets: 0, unverified: false }
+    if (!commit.sha_after) return { paths: [], secrets: 0, unverified: true }
     const landed = readCommittedTree(projectRoot, commit.sha_after)
     if (landed === null) return { paths: [], secrets: 0, unverified: true }
     if (landed.tree === approvedState.tree && landed.parent === approvedState.head) return { paths: [], secrets: 0, unverified: false }
@@ -1268,6 +1272,18 @@ export async function requestCommitHandler(
   }
   const tree = await treeDrift(cleanRewritePaths)
   reportTreeDrift(tree)
+  const landedRef = approvedState.tree === null ? approvedState.ref : readHeadRef(projectRoot)
+  const branchMoved = landedRef !== approvedState.ref
+  if (branchMoved) {
+    appendAudit(
+      projectRoot,
+      { event: 'request_commit.branch_drift', tool: 'rsct_request_commit', approved_ref: approvedState.ref, landed_ref: landedRef, sha_after: commit.sha_after },
+      config?.audit,
+    )
+    bookkeepingHints.push(
+      `⚠ the commit landed with HEAD on ${landedRef ?? 'no branch'}, not on the approved ${approvedState.ref ?? 'detached HEAD'} — most likely a git hook switched the branch during the commit. Check where the commit went (\`git log --all --oneline -3\`) before any push.`,
+    )
+  }
 
   if (approval) {
     const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
@@ -1362,7 +1378,7 @@ export async function requestCommitHandler(
   }
 
   return {
-    status: sweepDrift.length > 0 || tree.paths.length > 0 || tree.unverified ? 'committed_with_drift' : 'committed',
+    status: sweepDrift.length > 0 || tree.paths.length > 0 || tree.unverified || branchMoved ? 'committed_with_drift' : 'committed',
     branch: gitState.branch,
     channel,
     authorized_via: authorizedVia,

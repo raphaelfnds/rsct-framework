@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { requestCommitHandler, type RequestCommitInternal, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { defaultGitExecutor, type GitExecutor } from '../../src/lib/git.js'
 
 const GIT = (() => {
   try {
@@ -300,6 +301,7 @@ describe.skipIf(!GIT)('the commit dialog cuts a long contract list', () => {
       true,
     )
     expect(report).toBeNull()
+    expect(text).not.toContain('Full list')
     expect(text).toContain('"surface-11"; declared consumers: ')
     expect(text).toContain('"consumer-11".')
     expect(text).not.toMatch(/… and \d+ more/)
@@ -399,5 +401,72 @@ describe.skipIf(!GIT)('the branch, the first commit and a commit a hook makes on
     })
     expect(out.status).toBe('committed_with_drift')
     expect(out.hints.some((h) => h.includes('could not compare the commit'))).toBe(true)
+  })
+})
+
+describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
+  function hook(body: string): void {
+    const path = join(root, '.git', 'hooks', 'pre-commit')
+    writeFileSync(path, `#!/bin/sh\n${body}`)
+    chmodSync(path, 0o755)
+  }
+
+  it('reports a hook that switches the branch during the commit', async () => {
+    initRepo()
+    writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
+    git('branch', '-f', 'main', 'HEAD')
+    hook('git symbolic-ref HEAD refs/heads/main\n')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval())
+    expect(out.status).toBe('committed_with_drift')
+    expect(git('log', '--oneline', 'main').trim().split('\n')).toHaveLength(2)
+    expect(out.hints.some((h) => h.includes('landed with HEAD on refs/heads/main, not on the approved refs/heads/feat/x'))).toBe(true)
+    expect(readFileSync(join(root, '.rsct', 'audit.log'), 'utf8')).toContain('"event":"request_commit.branch_drift"')
+  })
+
+  it('reports a commit whose id cannot be read back after it landed', async () => {
+    initRepo()
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    let headReads = 0
+    const executor: GitExecutor = (cwd, args) => {
+      if (args[0] === 'rev-parse' && ++headReads > 1) return { ok: false, stdout: '', stderr: 'boom', exitCode: 1 }
+      return defaultGitExecutor(cwd, args)
+    }
+    const { out } = await commit(approval(), () => {}, { gitExecutor: executor })
+    expect(git('log', '--oneline').trim().split('\n')).toHaveLength(2)
+    expect(out.status).toBe('committed_with_drift')
+    expect(out.hints.some((h) => h.includes('could not compare the commit'))).toBe(true)
+  })
+
+  it('says nothing about HEAD when a failed commit left it where it was', async () => {
+    initRepo()
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const executor: GitExecutor = (cwd, args) =>
+      args[0] === 'commit' ? { ok: false, stdout: '', stderr: 'nothing happened', exitCode: 1 } : defaultGitExecutor(cwd, args)
+    const { out } = await commit(approval(), () => {}, { gitExecutor: executor })
+    expect(out.status).toBe('mutation_failed')
+    expect(out.hints.join('\n')).not.toContain('HEAD moved')
+    expect(out.hints.some((h) => h.includes('approval NOT consumed'))).toBe(true)
+  })
+
+  it('treats the approval as used once a hook committed during the attempt', async () => {
+    initRepo()
+    writeFileSync(join(root, 'sneaked.txt'), 'x\n')
+    hook('git add -f sneaked.txt\ngit commit -q --no-verify -m sneaked\n')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const used = approval()
+    const first = await commit(used)
+    expect(first.out.status).toBe('mutation_failed')
+    expect(first.out.hints.join('\n')).not.toContain('retry with the same dev_approval')
+    rmSync(join(root, '.git', 'hooks', 'pre-commit'))
+    writeFileSync(join(root, 'c.txt'), 'c\n')
+    git('add', 'c.txt')
+    const again = await commit(used)
+    expect(again.out.reject_kind).toBe('reused')
+    expect(again.dialogs).toEqual([])
   })
 })
