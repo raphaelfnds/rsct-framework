@@ -20,10 +20,11 @@ export async function scanTreeDiff(
   fromTree: string,
   toTree: string,
   extraPatterns: ReadonlyArray<ExtraPattern> = [],
+  timeoutMs?: number,
 ): Promise<DiffScanResult> {
   const args = treeDiffArgs(fromTree, toTree)
   if (args === null) return { ok: false, reason: 'not a pair of tree ids' }
-  return scanArgs(projectRoot, args, extraPatterns)
+  return scanArgs(projectRoot, args, extraPatterns, timeoutMs)
 }
 
 async function scanArgs(

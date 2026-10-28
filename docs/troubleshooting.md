@@ -352,25 +352,31 @@ it could not read, instead of letting it through unchecked (ADR-039, ADR-040). N
 committed.
 
 - **`secrets_unreadable`, `staged_paths_unreadable`, `staged_state_unreadable`**: git failed, did
-  not answer within 120 s, or could not tell whether the folder is a repository. The reason quotes
-  git when it said something.
+  not answer in time (120 s for the secrets scan, 30 s for the list of staged paths and for the
+  staged tree, HEAD and branch), or could not tell whether the folder is a repository. The reason
+  quotes git when it said something. Another git process holding `.git/index.lock` is waited for
+  about a second before `staged_state_unreadable`.
   - Retry once.
   - If one very large file keeps failing the read, split the commit.
   - Otherwise commit that change by hand in your own terminal.
-- **`staged_changed`**: what is staged, or HEAD, changed between the approval dialog and the
-  commit. Something ran `git add`, `git commit` or a checkout while the dialog was open. Look at
+- **`staged_changed`**: what is staged, HEAD or the branch changed between the approval dialog and
+  the commit. Something ran `git add`, `git commit`, a checkout or a branch switch while the dialog
+  was open. Look at
   `git status` and ask again, so the dialog shows what will be committed.
 
-## A commit returns `committed_with_drift` and the next commit is refused with `review_drift`
+## A commit returns `committed_with_drift`
 
 The commit that landed is not exactly what you approved. Its tree or parent differs from the one
-recorded before the dialog — most likely a git `pre-commit` hook that staged more. The hints list
-the paths that changed and how many secret findings they carry.
+recorded before the dialog — most likely a git `pre-commit` hook that staged more or rewrote a
+file. The hints list the paths that changed and how many secret findings they carry, and the audit
+log records `request_commit.tree_drift`.
 
-- Check those paths in the commit (`git show --stat HEAD`).
-- Then run `rsct_phase_review_start` / `_complete` over them; the lock lifts once a REVIEW covers
-  them.
-- A hook that only reformats code files the REVIEW already accepts does not trigger this.
+- Check those paths in the commit (`git show --stat HEAD`) before any push.
+- To take the commit back, `git reset --soft HEAD~1` undoes it and keeps everything staged.
+- If a code file the hook changed is among them, the next commit is refused with `review_drift`
+  until `rsct_phase_review_start` / `_complete` covers it. Other files (a README, a JSON file) are
+  reported only: a REVIEW stamps code files, so it could not clear a lock on them.
+- A hook that only reformats code files the REVIEW already accepts does not trigger the lock.
 
 ## A commit, push, merge or rebase is refused with `force_dialog_no_channel`
 

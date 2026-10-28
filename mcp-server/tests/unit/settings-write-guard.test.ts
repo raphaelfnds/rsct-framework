@@ -111,6 +111,11 @@ describe('judgeSettingsWrite — what it refuses', () => {
     expect(blocked('Write', { file_path: nullValued, content: '{}' }, nullValued)).toBe(true)
   })
 
+  it('refuses an env key that shares its name with a built-in object property', () => {
+    const file = join(project({}), '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: file, content: '{"env": {"toString": null}}' }, file)).toBe(true)
+  })
+
   it('allows an edit that keeps an existing guarded env value as it was, and refuses changing it', () => {
     const root = project({ env: { BASH_ENV: '/etc/profile.rsct' }, permissions: { allow: [] } })
     const file = join(root, '.claude', 'settings.local.json')

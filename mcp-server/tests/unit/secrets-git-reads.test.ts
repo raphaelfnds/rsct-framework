@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { getStagedPaths, gitRepoStatus, streamGitLines } from '../../src/lib/git.js'
-import { scanGitDiff } from '../../src/lib/staged-scan.js'
+import { baseTreeOf, getStagedPaths, gitRepoStatus, readStagedTreeState, streamGitLines } from '../../src/lib/git.js'
+import { scanGitDiff, scanTreeDiff } from '../../src/lib/staged-scan.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import { checkSecretsHandler } from '../../src/tools/check-secrets.js'
 
@@ -46,7 +46,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   delete process.env.GIT_EXTERNAL_DIFF
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 describe.skipIf(!GIT)('the staged scan reads what git will commit, whatever the repo config says', () => {
@@ -109,6 +109,52 @@ describe.skipIf(!GIT)('the staged scan reads what git will commit, whatever the 
     expect(await stagedFiles()).toEqual(['café.txt'])
   })
 
+  it('scans the tree it will commit against the tree of HEAD', async () => {
+    initRepo()
+    writeFileSync(join(root, 'a.env'), `${SECRET}
+`)
+    git('add', 'a.env')
+    const state = await readStagedTreeState(root)
+    const base = baseTreeOf(root, state!.head)
+    expect(base).toBe(git('rev-parse', 'HEAD^{tree}').trim())
+    const scan = await scanTreeDiff(root, base!, state!.tree!)
+    expect(scan.ok && scan.findings.map((f) => f.file)).toEqual(['a.env'])
+  })
+
+  it('scans the first commit of a repository against the empty tree', async () => {
+    git('init', '-q')
+    git('config', 'core.autocrlf', 'false')
+    writeFileSync(join(root, 'a.env'), `${SECRET}
+`)
+    git('add', 'a.env')
+    const state = await readStagedTreeState(root)
+    expect(state?.head).toBeNull()
+    const base = baseTreeOf(root, null)
+    expect(base).toBe(execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], { cwd: root, input: '', encoding: 'utf8' }).trim())
+    const scan = await scanTreeDiff(root, base!, state!.tree!)
+    expect(scan.ok && scan.findings.map((f) => f.file)).toEqual(['a.env'])
+  })
+
+  it('refuses to scan anything that is not a pair of tree ids', async () => {
+    initRepo()
+    expect(await scanTreeDiff(root, 'HEAD', '--output=x')).toEqual({ ok: false, reason: 'not a pair of tree ids' })
+  })
+
+  it('waits for another git process to release the index', async () => {
+    initRepo()
+    const lock = join(root, '.git', 'index.lock')
+    writeFileSync(lock, '')
+    setTimeout(() => rmSync(lock), 300)
+    const state = await readStagedTreeState(root)
+    expect(state?.tree).toBe(git('write-tree').trim())
+  })
+
+  it('gives up when the index stays locked', async () => {
+    initRepo()
+    writeFileSync(join(root, '.git', 'index.lock'), '')
+    expect(await readStagedTreeState(root)).toBeNull()
+  })
+
   it('lists both sides of a staged rename', () => {
     initRepo()
     git('mv', 'readme.txt', 'moved.txt')
@@ -145,7 +191,7 @@ describe.skipIf(!GIT)('a read that fails is a refusal, never an empty scan', () 
 
   it('refuses the commit when the staged files cannot be listed', async () => {
     initRepo()
-    git('switch', '-q', '-c', 'feat/x')
+    git('switch', '-q', '-C', 'feat/x')
     writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
     writeFileSync(join(root, 'a.txt'), 'plain\n')
     git('add', 'a.txt')
@@ -184,8 +230,10 @@ describe.skipIf(!GIT)('a read that fails is a refusal, never an empty scan', () 
 
   it('fails when git does not finish in time', async () => {
     initRepo()
-    const read = await streamGitLines(root, ['-c', 'alias.slow=!sleep 5', 'slow'], () => {}, 300)
-    expect(read).toEqual({ ok: false, reason: expect.stringContaining('did not finish') })
+    const started = performance.now()
+    const read = await streamGitLines(root, ['-c', 'alias.slow=!sleep 2', 'slow'], () => {}, 300)
+    expect(read).toEqual({ ok: false, reason: 'git did not finish reading within 300 ms' })
+    if (process.platform === 'win32') expect(performance.now() - started).toBeLessThan(1800)
   })
 
   it('fails when the line consumer throws, even once', async () => {
@@ -200,7 +248,7 @@ describe.skipIf(!GIT)('a read that fails is a refusal, never an empty scan', () 
 
   it('refuses the commit when the staged changes cannot be read in time', async () => {
     initRepo()
-    git('switch', '-q', '-c', 'feat/x')
+    git('switch', '-q', '-C', 'feat/x')
     writeFileSync(join(root, 'a.txt'), `${SECRET}\n`)
     git('add', 'a.txt')
     const now = new Date()
@@ -220,7 +268,7 @@ describe.skipIf(!GIT)('a read that fails is a refusal, never an empty scan', () 
 
   it('refuses a commit that hides a secret behind a staged .gitattributes', async () => {
     initRepo()
-    git('switch', '-q', '-c', 'feat/x')
+    git('switch', '-q', '-C', 'feat/x')
     writeFileSync(join(root, '.gitattributes'), 'notes.txt -diff\n')
     writeFileSync(join(root, 'notes.txt'), `${SECRET}\n`)
     git('add', '.')

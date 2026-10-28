@@ -739,12 +739,12 @@ the §C dialog.
 
 Scans `git diff --cached` against INV-6 secret patterns
 (`mcp-server/src/lib/secrets.ts` — single source of truth for the
-INV-6 regex). It reads the same stream `rsct_request_commit` reads (since 2.23.0): `--text
+INV-6 regex). Since 2.23.0 it reads with the flags `rsct_request_commit` uses: `--text
 --no-ext-diff --no-textconv`, fixed `a/` `b/` prefixes and `diff.relative` off, so attributes,
 diff drivers and repository config cannot hide content (ADR-039).
 
 - Input: `project_root?`, `staged_only?` (default true), `diff_override?` (programmatic test input)
-- Output: `findings[]` (per-line classification: `key-name`, `value-shape`, etc.), `read_error` (`null`, or why git could not be read — never reported as "no findings"), `extra_patterns_used[]`, `invalid_extra_patterns[]`
+- Output: `findings[]` (per-line classification: `key-name`, `value-shape`, etc.), `read_error` (`null`, or why git could not be read — never reported as "no findings"), `scanned_extra_patterns` (how many project patterns were applied), `invalid_extra_patterns[]`
 
 Honors `.rsct.json` `secrets_extra_patterns[]` for project-specific
 regexes. Invalid regexes are skipped (returned in
@@ -869,10 +869,13 @@ Since 2.23.0 (ADR-039, ADR-040):
   `"file":line — rule` (never the value; over 10 goes to `.rsct/reports/commit-secrets-*.md`), the
   contract surfaces with their declared consumers, and an inactive contract gate. Then come the
   agent's reasons, then the commit message.
-- The staged tree, HEAD and branch are recorded before the dialog and checked again right before
-  `git commit`.
+- The staged tree, HEAD and branch are recorded before the dialog; the secrets scan and the
+  contract paths read that recorded tree. All three are checked again right before `git commit`
+  (`staged_changed`).
 - A commit whose tree or parent differs from what was approved (a git hook that staged more)
-  returns `committed_with_drift` and locks further commits until a REVIEW.
+  returns `committed_with_drift`; the hints name the changed paths, their secret findings and
+  `git reset --soft HEAD~1` to undo it. Code files among them stay under the `review_drift` lock
+  above.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real staged diff (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`, `'secrets_unreadable'`, `'staged_paths_unreadable'`, `'staged_state_unreadable'`, `'staged_changed'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
