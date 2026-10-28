@@ -114,7 +114,7 @@ export function streamGitLines(
     }
     const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
     const expire = (): void => stopWith(`git did not finish reading within ${limit}`)
-    if (timeoutMs > 0) timer = setTimeout(expire, timeoutMs)
+    timer = setTimeout(expire, timeoutMs)
     child.stdout?.on('data', (chunk: Buffer) => {
       if (settled || stopReason !== null) return
       try {
