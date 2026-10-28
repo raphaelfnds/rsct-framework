@@ -12,6 +12,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-10-28
+
+### Security
+
+- **The commit secrets scan reads exactly what git will commit.** Until now these inputs reached a
+  commit with zero findings, with no override, through `rsct_request_commit`:
+  - a staged `.gitattributes` that marks a file `-diff` or `binary`;
+  - a file with a NUL byte;
+  - a `textconv` diff driver;
+  - `diff.external` or `GIT_EXTERNAL_DIFF`;
+  - `diff.relative` set in the repository config;
+  - an added line that starts with `++` (the rest of that file went unscanned);
+  - UTF-16LE text, and lines stored with CRLF against an end-anchored `secrets_extra_patterns`
+    entry.
+
+  The scan now reads the staged diff as a stream with `--text --no-ext-diff --no-textconv`, fixed
+  `a/` `b/` prefixes and `diff.relative` off. A read that fails, times out or cannot tell whether the
+  folder is a repository refuses the commit (`secrets_unreadable`, `staged_paths_unreadable`)
+  instead of scanning nothing. The key/value pattern runs in linear time with the same matches.
+  See ADR-039.
+- **The commit approval dialog shows every exception it is asked to approve.**
+  - Branch protection, the secrets scan and the contract gate used to run after you answered, with
+    the overrides filled in by the agent. They now run before the dialog.
+  - The dialog lists the protected branch, each secret finding (`"file":line — rule`, never the
+    value), the contract surfaces and their consumers, then the agent's reason for each exception.
+  - A check that needs an exception the request does not carry is refused before any dialog opens.
+  - The staged tree, HEAD and branch are checked again right before `git commit` (`staged_changed`).
+  - A commit that a git hook changed after your approval returns `committed_with_drift`, reports
+    the changed paths and their secret findings, and locks further commits until a REVIEW.
+
+  See ADR-040.
+- **The agent cannot add, change or remove any `env` entry in a Claude Code settings file**, not
+  only the keys that change how a hook starts. A developer who wants an env value set edits the
+  file by hand. See ADR-041.
+
+### Changed
+
+- `rsct_check_secrets` reads the same stream as the commit and reports a read it could not make in
+  `read_error`, never as "no findings".
+- `fast-uri` 3.1.9 (Dependabot #144), bundled into `rsct-mcp`.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone and restart the IDE: the commit scan and the commit
+  dialog travel with `rsct-mcp`.
+- Then run `/rsct-setup` in each project: its bundled copy of the edit guard (`.rsct/scripts/`) is
+  refreshed with the env rule. A project not re-set-up keeps the old guard.
+
 ## [2.22.0] - 2026-10-25
 
 ### Security

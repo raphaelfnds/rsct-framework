@@ -1510,7 +1510,9 @@ patterns like variables and refuses a git or gh subcommand built partly from a v
 narrows the named limit "a program or subcommand name assembled from parts of variables" to the
 program name. Since 2.22.0 (ADR-036) the guard also reads code piped into a program that runs
 it, git written inside another program's argument text and the package scripts a manager runs
-(`npm run …` and its siblings); ADR-038 adds the database rules to the same guard.
+(`npm run …` and its siblings); ADR-038 adds the database rules to the same guard. Since 2.23.0
+(ADR-041) the settings write guard refuses every agent add, change or removal of an `env` entry,
+which replaces the fixed list of env keys described below.
 **Tags**: gates, hooks, terminal, cross-os
 
 **Context**: every commit, push, merge and rebase gate lives inside an RSCT tool; the agent's
@@ -1852,7 +1854,9 @@ no dialog channel" became "refuses … and cuts nothing"; `git pull` moved to th
 `--ff-only` forms allowed; a Start-Process example passes a variable to `fetch` instead of `pull`.
 
 ### ADR-031 — Dialogs put the framework first; plan lookups are deterministic; the REVIEW names the process; an audit.path no file can sit at is ignored (2.18.0)
-**Status**: active. Since 2.20.1 (ADR-034) the given-up item that on Linux and macOS a dialog program that cannot open still reads as No no longer holds: it is `dialog_failed`, a refusal that is not recorded as the developer's decision. Since 2.22.0 (ADR-036) the push dialog names the commit it sends — the refspec git is called with is built from it — and, for a protected push whose carried files could not be read, says that `files_swept` was not checked.
+**Status**: active. Since 2.20.1 (ADR-034) the given-up item that on Linux and macOS a dialog program that cannot open still reads as No no longer holds: it is `dialog_failed`, a refusal that is not recorded as the developer's decision. Since 2.22.0 (ADR-036) the push dialog names the commit it sends — the refspec git is called with is built from it — and, for a protected push whose carried files could not be read, says that `files_swept` was not checked. Since 2.23.0 (ADR-040) the commit dialog lists every
+exception it approves (protected branch, secret findings, contract surfaces) before the agent's
+reasons and the commit message.
 **Tags**: dialog, gates, plan, classify, audit-log, cross-os
 
 **Context**: MEASURED 2026-10-21 on `main` @ `bfa4946` (2.17.0), Windows 11 / NTFS, real handlers
@@ -2746,6 +2750,147 @@ mutant per rule. A project keeps the old guard until `/rsct-setup` refreshes `.r
 §C and the memory entry update through setup 4.3b like any rule change.
 
 ---
+
+### ADR-039 — The commit secrets scan reads exactly what git will commit, and a read that fails refuses the commit (2.23.0)
+**Status**: active. Extends INV-6 (the secrets scan).
+**Tags**: gates, secrets, git, cross-os
+
+**Context**: MEASURED on `main` @ `148f108` (2.22.0), git 2.45.1.windows.1, throwaway repositories.
+- `getStagedDiff` ran `git diff --cached --no-color -U0`, which repository config and attributes
+  can change. A staged `.gitattributes` marking the file `-diff`, a file with a NUL byte (git calls
+  it binary), a `textconv` driver, `diff.external` in `.git/config` (empty output) or
+  `GIT_EXTERNAL_DIFF` each produced a scan with zero findings, and the commit went through with no
+  override.
+- `diff.relative` and `diff.mnemonicPrefix` changed which files and which names the scan saw.
+- The parser took an added line whose text starts with `++` for a file header, dropped the current
+  file, and stopped scanning the rest of it.
+- A git error, a timeout or an output over 16 MiB returned `null`, and the caller scanned an empty
+  string.
+- The key/value pattern backtracked quadratically on a long run of identifier characters: 40k
+  characters took about 0.9 s, 256 KiB about 42 s, synchronously.
+
+**Decision**:
+- Every content read a gate makes runs `git -c core.fsmonitor=false -c diff.relative=false diff
+  [--cached] --no-color -U0 --text --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
+  --ignore-submodules=none`.
+  - `diff.relative=false` is set through `-c` rather than `--no-relative`, which needs git 2.28 and
+    exits 129 on an older git.
+  - The read is streamed line by line into the scanner, so its size has no cap; it is bounded by a
+    120 s time budget.
+- File headers are recognised only outside a hunk: the hunk header's counts decide what is content.
+  Each line loses its NUL bytes and one trailing carriage return before matching, so UTF-16LE text
+  and lines stored with CRLF are read. A C-quoted path is decoded.
+- `gitRepoStatus` tells a folder git definitively calls "not a git repository" (nothing to commit,
+  an empty scan) from any other answer. A read that fails refuses the commit (`secrets_unreadable`,
+  `staged_paths_unreadable`) and says to split the commit or commit by hand. `rsct_check_secrets`
+  reports the failure in `read_error` instead of "no findings".
+- The key/value pattern matches an atomic key run from the first letter of a run only. A test
+  compares its matches with the previous pattern on 60,000 seeded lines plus hand-written shapes,
+  and checks that the time grows linearly.
+- The staged path list (`--no-renames`) carries both sides of a rename. The range reader keeps
+  `--diff-filter=d`, because deleted files cannot be swept.
+
+**Direction**: stricter. Every input that produced zero findings now produces the findings git
+would commit, and every read that failed now refuses.
+
+**What is given up, by name**:
+- Content that lives outside the repository is not scanned: Git LFS and git-annex store a pointer.
+- A file encrypted on the way in (git-crypt) is scanned as ciphertext.
+- A clean filter's output IS scanned, because the scan reads the staged blob.
+- With `--text`, a genuinely binary file is scanned as bytes; a credential-shaped byte run can raise
+  a false finding, which the developer answers in the dialog.
+- `secrets_extra_patterns` are the developer's own regexes and are not bounded.
+
+**Consequences**:
+- `tests/unit/secrets-scan.test.ts`: the parser, normalisation, quoting, the seeded equivalence and
+  the linear-time ratio.
+- `tests/unit/secrets-git-reads.test.ts`: each blind spot above in a real repository, every refusal
+  path, and the real-repository read that the injected git executor does not replace.
+
+### ADR-040 — The commit dialog shows every exception it is asked to approve, and the commit is exactly what was approved (2.23.0)
+**Status**: active. Extends ADR-031 (dialog text order).
+**Tags**: gates, dialog, commit, secrets, contracts
+
+**Context**: MEASURED on `main` @ `148f108` (2.22.0), the real `requestCommitHandler` with the
+dialog captured.
+- The commit dialog showed the branch, fixed advisories, the repository line and the message.
+- Branch protection, the secrets scan and the contract gate ran after the developer answered. The
+  agent put `override_protected_branch`, `override_secrets_check` and `override_contract_surface`
+  into the `dev_approval` it sent.
+- A staged secret plus a pre-filled override produced one generic dialog and `committed`. Without
+  the override, the dialog was shown and answered, and the commit was refused afterwards.
+- A pre-commit hook that runs `git add` put a file the developer never saw into the commit.
+- Field audit logs (aggregate): many secrets and contract overrides whose recorded reason does not
+  mention the developer at all.
+
+**Decision**:
+- Before any dialog, `rsct_request_commit` computes the protected-branch check, the secrets scan
+  (ADR-039) and the contract surfaces. A check that needs an exception the request does not carry
+  is refused before a dialog opens. The token path carries no exceptions, as before.
+- The dialog shows, framework lines first:
+  - the protected branch;
+  - each secret finding as `"file":line — rule` (never the value), up to 10, with the full list in
+    `.rsct/reports/commit-secrets-<sha16>.md`;
+  - the contract surfaces and their declared consumers;
+  - an inactive contract gate.
+  Then the agent's reason for each exception, quoted and flattened, then the commit message, last.
+  A commit with nothing to approve beyond itself shows the same dialog as before.
+- The staged tree (`git write-tree`), HEAD and branch are recorded before the dialog (or token) and
+  compared again right before `git commit`, after the existing sweep and dead-code re-checks.
+  Anything different refuses (`staged_changed`).
+- After `git commit`, a commit whose tree or parent differs from what was approved returns
+  `committed_with_drift`. RSCT scans the difference, reports the changed paths and their secret
+  findings, and arms the existing `review_drift` lock for every changed path except a code file the
+  existing post-commit sweep accepted as a clean rewrite. The next commit is refused until a REVIEW
+  covers those paths.
+
+**Direction**: stricter. The developer now sees in the dialog every exception the agent asks for,
+and a commit cannot carry what the dialog did not show without the lock arming.
+
+**What is given up, by name**:
+- The developer's own git hooks still run on the commit; skipping them would weaken their checks.
+- What a hook changes is caught after the commit, not before.
+- A hook that commits on its own, or a `post-commit` hook, is outside this check.
+
+**Consequences**:
+- `tests/unit/commit-dialog-exceptions.test.ts` covers, with real git:
+  - the dialog lines, the overflow report and refusal before the dialog;
+  - staging and a HEAD move while the dialog is open;
+  - a hook that adds a file with and without a secret, and the lock on the next commit;
+  - a hook that changes nothing.
+
+### ADR-041 — The agent cannot add, change or remove any env entry in Claude Code settings (2.23.0)
+**Status**: active. Extends ADR-028 (the settings write guard).
+**Tags**: gates, hooks, settings, mcp
+
+**Context**: READ on `main` @ `148f108`.
+- The settings write guard refused only a fixed list of `env` keys (`NODE_OPTIONS`, `PATH`,
+  `BASH_ENV`, `LD_*`, …).
+- Keys that redirect Claude Code's traffic or trust (`ANTHROPIC_BASE_URL`, proxy and certificate
+  variables, `NODE_TLS_REJECT_UNAUTHORIZED`) and `GIT_*` keys the MCP server inherits passed.
+**Decision**:
+- In `.claude/settings*.json`, every agent add, change or removal of an `env` entry is refused.
+- The same applies when the write leaves the file unreadable with an `env` block in it.
+- The per-key list is gone. An `env` block that the write leaves exactly as it was passes.
+
+**Direction**: stricter. A developer who asks the agent to set an env value now edits the file by
+hand.
+
+**What is given up, by name**:
+- The guard judges the agent's Write/Edit/MultiEdit calls only. A write from a shell script is not
+  refused here; for settings it is detected at commit time (ADR-028).
+- Settings keys that run a command (`apiKeyHelper`, `statusLine`) and hooks that are not RSCT's are
+  not judged.
+- **The rsct server registration** (in `.mcp.json` and `~/.claude.json`), and the settings keys that
+  enable or disable project servers, are not guarded. A check for them was written and removed: it
+  has to name those keys inside `mcp-server/src`, which the #73 boundary forbids (pinned by
+  `tests/bash/script-install.test.ts`, see ADR-028). Where such a check may live is the
+  developer's decision.
+- The guard is a hook: it reaches a project only through `/rsct-setup`.
+
+**Consequences**: `tests/unit/settings-write-guard.test.ts` covers every env case. Two earlier
+assertions said an ordinary env key and an env removal were allowed; by this decision they are now
+refusals.
 
 ## Anti-decisions (tried, rejected, do not retry)
 
