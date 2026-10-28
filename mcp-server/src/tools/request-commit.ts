@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -7,9 +9,13 @@ import {
   defaultGitExecutor,
   getFileAtHead,
   getStagedPaths,
+  getTreeDiffPaths,
   gitCommit,
+  readCommittedTree,
   readGitState,
   readHeadBirth,
+  readStagedTreeState,
+  sameStagedTreeState,
   type GitExecutor,
   type GitState,
 } from '../lib/git.js'
@@ -37,11 +43,10 @@ import {
   scanDiffForSecrets,
   type SecretFinding,
 } from '../lib/secrets.js'
-import { scanGitDiff } from '../lib/staged-scan.js'
+import { scanGitDiff, scanTreeDiff } from '../lib/staged-scan.js'
 
-const STAGED_PATHS_UNREADABLE =
-  'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
 import {
+  DevApprovalSchema,
   recordConsumedApproval,
   type DevApproval,
   type FabricationSignal,
@@ -102,7 +107,114 @@ import {
   affectedConsumers,
 } from '../lib/contracts.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
-import { DIALOG_PATH_LIMIT, commitMessageView, specLabel } from '../lib/dialog-text.js'
+import { DIALOG_PATH_LIMIT, commitMessageView, dialogList, specLabel } from '../lib/dialog-text.js'
+
+const STAGED_PATHS_UNREADABLE =
+  'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
+
+const DIALOG_FINDINGS_SHOWN = 10
+
+interface CommitOverrides {
+  branch?: { reason: string } | undefined
+  secrets?: { reason: string } | undefined
+  contract?: { reason: string } | undefined
+}
+
+interface ContractFacts {
+  mode: ContractCheckResult['mode']
+  ids: string[]
+  consumers: string[]
+  inactive: boolean
+}
+
+function readContractFacts(
+  projectRoot: string,
+  config: RsctConfig | null | undefined,
+  stagedPathsOverride: string[] | undefined,
+): ContractFacts | null {
+  const mode = confirmedTopologyMode(config ?? null)
+  if (mode !== 'multi-repo') return { mode, ids: [], consumers: [], inactive: false }
+  let universeRoot: string | null = null
+  try {
+    const r = resolveUniverseRoot(config ?? null, projectRoot)
+    universeRoot = r.kind === 'found' ? r.path : null
+  } catch {
+    universeRoot = null
+  }
+  const graph = readContracts(universeRoot)
+  const stagedPaths = stagedPathsOverride ?? getStagedPaths(projectRoot)
+  if (stagedPaths === null) return null
+  const appName = config?.app?.name ?? null
+  const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
+  return { mode, ids: hits.map((h) => h.id), consumers: affectedConsumers(hits), inactive: !graph.available }
+}
+
+function findingRule(finding: SecretFinding): string {
+  return finding.reason === 'extra-pattern' ? `extra pattern ${finding.pattern_id ?? '?'}` : finding.reason
+}
+
+function findingLabel(finding: SecretFinding): string {
+  return `"${finding.file}":${finding.line_number ?? '?'} — ${findingRule(finding)}`
+}
+
+function writeSecretsReport(projectRoot: string, findings: readonly SecretFinding[]): string | null {
+  const lines = ['# Secret scan findings for one commit approval', '', ...findings.map((f) => `- ${findingLabel(f)} — ${f.excerpt}`), '']
+  const content = lines.join('\n')
+  const rel = join('.rsct', 'reports', `commit-secrets-${createHash('sha256').update(content).digest('hex').slice(0, 16)}.md`)
+  try {
+    mkdirSync(join(projectRoot, '.rsct', 'reports'), { recursive: true })
+    writeFileSync(join(projectRoot, rel), content, 'utf8')
+    return rel.replace(/\\/g, '/')
+  } catch {
+    return null
+  }
+}
+
+function quoted(text: string): string {
+  return `"${specLabel(text)}"`
+}
+
+export function commitExceptionLines(
+  projectRoot: string,
+  facts: {
+    branchLabel: string
+    branchProtected: boolean
+    findings: readonly SecretFinding[]
+    contract: ContractFacts
+    overrides: CommitOverrides
+  },
+): { facts: string[]; reasons: string[] } {
+  const lines: string[] = []
+  const reasons: string[] = []
+  if (facts.branchProtected) {
+    lines.push(`⚠ '${specLabel(facts.branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: committing here needs your exception.`)
+  }
+  if (facts.findings.length > 0) {
+    lines.push(`⚠ The secrets scan found ${facts.findings.length} line(s) that look like a credential (file:line — rule; values are never shown):`)
+    lines.push(dialogList(facts.findings.map(findingLabel), DIALOG_FINDINGS_SHOWN))
+    if (facts.findings.length > DIALOG_FINDINGS_SHOWN) {
+      const report = writeSecretsReport(projectRoot, facts.findings)
+      lines.push(report ? `Full list: ${report}` : 'The full list is in this tool result.')
+    }
+  }
+  if (facts.contract.ids.length > 0) {
+    const consumers = facts.contract.consumers.length > 0 ? facts.contract.consumers.map(quoted).join(', ') : 'none listed'
+    lines.push(`⚠ This commit changes contract surface ${facts.contract.ids.map(quoted).join(', ')}; declared consumers: ${consumers}.`)
+  }
+  if (facts.contract.inactive) {
+    lines.push('⚠ The contract gate is inactive: no readable contracts.json for this universe, so cross-repo impact is not checked.')
+  }
+  if (facts.branchProtected && facts.overrides.branch) {
+    reasons.push(`Agent's reason for the protected branch: ${quoted(facts.overrides.branch.reason)}`)
+  }
+  if (facts.findings.length > 0 && facts.overrides.secrets) {
+    reasons.push(`Agent's reason for the secret findings: ${quoted(facts.overrides.secrets.reason)}`)
+  }
+  if (facts.contract.ids.length > 0 && facts.overrides.contract) {
+    reasons.push(`Agent's reason for the contract surface: ${quoted(facts.overrides.contract.reason)}`)
+  }
+  return { facts: lines, reasons }
+}
 
 export const requestCommitInputSchema = z
   .object({
@@ -133,6 +245,8 @@ export type RequestCommitRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'staged_paths_unreadable'
+  | 'staged_state_unreadable'
+  | 'staged_changed'
   | 'contract_surface'
   | 'plan_token_invalid'
   | 'message_too_long'
@@ -305,34 +419,35 @@ export async function requestCommitHandler(
   })
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
 
+  const earlyReject = (reject_kind: RequestCommitRejectKind, reason: string): RequestCommitOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind, reason, branch: gitState.branch },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel: null,
+      authorized_via: null,
+      reject_kind,
+      reason,
+      fabrication_signals: [],
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason]),
+    }
+  }
+
   if (resolution.rsct_installed) {
     const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot)
-    if (stagedForDrift === null) {
-      const reason = STAGED_PATHS_UNREADABLE
-      const audit = appendAudit(
-        projectRoot,
-        { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind: 'staged_paths_unreadable', reason, branch: gitState.branch },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch: gitState.branch,
-        channel: null,
-        authorized_via: null,
-        reject_kind: 'staged_paths_unreadable',
-        reason,
-        fabrication_signals: [],
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: false, override_used: false },
-        secrets_check: { findings_count: 0, findings: [], override_used: false },
-        plan_token: null,
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
-    }
+    if (stagedForDrift === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
     const drift = evaluateSettingsDrift({
       currentHash: hashSettingsFile(projectRoot),
       baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config?.audit)) ?? ''),
@@ -539,6 +654,114 @@ export async function requestCommitHandler(
   const deadBefore = await runDeadCodeCheck(sweepBefore.checked)
   if (!deadBefore.ok) return rejectDeadCode(deadBefore, 'before_authorization')
 
+  const { list: protectedList } = effectiveProtectedList(config)
+  const branchProtected = isProtectedBranch(gitState.branch, protectedList)
+  const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
+  const scan =
+    internal.stagedDiffOverride !== undefined
+      ? { ok: true as const, findings: scanDiffForSecrets(internal.stagedDiffOverride, extras) }
+      : await scanGitDiff(projectRoot, 'staged', extras, internal.secretsScanTimeoutMs)
+  if (!scan.ok) {
+    return earlyReject(
+      'secrets_unreadable',
+      `the secrets scan could not read what this commit carries (${scan.reason}), so it is refused rather than let through unscanned — split the commit, or the developer commits this by hand in their own terminal`,
+    )
+  }
+  const findings = scan.findings
+  const contractFacts = readContractFacts(projectRoot, config, internal.stagedPathsOverride)
+  if (contractFacts === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+  const approvedState = readStagedTreeState(projectRoot)
+  if (approvedState === null) {
+    return earlyReject(
+      'staged_state_unreadable',
+      'git could not record what is staged for this commit, so it is refused rather than committed unchecked — retry, or the developer commits this by hand in their own terminal',
+    )
+  }
+
+  const uncovered = (
+    overrides: CommitOverrides,
+    via: CommitAuthVia | null,
+    ch: CommitChannel | null,
+    signals: FabricationSignal[],
+  ): RequestCommitOutput | null => {
+    const tokenPath = via === 'plan_token'
+    const refuse = (
+      reject_kind: RequestCommitRejectKind,
+      reason: string,
+      auditExtra: Record<string, unknown>,
+      shape: Pick<RequestCommitOutput, 'branch_check' | 'secrets_check'> & Partial<Pick<RequestCommitOutput, 'contract_check'>>,
+    ): RequestCommitOutput => {
+      const audit = appendAudit(
+        projectRoot,
+        { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind, reason, branch: gitState.branch, channel: ch, authorized_via: via, ...auditExtra },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel: ch,
+        authorized_via: via,
+        reject_kind,
+        reason,
+        fabrication_signals: signals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        ...shape,
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
+    if (branchProtected && !overrides.branch) {
+      return refuse(
+        'protected_branch',
+        `branch '${branchLabel}' is protected — ${
+          tokenPath
+            ? 'a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }'
+            : 'pass dev_approval.override_protected_branch: { reason } to proceed'
+        }`,
+        {},
+        { branch_check: { protected: true, override_used: false }, secrets_check: { findings_count: 0, findings: [], override_used: false } },
+      )
+    }
+    if (findings.length > 0 && !overrides.secrets) {
+      return refuse(
+        'secrets',
+        `${findings.length} secret finding(s) in staged diff — ${
+          tokenPath
+            ? 'a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }'
+            : 'pass dev_approval.override_secrets_check: { reason } to proceed'
+        }`,
+        { findings_count: findings.length },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: false },
+        },
+      )
+    }
+    if (contractFacts.ids.length > 0 && !overrides.contract) {
+      return refuse(
+        'contract_surface',
+        `this commit changes contract surface(s) [${contractFacts.ids.join(', ')}] that other repos depend on [${
+          contractFacts.consumers.join(', ') || 'none listed'
+        }]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${
+          tokenPath
+            ? 'A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }.'
+            : 'To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above).'
+        }`,
+        { contracts: contractFacts.ids, consumers: contractFacts.consumers },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+          contract_check: { mode: 'multi-repo', touched: contractFacts.ids, consumers: contractFacts.consumers, override_used: false },
+        },
+      )
+    }
+    return null
+  }
+
   let channel: CommitChannel
   let authorizedVia: CommitAuthVia
   let approval: DevApproval | null = null
@@ -546,9 +769,24 @@ export async function requestCommitHandler(
   let tokenCtx: { token: PlanAuthorizationBlock } | null = null
 
   if (input.dev_approval !== undefined) {
+    const raw = DevApprovalSchema.safeParse(input.dev_approval)
+    const rawOverrides: CommitOverrides = raw.success
+      ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check, contract: raw.data.override_contract_surface }
+      : {}
+    if (raw.success) {
+      const early = uncovered(rawOverrides, null, null, [])
+      if (early) return early
+    }
     const retentionLine = resolution.rsct_installed
       ? retentionDialogLine(previewRetention(projectRoot, config?.audit, now))
       : null
+    const exceptions = commitExceptionLines(projectRoot, {
+      branchLabel,
+      branchProtected,
+      findings,
+      contract: contractFacts,
+      overrides: rawOverrides,
+    })
     const gate = await gateRequest({
       toolName: 'rsct_request_commit',
       approval: input.dev_approval,
@@ -561,8 +799,10 @@ export async function requestCommitHandler(
             `Approve commit on '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}'?`,
             ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
             ...(retentionLine ? [retentionLine] : []),
+            ...exceptions.facts,
           ].join('\n') +
           gateDialogFooter(projectRoot, config) +
+          (exceptions.reasons.length > 0 ? `\n\n${exceptions.reasons.join('\n')}` : '') +
           `\n\nCommit message:\n${commitMessageView(input.message)}`,
       },
       projectRoot,
@@ -664,59 +904,22 @@ export async function requestCommitHandler(
     tokenCtx = { token: verdict.token }
   }
 
-  const overrideBranch = approval?.override_protected_branch
-  const overrideSecrets = approval?.override_secrets_check
-
-  const { list: protectedList } = effectiveProtectedList(config)
-  const branchProtected = isProtectedBranch(gitState.branch, protectedList)
-
-  if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected — ${
-      authorizedVia === 'plan_token'
-        ? 'a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }'
-        : 'pass dev_approval.override_protected_branch: { reason } to proceed'
-    }`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_commit.rejected',
-        tool: 'rsct_request_commit',
-        reject_kind: 'protected_branch',
-        reason,
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: 'protected_branch',
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: true, override_used: false },
-      secrets_check: { findings_count: 0, findings: [], override_used: false },
-      plan_token: null,
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+  const overrides: CommitOverrides = {
+    branch: approval?.override_protected_branch,
+    secrets: approval?.override_secrets_check,
+    contract: approval?.override_contract_surface,
   }
+  const late = uncovered(overrides, authorizedVia, channel, fabricationSignals)
+  if (late) return late
 
-  if (branchProtected && overrideBranch) {
+  if (branchProtected && overrides.branch) {
     appendAudit(
       projectRoot,
       {
         event: 'request_commit.override_invoked',
         tool: 'rsct_request_commit',
         override_kind: 'protected_branch',
-        override_reason: overrideBranch.reason,
+        override_reason: overrides.branch.reason,
         branch: gitState.branch,
         channel,
       },
@@ -724,95 +927,14 @@ export async function requestCommitHandler(
     )
   }
 
-  const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
-  const scan =
-    internal.stagedDiffOverride !== undefined
-      ? { ok: true as const, findings: scanDiffForSecrets(internal.stagedDiffOverride, extras) }
-      : await scanGitDiff(projectRoot, 'staged', extras, internal.secretsScanTimeoutMs)
-  if (!scan.ok) {
-    const reason = `the secrets scan could not read what this commit carries (${scan.reason}), so it is refused rather than let through unscanned — split the commit, or the developer commits this by hand in their own terminal`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_commit.rejected',
-        tool: 'rsct_request_commit',
-        reject_kind: 'secrets_unreadable',
-        reason,
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: 'secrets_unreadable',
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: branchProtected, override_used: branchProtected },
-      secrets_check: { findings_count: 0, findings: [], override_used: false },
-      plan_token: null,
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
-  }
-  const findings = scan.findings
-
-  if (findings.length > 0 && !overrideSecrets) {
-    const reason = `${findings.length} secret finding(s) in staged diff — ${
-      authorizedVia === 'plan_token'
-        ? 'a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }'
-        : 'pass dev_approval.override_secrets_check: { reason } to proceed'
-    }`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_commit.rejected',
-        tool: 'rsct_request_commit',
-        reject_kind: 'secrets',
-        reason,
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia,
-        findings_count: findings.length,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: 'secrets',
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: branchProtected, override_used: branchProtected },
-      secrets_check: { findings_count: findings.length, findings, override_used: false },
-      plan_token: null,
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
-  }
-
-  if (findings.length > 0 && overrideSecrets) {
+  if (findings.length > 0 && overrides.secrets) {
     appendAudit(
       projectRoot,
       {
         event: 'request_commit.override_invoked',
         tool: 'rsct_request_commit',
         override_kind: 'secrets_check',
-        override_reason: overrideSecrets.reason,
+        override_reason: overrides.secrets.reason,
         findings_count: findings.length,
         branch: gitState.branch,
         channel,
@@ -821,134 +943,72 @@ export async function requestCommitHandler(
     )
   }
 
-  const overrideContract = approval?.override_contract_surface
-  const topoMode = confirmedTopologyMode(config ?? null)
-  let contractResult: ContractCheckResult = {
-    mode: topoMode,
-    touched: [],
-    consumers: [],
-    override_used: false,
-  }
-  let contractGateInactive = false
-  if (topoMode === 'multi-repo') {
-    const appName = config?.app?.name ?? null
-    let universeRoot: string | null = null
-    try {
-      const r = resolveUniverseRoot(config ?? null, projectRoot)
-      universeRoot = r.kind === 'found' ? r.path : null
-    } catch {
-      universeRoot = null
-    }
-    const graph = readContracts(universeRoot)
-    contractGateInactive = !graph.available
-    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot)
-    if (stagedPaths === null) {
-      const reason = STAGED_PATHS_UNREADABLE
-      const audit = appendAudit(
-        projectRoot,
-        {
-          event: 'request_commit.rejected',
-          tool: 'rsct_request_commit',
-          reject_kind: 'staged_paths_unreadable',
-          reason,
-          branch: gitState.branch,
-          channel,
-          authorized_via: authorizedVia,
-        },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
+  const contractResult: ContractCheckResult =
+    contractFacts.ids.length > 0
+      ? { mode: 'multi-repo', touched: contractFacts.ids, consumers: contractFacts.consumers, override_used: !!overrides.contract }
+      : { mode: contractFacts.mode, touched: [], consumers: [], override_used: false }
+  const contractGateInactive = contractFacts.inactive
+  if (contractFacts.ids.length > 0 && overrides.contract) {
+    appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.override_invoked',
+        tool: 'rsct_request_commit',
+        override_kind: 'contract_surface',
+        override_reason: overrides.contract.reason,
+        contracts: contractFacts.ids,
+        consumers: contractFacts.consumers,
         branch: gitState.branch,
         channel,
-        authorized_via: authorizedVia,
-        reject_kind: 'staged_paths_unreadable',
-        reason,
-        fabrication_signals: fabricationSignals,
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        branch_check: { protected: branchProtected, override_used: branchProtected },
-        secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
-        plan_token: null,
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
-    }
-    const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
-    if (hits.length > 0) {
-      const ids = hits.map((h) => h.id)
-      const consumers = affectedConsumers(hits)
-      contractResult = { mode: 'multi-repo', touched: ids, consumers, override_used: !!overrideContract }
-      if (!overrideContract) {
-        const reason = `this commit changes contract surface(s) [${ids.join(', ')}] that other repos depend on [${
-          consumers.join(', ') || 'none listed'
-        }]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${
-          authorizedVia === 'plan_token'
-            ? 'A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }.'
-            : 'To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above).'
-        }`
-        const audit = appendAudit(
-          projectRoot,
-          {
-            event: 'request_commit.rejected',
-            tool: 'rsct_request_commit',
-            reject_kind: 'contract_surface',
-            reason,
-            branch: gitState.branch,
-            channel,
-            authorized_via: authorizedVia,
-            contracts: ids,
-            consumers,
-          },
-          config?.audit,
-        )
-        return {
-          status: 'rejected',
-          branch: gitState.branch,
-          channel,
-          authorized_via: authorizedVia,
-          reject_kind: 'contract_surface',
-          reason,
-          fabrication_signals: fabricationSignals,
-          sha_before: gitState.head_sha,
-          sha_after: null,
-          branch_check: { protected: branchProtected, override_used: branchProtected },
-          secrets_check: {
-            findings_count: findings.length,
-            findings,
-            override_used: findings.length > 0,
-          },
-          contract_check: contractResult,
-          plan_token: null,
-          ...auditFields(audit),
-          anti_replay_persisted: null,
-          anti_replay_error: null,
-          hints: withAdvisories([reason]),
-        }
-      }
-      appendAudit(
-        projectRoot,
-        {
-          event: 'request_commit.override_invoked',
-          tool: 'rsct_request_commit',
-          override_kind: 'contract_surface',
-          override_reason: overrideContract.reason,
-          contracts: ids,
-          consumers,
-          branch: gitState.branch,
-          channel,
-        },
-        config?.audit,
-      )
-    }
+      },
+      config?.audit,
+    )
   }
 
   const sweepAtCommit = await runSweepCheck()
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, 'before_commit')
   const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked)
   if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, 'before_commit')
+
+  const stateNow = readStagedTreeState(projectRoot)
+  if (stateNow === null || !sameStagedTreeState(approvedState, stateNow)) {
+    const reason =
+      stateNow === null
+        ? 'git could not record what is staged right before the commit, so it is refused — retry, or the developer commits this by hand in their own terminal'
+        : 'what is staged (or HEAD) changed after the approval was asked for, so the developer did not see what would be committed — ask again'
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: 'staged_changed',
+        reason,
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel,
+      authorized_via: authorizedVia,
+      reject_kind: 'staged_changed',
+      reason,
+      fabrication_signals: fabricationSignals,
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: branchProtected, override_used: branchProtected },
+      secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+      plan_token: null,
+      contract_check: contractResult,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason]),
+    }
+  }
 
   let reservedToken: PlanAuthorizationBlock | null = null
   if (tokenCtx) {
@@ -1078,7 +1138,50 @@ export async function requestCommitHandler(
   let tokenSummary: RequestCommitOutput['plan_token'] = null
   const bookkeepingHints: string[] = []
 
+  const treeDrift = async (cleanRewrites: ReadonlySet<string>): Promise<{ paths: string[]; secrets: number; unverified: boolean }> => {
+    if (!commit.sha_after || approvedState.tree === null) return { paths: [], secrets: 0, unverified: false }
+    const landed = readCommittedTree(projectRoot, commit.sha_after)
+    if (landed === null) return { paths: [], secrets: 0, unverified: true }
+    if (landed.tree === approvedState.tree && landed.parent === approvedState.head) return { paths: [], secrets: 0, unverified: false }
+    const changed = getTreeDiffPaths(projectRoot, approvedState.tree, landed.tree)
+    if (changed === null) return { paths: [], secrets: 0, unverified: true }
+    const scanned = await scanTreeDiff(projectRoot, approvedState.tree, landed.tree, extras)
+    if (!scanned.ok) return { paths: changed, secrets: 0, unverified: true }
+    const withSecrets = new Set(scanned.findings.map((f) => f.file))
+    const parentMoved = landed.parent !== approvedState.head
+    return {
+      paths: changed.filter((path) => parentMoved || withSecrets.has(path) || !cleanRewrites.has(path)),
+      secrets: scanned.findings.length,
+      unverified: false,
+    }
+  }
+  const reportTreeDrift = (drift: { paths: string[]; secrets: number; unverified: boolean }): void => {
+    if (drift.paths.length === 0 && !drift.unverified) return
+    appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.tree_drift',
+        tool: 'rsct_request_commit',
+        paths: drift.paths,
+        secret_findings: drift.secrets,
+        unverified: drift.unverified,
+        sha_after: commit.sha_after,
+      },
+      config?.audit,
+    )
+    bookkeepingHints.push(
+      drift.unverified
+        ? `⚠ git committed, but RSCT could not compare the commit with what the developer approved${drift.paths.length > 0 ? ` (${drift.paths.join(', ')})` : ''} — check it before any push.`
+        : `⚠ the commit is not exactly what the developer approved: ${drift.paths.join(', ')} changed after the approval${drift.secrets > 0 ? `, with ${drift.secrets} secret finding(s)` : ''} — most likely a git hook. Those paths need a REVIEW before the next commit.`,
+    )
+  }
+
   let sweepDrift: string[] = []
+  if (commit.sha_after && sweepAtCommit.skipped !== null) {
+    const drift = await treeDrift(new Set())
+    reportTreeDrift(drift)
+    sweepDrift = drift.paths
+  }
   if (commit.sha_after && sweepAtCommit.skipped === null) {
     const committed = await verifyCommittedSweep({
       projectRoot,
@@ -1119,7 +1222,9 @@ export async function requestCommitHandler(
       if (open.length === 0) delete next.review_drift
       else next.review_drift = { ...state.review_drift, paths: open }
     }
-    const drift = [...new Set([...committed.drift, ...deadRewritten])]
+    const tree = await treeDrift(new Set(cleanRewrites.map((r) => r.path)))
+    reportTreeDrift(tree)
+    const drift = [...new Set([...committed.drift, ...deadRewritten, ...tree.paths])]
     if (drift.length > 0) {
       sweepDrift = drift
       next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: drift, at }

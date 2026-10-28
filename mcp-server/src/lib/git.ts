@@ -154,6 +154,51 @@ export function gitRepoStatus(projectRoot: string): GitRepoStatus {
   }
 }
 
+const OBJECT_ID = /^[0-9a-f]{40,64}$/
+
+export interface StagedTreeState {
+  tree: string | null
+  head: string | null
+}
+
+export function readStagedTreeState(projectRoot: string): StagedTreeState | null {
+  const status = gitRepoStatus(projectRoot)
+  if (status === 'not_a_repo') return { tree: null, head: null }
+  if (status === 'unknown') return null
+  const tree = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, 'write-tree'])?.trim() ?? ''
+  if (!OBJECT_ID.test(tree)) return null
+  const head = safeGitRaw(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD^{commit}'])?.trim() ?? ''
+  return { tree, head: OBJECT_ID.test(head) ? head : null }
+}
+
+export function sameStagedTreeState(a: StagedTreeState, b: StagedTreeState): boolean {
+  return a.tree === b.tree && a.head === b.head
+}
+
+export interface CommittedTree {
+  tree: string
+  parent: string | null
+}
+
+export function readCommittedTree(projectRoot: string, commit: string): CommittedTree | null {
+  if (!isSafeRevisionToken(commit)) return null
+  const tree = safeGitRaw(projectRoot, ['rev-parse', '--verify', '-q', `${commit}^{tree}`])?.trim() ?? ''
+  if (!OBJECT_ID.test(tree)) return null
+  const parents = (safeGitRaw(projectRoot, ['rev-list', '--parents', '-n', '1', commit])?.trim() ?? '').split(' ').slice(1)
+  return { tree, parent: parents.length === 1 && OBJECT_ID.test(parents[0]!) ? parents[0]! : null }
+}
+
+export function treeDiffArgs(from: string, to: string): string[] | null {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null
+  return [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS, from, to]
+}
+
+export function getTreeDiffPaths(projectRoot: string, from: string, to: string): string[] | null {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null
+  const raw = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, 'diff', '--name-only', '-z', '--no-renames', '--ignore-submodules=none', from, to])
+  return raw === null ? null : splitNulPaths(raw)
+}
+
 export function getStagedPaths(projectRoot: string): string[] | null {
   const status = gitRepoStatus(projectRoot)
   if (status === 'not_a_repo') return []
