@@ -2830,7 +2830,8 @@ dialog captured.
   - the protected branch;
   - each secret finding as `"file":line — rule` (never the value), up to 10, with the full list in
     `.rsct/reports/commit-secrets-<sha16>.md`;
-  - the contract surfaces and their declared consumers;
+  - the contract surfaces and their declared consumers, up to 10 of each, with the full lists in
+    `.rsct/reports/commit-contracts-<sha16>.md`;
   - an inactive contract gate.
   Then the agent's reason for each exception, quoted and flattened, then the commit message, last.
   A commit with nothing to approve beyond itself shows the same dialog as before.
@@ -2858,7 +2859,8 @@ that a hook changed is reported.
 
 **Consequences**:
 - `tests/unit/commit-dialog-exceptions.test.ts` covers, with real git:
-  - the dialog lines, the overflow report and refusal before the dialog;
+  - the dialog lines, the overflow reports for secrets and contracts, and refusal before the
+    dialog;
   - staging, a HEAD move and a branch switch while the dialog is open;
   - a hook that adds a file with and without a secret, and the undo hint;
   - a formatting hook on a non-code file that does not lock later commits;
