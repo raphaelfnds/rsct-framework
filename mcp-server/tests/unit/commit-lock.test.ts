@@ -425,6 +425,25 @@ describe('rsct_request_commit — the token path', () => {
     expect(readState()?.plan_authorization?.actions_used).toBe(2)
   })
 
+  it('does not refund the reserved action when a commit landed during the failing attempt', async () => {
+    repo()
+    writePlan('p', TWO)
+    seed(token({ actions_used: 2 }))
+    const out = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {
+      gitExecutor: (root, args) => {
+        if (args[0] === 'commit') {
+          defaultGitExecutor(root, ['commit', '-q', '--no-verify', '-m', 'landed anyway'])
+          return { ok: false, stdout: '', stderr: 'boom', exitCode: 1 }
+        }
+        return defaultGitExecutor(root, args)
+      },
+    })
+    expect(out.status).toBe('mutation_failed')
+    expect(git(tmpRoot, 'log', '-1', '--format=%s').trim()).toBe('landed anyway')
+    expect(readState()?.plan_authorization?.actions_used).toBe(3)
+    expect(out.hints.join('\n')).toContain('The reserved token action was NOT refunded.')
+  })
+
   it('a landed commit does not extend the token, even one an older server gave a sliding window', async () => {
     repo()
     writePlan('p', TWO)

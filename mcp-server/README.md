@@ -739,10 +739,12 @@ the §C dialog.
 
 Scans `git diff --cached` against INV-6 secret patterns
 (`mcp-server/src/lib/secrets.ts` — single source of truth for the
-INV-6 regex).
+INV-6 regex). Since 2.23.0 it reads with the flags `rsct_request_commit` uses: `--text
+--no-ext-diff --no-textconv`, fixed `a/` `b/` prefixes and `diff.relative` off, so attributes,
+diff drivers and repository config cannot hide content (ADR-039).
 
 - Input: `project_root?`, `staged_only?` (default true), `diff_override?` (programmatic test input)
-- Output: `findings[]` (per-line classification: `key-name`, `value-shape`, etc.), `extra_patterns_used[]`, `invalid_extra_patterns[]`
+- Output: `findings[]` (per-line classification: `key-name`, `value-shape`, etc.), `read_error` (`null`, or why git could not be read — never reported as "no findings"), `scanned_extra_patterns` (how many project patterns were applied), `invalid_extra_patterns[]`
 
 Honors `.rsct.json` `secrets_extra_patterns[]` for project-specific
 regexes. Invalid regexes are skipped (returned in
@@ -762,8 +764,8 @@ The answer comes from the same function the PreToolUse edit-scope guard runs, so
 the tool and the hook agree on an absolute path in a managed project whose root
 is the one holding `.rsct.json`. (Without a usable `.rsct.json` the hook lets
 every scope through — it still refuses a Claude Code settings write that
-switches hooks off, changes or removes an RSCT hook entry or sets `env.NODE_OPTIONS` /
-`env.PATH`, and still exits 2 on a fault of its own; the tool still answers
+switches hooks off, changes or removes an RSCT hook entry or adds, changes or removes any `env`
+entry, and still exits 2 on a fault of its own; the tool still answers
 from the recorded list. For a
 relative path, or a root that is a subfolder, the tool walks up to the
 `.rsct.json` while the hook takes the root it is given.) In order:
@@ -848,6 +850,7 @@ The `dev_approval` shape (validated by `lib/dev-approval.ts`):
   reason: string            // ≥10 chars to avoid 'reason_too_short' fabrication signal
   override_protected_branch?: { reason: string }  // INV-9 override path, audit-logged
   override_secrets_check?:     { reason: string }
+  override_contract_surface?:  { reason: string }
 }
 ```
 
@@ -859,8 +862,36 @@ per-action `dev_approval` **OR** — when `dev_approval` is omitted — an activ
 **plan-scoped batch token** (see `rsct_plan_authorize`). The token path carries
 no overrides, so a protected branch or a secret finding still rejects.
 
-- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real `git diff --cached` (the test-only diff seam is a function arg, not an MCP input).
-- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
+Since 2.23.0 (ADR-039, ADR-040):
+- Branch protection, the secrets scan and the contract gate run **before** the dialog. A check
+  that needs an exception the request does not carry is refused before any dialog opens.
+- The dialog lists each exception it approves: the protected branch, each secret finding as
+  `"file":line — rule` (never the value; over 10 goes to `.rsct/reports/commit-secrets-*.md`), the
+  contract surfaces with their declared consumers (over 10 of either goes to
+  `.rsct/reports/commit-contracts-*.md`), and an inactive contract gate. Then come the
+  agent's reasons, then the commit message.
+- The staged tree, HEAD and branch are recorded before the dialog; the secrets scan and the
+  contract paths read that recorded tree. All three are checked again right before `git commit`
+  (`staged_changed`).
+- A commit whose tree or parent differs from what was approved (a git hook that staged more)
+  returns `committed_with_drift`; the hints name the changed paths, how many secret findings they
+  carry and the command that undoes it (`git reset --soft HEAD~1`, or `git update-ref -d HEAD` for
+  a first commit). Code files among them stay under the `review_drift` lock above. A commit RSCT
+  cannot read back is `committed_with_drift` too.
+- The branch is read from HEAD's symbolic ref, so it is known before its first commit: the first
+  commit on a protected branch needs `override_protected_branch`. A recorded branch that is not
+  the one checked refuses (`staged_changed`).
+- When `git commit` fails but HEAD moved meanwhile (a hook's own commit, or this commit with an
+  error after it), the hints and the audit entry (`head_moved_to`) say so; when a hook switched
+  the branch instead, they say that (`head_ref_now`). Either way the approval counts as used and a
+  plan token's action is not refunded.
+- A commit that lands with HEAD on another branch than the approved one (a hook that switched it)
+  returns `committed_with_drift` and audits `request_commit.branch_drift`.
+- A list that cannot be written to its report is shown whole in the dialog (a dialog over its size
+  limit is refused).
+
+- Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real staged diff (the test-only diff seam is a function arg, not an MCP input).
+- Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`, `'secrets_unreadable'`, `'staged_paths_unreadable'`, `'staged_state_unreadable'`, `'staged_changed'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`
 - `hints[]` also carries **advisories** — reports that never gate, prepended ahead of the routine tail and present on rejected returns too. Two of them today:
   1. **Security-tier install drift** — an enforcement script under `.rsct/scripts/` is absent, is present with no hook entry pointing at it or with a guard entry in another form than `/rsct-setup` writes, or is an edit guard from a build that cannot block (2.2.0 to 2.12.3); or `"disableAllHooks": true` in the local, project or user settings switches every hook off. In each case what it enforces is not running. A script that merely *differs* from the shipped copy stays at the normal tier and is NOT an advisory. Carried by `rsct_request_commit`, `rsct_request_push`, `rsct_request_merge`, `rsct_request_rebase` and `rsct_plan_authorize`, and each of them also adds one line to its OS dialog — the one channel the agent cannot summarize away. A commit authorized by an active batch token lands with no dialog; the line was in the dialog that minted the token.
   2. **`.claude/settings.json` drift** (`rsct_request_commit` only) — the versioned settings file diverged from the baseline the SessionStart hook recorded and is not staged. Lists the new `permissions.allow[]` entries verbatim and offers three resolutions (stage / relocate to `settings.local.json` / discard). Report-only: it never stages, edits or discards, and it says nothing about a file you already staged.
@@ -1063,12 +1094,9 @@ In any project, managed or not, it also refuses (`claude_settings`) an `Edit`,
 `settings.local.json` in a folder named `.claude` (the project's or `~/.claude`) — whose
 resulting text would set `"disableAllHooks": true`, change or remove an entry for
 one of the three RSCT hooks (its event, matcher or any field of the hook), leave a
-settings file that holds RSCT hooks unparseable, or set or change
-an env key that changes how a hook shell or node starts (`NODE_OPTIONS`, `PATH`,
-`BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `CLAUDE_PROJECT_DIR`, every `LD_*` and
-`DYLD_*` loader key, `BASH_FUNC_*`),
-or add one of those keys to a result that does not parse. Any other edit of those
-files passes.
+settings file that holds RSCT hooks unparseable, or add, change or remove any `env`
+entry — since 2.23.0 every key, not only the ones that change how a hook shell or node starts
+(ADR-041) — or leave a result that does not parse with an `env` block in it.
 
 It needs no server, which cuts both ways: it enforces in a session where
 `rsct-mcp` is not connected, and there it cannot be told the context was

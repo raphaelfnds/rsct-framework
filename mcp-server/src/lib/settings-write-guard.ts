@@ -8,16 +8,6 @@ export const RSCT_HOOK_MARKERS: readonly string[] = [
   '.rsct/scripts/terminal-guard.js',
 ]
 
-const GUARDED_ENV_KEYS = new Set([
-  'NODE_OPTIONS', 'PATH', 'BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'CLAUDE_PROJECT_DIR',
-  'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
-])
-
-function isGuardedEnvKey(key: string): boolean {
-  const k = key.toUpperCase()
-  return GUARDED_ENV_KEYS.has(k) || /^(BASH_FUNC_|LD_|DYLD_)/.test(k)
-}
-
 export type SettingsWriteVerdict = { block: false } | { block: true; reason: string }
 
 type Reader = (path: string) => string | null
@@ -104,12 +94,18 @@ function parseObject(text: string): Record<string, unknown> | null {
   }
 }
 
-function guardedEnv(json: Record<string, unknown> | null): Map<string, string> {
+function envEntries(json: Record<string, unknown> | null): Record<string, unknown> {
   const env = json?.env
-  const found = new Map<string, string>()
-  if (!env || typeof env !== 'object' || Array.isArray(env)) return found
-  for (const [k, v] of Object.entries(env as Record<string, unknown>)) if (isGuardedEnvKey(k)) found.set(k.toUpperCase(), JSON.stringify(v))
-  return found
+  return env && typeof env === 'object' && !Array.isArray(env) ? (env as Record<string, unknown>) : {}
+}
+
+function changedEnvKey(before: Record<string, unknown> | null, after: Record<string, unknown>): string | null {
+  const was = envEntries(before)
+  const now = envEntries(after)
+  for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
+    if (!Object.hasOwn(was, key) || !Object.hasOwn(now, key) || stable(was[key]) !== stable(now[key])) return key
+  }
+  return null
 }
 
 function markersIn(text: string): string {
@@ -233,26 +229,15 @@ export function judgeSettingsWrite(
     }
   }
 
-  const envBefore = guardedEnv(beforeJson)
-  for (const [key, value] of guardedEnv(afterJson)) {
-    if (envBefore.get(key) !== value) {
-      return { block: true, reason: `this write would set env.${key} in a Claude Code settings file; that is the developer's own edit` }
-    }
-  }
   if (!afterJson) {
-    const before = decodeUnicodeEscapes(current)
-    const patterns: Array<[string, RegExp]> = [
-      ['NODE_OPTIONS', /NODE_OPTIONS/i],
-      ['BASH_FUNC_', /"BASH_FUNC_/i],
-      ['LD_', /"LD_\w+"\s*:/i],
-      ['DYLD_', /"DYLD_\w+"\s*:/i],
-      ...[...GUARDED_ENV_KEYS].filter((k) => k !== 'NODE_OPTIONS').map((k): [string, RegExp] => [k, new RegExp(`"${k}"\\s*:\\s*"`, 'i')]),
-    ]
-    for (const [key, pattern] of patterns) {
-      if (pattern.test(decodedAfter) && !pattern.test(before)) {
-        return { block: true, reason: `this write would add ${key} to a Claude Code settings file; that is the developer's own edit` }
-      }
+    if (/"env"\s*:/i.test(decodedAfter)) {
+      return { block: true, reason: 'this write would leave a Claude Code settings file unreadable with an env block in it; every env entry is the developer\'s own edit' }
     }
+    return PASS
+  }
+  const envKey = changedEnvKey(beforeJson, afterJson)
+  if (envKey !== null) {
+    return { block: true, reason: `this write would add, change or remove env.${envKey} in a Claude Code settings file; every env entry is the developer's own edit` }
   }
   return PASS
 }

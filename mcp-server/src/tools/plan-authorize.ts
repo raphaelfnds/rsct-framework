@@ -216,7 +216,7 @@ export async function planAuthorizeHandler(
     }
   }
 
-  if (branch === null) {
+  if (branch === null || gitState.head_sha === null) {
     return refuse(
       'no_branch',
       'no branch resolved (detached HEAD or not in a git worktree) — a batch token must be scoped to a named branch',

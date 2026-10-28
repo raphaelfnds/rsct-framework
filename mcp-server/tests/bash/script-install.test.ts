@@ -7,6 +7,14 @@ import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import { bashBin } from './lib/resolve-bash.js'
 
 const BASH = bashAvailable()
+
+const THIS_IS_WSL = process.platform === 'linux' && (() => {
+  try {
+    return /microsoft|wsl/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8'))
+  } catch {
+    return false
+  }
+})()
 const ROOT = repoRoot(__dirname)
 const INSTALL = resolve(ROOT, 'scripts', 'install.sh')
 const UNINSTALL = resolve(ROOT, 'scripts', 'uninstall-framework.sh')
@@ -242,7 +250,7 @@ const readScope = (home: string) =>
 const rsctHome = (home: string) => join(home, '.rsct')
 const commandsDir = (home: string) => join(home, '.claude', 'commands')
 
-describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox smoke (T0.b)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('scripts/install.sh + uninstall-framework.sh — sandbox smoke (T0.b)', () => {
   it('install populates ~/.rsct and registers the slash commands', () => {
     const home = newSandbox()
     const r = runScript(INSTALL, home)
@@ -348,14 +356,6 @@ describe.skipIf(!BASH)('scripts/install.sh + uninstall-framework.sh — sandbox 
 
 const OSRELEASE_CHECK = /grep -qiE "([^"]+)" \/proc\/sys\/kernel\/osrelease/
 
-const THIS_IS_WSL = (() => {
-  try {
-    return /microsoft|wsl/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8'))
-  } catch {
-    return false
-  }
-})()
-
 describe.skipIf(!BASH)('install/uninstall WSL detection reads osrelease the same way (#110)', () => {
   for (const script of [INSTALL, UNINSTALL]) {
     const name = script.replace(/\\/g, '/').split('/').pop()!
@@ -407,7 +407,31 @@ describe.skipIf(!BASH)('install/uninstall WSL detection reads osrelease the same
   })
 })
 
-describe.skipIf(!BASH)('uninstall plan-line wording under --skip-mcp (A4)', () => {
+describe.runIf(BASH && THIS_IS_WSL)('inside WSL both scripts refuse to run without --wsl (ADR-032); the sandbox tests that need them to run are skipped here and run on Linux, macOS and Windows', () => {
+  const everything = (dir: string): string[] => (readdirSync(dir, { recursive: true }) as string[]).sort()
+
+  it('the installer refuses without --wsl and writes nothing', () => {
+    const home = newSandbox()
+    const r = runScript(INSTALL, home)
+    expect(r.ok, r.out).toBe(false)
+    expect(r.out, r.out).toMatch(/This script is running under WSL/)
+    expect(r.out, r.out).toMatch(/bash scripts\/install\.sh --wsl/)
+    expect(everything(home)).toEqual([])
+  }, 60_000)
+
+  it('the uninstaller refuses without --wsl and removes nothing', () => {
+    const home = newSandbox()
+    seedFramework(home)
+    const before = everything(home)
+    const r = runScript(UNINSTALL, home)
+    expect(r.ok, r.out).toBe(false)
+    expect(r.out, r.out).toMatch(/This script is running under WSL/)
+    expect(r.out, r.out).toMatch(/bash scripts\/uninstall-framework\.sh --wsl/)
+    expect(everything(home)).toEqual(before)
+  }, 60_000)
+})
+
+describe.skipIf(!BASH || THIS_IS_WSL)('uninstall plan-line wording under --skip-mcp (A4)', () => {
   it('reports a detected global rsct-mcp as left untouched, not "will ask separately"', () => {
     const home = newSandbox()
     seedFramework(home)
@@ -424,7 +448,7 @@ describe.skipIf(!BASH)('uninstall plan-line wording under --skip-mcp (A4)', () =
   }, 60_000)
 })
 
-describe.skipIf(!BASH)('install.sh reads ~/.rsct/mcp-scope as the menu default (#71)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('install.sh reads ~/.rsct/mcp-scope as the menu default (#71)', () => {
   const mcpEnv = (_home: string) => ({ RSCT_SKIP_MCP: undefined as string | undefined })
 
   it('keeps a recorded "project" on an unattended re-run', () => {
@@ -521,7 +545,7 @@ describe.skipIf(!BASH)('install.sh reads ~/.rsct/mcp-scope as the menu default (
   }, 60_000)
 })
 
-describe.skipIf(!BASH)('install.sh makes the MCP scope choice EFFECTIVE (#73)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('install.sh makes the MCP scope choice EFFECTIVE (#73)', () => {
   const mcp = { RSCT_SKIP_MCP: undefined as string | undefined, RSCT_ASSUME_YES: undefined as string | undefined }
   const mcpYes = { RSCT_SKIP_MCP: undefined as string | undefined }
   const keys = (...rest: string[]) => `y\n\n${rest.join('\n')}\n`
@@ -835,7 +859,7 @@ const FOREIGN_COMMAND = BASH
   ? execFileSync(bashBin(), ['-c', 'command -v rsct-mcp || true'], { env: process.env, encoding: 'utf8' }).trim()
   : ''
 
-describe.skipIf(!BASH)('install.sh runs the companion from a copy it owns (#74)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('install.sh runs the companion from a copy it owns (#74)', () => {
   const mcpYes = { RSCT_SKIP_MCP: undefined as string | undefined }
   const copiedDist = (home: string) => readFileSync(join(mcpHome(home), 'dist', 'index.js'), 'utf8')
 
@@ -1070,7 +1094,7 @@ describe.skipIf(!BASH)('install.sh runs the companion from a copy it owns (#74)'
   }, 900_000)
 })
 
-describe.skipIf(!BASH)('uninstall-framework.sh treats the copy as part of the companion (#74)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('uninstall-framework.sh treats the copy as part of the companion (#74)', () => {
   const reach = { RSCT_SKIP_MCP: undefined as string | undefined }
   const asked = { ...reach, RSCT_ASSUME_YES: undefined as string | undefined }
   const copyIntact = (home: string) => existsSync(join(mcpHome(home), 'dist', 'index.js'))
@@ -1195,7 +1219,7 @@ describe.skipIf(!BASH)('both scripts load scripts/rsct-lib.sh from beside them, 
     expect(present(commandsDir(home))).toBe(false)
   }, 60_000)
 
-  it('an exported CDPATH does not break finding the lib when the scripts run by a relative path', () => {
+  it.skipIf(THIS_IS_WSL)('an exported CDPATH does not break finding the lib when the scripts run by a relative path', () => {
     const tree = newSourceTree(['dist'], 'V1')
     const root = resolve(tree.install, '..', '..')
     copyFileSync(UNINSTALL, join(root, 'scripts', 'uninstall-framework.sh'))
@@ -1222,7 +1246,7 @@ describe.skipIf(!BASH)('both scripts load scripts/rsct-lib.sh from beside them, 
   }, 60_000)
 })
 
-describe.skipIf(!BASH)('uninstall-framework.sh removes the user-scope registration where Claude Code keeps it (#82)', () => {
+describe.skipIf(!BASH || THIS_IS_WSL)('uninstall-framework.sh removes the user-scope registration where Claude Code keeps it (#82)', () => {
   const reach = { RSCT_SKIP_MCP: undefined as string | undefined }
   const asked = { ...reach, RSCT_ASSUME_YES: undefined as string | undefined }
   const noCommand = () => pathWithoutHostTools(newStubBin({ withoutCommand: true }))

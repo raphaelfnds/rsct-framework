@@ -149,8 +149,9 @@ It does not watch the terminal: a shell command that writes a file is not seen.
 In a project the framework does not manage — no `.rsct.json`, or one it
 rejected — the guard lets scope through, while `rsct_check_edit_scope` still
 answers from the recorded list. Two refusals hold everywhere: a Claude Code
-settings write that would switch every hook off, change or remove an RSCT hook entry, leave such a file unparseable, or set
-an env key such as `NODE_OPTIONS`, `PATH` or `BASH_ENV` (`claude_settings` — make that edit yourself),
+settings write that would switch every hook off, change or remove an RSCT hook entry, leave such a file unparseable, or add,
+change or remove any `env` entry (`claude_settings` — make that edit yourself; since 2.23.0 every key, not only
+`NODE_OPTIONS`, `PATH` or `BASH_ENV`),
 an edit of `.rsct.json` that sets `database_guard` or `database_test_guard` to
 `false` (`rsct_config`, since 2.22.0 — make that edit yourself), an `Edit` of
 either file whose old text is not in the file exactly as written (since 2.22.0 —
@@ -343,6 +344,62 @@ If your project genuinely wants longer messages, set a number in `.rsct.json`:
 
 Note the value is a **number**, not a string — `"30"` in quotes is rejected by
 the config schema.
+
+## A commit is refused with `secrets_unreadable`, `staged_paths_unreadable`, `staged_state_unreadable` or `staged_changed`
+
+Since 2.23.0 `rsct_request_commit` reads exactly what git is about to commit and refuses a commit
+it could not read, instead of letting it through unchecked (ADR-039, ADR-040). Nothing was
+committed.
+
+- **`secrets_unreadable`, `staged_paths_unreadable`, `staged_state_unreadable`**: git failed, did
+  not answer in time (120 s for the secrets scan, 30 s for the list of staged paths and for the
+  staged tree, HEAD and branch), or could not tell whether the folder is a repository. The reason
+  quotes git when it said something. Another git process holding `.git/index.lock` is waited for
+  about a second before `staged_state_unreadable`.
+  - Retry once.
+  - If one very large file keeps failing the read, split the commit.
+  - Otherwise commit that change by hand in your own terminal.
+- **`staged_changed`**: what is staged, HEAD or the branch changed between the approval dialog and
+  the commit, or the branch changed while the commit was being prepared. Something ran `git add`,
+  `git commit`, a checkout or a branch switch meanwhile. Look at
+  `git status` and ask again, so the dialog shows what will be committed.
+
+## A commit returns `committed_with_drift`
+
+The commit that landed is not exactly what you approved. Its tree or parent differs from the one
+recorded before the dialog — most likely a git `pre-commit` hook that staged more or rewrote a
+file. The hints list the paths that changed and how many secret findings they carry, and the audit
+log records `request_commit.tree_drift`.
+
+- Check those paths in the commit (`git show --stat HEAD`) before any push.
+- To take the commit back, `git reset --soft HEAD~1` undoes it and keeps everything staged (on a
+  first commit, `git update-ref -d HEAD`).
+- If the hints say the commit landed on another branch, a hook switched the branch during the
+  commit: find the commit (`git log --all --oneline -3`) and undo it on the branch that has it.
+- If a code file the hook changed is among them, the next commit is refused with `review_drift`
+  until `rsct_phase_review_start` / `_complete` covers it. Other files (a README, a JSON file) are
+  reported only: a REVIEW stamps code files, so it could not clear a lock on them.
+- A hook that only reformats code files the REVIEW already accepts does not trigger the lock.
+- The same status, with "RSCT could not compare the commit", means git committed but RSCT could
+  not read the commit back. Check it the same way.
+
+## A commit returns `mutation_failed` and says HEAD moved or the branch changed
+
+`git commit` reported a failure, but HEAD now points at a commit RSCT did not check, or at another
+branch — most likely a git hook. The audit entry carries `head_moved_to` or `head_ref_now`. The
+approval counts as used and a plan token's action is not refunded.
+
+- Look at what is there before any push: `git show <sha>`, or `git log --all --oneline -5` when
+  the branch changed.
+- Undo an unwanted commit on the branch that has it (`git reset --soft HEAD~1` keeps its changes
+  staged; on a first commit, `git update-ref -d HEAD`), then switch back to your branch.
+- Then fix or remove the hook, and ask for the commit again with a fresh approval.
+
+## The first commit of a new repository is refused with `protected_branch`
+
+Since 2.23.0 the branch is known before its first commit, so a first commit on `main` (or any
+protected branch) needs the protected-branch exception, like every other commit there. Approve it
+in the dialog, or start on a feature branch.
 
 ## A commit, push, merge or rebase is refused with `force_dialog_no_channel`
 

@@ -100,6 +100,15 @@ describe('rsct_request_rebase', () => {
     expect(out.anti_replay_persisted).toBe(true)
   })
 
+  it('rejects a branch that has no commit yet, as before its name could be read', async () => {
+    const out = (await requestRebaseHandler(
+      { project_root: tmpRoot, ref: 'main', dev_approval: approval(), pre_merge_ack: ack() },
+      internal({ gitStateOverride: { ...gitState('feat/new'), head_sha: null } }),
+    )) as RequestRebaseOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('detached_head')
+  })
+
   it('squash-stages without committing (mode=squash)', async () => {
     const out = (await requestRebaseHandler(
       { project_root: tmpRoot, mode: 'squash', ref: 'feat/src', dev_approval: approval(), pre_merge_ack: ack() },

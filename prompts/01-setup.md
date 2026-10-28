@@ -4311,8 +4311,7 @@ A guard that cannot start — the copy missing or crashing — now blocks the
 edit: the command ends in `|| exit 2` and starts the guard with `NODE_OPTIONS`
 cleared (ADR-028). It also refuses, in any project, a write to a Claude Code
 settings file that would switch every hook off, change or remove an RSCT hook
-entry, leave such a file unparseable, or set an env key that changes how a hook starts (`NODE_OPTIONS`, `PATH`,
-`BASH_ENV` and the like).
+entry, leave such a file unparseable, or add, change or remove any `env` entry (ADR-041).
 Gate the whole
 phase on `[ -n "$SANITIZER_SRC" ]` (rsct-mcp available, from 4.V.a) — the
 guard ships in the same package.

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
 export interface GitState {
   available: boolean
@@ -14,9 +15,12 @@ export function readGitState(projectRoot: string): GitState {
     return { available: false, branch: null, head_sha: null, is_clean: null }
   }
 
-  const branch = safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const symbolic = readHeadRef(projectRoot) ?? ''
+  const branch = symbolic.startsWith(BRANCH_REF_PREFIX)
+    ? symbolic.slice(BRANCH_REF_PREFIX.length)
+    : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
-  const status = safeGit(projectRoot, ['status', '--porcelain'])
+  const status = safeGit(projectRoot, ['-c', 'core.fsmonitor=', 'status', '--porcelain'])
 
   return {
     available: true,
@@ -26,14 +30,241 @@ export function readGitState(projectRoot: string): GitState {
   }
 }
 
-export function getStagedDiff(projectRoot: string): string | null {
-  if (!isGitRepo(projectRoot)) return null
-  return safeGitRaw(projectRoot, ['diff', '--cached', '--no-color', '-U0'])
+const BRANCH_REF_PREFIX = 'refs/heads/'
+
+export function branchRef(branch: string | null): string | null {
+  return branch === null || branch === 'HEAD' ? null : `${BRANCH_REF_PREFIX}${branch}`
+}
+
+export function readHeadRef(projectRoot: string): string | null {
+  const ref = gitReadC(projectRoot, ['symbolic-ref', '-q', 'HEAD']).stdout.trim()
+  return ref.length > 0 ? ref : null
+}
+
+const GATE_READ_CONFIG: readonly string[] = [
+  '-c', 'core.fsmonitor=',
+  '-c', 'diff.relative=false',
+]
+
+const CONTENT_DIFF_FLAGS: readonly string[] = [
+  '--no-color',
+  '-U0',
+  '--text',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+  '--ignore-submodules=none',
+]
+
+const NAME_DIFF_FLAGS: readonly string[] = ['--name-only', '-z', '--no-renames', '--ignore-submodules=none']
+
+export const STAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', '--cached', ...CONTENT_DIFF_FLAGS]
+export const UNSTAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS]
+
+export type GitStreamResult = { ok: true } | { ok: false; reason: string }
+
+const GIT_SCAN_TIMEOUT_MS = 120_000
+
+export function streamGitLines(
+  cwd: string,
+  args: readonly string[],
+  onLine: (line: string) => void,
+  timeoutMs: number = GIT_SCAN_TIMEOUT_MS,
+): Promise<GitStreamResult> {
+  return new Promise((resolvePromise) => {
+    let settled = false
+    const parts: string[] = []
+    let stderr = ''
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const decoder = new StringDecoder('utf8')
+    const finish = (result: GitStreamResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise(result)
+    }
+    const feed = (text: string): void => {
+      let start = 0
+      let at = text.indexOf('\n')
+      while (at !== -1) {
+        parts.push(text.slice(start, at))
+        const line = parts.join('')
+        parts.length = 0
+        onLine(line)
+        start = at + 1
+        at = text.indexOf('\n', start)
+      }
+      if (start < text.length) parts.push(text.slice(start))
+    }
+    let child: ChildProcess
+    try {
+      child = spawn('git', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    } catch (error) {
+      finish({ ok: false, reason: `git could not start: ${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    let stopReason: string | null = null
+    const stopWith = (reason: string): void => {
+      if (stopReason !== null || settled) return
+      stopReason = reason
+      clearTimeout(timer)
+      killTree(child)
+      timer = setTimeout(() => finish({ ok: false, reason }), 5_000)
+    }
+    const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
+    timer = setTimeout(() => stopWith(`git did not finish reading within ${limit}`), timeoutMs)
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled || stopReason !== null) return
+      try {
+        feed(decoder.write(chunk))
+      } catch (error) {
+        stopWith(`the read stopped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < 4096) stderr += chunk.toString('utf8')
+    })
+    child.on('error', (error) => finish({ ok: false, reason: stopReason ?? `git could not run: ${error.message}` }))
+    child.on('close', (code, signal) => {
+      if (settled) return
+      if (stopReason !== null) {
+        finish({ ok: false, reason: stopReason })
+        return
+      }
+      if (code !== 0) {
+        const said = firstLine(stderr)
+        finish({ ok: false, reason: said.length > 0 ? `git said: "${said}"` : `git exited with ${code ?? signal ?? 'no code'}` })
+        return
+      }
+      try {
+        feed(decoder.end())
+        if (parts.length > 0) onLine(parts.join(''))
+        finish({ ok: true })
+      } catch (error) {
+        finish({ ok: false, reason: `the read stopped: ${error instanceof Error ? error.message : String(error)}` })
+      }
+    })
+  })
+}
+
+function killTree(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    try {
+      execFileSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore', windowsHide: true, timeout: 5_000 })
+      return
+    } catch {
+      child.kill('SIGKILL')
+      return
+    }
+  }
+  child.kill('SIGKILL')
+}
+
+const STAGED_PATHS_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', '--cached', ...NAME_DIFF_FLAGS]
+
+interface GitRead {
+  ok: boolean
+  stdout: string
+  stderr: string
+  status: number | null
+}
+
+function gitReadC(cwd: string, args: readonly string[], input?: string): GitRead {
+  try {
+    const stdout = execFileSync('git', [...args], {
+      cwd,
+      encoding: 'utf8',
+      input: input ?? '',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: GIT_READ_TIMEOUT_MS,
+      env: { ...process.env, LC_ALL: 'C' },
+      windowsHide: true,
+    })
+    return { ok: true, stdout, stderr: '', status: 0 }
+  } catch (error) {
+    const thrown = error as { status?: number | null; stderr?: Buffer | string }
+    return { ok: false, stdout: '', stderr: String(thrown.stderr ?? ''), status: thrown.status ?? null }
+  }
+}
+
+export type GitRepoStatus = 'repo' | 'not_a_repo' | 'unknown'
+
+export function gitRepoStatus(projectRoot: string): GitRepoStatus {
+  const res = gitReadC(projectRoot, ['rev-parse', '--is-inside-work-tree'])
+  if (res.ok) return res.stdout.trim() === 'true' ? 'repo' : 'unknown'
+  return res.status === 128 && /not a git repository/i.test(res.stderr) ? 'not_a_repo' : 'unknown'
+}
+
+const OBJECT_ID = /^[0-9a-f]{40,64}$/
+
+export interface StagedTreeState {
+  tree: string | null
+  head: string | null
+  ref: string | null
+}
+
+const INDEX_LOCK_RETRIES = 5
+const INDEX_LOCK_WAIT_MS = 200
+
+export async function readStagedTreeState(projectRoot: string): Promise<StagedTreeState | null> {
+  const status = gitRepoStatus(projectRoot)
+  if (status === 'not_a_repo') return { tree: null, head: null, ref: null }
+  if (status === 'unknown') return null
+  let written: GitRead = gitReadC(projectRoot, [...GATE_READ_CONFIG, 'write-tree'])
+  for (let attempt = 1; !written.ok && /index\.lock/.test(written.stderr) && attempt < INDEX_LOCK_RETRIES; attempt++) {
+    await new Promise((done) => setTimeout(done, INDEX_LOCK_WAIT_MS))
+    written = gitReadC(projectRoot, [...GATE_READ_CONFIG, 'write-tree'])
+  }
+  const tree = written.stdout.trim()
+  if (!written.ok || !OBJECT_ID.test(tree)) return null
+  const head = gitReadC(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).stdout.trim()
+  return { tree, head: OBJECT_ID.test(head) ? head : null, ref: readHeadRef(projectRoot) }
+}
+
+export function sameStagedTreeState(a: StagedTreeState, b: StagedTreeState): boolean {
+  return a.tree === b.tree && a.head === b.head && a.ref === b.ref
+}
+
+export function baseTreeOf(projectRoot: string, head: string | null): string | null {
+  const res =
+    head === null
+      ? gitReadC(projectRoot, ['hash-object', '-t', 'tree', '--stdin'], '')
+      : gitReadC(projectRoot, ['rev-parse', '--verify', '-q', `${head}^{tree}`])
+  const id = res.stdout.trim()
+  return res.ok && OBJECT_ID.test(id) ? id : null
+}
+
+export interface CommittedTree {
+  tree: string
+  parent: string | null
+}
+
+export function readCommittedTree(projectRoot: string, commit: string): CommittedTree | null {
+  if (!isSafeRevisionToken(commit)) return null
+  const tree = safeGitRaw(projectRoot, ['rev-parse', '--verify', '-q', `${commit}^{tree}`])?.trim() ?? ''
+  if (!OBJECT_ID.test(tree)) return null
+  const parents = (safeGitRaw(projectRoot, ['rev-list', '--parents', '-n', '1', commit])?.trim() ?? '').split(' ').slice(1)
+  return { tree, parent: parents.length === 1 && OBJECT_ID.test(parents[0]!) ? parents[0]! : null }
+}
+
+export function treeDiffArgs(from: string, to: string): string[] | null {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null
+  return [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS, from, to]
+}
+
+export function getTreeDiffPaths(projectRoot: string, from: string, to: string): string[] | null {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null
+  const raw = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, 'diff', ...NAME_DIFF_FLAGS, from, to])
+  return raw === null ? null : splitNulPaths(raw)
 }
 
 export function getStagedPaths(projectRoot: string): string[] | null {
-  if (!isGitRepo(projectRoot)) return null
-  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
+  const status = gitRepoStatus(projectRoot)
+  if (status === 'not_a_repo') return []
+  if (status === 'unknown') return null
+  const raw = safeGitRaw(projectRoot, [...STAGED_PATHS_ARGS])
   if (raw === null) return null
   return splitNulPaths(raw)
 }
@@ -66,13 +297,7 @@ export function getRangePaths(
     if (!isSafeRevisionToken(rev)) return { status: 'unsafe_revision', revision: rev }
   }
   if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
-  const raw = safeGitRaw(projectRoot, [
-    'diff',
-    '--name-only',
-    '-z',
-    '--diff-filter=d',
-    `${base}...${head}`,
-  ])
+  const raw = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, 'diff', ...NAME_DIFF_FLAGS, '--diff-filter=d', `${base}...${head}`])
   if (raw === null) return { status: 'unavailable' }
   return { status: 'ok', paths: splitNulPaths(raw) }
 }
@@ -143,14 +368,8 @@ export function getFileAtHead(projectRoot: string, relPath: string): string | nu
   return safeGitRaw(projectRoot, ['show', `HEAD:${relPath}`])
 }
 
-export function getUnstagedDiff(projectRoot: string): string | null {
-  if (!isGitRepo(projectRoot)) return null
-  return safeGitRaw(projectRoot, ['diff', '--no-color', '-U0'])
-}
-
 function isGitRepo(projectRoot: string): boolean {
-  const out = safeGit(projectRoot, ['rev-parse', '--is-inside-work-tree'])
-  return out === 'true'
+  return gitRepoStatus(projectRoot) === 'repo'
 }
 
 export function gitIsTracked(

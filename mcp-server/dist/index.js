@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, fstatSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync, spawn } from 'child_process';
+import { StringDecoder } from 'string_decoder';
 import { randomUUID, createHash } from 'crypto';
 import { homedir, tmpdir } from 'os';
 
@@ -3369,6 +3370,37 @@ var require_utils = __commonJS({
       }
       return output.join("");
     }
+    function removeDotSegmentsRelative(path2) {
+      if (path2 === "" || path2[0] === "/") {
+        return removeDotSegments(path2);
+      }
+      const segments = path2.split("/");
+      const last = segments.length - 1;
+      const output = [];
+      let trailingDirectory = false;
+      for (let i2 = 0; i2 <= last; i2++) {
+        const segment = segments[i2];
+        if (segment === "." || segment === "..") {
+          if (segment === "..") {
+            if (output.length !== 0 && output[output.length - 1] !== "..") {
+              output.pop();
+            } else {
+              output.push("..");
+            }
+          }
+          trailingDirectory = i2 === last;
+        } else {
+          output.push(segment);
+        }
+      }
+      if (trailingDirectory && output[output.length - 1] !== "..") {
+        output.push("");
+      }
+      if (output.length === 0 || output[0] === "" || output[0].includes(":")) {
+        output.unshift(".");
+      }
+      return output.join("/");
+    }
     var HOST_DELIMS = { "@": "%40", "/": "%2F", "?": "%3F", "#": "%23", ":": "%3A" };
     var HOST_DELIM_RE = /[@/?#:]/g;
     var HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
@@ -3629,6 +3661,7 @@ var require_utils = __commonJS({
       encodeFragment,
       escapePreservingEscapes,
       removeDotSegments,
+      removeDotSegmentsRelative,
       isIPv4,
       isUUID,
       normalizeIPv6,
@@ -3852,16 +3885,18 @@ var require_schemes = __commonJS({
 var require_fast_uri = __commonJS({
   "node_modules/fast-uri/index.js"(exports, module2) {
     init_esm_shims();
-    var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
+    var { normalizeIPv6, removeDotSegments, removeDotSegmentsRelative, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
     var VALID_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/u;
     var MALFORMED_SCHEME_ERROR = "URI scheme is malformed.";
-    function decodeValidScheme(scheme) {
-      const decodedScheme = unescape(String(scheme));
-      if (!VALID_SCHEME.test(decodedScheme)) {
+    var MALFORMED_HOST_ERROR = "URI host is malformed.";
+    var FORBIDDEN_DOMAIN_HOST_CHARACTER = /[\0-\x20"#/:<>?@[\\\]^`{|}\x7F]/u;
+    function validateScheme(scheme) {
+      const stringScheme = String(scheme);
+      if (!VALID_SCHEME.test(stringScheme)) {
         throw new TypeError(MALFORMED_SCHEME_ERROR);
       }
-      return decodedScheme;
+      return stringScheme;
     }
     function normalize2(uri, options) {
       if (typeof uri === "string") {
@@ -3898,6 +3933,9 @@ var require_fast_uri = __commonJS({
       const resolvedSchemeHandler = getSchemeHandler(options && options.scheme || resolved.scheme);
       const resolvedHost = resolved.host;
       const resolvedHostIsIP = resolvedHost !== void 0 && resolvedHost !== "" && (isIPv4(resolvedHost) || normalizeIPv6(resolvedHost).isIPV6);
+      if (hasForbiddenDomainHost(resolved, options || {}, resolvedSchemeHandler, resolvedHostIsIP)) {
+        throw new Error(MALFORMED_HOST_ERROR);
+      }
       canonicalizeHost(resolved, options || {}, resolvedSchemeHandler, resolvedHostIsIP);
       const encodedASCIIHost = resolvedHost && resolvedHost.indexOf("%") !== -1 && !new RegExp("\\P{ASCII}", "u").test(resolvedHost);
       if (resolved.error && !encodedASCIIHost) {
@@ -3939,14 +3977,15 @@ var require_fast_uri = __commonJS({
             if (relative7.path[0] === "/") {
               target.path = removeDotSegments(relative7.path);
             } else {
-              if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
+              const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
+              if (baseHasAuthority && !base.path) {
                 target.path = "/" + relative7.path;
               } else if (!base.path) {
                 target.path = relative7.path;
               } else {
                 target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative7.path;
               }
-              target.path = removeDotSegments(target.path);
+              target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
             target.query = relative7.query;
           }
@@ -3984,12 +4023,13 @@ var require_fast_uri = __commonJS({
       const options = Object.assign({}, opts);
       const uriTokens = [];
       if (component.scheme) {
-        component.scheme = decodeValidScheme(component.scheme);
+        component.scheme = validateScheme(component.scheme);
       }
       const schemeHandler = getSchemeHandler(options.scheme || component.scheme);
       if (schemeHandler && schemeHandler.serialize) schemeHandler.serialize(component, options);
       const hasAuthority = component.userinfo !== void 0 || component.host !== void 0 || component.port !== void 0;
-      const pathNoScheme = !options.skipEscape && component.scheme === void 0 && !hasAuthority;
+      const schemelessReference = (component.scheme === void 0 || options.reference === "suffix") && !hasAuthority;
+      const pathNoScheme = !options.skipEscape && schemelessReference;
       if (component.path !== void 0) {
         if (!options.skipEscape) {
           component.path = serializePathEncoding(component.path, pathNoScheme);
@@ -3998,7 +4038,7 @@ var require_fast_uri = __commonJS({
         }
       }
       if (options.reference !== "suffix" && component.scheme) {
-        component.scheme = decodeValidScheme(component.scheme);
+        component.scheme = validateScheme(component.scheme);
         uriTokens.push(component.scheme, ":");
       }
       const authority = recomposeAuthority(component);
@@ -4014,9 +4054,9 @@ var require_fast_uri = __commonJS({
       if (component.path !== void 0) {
         let s = component.path;
         if (!options.absolutePath && (!schemeHandler || !schemeHandler.absolutePath)) {
-          s = removeDotSegments(s);
+          s = schemelessReference && s[0] !== "/" ? removeDotSegmentsRelative(s) : removeDotSegments(s);
         }
-        if (pathNoScheme) {
+        if (schemelessReference) {
           s = serializePathEncoding(s, true);
         }
         if (authority === void 0 && s[0] === "/" && s[1] === "/") {
@@ -4063,15 +4103,33 @@ var require_fast_uri = __commonJS({
       return hasMalformedPercentEncoding(matches[3]) || host !== void 0 && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
     }
     function canonicalizeHost(parsed, options, schemeHandler, isIP) {
+      if (hasForbiddenDomainHost(parsed, options, schemeHandler, isIP)) {
+        parsed.error = parsed.error || MALFORMED_HOST_ERROR;
+        return true;
+      }
       if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
+        let url;
         try {
-          parsed.host = new URL("http://" + parsed.host).hostname;
+          url = new URL("http://" + parsed.host);
         } catch (e) {
           parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
           return true;
         }
+        if (!isHostOnlyURL(url)) {
+          parsed.error = parsed.error || MALFORMED_HOST_ERROR;
+          return true;
+        }
+        parsed.host = url.hostname;
       }
       return false;
+    }
+    function hasForbiddenDomainHost(parsed, options, schemeHandler, isIP) {
+      return Boolean(
+        parsed.host && isIP === false && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && FORBIDDEN_DOMAIN_HOST_CHARACTER.test(parsed.host)
+      );
+    }
+    function isHostOnlyURL(url) {
+      return url.username === "" && url.password === "" && url.port === "" && url.pathname === "/" && url.search === "" && url.hash === "" && url.hostname !== "";
     }
     function parseWithStatus(uri, opts) {
       const options = Object.assign({}, opts);
@@ -4127,9 +4185,8 @@ var require_fast_uri = __commonJS({
         parsed.query = matches[7];
         parsed.fragment = matches[8];
         if (parsed.scheme !== void 0) {
-          const decodedScheme = unescape(parsed.scheme);
-          if (VALID_SCHEME.test(decodedScheme)) {
-            parsed.scheme = decodedScheme.toLowerCase();
+          if (VALID_SCHEME.test(parsed.scheme)) {
+            parsed.scheme = parsed.scheme.toLowerCase();
           } else {
             parsed.error = parsed.error || MALFORMED_SCHEME_ERROR;
             malformedScheme = true;
@@ -4157,7 +4214,7 @@ var require_fast_uri = __commonJS({
             malformedIPLiteral = hasIPLiteralBracket && (!bracketedIPLiteral || ipv6result.error === true);
             parsed.host = isIP ? ipv6result.host : ipv6result.host.toLowerCase();
             if (malformedIPLiteral) {
-              parsed.error = parsed.error || "URI host is malformed.";
+              parsed.error = parsed.error || MALFORMED_HOST_ERROR;
               malformedAuthorityOrPort = true;
             }
           } else {
@@ -4185,7 +4242,7 @@ var require_fast_uri = __commonJS({
           if (!isIP) {
             host = normalizePercentEncoding(host.toLowerCase());
           }
-          parsed.host = reescapeHostDelimiters(host, isIP);
+          parsed.host = isIP || options.scheme !== "null" ? reescapeHostDelimiters(host, isIP) : host;
         }
         if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
           if (parsed.path) {
@@ -22920,9 +22977,10 @@ function readGitState(projectRoot) {
   if (!isGitRepo(projectRoot)) {
     return { available: false, branch: null, head_sha: null, is_clean: null };
   }
-  const branch = safeGit(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const symbolic = readHeadRef(projectRoot) ?? "";
+  const branch = symbolic.startsWith(BRANCH_REF_PREFIX) ? symbolic.slice(BRANCH_REF_PREFIX.length) : safeGit(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const head_sha = safeGit(projectRoot, ["rev-parse", "--short", "HEAD"]);
-  const status = safeGit(projectRoot, ["status", "--porcelain"]);
+  const status = safeGit(projectRoot, ["-c", "core.fsmonitor=", "status", "--porcelain"]);
   return {
     available: true,
     branch,
@@ -22930,13 +22988,192 @@ function readGitState(projectRoot) {
     is_clean: status !== null ? status.length === 0 : null
   };
 }
-function getStagedDiff(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  return safeGitRaw(projectRoot, ["diff", "--cached", "--no-color", "-U0"]);
+var BRANCH_REF_PREFIX = "refs/heads/";
+function branchRef(branch) {
+  return branch === null || branch === "HEAD" ? null : `${BRANCH_REF_PREFIX}${branch}`;
+}
+function readHeadRef(projectRoot) {
+  const ref = gitReadC(projectRoot, ["symbolic-ref", "-q", "HEAD"]).stdout.trim();
+  return ref.length > 0 ? ref : null;
+}
+var GATE_READ_CONFIG = [
+  "-c",
+  "core.fsmonitor=",
+  "-c",
+  "diff.relative=false"
+];
+var CONTENT_DIFF_FLAGS = [
+  "--no-color",
+  "-U0",
+  "--text",
+  "--no-ext-diff",
+  "--no-textconv",
+  "--src-prefix=a/",
+  "--dst-prefix=b/",
+  "--ignore-submodules=none"
+];
+var NAME_DIFF_FLAGS = ["--name-only", "-z", "--no-renames", "--ignore-submodules=none"];
+var STAGED_DIFF_ARGS = [...GATE_READ_CONFIG, "diff", "--cached", ...CONTENT_DIFF_FLAGS];
+var UNSTAGED_DIFF_ARGS = [...GATE_READ_CONFIG, "diff", ...CONTENT_DIFF_FLAGS];
+var GIT_SCAN_TIMEOUT_MS = 12e4;
+function streamGitLines(cwd2, args2, onLine, timeoutMs = GIT_SCAN_TIMEOUT_MS) {
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const parts2 = [];
+    let stderr = "";
+    let timer;
+    const decoder = new StringDecoder("utf8");
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(result);
+    };
+    const feed = (text2) => {
+      let start2 = 0;
+      let at = text2.indexOf("\n");
+      while (at !== -1) {
+        parts2.push(text2.slice(start2, at));
+        const line2 = parts2.join("");
+        parts2.length = 0;
+        onLine(line2);
+        start2 = at + 1;
+        at = text2.indexOf("\n", start2);
+      }
+      if (start2 < text2.length) parts2.push(text2.slice(start2));
+    };
+    let child;
+    try {
+      child = spawn("git", [...args2], { cwd: cwd2, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    } catch (error2) {
+      finish({ ok: false, reason: `git could not start: ${error2 instanceof Error ? error2.message : String(error2)}` });
+      return;
+    }
+    let stopReason = null;
+    const stopWith = (reason) => {
+      if (stopReason !== null || settled) return;
+      stopReason = reason;
+      clearTimeout(timer);
+      killTree(child);
+      timer = setTimeout(() => finish({ ok: false, reason }), 5e3);
+    };
+    const limit = timeoutMs < 1e3 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1e3)} s`;
+    timer = setTimeout(() => stopWith(`git did not finish reading within ${limit}`), timeoutMs);
+    child.stdout?.on("data", (chunk) => {
+      if (settled || stopReason !== null) return;
+      try {
+        feed(decoder.write(chunk));
+      } catch (error2) {
+        stopWith(`the read stopped: ${error2 instanceof Error ? error2.message : String(error2)}`);
+      }
+    });
+    child.stderr?.on("data", (chunk) => {
+      if (stderr.length < 4096) stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error2) => finish({ ok: false, reason: stopReason ?? `git could not run: ${error2.message}` }));
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      if (stopReason !== null) {
+        finish({ ok: false, reason: stopReason });
+        return;
+      }
+      if (code !== 0) {
+        const said = firstLine(stderr);
+        finish({ ok: false, reason: said.length > 0 ? `git said: "${said}"` : `git exited with ${code ?? signal ?? "no code"}` });
+        return;
+      }
+      try {
+        feed(decoder.end());
+        if (parts2.length > 0) onLine(parts2.join(""));
+        finish({ ok: true });
+      } catch (error2) {
+        finish({ ok: false, reason: `the read stopped: ${error2 instanceof Error ? error2.message : String(error2)}` });
+      }
+    });
+  });
+}
+function killTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32" && child.pid !== void 0) {
+    try {
+      execFileSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
+      return;
+    } catch {
+      child.kill("SIGKILL");
+      return;
+    }
+  }
+  child.kill("SIGKILL");
+}
+var STAGED_PATHS_ARGS = [...GATE_READ_CONFIG, "diff", "--cached", ...NAME_DIFF_FLAGS];
+function gitReadC(cwd2, args2, input) {
+  try {
+    const stdout = execFileSync("git", [...args2], {
+      cwd: cwd2,
+      encoding: "utf8",
+      input: input ?? "",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: GIT_READ_TIMEOUT_MS,
+      env: { ...process.env, LC_ALL: "C" },
+      windowsHide: true
+    });
+    return { ok: true, stdout, stderr: "", status: 0 };
+  } catch (error2) {
+    const thrown = error2;
+    return { ok: false, stdout: "", stderr: String(thrown.stderr ?? ""), status: thrown.status ?? null };
+  }
+}
+function gitRepoStatus(projectRoot) {
+  const res = gitReadC(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
+  if (res.ok) return res.stdout.trim() === "true" ? "repo" : "unknown";
+  return res.status === 128 && /not a git repository/i.test(res.stderr) ? "not_a_repo" : "unknown";
+}
+var OBJECT_ID = /^[0-9a-f]{40,64}$/;
+var INDEX_LOCK_RETRIES = 5;
+var INDEX_LOCK_WAIT_MS = 200;
+async function readStagedTreeState(projectRoot) {
+  const status = gitRepoStatus(projectRoot);
+  if (status === "not_a_repo") return { tree: null, head: null, ref: null };
+  if (status === "unknown") return null;
+  let written = gitReadC(projectRoot, [...GATE_READ_CONFIG, "write-tree"]);
+  for (let attempt = 1; !written.ok && /index\.lock/.test(written.stderr) && attempt < INDEX_LOCK_RETRIES; attempt++) {
+    await new Promise((done) => setTimeout(done, INDEX_LOCK_WAIT_MS));
+    written = gitReadC(projectRoot, [...GATE_READ_CONFIG, "write-tree"]);
+  }
+  const tree = written.stdout.trim();
+  if (!written.ok || !OBJECT_ID.test(tree)) return null;
+  const head = gitReadC(projectRoot, ["rev-parse", "--verify", "-q", "HEAD^{commit}"]).stdout.trim();
+  return { tree, head: OBJECT_ID.test(head) ? head : null, ref: readHeadRef(projectRoot) };
+}
+function sameStagedTreeState(a, b) {
+  return a.tree === b.tree && a.head === b.head && a.ref === b.ref;
+}
+function baseTreeOf(projectRoot, head) {
+  const res = head === null ? gitReadC(projectRoot, ["hash-object", "-t", "tree", "--stdin"], "") : gitReadC(projectRoot, ["rev-parse", "--verify", "-q", `${head}^{tree}`]);
+  const id = res.stdout.trim();
+  return res.ok && OBJECT_ID.test(id) ? id : null;
+}
+function readCommittedTree(projectRoot, commit) {
+  if (!isSafeRevisionToken(commit)) return null;
+  const tree = safeGitRaw(projectRoot, ["rev-parse", "--verify", "-q", `${commit}^{tree}`])?.trim() ?? "";
+  if (!OBJECT_ID.test(tree)) return null;
+  const parents = (safeGitRaw(projectRoot, ["rev-list", "--parents", "-n", "1", commit])?.trim() ?? "").split(" ").slice(1);
+  return { tree, parent: parents.length === 1 && OBJECT_ID.test(parents[0]) ? parents[0] : null };
+}
+function treeDiffArgs(from, to) {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null;
+  return [...GATE_READ_CONFIG, "diff", ...CONTENT_DIFF_FLAGS, from, to];
+}
+function getTreeDiffPaths(projectRoot, from, to) {
+  if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to)) return null;
+  const raw = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, "diff", ...NAME_DIFF_FLAGS, from, to]);
+  return raw === null ? null : splitNulPaths(raw);
 }
 function getStagedPaths(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  const raw = safeGitRaw(projectRoot, ["diff", "--cached", "--name-only", "-z"]);
+  const status = gitRepoStatus(projectRoot);
+  if (status === "not_a_repo") return [];
+  if (status === "unknown") return null;
+  const raw = safeGitRaw(projectRoot, [...STAGED_PATHS_ARGS]);
   if (raw === null) return null;
   return splitNulPaths(raw);
 }
@@ -22954,13 +23191,7 @@ function getRangePaths(projectRoot, base, head) {
     if (!isSafeRevisionToken(rev)) return { status: "unsafe_revision", revision: rev };
   }
   if (!isGitRepo(projectRoot)) return { status: "unavailable" };
-  const raw = safeGitRaw(projectRoot, [
-    "diff",
-    "--name-only",
-    "-z",
-    "--diff-filter=d",
-    `${base}...${head}`
-  ]);
+  const raw = safeGitRaw(projectRoot, [...GATE_READ_CONFIG, "diff", ...NAME_DIFF_FLAGS, "--diff-filter=d", `${base}...${head}`]);
   if (raw === null) return { status: "unavailable" };
   return { status: "ok", paths: splitNulPaths(raw) };
 }
@@ -22981,13 +23212,8 @@ function getFileAtHead(projectRoot, relPath) {
   if (!isGitRepo(projectRoot)) return null;
   return safeGitRaw(projectRoot, ["show", `HEAD:${relPath}`]);
 }
-function getUnstagedDiff(projectRoot) {
-  if (!isGitRepo(projectRoot)) return null;
-  return safeGitRaw(projectRoot, ["diff", "--no-color", "-U0"]);
-}
 function isGitRepo(projectRoot) {
-  const out2 = safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]);
-  return out2 === "true";
+  return gitRepoStatus(projectRoot) === "repo";
 }
 function gitIsTracked(projectRoot, relPath, executor = defaultGitExecutor) {
   const r = executor(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
@@ -24082,7 +24308,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.22.0";
+var RSCT_MCP_VERSION = "2.23.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -26398,11 +26624,8 @@ var MASK_PLACEHOLDER = "***MASKED***";
 var SECRET_KEY_PATTERN = /\b(jwt[._-]?secret|api[._-]?key|secret|token|password|bearer|credential)\b/i;
 var SECRET_VALUE_PATTERNS = [
   /^sk-[a-zA-Z0-9]{20,}$/,
-  // OpenAI / Anthropic-style
   /^AKIA[0-9A-Z]{16}$/,
-  // AWS access key
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/
-  // PEM private key block
 ];
 function maskIfSecret(key, value) {
   if (value.length === 0) return { masked: false, value };
@@ -26437,65 +26660,65 @@ function compileExtraPatterns(patternStrings) {
   });
   return { compiled, invalid };
 }
-var FILE_HEADER_REGEX = /^\+\+\+\s+(?:b\/)?(.+?)\s*$/;
-var HUNK_HEADER_REGEX = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/;
-var KEY_VALUE_REGEX = /["']?([a-zA-Z][a-zA-Z0-9_.-]{1,})["']?\s*[:=]\s*["']?([^\s"',;}]+)["']?/g;
+var FILE_HEADER_REGEX = /^\+\+\+\s+(.+?)\s*$/;
+var HUNK_HEADER_REGEX = /^@@\s+-\d+(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/;
+var KEY_VALUE_REGEX = /["']?(?=[a-zA-Z])(?<![a-zA-Z][a-zA-Z0-9_.-]*?)([a-zA-Z](?=([a-zA-Z0-9_.-]+))\2)["']?\s*[:=]\s*["']?([^\s"',;}]+)["']?/g;
 var EXCERPT_MAX_LENGTH = 160;
-function* iterateAddedDiffLines(diff) {
-  const lines = diff.split("\n");
-  let currentFile = null;
-  let newLineNumber = 0;
-  for (const raw of lines) {
-    if (raw.startsWith("diff ")) {
-      currentFile = null;
+var C_ESCAPES = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "	", v: "\v", '"': '"', "\\": "\\" };
+function unquoteGitPath(path2) {
+  if (path2.length < 2 || !path2.startsWith('"') || !path2.endsWith('"')) return path2;
+  const chars = Array.from(path2.slice(1, -1));
+  const bytes = [];
+  for (let i2 = 0; i2 < chars.length; i2++) {
+    const ch = chars[i2];
+    if (ch !== "\\" || i2 === chars.length - 1) {
+      bytes.push(...Buffer.from(ch, "utf8"));
       continue;
     }
-    if (raw.startsWith("+++")) {
-      if (raw === "+++ /dev/null") {
-        currentFile = null;
-      } else {
-        const m = FILE_HEADER_REGEX.exec(raw);
-        currentFile = m?.[1] ?? null;
-      }
+    const octal = chars.slice(i2 + 1, i2 + 4).join("");
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(parseInt(octal, 8));
+      i2 += 3;
       continue;
     }
-    if (raw.startsWith("---")) continue;
-    const hunk = HUNK_HEADER_REGEX.exec(raw);
-    if (hunk?.[1]) {
-      newLineNumber = parseInt(hunk[1], 10);
-      continue;
-    }
-    if (raw.startsWith("+")) {
-      if (currentFile) {
-        yield { file: currentFile, line_number: newLineNumber, content: raw.slice(1) };
-      }
-      newLineNumber++;
-      continue;
-    }
-    if (raw.startsWith("-")) continue;
-    if (raw.startsWith(" ")) {
-      newLineNumber++;
-      continue;
-    }
+    const next = chars[i2 + 1];
+    bytes.push(...Buffer.from(C_ESCAPES[next] ?? `\\${next}`, "utf8"));
+    i2 += 1;
   }
+  return Buffer.from(bytes).toString("utf8");
+}
+function headerPath(raw) {
+  const m = FILE_HEADER_REGEX.exec(raw);
+  if (!m?.[1] || m[1] === "/dev/null") return null;
+  const path2 = unquoteGitPath(m[1]);
+  return path2.startsWith("b/") ? path2.slice(2) : path2;
+}
+function normalizeDiffLine(raw) {
+  const withoutNul = raw.includes("\0") ? raw.replace(/\0/g, "") : raw;
+  return withoutNul.endsWith("\r") ? withoutNul.slice(0, -1) : withoutNul;
 }
 function maskExcerpt(line2, matched) {
   const masked = matched.length > 0 ? line2.split(matched).join(MASK_PLACEHOLDER) : line2;
   return masked.length > EXCERPT_MAX_LENGTH ? `${masked.slice(0, EXCERPT_MAX_LENGTH - 3)}...` : masked;
 }
 function scanDiffForSecrets(diff, extraPatterns = []) {
+  const scanner = createDiffScanner(extraPatterns);
+  for (const raw of diff.split("\n")) scanner.line(raw);
+  return scanner.findings;
+}
+function createDiffScanner(extraPatterns = []) {
   const findings = [];
-  for (const line2 of iterateAddedDiffLines(diff)) {
+  let currentFile = null;
+  let inHunk = false;
+  let oldLeft = 0;
+  let newLeft = 0;
+  let newLineNumber = 0;
+  const scanAddedLine = (file, lineNumber, content) => {
     let valueShapeHit = false;
     for (const pattern of LINE_VALUE_PATTERNS) {
-      const m = pattern.exec(line2.content);
+      const m = pattern.exec(content);
       if (m) {
-        findings.push({
-          file: line2.file,
-          line_number: line2.line_number,
-          reason: "value-shape",
-          excerpt: maskExcerpt(line2.content, m[0])
-        });
+        findings.push({ file, line_number: lineNumber, reason: "value-shape", excerpt: maskExcerpt(content, m[0]) });
         valueShapeHit = true;
         break;
       }
@@ -26503,36 +26726,66 @@ function scanDiffForSecrets(diff, extraPatterns = []) {
     if (!valueShapeHit) {
       KEY_VALUE_REGEX.lastIndex = 0;
       let kv;
-      while ((kv = KEY_VALUE_REGEX.exec(line2.content)) !== null) {
+      while ((kv = KEY_VALUE_REGEX.exec(content)) !== null) {
         const key = kv[1];
-        const value = kv[2];
+        const value = kv[3];
         if (key && value && SECRET_KEY_PATTERN.test(key)) {
-          findings.push({
-            file: line2.file,
-            line_number: line2.line_number,
-            reason: "key-name",
-            excerpt: maskExcerpt(line2.content, value)
-          });
+          findings.push({ file, line_number: lineNumber, reason: "key-name", excerpt: maskExcerpt(content, value) });
           break;
         }
       }
     }
     for (const { id, pattern } of extraPatterns) {
       pattern.lastIndex = 0;
-      const m = pattern.exec(line2.content);
+      const m = pattern.exec(content);
       if (m && m[0].length > 0) {
         findings.push({
-          file: line2.file,
-          line_number: line2.line_number,
+          file,
+          line_number: lineNumber,
           reason: "extra-pattern",
           pattern_id: id,
-          excerpt: maskExcerpt(line2.content, m[0])
+          excerpt: maskExcerpt(content, m[0])
         });
         break;
       }
     }
-  }
-  return findings;
+  };
+  const line2 = (input) => {
+    const raw = normalizeDiffLine(input);
+    if (inHunk) {
+      if (raw.startsWith("+")) {
+        if (currentFile) scanAddedLine(currentFile, newLineNumber, raw.slice(1));
+        newLineNumber++;
+        newLeft--;
+      } else if (raw.startsWith("-")) {
+        oldLeft--;
+      } else if (raw.startsWith(" ")) {
+        newLineNumber++;
+        oldLeft--;
+        newLeft--;
+      } else if (!raw.startsWith("\\")) {
+        inHunk = false;
+      }
+      if (inHunk) {
+        if (oldLeft <= 0 && newLeft <= 0) inHunk = false;
+        return;
+      }
+    }
+    if (raw.startsWith("diff ")) {
+      currentFile = null;
+      return;
+    }
+    const hunk = HUNK_HEADER_REGEX.exec(raw);
+    if (hunk?.[2]) {
+      oldLeft = hunk[1] === void 0 ? 1 : parseInt(hunk[1], 10);
+      newLineNumber = parseInt(hunk[2], 10);
+      newLeft = hunk[3] === void 0 ? 1 : parseInt(hunk[3], 10);
+      inHunk = oldLeft > 0 || newLeft > 0;
+      return;
+    }
+    if (raw.startsWith("+++")) currentFile = headerPath(raw);
+  };
+  return { line: line2, findings };
 }
 
 // src/lib/env-files.ts
@@ -28114,6 +28367,27 @@ function buildHints6(input) {
 
 // src/tools/check-secrets.ts
 init_esm_shims();
+
+// src/lib/staged-scan.ts
+init_esm_shims();
+async function scanGitDiff(projectRoot, which, extraPatterns = []) {
+  const status = gitRepoStatus(projectRoot);
+  if (status === "not_a_repo") return { ok: true, findings: [] };
+  if (status === "unknown") return { ok: false, reason: "git could not tell whether this folder is a repository" };
+  return scanArgs(projectRoot, which === "staged" ? STAGED_DIFF_ARGS : UNSTAGED_DIFF_ARGS, extraPatterns);
+}
+async function scanTreeDiff(projectRoot, fromTree, toTree, extraPatterns = [], timeoutMs) {
+  const args2 = treeDiffArgs(fromTree, toTree);
+  if (args2 === null) return { ok: false, reason: "not a pair of tree ids" };
+  return scanArgs(projectRoot, args2, extraPatterns, timeoutMs);
+}
+async function scanArgs(projectRoot, args2, extraPatterns, timeoutMs) {
+  const scanner = createDiffScanner(extraPatterns);
+  const read = await streamGitLines(projectRoot, args2, scanner.line, timeoutMs);
+  return read.ok ? { ok: true, findings: scanner.findings } : { ok: false, reason: read.reason };
+}
+
+// src/tools/check-secrets.ts
 var checkSecretsInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   staged_only: external_exports.boolean().optional().describe(
@@ -28125,7 +28399,7 @@ var checkSecretsInputSchema = external_exports.object({
 }).strict();
 var checkSecretsTool = {
   name: "rsct_check_secrets",
-  description: "Pure query (INV-6): scan staged diff for credentials. Reports findings without blocking \u2014 rsct_request_commit will actually refuse the commit unless dev_approval.override_secrets_check is provided. Patterns come from the framework defaults plus optional `secrets_extra_patterns[]` regexes in .rsct.json. Excerpts are masked. Degrades gracefully outside git.",
+  description: 'Pure query (INV-6): scan staged diff for credentials. Reports findings without blocking \u2014 rsct_request_commit will actually refuse the commit unless dev_approval.override_secrets_check is provided. Patterns come from the framework defaults plus optional `secrets_extra_patterns[]` regexes in .rsct.json. Excerpts are masked. It reads with the flags rsct_request_commit uses (attributes, diff drivers and repository config cannot hide content). Outside a git repository it returns no findings; when git cannot be read it reports read_error, never "no findings".',
   inputSchema: {
     type: "object",
     properties: {
@@ -28151,29 +28425,34 @@ async function checkSecretsHandler(rawInput) {
   const resolution = resolveProjectRoot(input.project_root);
   const git = readGitState(resolution.root);
   const extras = compileExtraPatterns(resolution.config?.secrets_extra_patterns ?? []);
-  let diff;
+  let findings = [];
+  let readError = null;
+  const diffPresent = input.diff_override !== void 0 || git.available;
   if (input.diff_override !== void 0) {
-    diff = input.diff_override;
-  } else if (staged_only) {
-    diff = getStagedDiff(resolution.root);
+    findings = scanDiffForSecrets(input.diff_override, extras.compiled);
   } else {
-    const staged = getStagedDiff(resolution.root) ?? "";
-    const unstaged = getUnstagedDiff(resolution.root) ?? "";
-    diff = `${staged}
-${unstaged}`;
+    for (const which of staged_only ? ["staged"] : ["staged", "unstaged"]) {
+      const scan = await scanGitDiff(resolution.root, which, extras.compiled);
+      if (!scan.ok) {
+        readError = `${which} changes: ${scan.reason}`;
+        break;
+      }
+      findings.push(...scan.findings);
+    }
   }
-  const findings = diff !== null ? scanDiffForSecrets(diff, extras.compiled) : [];
   return {
     rsct_installed: resolution.rsct_installed,
     in_git_repo: git.available,
     staged_only,
     findings,
+    read_error: readError,
     scanned_extra_patterns: extras.compiled.length,
     invalid_extra_patterns: extras.invalid,
     hints: buildHints7({
       rsct_installed: resolution.rsct_installed,
       in_git_repo: git.available,
-      diff_present: diff !== null,
+      diff_present: diffPresent,
+      read_error: readError,
       findings_count: findings.length,
       invalid_extras: extras.invalid.length
     })
@@ -28181,6 +28460,11 @@ ${unstaged}`;
 }
 function buildHints7(input) {
   const hints = [];
+  if (input.read_error !== null) {
+    hints.push(
+      `The scan could NOT read the changes (${input.read_error}). This is not "no findings": rsct_request_commit refuses a commit it cannot read.`
+    );
+  }
   if (!input.rsct_installed) {
     hints.push(
       "No .rsct.json \u2014 running secrets scan with framework default patterns only."
@@ -28195,7 +28479,7 @@ function buildHints7(input) {
     hints.push(
       `${input.findings_count} secret finding(s). rsct_request_commit will reject this commit unless dev_approval includes override_secrets_check: { reason }.`
     );
-  } else if (input.in_git_repo || input.diff_present) {
+  } else if (input.read_error === null && (input.in_git_repo || input.diff_present)) {
     hints.push("No secret patterns matched the scanned diff.");
   }
   if (input.invalid_extras > 0) {
@@ -46246,6 +46530,96 @@ function resolveMaxActions(input, configDefault) {
 }
 
 // src/tools/request-commit.ts
+var STAGED_PATHS_UNREADABLE = "git could not list the files this commit carries, so the commit is refused rather than let through unchecked \u2014 retry, or the developer commits this by hand in their own terminal";
+var STAGED_STATE_UNREADABLE = "git could not record what is staged for this commit, so it is refused rather than committed unchecked \u2014 retry, or the developer commits this by hand in their own terminal";
+var BRANCH_MOVED = "the branch changed while this commit was being prepared, so the branch checked and shown is not the one git would commit on \u2014 look at git status and ask again";
+var DIALOG_LIST_SHOWN = 10;
+function readContractFacts(projectRoot, config2, readCommitPaths2) {
+  const mode = confirmedTopologyMode(config2 ?? null);
+  if (mode !== "multi-repo") return { mode, ids: [], consumers: [], inactive: false };
+  let universeRoot = null;
+  try {
+    const r = resolveUniverseRoot(config2 ?? null, projectRoot);
+    universeRoot = r.kind === "found" ? r.path : null;
+  } catch {
+    universeRoot = null;
+  }
+  const graph = readContracts(universeRoot);
+  const stagedPaths = readCommitPaths2();
+  if (stagedPaths === null) return null;
+  const appName = config2?.app?.name ?? null;
+  const hits2 = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : [];
+  return { mode, ids: hits2.map((h) => h.id), consumers: affectedConsumers(hits2), inactive: !graph.available };
+}
+function findingRule(finding) {
+  return finding.reason === "extra-pattern" ? `extra pattern ${finding.pattern_id ?? "?"}` : finding.reason;
+}
+function findingLabel(finding) {
+  return `"${finding.file}":${finding.line_number ?? "?"} \u2014 ${findingRule(finding)}`;
+}
+function writeListReport(projectRoot, kind, title, entries) {
+  const content = [`# ${title}`, "", ...entries.map((e) => `- ${e}`), ""].join("\n");
+  const rel = join(".rsct", "reports", `commit-${kind}-${createHash("sha256").update(content).digest("hex").slice(0, 16)}.md`);
+  try {
+    mkdirSync(join(projectRoot, ".rsct", "reports"), { recursive: true });
+    writeFileSync(join(projectRoot, rel), content, "utf8");
+    return rel.replace(/\\/g, "/");
+  } catch {
+    return null;
+  }
+}
+function quoted(text2) {
+  return `"${specLabel(text2)}"`;
+}
+function inlineList(items, limit) {
+  const shown = items.slice(0, limit).map(quoted).join(", ");
+  return items.length > limit ? `${shown} \u2026 and ${items.length - limit} more` : shown;
+}
+function shownLimit(report) {
+  return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN;
+}
+function commitExceptionLines(projectRoot, facts) {
+  const lines = [];
+  const reasons = [];
+  if (facts.branchProtected) {
+    lines.push(`\u26A0 '${specLabel(facts.branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: committing here needs your exception.`);
+  }
+  if (facts.findings.length > 0) {
+    lines.push(`\u26A0 The secrets scan found ${facts.findings.length} line(s) that look like a credential (file:line \u2014 rule; values are never shown):`);
+    const report = facts.findings.length > DIALOG_LIST_SHOWN ? writeListReport(
+      projectRoot,
+      "secrets",
+      "Secret scan findings for one commit approval",
+      facts.findings.map((f) => `${findingLabel(f)} \u2014 ${f.excerpt}`)
+    ) : null;
+    lines.push(dialogList(facts.findings.map(findingLabel), shownLimit(report)));
+    if (report !== null) lines.push(`Full list: ${report}`);
+  }
+  if (facts.contract.ids.length > 0) {
+    const { ids, consumers } = facts.contract;
+    const cut = ids.length > DIALOG_LIST_SHOWN || consumers.length > DIALOG_LIST_SHOWN;
+    const report = cut ? writeListReport(projectRoot, "contracts", "Contract surfaces for one commit approval", [
+      ...ids.map((id) => `surface ${JSON.stringify(id)}`),
+      ...consumers.map((c) => `consumer ${JSON.stringify(c)}`)
+    ]) : null;
+    const limit = shownLimit(report);
+    lines.push(`\u26A0 This commit changes contract surface ${inlineList(ids, limit)}; declared consumers: ${consumers.length > 0 ? inlineList(consumers, limit) : "none listed"}.`);
+    if (report !== null) lines.push(`Full list: ${report}`);
+  }
+  if (facts.contract.inactive) {
+    lines.push("\u26A0 The contract gate is inactive: no readable contracts.json for this universe, so cross-repo impact is not checked.");
+  }
+  if (facts.branchProtected && facts.overrides.branch) {
+    reasons.push(`Agent's reason for the protected branch: ${quoted(facts.overrides.branch.reason)}`);
+  }
+  if (facts.findings.length > 0 && facts.overrides.secrets) {
+    reasons.push(`Agent's reason for the secret findings: ${quoted(facts.overrides.secrets.reason)}`);
+  }
+  if (facts.contract.ids.length > 0 && facts.overrides.contract) {
+    reasons.push(`Agent's reason for the contract surface: ${quoted(facts.overrides.contract.reason)}`);
+  }
+  return { facts: lines, reasons };
+}
 var requestCommitInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   message: external_exports.string().min(1, "commit message required").describe("Commit message to pass to `git commit -m`."),
@@ -46263,7 +46637,7 @@ function runRetention(prune, projectRoot, config2, now) {
 }
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers and repository config cannot hide content); a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -46331,8 +46705,46 @@ async function requestCommitHandler(rawInput, internal = {}) {
     auditWriter: appendAudit
   });
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint);
+  const rejectWith = (reject_kind, reason, context) => {
+    const audit2 = appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.rejected",
+        tool: "rsct_request_commit",
+        reject_kind,
+        reason,
+        branch: gitState.branch,
+        ...context.via !== null && { channel: context.channel, authorized_via: context.via },
+        ...context.auditExtra
+      },
+      config2?.audit
+    );
+    return {
+      status: "rejected",
+      branch: gitState.branch,
+      channel: context.channel,
+      authorized_via: context.via,
+      reject_kind,
+      reason,
+      fabrication_signals: context.signals,
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: false, override_used: false },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      ...context.shape,
+      plan_token: null,
+      ...auditFields(audit2),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason])
+    };
+  };
+  const earlyReject = (reject_kind, reason) => {
+    return rejectWith(reject_kind, reason, { via: null, channel: null, signals: [] });
+  };
   if (resolution.rsct_installed) {
-    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? [];
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot);
+    if (stagedForDrift === null) return earlyReject("staged_paths_unreadable", STAGED_PATHS_UNREADABLE);
     const drift = evaluateSettingsDrift({
       currentHash: hashSettingsFile(projectRoot),
       baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config2?.audit)) ?? ""),
@@ -46528,13 +46940,87 @@ async function requestCommitHandler(rawInput, internal = {}) {
   if (!sweepBefore.ok) return rejectSweep(sweepBefore, "before_authorization");
   const deadBefore = await runDeadCodeCheck(sweepBefore.checked);
   if (!deadBefore.ok) return rejectDeadCode(deadBefore, "before_authorization");
+  const approvedState = await readStagedTreeState(projectRoot);
+  const baseTree = approvedState?.tree ? baseTreeOf(projectRoot, approvedState.head) : null;
+  if (approvedState === null || approvedState.tree !== null && baseTree === null) {
+    return earlyReject("staged_state_unreadable", STAGED_STATE_UNREADABLE);
+  }
+  if (approvedState.tree !== null && approvedState.ref !== branchRef(gitState.branch)) {
+    return earlyReject("staged_changed", BRANCH_MOVED);
+  }
+  const { list: protectedList } = effectiveProtectedList(config2);
+  const branchProtected = isProtectedBranch(gitState.branch, protectedList);
+  const extras = compileExtraPatterns(config2?.secrets_extra_patterns ?? []).compiled;
+  const scan = internal.stagedDiffOverride !== void 0 ? { ok: true, findings: scanDiffForSecrets(internal.stagedDiffOverride, extras) } : approvedState.tree === null || baseTree === null ? { ok: true, findings: [] } : await scanTreeDiff(projectRoot, baseTree, approvedState.tree, extras, internal.secretsScanTimeoutMs);
+  if (!scan.ok) {
+    return earlyReject(
+      "secrets_unreadable",
+      `the secrets scan could not read what this commit carries (${scan.reason}), so it is refused rather than let through unscanned \u2014 split the commit, or the developer commits this by hand in their own terminal`
+    );
+  }
+  const findings = scan.findings;
+  const contractFacts = readContractFacts(
+    projectRoot,
+    config2,
+    () => internal.stagedPathsOverride ?? (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree))
+  );
+  if (contractFacts === null) return earlyReject("staged_paths_unreadable", STAGED_PATHS_UNREADABLE);
+  const uncovered = (overrides2, via, ch, signals) => {
+    const tokenPath = via === "plan_token";
+    const refuse = (reject_kind, reason, auditExtra, shape) => rejectWith(reject_kind, reason, { via, channel: ch, signals, auditExtra, shape });
+    if (branchProtected && !overrides2.branch) {
+      return refuse(
+        "protected_branch",
+        `branch '${branchLabel}' is protected \u2014 ${tokenPath ? "a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }" : "pass dev_approval.override_protected_branch: { reason } to proceed"}`,
+        {},
+        { branch_check: { protected: true, override_used: false }, secrets_check: { findings_count: 0, findings: [], override_used: false } }
+      );
+    }
+    if (findings.length > 0 && !overrides2.secrets) {
+      return refuse(
+        "secrets",
+        `${findings.length} secret finding(s) in staged diff \u2014 ${tokenPath ? "a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }" : "pass dev_approval.override_secrets_check: { reason } to proceed"}`,
+        { findings_count: findings.length },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: false }
+        }
+      );
+    }
+    if (contractFacts.ids.length > 0 && !overrides2.contract) {
+      return refuse(
+        "contract_surface",
+        `this commit changes contract surface(s) [${contractFacts.ids.join(", ")}] that other repos depend on [${contractFacts.consumers.join(", ") || "none listed"}]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${tokenPath ? "A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }." : "To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above)."}`,
+        { contracts: contractFacts.ids, consumers: contractFacts.consumers },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+          contract_check: { mode: "multi-repo", touched: contractFacts.ids, consumers: contractFacts.consumers, override_used: false }
+        }
+      );
+    }
+    return null;
+  };
   let channel;
   let authorizedVia;
   let approval = null;
   let fabricationSignals = [];
   let tokenCtx = null;
   if (input.dev_approval !== void 0) {
+    const raw = DevApprovalSchema.safeParse(input.dev_approval);
+    const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check, contract: raw.data.override_contract_surface } : {};
+    if (raw.success) {
+      const early = uncovered(rawOverrides, null, null, []);
+      if (early) return early;
+    }
     const retentionLine = resolution.rsct_installed ? retentionDialogLine(previewRetention(projectRoot, config2?.audit, now)) : null;
+    const exceptions = commitExceptionLines(projectRoot, {
+      branchLabel,
+      branchProtected,
+      findings,
+      contract: contractFacts,
+      overrides: rawOverrides
+    });
     const gate = await gateRequest({
       toolName: "rsct_request_commit",
       approval: input.dev_approval,
@@ -46545,8 +47031,11 @@ async function requestCommitHandler(rawInput, internal = {}) {
         message: [
           `Approve commit on '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}'?`,
           ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : [],
-          ...retentionLine ? [retentionLine] : []
-        ].join("\n") + gateDialogFooter(projectRoot, config2) + `
+          ...retentionLine ? [retentionLine] : [],
+          ...exceptions.facts
+        ].join("\n") + gateDialogFooter(projectRoot, config2) + (exceptions.reasons.length > 0 ? `
+
+${exceptions.reasons.join("\n")}` : "") + `
 
 Commit message:
 ${commitMessageView(input.message)}`
@@ -46645,104 +47134,35 @@ ${commitMessageView(input.message)}`
     authorizedVia = "plan_token";
     tokenCtx = { token: verdict.token };
   }
-  const overrideBranch = approval?.override_protected_branch;
-  const overrideSecrets = approval?.override_secrets_check;
-  const { list: protectedList } = effectiveProtectedList(config2);
-  const branchProtected = isProtectedBranch(gitState.branch, protectedList);
-  if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected \u2014 ${authorizedVia === "plan_token" ? "a plan authorization never covers protected branches; commit with a per-action dev_approval that includes override_protected_branch: { reason }" : "pass dev_approval.override_protected_branch: { reason } to proceed"}`;
-    const audit2 = appendAudit(
-      projectRoot,
-      {
-        event: "request_commit.rejected",
-        tool: "rsct_request_commit",
-        reject_kind: "protected_branch",
-        reason,
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia
-      },
-      config2?.audit
-    );
-    return {
-      status: "rejected",
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: "protected_branch",
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: true, override_used: false },
-      secrets_check: { findings_count: 0, findings: [], override_used: false },
-      plan_token: null,
-      ...auditFields(audit2),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason])
-    };
-  }
-  if (branchProtected && overrideBranch) {
+  const overrides = {
+    branch: approval?.override_protected_branch,
+    secrets: approval?.override_secrets_check,
+    contract: approval?.override_contract_surface
+  };
+  const late2 = uncovered(overrides, authorizedVia, channel, fabricationSignals);
+  if (late2) return late2;
+  if (branchProtected && overrides.branch) {
     appendAudit(
       projectRoot,
       {
         event: "request_commit.override_invoked",
         tool: "rsct_request_commit",
         override_kind: "protected_branch",
-        override_reason: overrideBranch.reason,
+        override_reason: overrides.branch.reason,
         branch: gitState.branch,
         channel
       },
       config2?.audit
     );
   }
-  const diff = internal.stagedDiffOverride ?? getStagedDiff(projectRoot) ?? "";
-  const extras = compileExtraPatterns(config2?.secrets_extra_patterns ?? []).compiled;
-  const findings = scanDiffForSecrets(diff, extras);
-  if (findings.length > 0 && !overrideSecrets) {
-    const reason = `${findings.length} secret finding(s) in staged diff \u2014 ${authorizedVia === "plan_token" ? "a plan authorization never bypasses the secrets scan; commit with a per-action dev_approval that includes override_secrets_check: { reason }" : "pass dev_approval.override_secrets_check: { reason } to proceed"}`;
-    const audit2 = appendAudit(
-      projectRoot,
-      {
-        event: "request_commit.rejected",
-        tool: "rsct_request_commit",
-        reject_kind: "secrets",
-        reason,
-        branch: gitState.branch,
-        channel,
-        authorized_via: authorizedVia,
-        findings_count: findings.length
-      },
-      config2?.audit
-    );
-    return {
-      status: "rejected",
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: "secrets",
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: branchProtected, override_used: branchProtected },
-      secrets_check: { findings_count: findings.length, findings, override_used: false },
-      plan_token: null,
-      ...auditFields(audit2),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason])
-    };
-  }
-  if (findings.length > 0 && overrideSecrets) {
+  if (findings.length > 0 && overrides.secrets) {
     appendAudit(
       projectRoot,
       {
         event: "request_commit.override_invoked",
         tool: "rsct_request_commit",
         override_kind: "secrets_check",
-        override_reason: overrideSecrets.reason,
+        override_reason: overrides.secrets.reason,
         findings_count: findings.length,
         branch: gitState.branch,
         channel
@@ -46750,93 +47170,45 @@ ${commitMessageView(input.message)}`
       config2?.audit
     );
   }
-  const overrideContract = approval?.override_contract_surface;
-  const topoMode = confirmedTopologyMode(config2 ?? null);
-  let contractResult = {
-    mode: topoMode,
-    touched: [],
-    consumers: [],
-    override_used: false
-  };
-  let contractGateInactive = false;
-  if (topoMode === "multi-repo") {
-    const appName = config2?.app?.name ?? null;
-    let universeRoot = null;
-    try {
-      const r = resolveUniverseRoot(config2 ?? null, projectRoot);
-      universeRoot = r.kind === "found" ? r.path : null;
-    } catch {
-      universeRoot = null;
-    }
-    const graph = readContracts(universeRoot);
-    contractGateInactive = !graph.available;
-    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? [];
-    const hits2 = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : [];
-    if (hits2.length > 0) {
-      const ids = hits2.map((h) => h.id);
-      const consumers = affectedConsumers(hits2);
-      contractResult = { mode: "multi-repo", touched: ids, consumers, override_used: !!overrideContract };
-      if (!overrideContract) {
-        const reason = `this commit changes contract surface(s) [${ids.join(", ")}] that other repos depend on [${consumers.join(", ") || "none listed"}]. This repo OWNS (produces) those surfaces, so the gate stops the commit here to flag the cross-repo impact. ${authorizedVia === "plan_token" ? "A plan authorization never bypasses the contract gate; commit with a per-action dev_approval that includes override_contract_surface: { reason }." : "To proceed, pass dev_approval.override_contract_surface: { reason } (acknowledging the impact on the consumers listed above)."}`;
-        const audit2 = appendAudit(
-          projectRoot,
-          {
-            event: "request_commit.rejected",
-            tool: "rsct_request_commit",
-            reject_kind: "contract_surface",
-            reason,
-            branch: gitState.branch,
-            channel,
-            authorized_via: authorizedVia,
-            contracts: ids,
-            consumers
-          },
-          config2?.audit
-        );
-        return {
-          status: "rejected",
-          branch: gitState.branch,
-          channel,
-          authorized_via: authorizedVia,
-          reject_kind: "contract_surface",
-          reason,
-          fabrication_signals: fabricationSignals,
-          sha_before: gitState.head_sha,
-          sha_after: null,
-          branch_check: { protected: branchProtected, override_used: branchProtected },
-          secrets_check: {
-            findings_count: findings.length,
-            findings,
-            override_used: findings.length > 0
-          },
-          contract_check: contractResult,
-          plan_token: null,
-          ...auditFields(audit2),
-          anti_replay_persisted: null,
-          anti_replay_error: null,
-          hints: withAdvisories([reason])
-        };
-      }
-      appendAudit(
-        projectRoot,
-        {
-          event: "request_commit.override_invoked",
-          tool: "rsct_request_commit",
-          override_kind: "contract_surface",
-          override_reason: overrideContract.reason,
-          contracts: ids,
-          consumers,
-          branch: gitState.branch,
-          channel
-        },
-        config2?.audit
-      );
-    }
+  const contractResult = contractFacts.ids.length > 0 ? { mode: "multi-repo", touched: contractFacts.ids, consumers: contractFacts.consumers, override_used: !!overrides.contract } : { mode: contractFacts.mode, touched: [], consumers: [], override_used: false };
+  const contractGateInactive = contractFacts.inactive;
+  if (contractFacts.ids.length > 0 && overrides.contract) {
+    appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.override_invoked",
+        tool: "rsct_request_commit",
+        override_kind: "contract_surface",
+        override_reason: overrides.contract.reason,
+        contracts: contractFacts.ids,
+        consumers: contractFacts.consumers,
+        branch: gitState.branch,
+        channel
+      },
+      config2?.audit
+    );
   }
   const sweepAtCommit = await runSweepCheck();
   if (!sweepAtCommit.ok) return rejectSweep(sweepAtCommit, "before_commit");
   const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked);
   if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, "before_commit");
+  const stateNow = await readStagedTreeState(projectRoot);
+  if (stateNow === null || !sameStagedTreeState(approvedState, stateNow)) {
+    return rejectWith(
+      stateNow === null ? "staged_state_unreadable" : "staged_changed",
+      stateNow === null ? STAGED_STATE_UNREADABLE : "what is staged, HEAD or the branch changed after the approval was asked for, so the developer did not see what would be committed \u2014 ask again",
+      {
+        via: authorizedVia,
+        channel,
+        signals: fabricationSignals,
+        shape: {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+          contract_check: contractResult
+        }
+      }
+    );
+  }
   let reservedToken = null;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
@@ -46890,8 +47262,14 @@ ${commitMessageView(input.message)}`
   const commit = gitCommit(projectRoot, input.message, gitExecutor);
   if (!commit.ok) {
     const reason = commit.error ?? commit.stderr ?? "git commit failed";
-    let refundNote = "";
-    if (tokenCtx) {
+    const headNow = approvedState.tree === null ? null : resolveCommit(projectRoot, "HEAD");
+    const movedTo = headNow !== null && headNow !== approvedState.head ? headNow : null;
+    const refNow = readHeadRef(projectRoot);
+    const switched = refNow !== approvedState.ref;
+    const headChanged = movedTo !== null || switched;
+    const usedRecord = approval && headChanged ? recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit }) : null;
+    let refundNote = headChanged && tokenCtx ? " The reserved token action was NOT refunded." : "";
+    if (tokenCtx && !headChanged) {
       const fresh = readPhaseState(projectRoot);
       const stillReserved = fresh.parse_error === void 0 && sameToken(readToken(fresh.state), reservedToken);
       const refund = stillReserved ? writePhaseState(projectRoot, {
@@ -46908,10 +47286,14 @@ ${commitMessageView(input.message)}`
         reason,
         branch: gitState.branch,
         channel,
-        authorized_via: authorizedVia
+        authorized_via: authorizedVia,
+        head_moved_to: movedTo,
+        head_ref_now: switched ? refNow : void 0
       },
       config2?.audit
     );
+    const changedHint = switched ? `\u26A0 git commit reported a failure, and HEAD now points at ${refNow ?? "no branch"}${headNow ? ` (${headNow.slice(0, 12)})` : ""} instead of the approved ${approvedState.ref ?? "detached HEAD"}: something switched the branch during the attempt, most likely a git hook, and a commit RSCT did not check may have landed. Look at \`git log --all --oneline -5\` before any push, switch back, and ask again with a fresh approval.${refundNote}` : `\u26A0 git commit reported a failure, but HEAD moved to ${movedTo?.slice(0, 12)} meanwhile: a commit landed that RSCT did not check \u2014 a git hook's own commit, or this commit with an error after it. Check it (\`git show ${movedTo?.slice(0, 12)}\`) before any push, and ask again with a fresh approval.${refundNote}`;
+    const recordHint = usedRecord && !usedRecord.ok ? [`\u26A0 could not record this approval as used (${usedRecord.error}); do not send it again.`] : [];
     return {
       status: "mutation_failed",
       branch: gitState.branch,
@@ -46931,10 +47313,12 @@ ${commitMessageView(input.message)}`
       plan_token: null,
       contract_check: contractResult,
       ...auditFields(audit2),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
+      anti_replay_persisted: usedRecord ? usedRecord.ok : null,
+      anti_replay_error: usedRecord && !usedRecord.ok ? usedRecord.error : null,
       hints: withAdvisories([
-        authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+        ...headChanged ? [changedHint, ...recordHint] : [
+          authorizedVia === "plan_token" ? `git commit failed \u2014 fix the underlying error and retry.${refundNote}` : "git commit failed \u2014 approval NOT consumed. Fix the underlying error and retry with the same dev_approval."
+        ]
       ])
     };
   }
@@ -46942,7 +47326,44 @@ ${commitMessageView(input.message)}`
   let antiReplayError = null;
   let tokenSummary = null;
   const bookkeepingHints = [];
+  const treeDrift = async (cleanRewrites) => {
+    if (approvedState.tree === null) return { paths: [], secrets: 0, unverified: false };
+    if (!commit.sha_after) return { paths: [], secrets: 0, unverified: true };
+    const landed = readCommittedTree(projectRoot, commit.sha_after);
+    if (landed === null) return { paths: [], secrets: 0, unverified: true };
+    if (landed.tree === approvedState.tree && landed.parent === approvedState.head) return { paths: [], secrets: 0, unverified: false };
+    const changed = getTreeDiffPaths(projectRoot, approvedState.tree, landed.tree);
+    if (changed === null) return { paths: [], secrets: 0, unverified: true };
+    const scanned = await scanTreeDiff(projectRoot, approvedState.tree, landed.tree, extras);
+    if (!scanned.ok) return { paths: changed, secrets: 0, unverified: true };
+    const withSecrets = new Set(scanned.findings.map((f) => f.file));
+    const parentMoved = landed.parent !== approvedState.head;
+    return {
+      paths: changed.filter((path2) => parentMoved || withSecrets.has(path2) || !cleanRewrites.has(path2)),
+      secrets: scanned.findings.length,
+      unverified: false
+    };
+  };
+  const reportTreeDrift = (drift) => {
+    if (drift.paths.length === 0 && !drift.unverified) return;
+    appendAudit(
+      projectRoot,
+      {
+        event: "request_commit.tree_drift",
+        tool: "rsct_request_commit",
+        paths: drift.paths,
+        secret_findings: drift.secrets,
+        unverified: drift.unverified,
+        sha_after: commit.sha_after
+      },
+      config2?.audit
+    );
+    bookkeepingHints.push(
+      drift.unverified ? `\u26A0 git committed, but RSCT could not compare the commit with what the developer approved${drift.paths.length > 0 ? ` (${drift.paths.join(", ")})` : ""} \u2014 check it before any push.` : `\u26A0 the commit is not exactly what the developer approved: ${drift.paths.join(", ")} changed after the approval${drift.secrets > 0 ? `, with ${drift.secrets} secret finding(s)` : ""} \u2014 most likely a git hook. Check them before any push; ${approvedState.head === null ? "`git update-ref -d HEAD` undoes this first commit" : "`git reset --soft HEAD~1` undoes this commit"} and keeps everything staged.`
+    );
+  };
   let sweepDrift = [];
+  let cleanRewritePaths = /* @__PURE__ */ new Set();
   if (commit.sha_after && sweepAtCommit.skipped === null) {
     const committed = await verifyCommittedSweep({
       projectRoot,
@@ -46980,6 +47401,7 @@ ${commitMessageView(input.message)}`
       if (open.length === 0) delete next.review_drift;
       else next.review_drift = { ...state.review_drift, paths: open };
     }
+    cleanRewritePaths = new Set(cleanRewrites.map((r) => r.path));
     const drift = [.../* @__PURE__ */ new Set([...committed.drift, ...deadRewritten])];
     if (drift.length > 0) {
       sweepDrift = drift;
@@ -46999,6 +47421,20 @@ ${commitMessageView(input.message)}`
         bookkeepingHints.push(`\u26A0 could not record the post-commit sweep result in phase-state (${w.reason}).`);
       }
     }
+  }
+  const tree = await treeDrift(cleanRewritePaths);
+  reportTreeDrift(tree);
+  const landedRef = readHeadRef(projectRoot);
+  const branchMoved = landedRef !== approvedState.ref;
+  if (branchMoved) {
+    appendAudit(
+      projectRoot,
+      { event: "request_commit.branch_drift", tool: "rsct_request_commit", approved_ref: approvedState.ref, landed_ref: landedRef, sha_after: commit.sha_after },
+      config2?.audit
+    );
+    bookkeepingHints.push(
+      `\u26A0 the commit landed with HEAD on ${landedRef ?? "no branch"}, not on the approved ${approvedState.ref ?? "detached HEAD"} \u2014 most likely a git hook switched the branch during the commit. Check where the commit went (\`git log --all --oneline -3\`) before any push.`
+    );
   }
   if (approval) {
     const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
@@ -47086,7 +47522,7 @@ ${commitMessageView(input.message)}`
     );
   }
   return {
-    status: sweepDrift.length > 0 ? "committed_with_drift" : "committed",
+    status: sweepDrift.length > 0 || tree.paths.length > 0 || tree.unverified || branchMoved ? "committed_with_drift" : "committed",
     branch: gitState.branch,
     channel,
     authorized_via: authorizedVia,
@@ -48080,7 +48516,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
   }
   const approval = gate.approval;
   const overrideBranch = approval.override_protected_branch;
-  if (targetBranch === null) {
+  if (targetBranch === null || gitState.head_sha === null) {
     const reason = "cannot merge onto a detached HEAD \u2014 checkout the target branch first";
     const audit2 = appendAudit(
       projectRoot,
@@ -48444,7 +48880,7 @@ async function planAuthorizeHandler(rawInput, internal = {}) {
       hints: [...anchorHints(projectRoot, config2?.audit), ...advisoryHints, `${reason} No dialog was shown.`]
     };
   };
-  if (branch === null) {
+  if (branch === null || gitState.head_sha === null) {
     return refuse(
       "no_branch",
       "no branch resolved (detached HEAD or not in a git worktree) \u2014 a batch token must be scoped to a named branch"
@@ -49059,7 +49495,7 @@ ${installAdvisory.dialogLine}` : "") + gateDialogFooter(projectRoot, config2)
   }
   const approval = gate.approval;
   const overrideBranch = approval.override_protected_branch;
-  if (currentBranch === null) {
+  if (currentBranch === null || gitState.head_sha === null) {
     const reason = "cannot rebase/squash on a detached HEAD \u2014 checkout a branch first";
     const audit2 = appendAudit(
       projectRoot,

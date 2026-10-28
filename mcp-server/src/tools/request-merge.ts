@@ -351,7 +351,7 @@ export async function requestMergeHandler(
   const approval = gate.approval
   const overrideBranch = approval.override_protected_branch
 
-  if (targetBranch === null) {
+  if (targetBranch === null || gitState.head_sha === null) {
     const reason = 'cannot merge onto a detached HEAD — checkout the target branch first'
     const audit = appendAudit(
       projectRoot,

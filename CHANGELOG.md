@@ -12,6 +12,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-10-28
+
+### Security
+
+- **The commit secrets scan reads exactly what git will commit.** Until now these inputs reached a
+  commit with zero findings, with no override, through `rsct_request_commit`:
+  - a staged `.gitattributes` that marks a file `-diff` or `binary`;
+  - a file with a NUL byte;
+  - a `textconv` diff driver;
+  - `diff.external` or `GIT_EXTERNAL_DIFF`;
+  - `diff.relative` set in the repository config;
+  - an added line that starts with `++` (the rest of that file went unscanned);
+  - UTF-16LE text, and lines stored with CRLF against an end-anchored `secrets_extra_patterns`
+    entry.
+
+  The scan now reads the staged diff as a stream with `--text --no-ext-diff --no-textconv`, fixed
+  `a/` `b/` prefixes and `diff.relative` off. A read that fails, times out or cannot tell whether the
+  folder is a repository refuses the commit (`secrets_unreadable`, `staged_paths_unreadable`,
+  `staged_state_unreadable`) instead of scanning nothing. The key/value pattern runs in linear time with the same matches.
+  See ADR-039.
+- **The commit approval dialog shows every exception it is asked to approve.**
+  - Branch protection, the secrets scan and the contract gate used to run after you answered, with
+    the overrides filled in by the agent. They now run before the dialog.
+  - The dialog lists the protected branch, each secret finding (`"file":line — rule`, never the
+    value), the contract surfaces and their consumers, then the agent's reason for each exception.
+    Over 10 findings, surfaces or consumers, the dialog shows the first 10 and names a report under
+    `.rsct/reports/` with the full list; if the report cannot be written, it shows them all (a
+    dialog over its size limit is refused, as before).
+  - A check that needs an exception the request does not carry is refused before any dialog opens.
+  - The staged tree, HEAD and branch are recorded before the dialog, the scan reads that recorded
+    tree, and all three are checked again right before `git commit` (`staged_changed`). The
+    recorded branch must also be the one the protection check and the dialog used.
+  - The branch is read so that it is known before its first commit: the first commit on a
+    protected branch now needs the protected-branch exception, like any other commit there.
+  - A commit that a git hook changed after your approval returns `committed_with_drift` and names
+    the changed paths, how many secret findings they carry, and the command that undoes it. Code
+    files the hook changed that no REVIEW covers stay locked until a REVIEW, as before. A commit
+    RSCT cannot read back is `committed_with_drift` too, and so is a commit that lands with HEAD
+    on another branch than the approved one.
+  - When `git commit` fails but HEAD moved or the branch changed meanwhile, the result says so
+    and points at the commit to check before any push; the approval counts as used and a plan
+    token's action is not refunded.
+
+  See ADR-040.
+- **The agent cannot add, change or remove any `env` entry in a Claude Code settings file**, not
+  only the keys that change how a hook starts. A developer who wants an env value set edits the
+  file by hand. See ADR-041.
+
+### Changed
+
+- `rsct_check_secrets` reads with the same flags as the commit and reports a read it could not
+  make in `read_error`, never as "no findings".
+- `fast-uri` 3.1.9 (Dependabot #144), bundled into `rsct-mcp`.
+- Inside WSL, the installer tests that need the scripts to run are skipped (the scripts refuse
+  there without `--wsl`, by design), and two tests check that refusal. #145 tracks testing the
+  `--wsl` path itself.
+
+### Migration for existing projects
+
+- Run the installer from an updated clone (`scripts/install.sh`, with `--wsl` for a Claude Code
+  inside WSL) and restart the IDE: the commit scan and the commit dialog travel with `rsct-mcp`.
+- Then run `/rsct-setup` in each project: its bundled copy of the edit guard (`.rsct/scripts/`) is
+  refreshed with the env rule. A project not re-set-up keeps the old guard.
+- The first commit of a new repository on `main` (or any protected branch) now asks for the
+  protected-branch exception: approve it in the dialog, or start on a feature branch.
+
 ## [2.22.0] - 2026-10-25
 
 ### Security
