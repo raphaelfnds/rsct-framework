@@ -48,12 +48,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     protected branch now needs the protected-branch exception, like any other commit there.
   - A commit that a git hook changed after your approval returns `committed_with_drift` and names
     the changed paths, how many secret findings they carry, and the command that undoes it. Code
-    files the hook changed stay locked until a REVIEW, as before. A commit RSCT cannot read back
-    is `committed_with_drift` too.
-  - When `git commit` fails but HEAD moved meanwhile (a hook's own commit, or this commit with an
-    error after it, or a hook that switched the branch), the result says which, the approval counts
-    as used and a plan token's action is not refunded. A commit that lands on another branch than the approved one (a hook that
-    switched it) returns `committed_with_drift`.
+    files the hook changed that no REVIEW covers stay locked until a REVIEW, as before. A commit
+    RSCT cannot read back is `committed_with_drift` too, and so is a commit that lands with HEAD
+    on another branch than the approved one.
+  - When `git commit` fails but HEAD moved or the branch changed meanwhile, the result says so
+    and points at the commit to check before any push; the approval counts as used and a plan
+    token's action is not refunded.
 
   See ADR-040.
 - **The agent cannot add, change or remove any `env` entry in a Claude Code settings file**, not
@@ -62,14 +62,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- `rsct_check_secrets` reads with the same flags as the commit and reports a read it could not make in
-  `read_error`, never as "no findings".
+- `rsct_check_secrets` reads with the same flags as the commit and reports a read it could not
+  make in `read_error`, never as "no findings".
 - `fast-uri` 3.1.9 (Dependabot #144), bundled into `rsct-mcp`.
 
 ### Migration for existing projects
 
-- Run the installer from an updated clone and restart the IDE: the commit scan and the commit
-  dialog travel with `rsct-mcp`.
+- Run the installer from an updated clone (`scripts/install.sh`, with `--wsl` for a Claude Code
+  inside WSL) and restart the IDE: the commit scan and the commit dialog travel with `rsct-mcp`.
+- The first commit of a new repository on `main` (or any protected branch) now asks for the
+  protected-branch exception: approve it in the dialog, or start on a feature branch.
 - Then run `/rsct-setup` in each project: its bundled copy of the edit guard (`.rsct/scripts/`) is
   refreshed with the env rule. A project not re-set-up keeps the old guard.
 

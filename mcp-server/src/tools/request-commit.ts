@@ -1095,7 +1095,7 @@ export async function requestCommitHandler(
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
     const headNow = approvedState.tree === null ? null : resolveCommit(projectRoot, 'HEAD')
     const movedTo = headNow !== null && headNow !== approvedState.head ? headNow : null
-    const refNow = approvedState.tree === null ? approvedState.ref : readHeadRef(projectRoot)
+    const refNow = readHeadRef(projectRoot)
     const switched = refNow !== approvedState.ref
     const headChanged = movedTo !== null || switched
     const usedRecord = approval && headChanged ? recordApproval(approval, { projectRoot, now, auditConfig: config?.audit }) : null
@@ -1133,7 +1133,7 @@ export async function requestCommitHandler(
       config?.audit,
     )
     const changedHint = switched
-      ? `⚠ git did not commit, and HEAD now points at ${refNow ?? 'no branch'} instead of the approved ${approvedState.ref ?? 'detached HEAD'}: something switched the branch during the attempt, most likely a git hook. Switch back and check \`git status\` before asking again with a fresh approval.${refundNote}`
+      ? `⚠ git commit reported a failure, and HEAD now points at ${refNow ?? 'no branch'}${headNow ? ` (${headNow.slice(0, 12)})` : ''} instead of the approved ${approvedState.ref ?? 'detached HEAD'}: something switched the branch during the attempt, most likely a git hook, and a commit RSCT did not check may have landed. Look at \`git log --all --oneline -5\` before any push, switch back, and ask again with a fresh approval.${refundNote}`
       : `⚠ git commit reported a failure, but HEAD moved to ${movedTo?.slice(0, 12)} meanwhile: a commit landed that RSCT did not check — a git hook's own commit, or this commit with an error after it. Check it (\`git show ${movedTo?.slice(0, 12)}\`) before any push, and ask again with a fresh approval.${refundNote}`
     const recordHint =
       usedRecord && !usedRecord.ok
