@@ -408,23 +408,26 @@ describe.skipIf(!BASH)('install/uninstall WSL detection reads osrelease the same
 })
 
 describe.runIf(BASH && THIS_IS_WSL)('inside WSL both scripts refuse to run without --wsl (ADR-032); the sandbox tests that need them to run are skipped here and run on Linux, macOS and Windows', () => {
+  const everything = (dir: string): string[] => (readdirSync(dir, { recursive: true }) as string[]).sort()
+
   it('the installer refuses without --wsl and writes nothing', () => {
     const home = newSandbox()
     const r = runScript(INSTALL, home)
     expect(r.ok, r.out).toBe(false)
     expect(r.out, r.out).toMatch(/This script is running under WSL/)
     expect(r.out, r.out).toMatch(/bash scripts\/install\.sh --wsl/)
-    expect(present(rsctHome(home))).toBe(false)
-    expect(present(commandsDir(home))).toBe(false)
+    expect(everything(home)).toEqual([])
   }, 60_000)
 
   it('the uninstaller refuses without --wsl and removes nothing', () => {
     const home = newSandbox()
     seedFramework(home)
+    const before = everything(home)
     const r = runScript(UNINSTALL, home)
     expect(r.ok, r.out).toBe(false)
     expect(r.out, r.out).toMatch(/This script is running under WSL/)
-    expect(present(join(rsctHome(home), 'prompts', '01-setup.md'))).toBe(true)
+    expect(r.out, r.out).toMatch(/bash scripts\/uninstall-framework\.sh --wsl/)
+    expect(everything(home)).toEqual(before)
   }, 60_000)
 })
 
