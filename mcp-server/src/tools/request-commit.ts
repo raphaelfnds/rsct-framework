@@ -1095,9 +1095,12 @@ export async function requestCommitHandler(
     const reason = commit.error ?? commit.stderr ?? 'git commit failed'
     const headNow = approvedState.tree === null ? null : resolveCommit(projectRoot, 'HEAD')
     const movedTo = headNow !== null && headNow !== approvedState.head ? headNow : null
-    if (approval && movedTo !== null) recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
-    let refundNote = movedTo === null ? '' : ' The reserved token action was NOT refunded: a commit landed.'
-    if (tokenCtx && movedTo === null) {
+    const refNow = approvedState.tree === null ? approvedState.ref : readHeadRef(projectRoot)
+    const switched = refNow !== approvedState.ref
+    const headChanged = movedTo !== null || switched
+    const usedRecord = approval && headChanged ? recordApproval(approval, { projectRoot, now, auditConfig: config?.audit }) : null
+    let refundNote = headChanged && tokenCtx ? ' The reserved token action was NOT refunded.' : ''
+    if (tokenCtx && !headChanged) {
       const fresh = readPhaseState(projectRoot)
       const stillReserved = fresh.parse_error === undefined && sameToken(readToken(fresh.state), reservedToken!)
       const refund = stillReserved
@@ -1125,9 +1128,17 @@ export async function requestCommitHandler(
         channel,
         authorized_via: authorizedVia,
         head_moved_to: movedTo,
+        head_ref_now: switched ? refNow : undefined,
       },
       config?.audit,
     )
+    const changedHint = switched
+      ? `⚠ git did not commit, and HEAD now points at ${refNow ?? 'no branch'} instead of the approved ${approvedState.ref ?? 'detached HEAD'}: something switched the branch during the attempt, most likely a git hook. Switch back and check \`git status\` before asking again with a fresh approval.${refundNote}`
+      : `⚠ git commit reported a failure, but HEAD moved to ${movedTo?.slice(0, 12)} meanwhile: a commit landed that RSCT did not check — a git hook's own commit, or this commit with an error after it. Check it (\`git show ${movedTo?.slice(0, 12)}\`) before any push, and ask again with a fresh approval.${refundNote}`
+    const recordHint =
+      usedRecord && !usedRecord.ok
+        ? [`⚠ could not record this approval as used (${usedRecord.error}); do not send it again.`]
+        : []
     return {
       status: 'mutation_failed',
       branch: gitState.branch,
@@ -1147,17 +1158,15 @@ export async function requestCommitHandler(
       plan_token: null,
       contract_check: contractResult,
       ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
+      anti_replay_persisted: usedRecord ? usedRecord.ok : null,
+      anti_replay_error: usedRecord && !usedRecord.ok ? usedRecord.error : null,
       hints: withAdvisories([
-        ...(movedTo === null
-          ? [
+        ...(headChanged
+          ? [changedHint, ...recordHint]
+          : [
               authorizedVia === 'plan_token'
                 ? `git commit failed — fix the underlying error and retry.${refundNote}`
                 : 'git commit failed — approval NOT consumed. Fix the underlying error and retry with the same dev_approval.',
-            ]
-          : [
-              `⚠ git commit reported a failure, but HEAD moved to ${movedTo.slice(0, 12)} meanwhile: a commit landed that RSCT did not check — a git hook's own commit, or this commit with an error after it. Check it (\`git show ${movedTo.slice(0, 12)}\`) before any push, and ask again with a fresh approval.${refundNote}`,
             ]),
       ]),
     }
@@ -1272,7 +1281,7 @@ export async function requestCommitHandler(
   }
   const tree = await treeDrift(cleanRewritePaths)
   reportTreeDrift(tree)
-  const landedRef = approvedState.tree === null ? approvedState.ref : readHeadRef(projectRoot)
+  const landedRef = readHeadRef(projectRoot)
   const branchMoved = landedRef !== approvedState.ref
   if (branchMoved) {
     appendAudit(

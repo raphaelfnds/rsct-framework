@@ -65,6 +65,12 @@ async function commit(
   return { out, dialogs }
 }
 
+function hook(body: string): void {
+  const path = join(root, '.git', 'hooks', 'pre-commit')
+  writeFileSync(path, `#!/bin/sh\n${body}`)
+  chmodSync(path, 0o755)
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'rsct-dialog-'))
 })
@@ -326,12 +332,6 @@ describe.skipIf(!GIT)('the branch, the first commit and a commit a hook makes on
     git('symbolic-ref', 'HEAD', `refs/heads/${branch}`)
   }
 
-  function hook(body: string): void {
-    const path = join(root, '.git', 'hooks', 'pre-commit')
-    writeFileSync(path, `#!/bin/sh\n${body}`)
-    chmodSync(path, 0o755)
-  }
-
   it('refuses when the branch that was checked is not the branch git would commit on', async () => {
     initRepo('main')
     writeFileSync(join(root, 'b.txt'), 'b\n')
@@ -405,12 +405,6 @@ describe.skipIf(!GIT)('the branch, the first commit and a commit a hook makes on
 })
 
 describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
-  function hook(body: string): void {
-    const path = join(root, '.git', 'hooks', 'pre-commit')
-    writeFileSync(path, `#!/bin/sh\n${body}`)
-    chmodSync(path, 0o755)
-  }
-
   it('reports a hook that switches the branch during the commit', async () => {
     initRepo()
     writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
@@ -452,6 +446,21 @@ describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
     expect(out.hints.some((h) => h.includes('approval NOT consumed'))).toBe(true)
   })
 
+  it('says the branch was switched, not that a commit landed, when a hook moved HEAD to another branch', async () => {
+    initRepo()
+    git('update-ref', 'refs/heads/other', git('commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'other').trim())
+    hook('git symbolic-ref HEAD refs/heads/other\n')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const before = git('rev-parse', 'refs/heads/other').trim()
+    const { out } = await commit(approval())
+    expect(out.status).toBe('mutation_failed')
+    expect(git('rev-parse', 'refs/heads/other').trim()).toBe(before)
+    const text = out.hints.join('\n')
+    expect(text).toContain('HEAD now points at refs/heads/other instead of the approved refs/heads/feat/x')
+    expect(text).not.toContain('a commit landed')
+  })
+
   it('treats the approval as used once a hook committed during the attempt', async () => {
     initRepo()
     writeFileSync(join(root, 'sneaked.txt'), 'x\n')
@@ -461,7 +470,9 @@ describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
     const used = approval()
     const first = await commit(used)
     expect(first.out.status).toBe('mutation_failed')
+    expect(first.out.anti_replay_persisted).toBe(true)
     expect(first.out.hints.join('\n')).not.toContain('retry with the same dev_approval')
+    expect(first.out.hints.join('\n')).not.toContain('token action')
     rmSync(join(root, '.git', 'hooks', 'pre-commit'))
     writeFileSync(join(root, 'c.txt'), 'c\n')
     git('add', 'c.txt')
