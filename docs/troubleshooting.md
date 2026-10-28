@@ -394,6 +394,8 @@ ref 'HEAD'`), or git created this commit and failed afterwards. The audit entry 
 - To take it back, `git reset --soft HEAD~1` keeps its changes staged (on a first commit,
   `git update-ref -d HEAD`).
 - Then fix or remove the hook, and ask for the commit again with a fresh approval.
+- If the hint says HEAD now points at another branch, nothing was committed: a hook switched the
+  branch and git refused the commit. Switch back (`git switch <branch>`) and do not run the reset.
 
 ## The first commit of a new repository is refused with `protected_branch`
 
