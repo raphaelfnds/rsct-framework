@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, cop
 import { isAbsolute, resolve, join, dirname, relative, sep, basename } from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
+import 'string_decoder';
 import { createHash } from 'crypto';
 
 createRequire(import.meta.url);
