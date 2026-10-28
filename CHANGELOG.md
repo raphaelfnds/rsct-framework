@@ -65,6 +65,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `rsct_check_secrets` reads with the same flags as the commit and reports a read it could not
   make in `read_error`, never as "no findings".
 - `fast-uri` 3.1.9 (Dependabot #144), bundled into `rsct-mcp`.
+- Inside WSL, the installer tests that need the scripts to run are skipped (the scripts refuse
+  there without `--wsl`, by design), and two tests check that refusal. #145 tracks testing the
+  `--wsl` path itself.
 
 ### Migration for existing projects
 
