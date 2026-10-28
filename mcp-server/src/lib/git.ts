@@ -15,7 +15,10 @@ export function readGitState(projectRoot: string): GitState {
     return { available: false, branch: null, head_sha: null, is_clean: null }
   }
 
-  const branch = safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const symbolic = gitReadC(projectRoot, ['symbolic-ref', '-q', 'HEAD']).stdout.trim()
+  const branch = symbolic.startsWith(BRANCH_REF_PREFIX)
+    ? symbolic.slice(BRANCH_REF_PREFIX.length)
+    : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
   const status = safeGit(projectRoot, ['status', '--porcelain'])
 
@@ -27,8 +30,19 @@ export function readGitState(projectRoot: string): GitState {
   }
 }
 
+const BRANCH_REF_PREFIX = 'refs/heads/'
+
+export function branchRef(branch: string | null): string | null {
+  return branch === null || branch === 'HEAD' ? null : `${BRANCH_REF_PREFIX}${branch}`
+}
+
+export function readHeadCommit(projectRoot: string): string | null {
+  const head = gitReadC(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).stdout.trim()
+  return OBJECT_ID.test(head) ? head : null
+}
+
 const GATE_READ_CONFIG: readonly string[] = [
-  '-c', 'core.fsmonitor=false',
+  '-c', 'core.fsmonitor=',
   '-c', 'diff.relative=false',
 ]
 
@@ -135,6 +149,7 @@ export function streamGitLines(
 }
 
 function killTree(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null) return
   if (process.platform === 'win32' && child.pid !== undefined) {
     try {
       execFileSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore', windowsHide: true, timeout: 5_000 })

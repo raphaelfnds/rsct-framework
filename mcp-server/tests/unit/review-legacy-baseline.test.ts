@@ -71,7 +71,11 @@ async function completeReview(extra: Record<string, unknown>, p = prompts()): Pr
 
 async function commit(): Promise<RequestCommitOutput> {
   return requestCommitHandler(
-    { project_root: root, message: 'feat: first publication', dev_approval: approval('commit:main:first') },
+    {
+      project_root: root,
+      message: 'feat: first publication',
+      dev_approval: { ...approval('commit:main:first'), override_protected_branch: { reason: 'first publication on main' } },
+    },
     { promptFn: prompts().fn },
   )
 }

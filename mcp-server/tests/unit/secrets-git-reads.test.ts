@@ -26,10 +26,12 @@ function git(...args: string[]): string {
 }
 
 function initRepo(): void {
-  git('init', '-q')
+  git('init', '-q', '--template=')
   git('config', 'user.email', 't@example.invalid')
   git('config', 'user.name', 't')
   git('config', 'core.autocrlf', 'false')
+  git('config', 'commit.gpgsign', 'false')
+  git('config', 'core.hooksPath', '.git/no-hooks')
   writeFileSync(join(root, 'readme.txt'), 'hello\n')
   git('add', 'readme.txt')
   git('commit', '-q', '-m', 'init')
@@ -144,7 +146,7 @@ describe.skipIf(!GIT)('the staged scan reads what git will commit, whatever the 
     initRepo()
     const lock = join(root, '.git', 'index.lock')
     writeFileSync(lock, '')
-    setTimeout(() => rmSync(lock), 300)
+    setTimeout(() => rmSync(lock, { force: true }), 300)
     const state = await readStagedTreeState(root)
     expect(state?.tree).toBe(git('write-tree').trim())
   })
@@ -153,6 +155,17 @@ describe.skipIf(!GIT)('the staged scan reads what git will commit, whatever the 
     initRepo()
     writeFileSync(join(root, '.git', 'index.lock'), '')
     expect(await readStagedTreeState(root)).toBeNull()
+  })
+
+  it('never runs an fsmonitor command from the repository config', async () => {
+    initRepo()
+    writeFileSync(join(root, 'a.env'), `${SECRET}\n`)
+    git('add', 'a.env')
+    git('config', 'core.fsmonitor', 'echo ran >> fsmonitor-ran.txt; exit 1; :')
+    expect(await stagedFiles()).toEqual(['a.env'])
+    expect(getStagedPaths(root)).toEqual(['a.env'])
+    expect((await readStagedTreeState(root))?.tree).toMatch(/^[0-9a-f]{40,64}$/)
+    expect(existsSync(join(root, 'fsmonitor-ran.txt'))).toBe(false)
   })
 
   it('lists both sides of a staged rename', () => {
