@@ -85,18 +85,30 @@ describe('judgeSettingsWrite — what it refuses', () => {
     expect(blocked('Write', { file_path: file, content: '{"env": {"NODE_OPTIONS": "--require x.js"' }, file)).toBe(true)
   })
 
-  it('refuses the other env keys that change how a hook shell or node starts (REVIEW #91 round 6)', () => {
+  it('refuses every env key, the hook-start ones and ordinary ones alike', () => {
     const root = project({})
     const file = join(root, '.claude', 'settings.local.json')
-    for (const key of ['BASH_ENV', 'bash_env', 'ENV', 'SHELLOPTS', 'CLAUDE_PROJECT_DIR', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BASH_FUNC_node%%']) {
-      expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { [key]: 'x' } }) }, file)).toBe(true)
+    const keys = [
+      'BASH_ENV', 'bash_env', 'ENV', 'SHELLOPTS', 'CLAUDE_PROJECT_DIR', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BASH_FUNC_node%%',
+      'LD_AUDIT', 'DYLD_FRAMEWORK_PATH', 'ANTHROPIC_BASE_URL', 'HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'NODE_TLS_REJECT_UNAUTHORIZED',
+      'GIT_CONFIG_COUNT', 'MY_FLAG',
+    ]
+    for (const key of keys) {
+      expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { [key]: 'x' } }) }, file), key).toBe(true)
     }
     expect(blocked('Write', { file_path: file, content: '{"env": {"BASH_ENV": "x"' }, file)).toBe(true)
-    expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { MY_FLAG: '1' } }) }, file)).toBe(false)
-    for (const key of ['LD_AUDIT', 'DYLD_FRAMEWORK_PATH']) {
-      expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { [key]: 'x' } }) }, file)).toBe(true)
-    }
-    expect(blocked('Write', { file_path: file, content: '{"env": {"MY_FLAG": "1"' }, file)).toBe(false)
+    expect(blocked('Write', { file_path: file, content: '{"env": {"MY_FLAG": "1"' }, file)).toBe(true)
+  })
+
+  it('refuses changing or removing an env entry that is already there', () => {
+    const root = project({ env: { HTTPS_PROXY: 'http://proxy.example:3128', MY_FLAG: '1' } })
+    const file = join(root, '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { HTTPS_PROXY: 'http://elsewhere:3128', MY_FLAG: '1' } }) }, file)).toBe(true)
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ env: { MY_FLAG: '1' } }) }, file)).toBe(true)
+    expect(blocked('Write', { file_path: file, content: '{}' }, file)).toBe(true)
+    expect(blocked('Edit', { file_path: file, old_string: '"MY_FLAG": "1"', new_string: '"MY_FLAG": "2"' }, file)).toBe(true)
+    const nullValued = join(project({ env: { UNSET_ME: null } }), '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: nullValued, content: '{}' }, nullValued)).toBe(true)
   })
 
   it('allows an edit that keeps an existing guarded env value as it was, and refuses changing it', () => {
@@ -122,7 +134,7 @@ describe('judgeSettingsWrite — what keeps working', () => {
     expect(blocked('Edit', { file_path: local, old_string: '"allow": []', new_string: '"allow": ["Bash(npm test)"]' }, local)).toBe(false)
     expect(blocked('Write', { file_path: local, content: JSON.stringify({ env: { PATH: '/usr/bin' }, model: 'x' }) }, local)).toBe(false)
     expect(blocked('Edit', { file_path: shared, old_string: '"hooks"', new_string: '"model": "x",\n  "hooks"' }, shared)).toBe(false)
-    expect(blocked('Write', { file_path: local, content: '{"disableAllHooks": false}' }, local)).toBe(false)
+    expect(blocked('Write', { file_path: local, content: JSON.stringify({ env: { PATH: '/usr/bin' }, disableAllHooks: false }) }, local)).toBe(false)
   })
 
   it('leaves other files and other tools alone', () => {
