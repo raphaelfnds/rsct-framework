@@ -1,12 +1,13 @@
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
-import { getStagedDiff, getUnstagedDiff, readGitState } from '../lib/git.js'
+import { readGitState } from '../lib/git.js'
 import {
   compileExtraPatterns,
   scanDiffForSecrets,
   type SecretFinding,
 } from '../lib/secrets.js'
+import { scanGitDiff } from '../lib/staged-scan.js'
 
 export const checkSecretsInputSchema = z
   .object({
@@ -36,6 +37,7 @@ export interface CheckSecretsOutput {
   in_git_repo: boolean
   staged_only: boolean
   findings: SecretFinding[]
+  read_error: string | null
   scanned_extra_patterns: number
   invalid_extra_patterns: Array<{ index: number; pattern: string; error: string }>
   hints: string[]
@@ -77,30 +79,35 @@ export async function checkSecretsHandler(
 
   const extras = compileExtraPatterns(resolution.config?.secrets_extra_patterns ?? [])
 
-  let diff: string | null
+  let findings: SecretFinding[] = []
+  let readError: string | null = null
+  const diffPresent = input.diff_override !== undefined || git.available
   if (input.diff_override !== undefined) {
-    diff = input.diff_override
-  } else if (staged_only) {
-    diff = getStagedDiff(resolution.root)
+    findings = scanDiffForSecrets(input.diff_override, extras.compiled)
   } else {
-    const staged = getStagedDiff(resolution.root) ?? ''
-    const unstaged = getUnstagedDiff(resolution.root) ?? ''
-    diff = `${staged}\n${unstaged}`
+    for (const which of staged_only ? (['staged'] as const) : (['staged', 'unstaged'] as const)) {
+      const scan = await scanGitDiff(resolution.root, which, extras.compiled)
+      if (!scan.ok) {
+        readError = `${which} changes: ${scan.reason}`
+        break
+      }
+      findings.push(...scan.findings)
+    }
   }
-
-  const findings = diff !== null ? scanDiffForSecrets(diff, extras.compiled) : []
 
   return {
     rsct_installed: resolution.rsct_installed,
     in_git_repo: git.available,
     staged_only,
     findings,
+    read_error: readError,
     scanned_extra_patterns: extras.compiled.length,
     invalid_extra_patterns: extras.invalid,
     hints: buildHints({
       rsct_installed: resolution.rsct_installed,
       in_git_repo: git.available,
-      diff_present: diff !== null,
+      diff_present: diffPresent,
+      read_error: readError,
       findings_count: findings.length,
       invalid_extras: extras.invalid.length,
     }),
@@ -111,12 +118,18 @@ interface HintInputs {
   rsct_installed: boolean
   in_git_repo: boolean
   diff_present: boolean
+  read_error: string | null
   findings_count: number
   invalid_extras: number
 }
 
 function buildHints(input: HintInputs): string[] {
   const hints: string[] = []
+  if (input.read_error !== null) {
+    hints.push(
+      `The scan could NOT read the changes (${input.read_error}). This is not "no findings": rsct_request_commit refuses a commit it cannot read.`,
+    )
+  }
   if (!input.rsct_installed) {
     hints.push(
       'No .rsct.json — running secrets scan with framework default patterns only.',
@@ -131,7 +144,7 @@ function buildHints(input: HintInputs): string[] {
     hints.push(
       `${input.findings_count} secret finding(s). rsct_request_commit will reject this commit unless dev_approval includes override_secrets_check: { reason }.`,
     )
-  } else if (input.in_git_repo || input.diff_present) {
+  } else if (input.read_error === null && (input.in_git_repo || input.diff_present)) {
     hints.push('No secret patterns matched the scanned diff.')
   }
   if (input.invalid_extras > 0) {
