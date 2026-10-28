@@ -38,7 +38,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - The dialog lists the protected branch, each secret finding (`"file":line — rule`, never the
     value), the contract surfaces and their consumers, then the agent's reason for each exception.
     Over 10 findings, surfaces or consumers, the dialog shows the first 10 and names a report under
-    `.rsct/reports/` with the full list; if the report cannot be written, it shows them all.
+    `.rsct/reports/` with the full list; if the report cannot be written, it shows them all (a
+    dialog over its size limit is refused, as before).
   - A check that needs an exception the request does not carry is refused before any dialog opens.
   - The staged tree, HEAD and branch are recorded before the dialog, the scan reads that recorded
     tree, and all three are checked again right before `git commit` (`staged_changed`). The
@@ -49,8 +50,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     the changed paths, how many secret findings they carry, and the command that undoes it. Code
     files the hook changed stay locked until a REVIEW, as before. A commit RSCT cannot read back
     is `committed_with_drift` too.
-  - When `git commit` fails but HEAD moved meanwhile (a hook that made its own commit), the result
-    says so.
+  - When `git commit` fails but HEAD moved meanwhile (a hook's own commit, or this commit with an
+    error after it), the result says so, the approval counts as used and a plan token's action is
+    not refunded. A commit that lands on another branch than the approved one (a hook that
+    switched it) returns `committed_with_drift`.
 
   See ADR-040.
 - **The agent cannot add, change or remove any `env` entry in a Claude Code settings file**, not
