@@ -7,12 +7,11 @@ export async function scanGitDiff(
   projectRoot: string,
   which: 'staged' | 'unstaged',
   extraPatterns: ReadonlyArray<ExtraPattern> = [],
-  timeoutMs?: number,
 ): Promise<DiffScanResult> {
   const status = gitRepoStatus(projectRoot)
   if (status === 'not_a_repo') return { ok: true, findings: [] }
   if (status === 'unknown') return { ok: false, reason: 'git could not tell whether this folder is a repository' }
-  return scanArgs(projectRoot, which === 'staged' ? STAGED_DIFF_ARGS : UNSTAGED_DIFF_ARGS, extraPatterns, timeoutMs)
+  return scanArgs(projectRoot, which === 'staged' ? STAGED_DIFF_ARGS : UNSTAGED_DIFF_ARGS, extraPatterns)
 }
 
 export async function scanTreeDiff(

@@ -139,6 +139,7 @@ describe('dialog text helpers', () => {
 describe('every approval dialog shows the framework lines before what the agent wrote', () => {
   it('commit: the message comes after the repository line, its blank lines collapsed', async () => {
     initSweepRepo(root)
+    git(root, 'symbolic-ref', 'HEAD', 'refs/heads/feat/docs')
     config()
     writeFileSync(join(root, 'README.md'), 'a\n', 'utf8')
     git(root, 'add', 'README.md')

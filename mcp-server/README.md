@@ -874,9 +874,16 @@ Since 2.23.0 (ADR-039, ADR-040):
   contract paths read that recorded tree. All three are checked again right before `git commit`
   (`staged_changed`).
 - A commit whose tree or parent differs from what was approved (a git hook that staged more)
-  returns `committed_with_drift`; the hints name the changed paths, their secret findings and
-  `git reset --soft HEAD~1` to undo it. Code files among them stay under the `review_drift` lock
-  above.
+  returns `committed_with_drift`; the hints name the changed paths, how many secret findings they
+  carry and the command that undoes it (`git reset --soft HEAD~1`, or `git update-ref -d HEAD` for
+  a first commit). Code files among them stay under the `review_drift` lock above. A commit RSCT
+  cannot read back is `committed_with_drift` too.
+- The branch is read from HEAD's symbolic ref, so it is known before its first commit: the first
+  commit on a protected branch needs `override_protected_branch`. A recorded branch that is not
+  the one checked refuses (`staged_changed`).
+- When `git commit` fails but HEAD moved meanwhile (a hook that made its own commit), the hints and
+  the audit entry (`head_moved_to`) say so.
+- A list that cannot be written to its report is shown whole in the dialog.
 
 - Input: `project_root?`, `message`, `dev_approval?` (OPTIONAL — omit to use a plan token). The MCP surface has NO diff override — the secrets scan ALWAYS reads the real staged diff (the test-only diff seam is a function arg, not an MCP input).
 - Output: `status: 'committed' | 'committed_with_drift' | 'rejected' | 'mutation_failed'`, `authorized_via: 'dev_approval' | 'plan_token' | null`, `channel` (gate channel or `'plan_token'`), `sha_before`, `sha_after?`, `reject_kind?` (incl. `'plan_token_invalid'`, `'contract_surface'`, `'message_too_long'`, `'review_missing'`, `'comments_present'`, `'migration_reverted'`, `'review_drift'`, `'review_unreadable'`, `'dead_code_staged'`, `'secrets_unreadable'`, `'staged_paths_unreadable'`, `'staged_state_unreadable'`, `'staged_changed'`), `branch_check`, `secrets_check`, `contract_check`, `bootstrap_marker`, `plan_token?` (budget summary on token commits), `audit_path: string | null`, `audit_error: string | null`, `anti_replay_persisted: boolean | null`, `anti_replay_error: string | null`, `hints: string[]`

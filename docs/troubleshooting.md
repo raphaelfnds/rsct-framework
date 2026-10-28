@@ -360,8 +360,8 @@ committed.
   - If one very large file keeps failing the read, split the commit.
   - Otherwise commit that change by hand in your own terminal.
 - **`staged_changed`**: what is staged, HEAD or the branch changed between the approval dialog and
-  the commit. Something ran `git add`, `git commit`, a checkout or a branch switch while the dialog
-  was open. Look at
+  the commit, or the branch changed while the commit was being prepared. Something ran `git add`,
+  `git commit`, a checkout or a branch switch meanwhile. Look at
   `git status` and ask again, so the dialog shows what will be committed.
 
 ## A commit returns `committed_with_drift`
@@ -377,6 +377,24 @@ log records `request_commit.tree_drift`.
   until `rsct_phase_review_start` / `_complete` covers it. Other files (a README, a JSON file) are
   reported only: a REVIEW stamps code files, so it could not clear a lock on them.
 - A hook that only reformats code files the REVIEW already accepts does not trigger the lock.
+- The same status, with "RSCT could not compare the commit", means git committed but RSCT could
+  not read the commit back. Check it the same way.
+
+## A commit returns `mutation_failed` and says HEAD moved
+
+`git commit` failed, but HEAD now points at a commit you did not approve — most likely a
+`pre-commit` hook that ran its own `git commit` (git then refuses the outer commit with `cannot
+lock ref 'HEAD'`). The audit entry carries `head_moved_to`.
+
+- Look at that commit (`git show <sha>`) before any push.
+- To take it back, `git reset --soft HEAD~1` keeps its changes staged.
+- Then fix or remove the hook, and ask for the commit again.
+
+## The first commit of a new repository is refused with `protected_branch`
+
+Since 2.23.0 the branch is known before its first commit, so a first commit on `main` (or any
+protected branch) needs the protected-branch exception, like every other commit there. Approve it
+in the dialog, or start on a feature branch.
 
 ## A commit, push, merge or rebase is refused with `force_dialog_no_channel`
 

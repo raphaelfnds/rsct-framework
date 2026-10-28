@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
+import { requestCommitHandler, type RequestCommitInternal, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 
 const GIT = (() => {
@@ -25,7 +25,8 @@ function git(...args: string[]): string {
 }
 
 function initRepo(branch = 'feat/x'): void {
-  git('init', '-q')
+  git('init', '-q', '--template=')
+  mkdirSync(join(root, '.git', 'hooks'), { recursive: true })
   git('config', 'user.email', 't@example.invalid')
   git('config', 'user.name', 't')
   git('config', 'core.autocrlf', 'false')
@@ -45,11 +46,13 @@ function approval(extra: Record<string, unknown> = {}): Record<string, unknown> 
 async function commit(
   devApproval: Record<string, unknown>,
   onDialog: (opts: DialogOptions) => void = () => {},
+  internal: Partial<RequestCommitInternal> = {},
 ): Promise<{ out: RequestCommitOutput; dialogs: string[] }> {
   const dialogs: string[] = []
   const out = (await requestCommitHandler(
     { project_root: root, message: 'feat: change', dev_approval: devApproval },
     {
+      ...internal,
       now: new Date(),
       promptFn: async (opts: DialogOptions): Promise<DialogResult> => {
         dialogs.push(opts.message)
@@ -118,6 +121,19 @@ describe.skipIf(!GIT)('the commit dialog shows every exception it is asked to ap
     const report = /Full list: (\.rsct\/reports\/commit-secrets-[0-9a-f]{16}\.md)/.exec(dialogs[0]!)?.[1]
     expect(report).toBeDefined()
     expect(readFileSync(join(root, report!), 'utf8').match(/^- "many\.env":/gm)).toHaveLength(12)
+  })
+
+  it('shows the whole list when the report cannot be written', async () => {
+    initRepo()
+    mkdirSync(join(root, '.rsct'), { recursive: true })
+    writeFileSync(join(root, '.rsct', 'reports'), 'not a folder\n')
+    writeFileSync(join(root, 'many.env'), Array.from({ length: 12 }, (_, i) => `token.${i}=v${i}`).join('\n') + '\n')
+    git('add', 'many.env')
+    const { out, dialogs } = await commit(approval({ override_secrets_check: { reason: 'fixtures' } }))
+    expect(out.status).toBe('committed')
+    expect(dialogs[0]!.match(/^• "many\.env":/gm)).toHaveLength(12)
+    expect(dialogs[0]).not.toMatch(/… and \d+ more/)
+    expect(dialogs[0]).not.toContain('Full list')
   })
 
   it('shows nothing extra when there is nothing to approve beyond the commit', async () => {
@@ -228,8 +244,15 @@ describe.skipIf(!GIT)('the commit is exactly what the developer approved', () =>
 describe.skipIf(!GIT)('the commit dialog cuts a long contract list', () => {
   const pad = (i: number): string => String(i).padStart(2, '0')
 
-  async function contractCommit(contracts: Array<{ id: string; dirs: number[]; consumers: string[] }>): Promise<{ text: string; report: string | null }> {
+  async function contractCommit(
+    contracts: Array<{ id: string; dirs: number[]; consumers: string[] }>,
+    reportsBlocked = false,
+  ): Promise<{ text: string; report: string | null }> {
     initRepo()
+    if (reportsBlocked) {
+      mkdirSync(join(root, '.rsct'), { recursive: true })
+      writeFileSync(join(root, '.rsct', 'reports'), 'not a folder\n')
+    }
     const universe = mkdtempSync(join(tmpdir(), 'rsct-dialog-uni-'))
     try {
       mkdirSync(join(universe, 'applications', 'registered-app'), { recursive: true })
@@ -271,9 +294,110 @@ describe.skipIf(!GIT)('the commit dialog cuts a long contract list', () => {
     expect(report?.match(/^- consumer "consumer-\d+"$/gm)).toHaveLength(12)
   })
 
+  it('shows every surface and consumer when the report cannot be written', async () => {
+    const { text, report } = await contractCommit(
+      Array.from({ length: 12 }, (_, i) => ({ id: `surface-${pad(i)}`, dirs: [i], consumers: [`consumer-${pad(i)}`] })),
+      true,
+    )
+    expect(report).toBeNull()
+    expect(text).toContain('"surface-11"; declared consumers: ')
+    expect(text).toContain('"consumer-11".')
+    expect(text).not.toMatch(/… and \d+ more/)
+  })
+
   it('writes no report when every name fits', async () => {
     const { text, report } = await contractCommit([{ id: 'one-surface', dirs: [0], consumers: ['web'] }])
     expect(text).toContain('⚠ This commit changes contract surface "one-surface"; declared consumers: "web".')
     expect(report).toBeNull()
+  })
+})
+
+describe.skipIf(!GIT)('the branch, the first commit and a commit a hook makes on its own', () => {
+  function unborn(branch: string): void {
+    git('init', '-q', '--template=')
+    mkdirSync(join(root, '.git', 'hooks'), { recursive: true })
+    git('config', 'user.email', 't@example.invalid')
+    git('config', 'user.name', 't')
+    git('config', 'core.autocrlf', 'false')
+    git('config', 'commit.gpgsign', 'false')
+    git('config', 'core.hooksPath', '.git/hooks')
+    git('symbolic-ref', 'HEAD', `refs/heads/${branch}`)
+  }
+
+  function hook(body: string): void {
+    const path = join(root, '.git', 'hooks', 'pre-commit')
+    writeFileSync(path, `#!/bin/sh\n${body}`)
+    chmodSync(path, 0o755)
+  }
+
+  it('refuses when the branch that was checked is not the branch git would commit on', async () => {
+    initRepo('main')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out, dialogs } = await commit(approval(), () => {}, {
+      gitStateOverride: { available: true, branch: 'feat/x', head_sha: null, is_clean: false },
+    })
+    expect(out.reject_kind).toBe('staged_changed')
+    expect(dialogs).toEqual([])
+    expect(git('log', '--oneline').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('still commits on a detached HEAD', async () => {
+    initRepo()
+    git('checkout', '-q', '--detach')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval())
+    expect(out.status).toBe('committed')
+  })
+
+  it('treats the first commit on a protected branch as a protected-branch commit', async () => {
+    unborn('main')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const refused = await commit(approval())
+    expect(refused.out.reject_kind).toBe('protected_branch')
+    expect(refused.dialogs).toEqual([])
+    const allowed = await commit(approval({ override_protected_branch: { reason: 'first publication' } }))
+    expect(allowed.out.status).toBe('committed')
+    expect(allowed.dialogs[0]).toContain(`⚠ 'main' is a protected branch`)
+  })
+
+  it('names the undo of a first commit that a hook changed', async () => {
+    unborn('feat/x')
+    writeFileSync(join(root, 'extra.txt'), 'extra\n')
+    hook('git add -f extra.txt\n')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval())
+    expect(out.status).toBe('committed_with_drift')
+    const hint = out.hints.find((h) => h.includes('extra.txt changed after the approval'))
+    expect(hint).toContain('`git update-ref -d HEAD` undoes this first commit')
+  })
+
+  it('reports a commit a hook made on its own when git commit then fails', async () => {
+    initRepo()
+    writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
+    writeFileSync(join(root, 'sneaked.txt'), 'x\n')
+    hook('git add -f sneaked.txt\ngit commit -q --no-verify -m sneaked\n')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval())
+    expect(out.status).toBe('mutation_failed')
+    const sneaked = git('rev-parse', 'HEAD').trim()
+    expect(git('log', '-1', '--format=%s').trim()).toBe('sneaked')
+    expect(out.hints.some((h) => h.includes(`HEAD moved to ${sneaked.slice(0, 12)}`))).toBe(true)
+    expect(readFileSync(join(root, '.rsct', 'audit.log'), 'utf8')).toContain(`"head_moved_to":"${sneaked}"`)
+  })
+
+  it('reports a commit it could not read back as drift', async () => {
+    initRepo()
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval(), () => {}, {
+      gitExecutor: () => ({ ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 }),
+    })
+    expect(out.status).toBe('committed_with_drift')
+    expect(out.hints.some((h) => h.includes('could not compare the commit'))).toBe(true)
   })
 })

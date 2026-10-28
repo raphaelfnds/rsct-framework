@@ -775,6 +775,7 @@ describe('rsct_request_commit — plan-token path (T3)', () => {
     writePlanFile()
     seedState({ plan_authorization: tokenBlock() })
     execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' })
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feat/foo'], { cwd: tmpRoot, stdio: 'ignore' })
     execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: tmpRoot, stdio: 'ignore' })
     execFileSync('git', ['config', 'user.name', 't'], { cwd: tmpRoot, stdio: 'ignore' })
     writeFileSync(join(tmpRoot, 'app.env'), 'API_KEY=sk-AAAAAAAAAAAAAAAAAAAAAAAA\n')

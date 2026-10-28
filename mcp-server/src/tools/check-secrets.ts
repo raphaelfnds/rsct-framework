@@ -46,7 +46,7 @@ export interface CheckSecretsOutput {
 export const checkSecretsTool: Tool = {
   name: 'rsct_check_secrets',
   description:
-    'Pure query (INV-6): scan staged diff for credentials. Reports findings without blocking — rsct_request_commit will actually refuse the commit unless dev_approval.override_secrets_check is provided. Patterns come from the framework defaults plus optional `secrets_extra_patterns[]` regexes in .rsct.json. Excerpts are masked. It reads the staged diff the way rsct_request_commit does (attributes, diff drivers and repository config cannot hide content). Outside a git repository it returns no findings; when git cannot be read it reports read_error, never "no findings".',
+    'Pure query (INV-6): scan staged diff for credentials. Reports findings without blocking — rsct_request_commit will actually refuse the commit unless dev_approval.override_secrets_check is provided. Patterns come from the framework defaults plus optional `secrets_extra_patterns[]` regexes in .rsct.json. Excerpts are masked. It reads with the flags rsct_request_commit uses (attributes, diff drivers and repository config cannot hide content). Outside a git repository it returns no findings; when git cannot be read it reports read_error, never "no findings".',
   inputSchema: {
     type: 'object',
     properties: {
