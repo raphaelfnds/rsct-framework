@@ -305,6 +305,22 @@ describe('rsct_request_merge — extra-strict refusals', () => {
     expect(out.reject_kind).toBe('same_branch')
   })
 
+  it('rejects a target branch that has no commit yet, as before its name could be read', async () => {
+    writeConfig(tmpRoot, BASE_CONFIG)
+    const out = (await requestMergeHandler(
+      { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
+      {
+        rangeReader: emptyRange,
+        gitStateOverride: { ...gitState('feat/new'), head_sha: null },
+        gitExecutor: gitExec({}, MERGE_OK),
+        promptFn: alwaysYes(),
+        now: FIXED_NOW,
+      },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('detached_head')
+  })
+
   it('rejects with detached_head when target_branch is null', async () => {
     writeConfig(tmpRoot, BASE_CONFIG)
     const out = (await requestMergeHandler(

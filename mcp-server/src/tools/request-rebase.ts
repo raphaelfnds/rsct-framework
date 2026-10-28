@@ -264,7 +264,7 @@ export async function requestRebaseHandler(
   const approval = gate.approval
   const overrideBranch = approval.override_protected_branch
 
-  if (currentBranch === null) {
+  if (currentBranch === null || gitState.head_sha === null) {
     const reason = 'cannot rebase/squash on a detached HEAD — checkout a branch first'
     const audit = appendAudit(
       projectRoot,

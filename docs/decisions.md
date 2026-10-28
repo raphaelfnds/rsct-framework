@@ -2858,12 +2858,17 @@ dialog captured.
   the command that undoes the commit (`git reset --soft HEAD~1`, or `git update-ref -d HEAD` for a
   first commit). Code files a hook changed stay under the existing `review_drift` lock. Other files
   are reported, not locked: a REVIEW stamps code files only, so a lock on a README or a JSON file
-  could never be cleared. A commit RSCT cannot read back is `committed_with_drift` too.
+  could never be cleared. A commit RSCT cannot read back is `committed_with_drift` too, and so is
+  a commit that lands with HEAD on another branch than the approved one (a hook that switched it;
+  `request_commit.branch_drift`).
 - MEASURED: a `pre-commit` hook that runs its own `git commit` makes RSCT's `git commit` fail
   (`cannot lock ref 'HEAD'`), while the hook's commit stays on the branch. When the commit fails
-  and HEAD moved, the hints and the audit (`head_moved_to`) say so.
+  and HEAD moved, the hints and the audit (`head_moved_to`) say so, the approval is recorded as
+  used and a plan token's action is not refunded.
 - When a report under `.rsct/reports/` cannot be written, the dialog shows the whole list instead
-  of the first 10.
+  of the first 10; a dialog over its size limit is refused, as every dialog is.
+- `rsct_plan_authorize`, `rsct_request_merge` and `rsct_request_rebase` keep refusing a branch
+  with no commit yet, as they did while its name could not be read.
 
 **Direction**: stricter. The developer now sees in the dialog every exception the agent asks for,
 the commit is refused if the staged tree, HEAD or branch moves after the approval, and a commit
@@ -2882,7 +2887,8 @@ that a hook changed is reported.
   - the first commit on a protected branch;
   - a hook that adds a file with and without a secret, and the undo hint (also on a first
     commit);
-  - a hook that makes its own commit, and a commit RSCT cannot read back;
+  - a hook that makes its own commit (and the approval it used), a hook that switches the branch,
+    a commit RSCT cannot read back, a failed commit that leaves HEAD alone;
   - a report that cannot be written;
   - a formatting hook on a non-code file that does not lock later commits;
   - a hook that changes nothing.

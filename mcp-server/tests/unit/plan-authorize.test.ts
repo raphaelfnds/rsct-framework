@@ -136,6 +136,16 @@ describe('rsct_plan_authorize', () => {
     expect(out.reject_kind).toBe('no_branch')
   })
 
+  it('rejects a branch that has no commit yet, as before its name could be read', async () => {
+    writePlan()
+    const out = (await planAuthorizeHandler(
+      { project_root: tmpRoot, dev_approval: approval() },
+      internal({ gitStateOverride: { ...gitState('feat/new'), head_sha: null } }),
+    )) as PlanAuthorizeOutput
+    expect(out.status).toBe('rejected')
+    expect(out.reject_kind).toBe('no_branch')
+  })
+
   it('rejects out-of-range ttl/max_actions at the input boundary (FV5)', async () => {
     writePlan()
     await expect(

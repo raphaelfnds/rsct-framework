@@ -372,7 +372,10 @@ file. The hints list the paths that changed and how many secret findings they ca
 log records `request_commit.tree_drift`.
 
 - Check those paths in the commit (`git show --stat HEAD`) before any push.
-- To take the commit back, `git reset --soft HEAD~1` undoes it and keeps everything staged.
+- To take the commit back, `git reset --soft HEAD~1` undoes it and keeps everything staged (on a
+  first commit, `git update-ref -d HEAD`).
+- If the hints say the commit landed on another branch, a hook switched the branch during the
+  commit: find the commit (`git log --all --oneline -3`) and undo it on the branch that has it.
 - If a code file the hook changed is among them, the next commit is refused with `review_drift`
   until `rsct_phase_review_start` / `_complete` covers it. Other files (a README, a JSON file) are
   reported only: a REVIEW stamps code files, so it could not clear a lock on them.
@@ -382,13 +385,15 @@ log records `request_commit.tree_drift`.
 
 ## A commit returns `mutation_failed` and says HEAD moved
 
-`git commit` failed, but HEAD now points at a commit you did not approve — most likely a
-`pre-commit` hook that ran its own `git commit` (git then refuses the outer commit with `cannot
-lock ref 'HEAD'`). The audit entry carries `head_moved_to`.
+`git commit` reported a failure, but HEAD now points at a commit RSCT did not check. Either a
+`pre-commit` hook ran its own `git commit` (git then refuses the outer commit with `cannot lock
+ref 'HEAD'`), or git created this commit and failed afterwards. The audit entry carries
+`head_moved_to`. The approval counts as used and a plan token's action is not refunded.
 
 - Look at that commit (`git show <sha>`) before any push.
-- To take it back, `git reset --soft HEAD~1` keeps its changes staged.
-- Then fix or remove the hook, and ask for the commit again.
+- To take it back, `git reset --soft HEAD~1` keeps its changes staged (on a first commit,
+  `git update-ref -d HEAD`).
+- Then fix or remove the hook, and ask for the commit again with a fresh approval.
 
 ## The first commit of a new repository is refused with `protected_branch`
 
