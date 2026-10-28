@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
 export interface GitState {
   available: boolean
@@ -26,14 +27,138 @@ export function readGitState(projectRoot: string): GitState {
   }
 }
 
-export function getStagedDiff(projectRoot: string): string | null {
-  if (!isGitRepo(projectRoot)) return null
-  return safeGitRaw(projectRoot, ['diff', '--cached', '--no-color', '-U0'])
+export const GATE_READ_CONFIG: readonly string[] = [
+  '-c', 'core.fsmonitor=false',
+  '-c', 'diff.relative=false',
+]
+
+const CONTENT_DIFF_FLAGS: readonly string[] = [
+  '--no-color',
+  '-U0',
+  '--text',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+  '--ignore-submodules=none',
+]
+
+export const STAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', '--cached', ...CONTENT_DIFF_FLAGS]
+export const UNSTAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS]
+
+export type GitStreamResult = { ok: true } | { ok: false; reason: string }
+
+export const GIT_SCAN_TIMEOUT_MS = 120_000
+
+export function streamGitLines(
+  cwd: string,
+  args: readonly string[],
+  onLine: (line: string) => void,
+  timeoutMs: number = GIT_SCAN_TIMEOUT_MS,
+): Promise<GitStreamResult> {
+  return new Promise((resolvePromise) => {
+    let settled = false
+    let pending = ''
+    let stderr = ''
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const decoder = new StringDecoder('utf8')
+    const finish = (result: GitStreamResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise(result)
+    }
+    const feed = (text: string): void => {
+      pending += text
+      let at = pending.indexOf('\n')
+      while (at !== -1) {
+        onLine(pending.slice(0, at))
+        pending = pending.slice(at + 1)
+        at = pending.indexOf('\n')
+      }
+    }
+    let child: ChildProcess
+    try {
+      child = spawn('git', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    } catch (error) {
+      finish({ ok: false, reason: `git could not start: ${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    let stopReason: string | null = null
+    const stopWith = (reason: string): void => {
+      if (stopReason !== null || settled) return
+      stopReason = reason
+      clearTimeout(timer)
+      child.kill('SIGKILL')
+      timer = setTimeout(() => finish({ ok: false, reason }), 5_000)
+    }
+    timer = setTimeout(() => stopWith(`git did not finish reading within ${Math.round(timeoutMs / 1000)} s`), timeoutMs)
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled || stopReason !== null) return
+      try {
+        feed(decoder.write(chunk))
+      } catch (error) {
+        stopWith(`the read stopped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < 4096) stderr += chunk.toString('utf8')
+    })
+    child.on('error', (error) => finish({ ok: false, reason: stopReason ?? `git could not run: ${error.message}` }))
+    child.on('close', (code, signal) => {
+      if (settled) return
+      if (stopReason !== null) {
+        finish({ ok: false, reason: stopReason })
+        return
+      }
+      if (code !== 0) {
+        const said = firstLine(stderr)
+        finish({ ok: false, reason: said.length > 0 ? `git said: "${said}"` : `git exited with ${code ?? signal ?? 'no code'}` })
+        return
+      }
+      try {
+        feed(decoder.end())
+        if (pending.length > 0) onLine(pending)
+        finish({ ok: true })
+      } catch (error) {
+        finish({ ok: false, reason: `the read stopped: ${error instanceof Error ? error.message : String(error)}` })
+      }
+    })
+  })
+}
+
+const STAGED_PATHS_ARGS: readonly string[] = [
+  ...GATE_READ_CONFIG,
+  'diff',
+  '--cached',
+  '--name-only',
+  '-z',
+  '--no-renames',
+  '--ignore-submodules=none',
+]
+
+export type GitRepoStatus = 'repo' | 'not_a_repo' | 'unknown'
+
+export function gitRepoStatus(projectRoot: string): GitRepoStatus {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: GIT_READ_TIMEOUT_MS,
+    })
+    return out.trim() === 'true' ? 'repo' : 'unknown'
+  } catch (error) {
+    const thrown = error as { status?: number | null; stderr?: Buffer | string }
+    return thrown.status === 128 && /not a git repository/i.test(String(thrown.stderr ?? '')) ? 'not_a_repo' : 'unknown'
+  }
 }
 
 export function getStagedPaths(projectRoot: string): string[] | null {
-  if (!isGitRepo(projectRoot)) return null
-  const raw = safeGitRaw(projectRoot, ['diff', '--cached', '--name-only', '-z'])
+  const status = gitRepoStatus(projectRoot)
+  if (status === 'not_a_repo') return []
+  if (status === 'unknown') return null
+  const raw = safeGitRaw(projectRoot, [...STAGED_PATHS_ARGS])
   if (raw === null) return null
   return splitNulPaths(raw)
 }
@@ -67,9 +192,12 @@ export function getRangePaths(
   }
   if (!isGitRepo(projectRoot)) return { status: 'unavailable' }
   const raw = safeGitRaw(projectRoot, [
+    ...GATE_READ_CONFIG,
     'diff',
     '--name-only',
     '-z',
+    '--no-renames',
+    '--ignore-submodules=none',
     '--diff-filter=d',
     `${base}...${head}`,
   ])
@@ -141,11 +269,6 @@ export function parseNumstatZ(raw: string): StagedStats {
 export function getFileAtHead(projectRoot: string, relPath: string): string | null {
   if (!isGitRepo(projectRoot)) return null
   return safeGitRaw(projectRoot, ['show', `HEAD:${relPath}`])
-}
-
-export function getUnstagedDiff(projectRoot: string): string | null {
-  if (!isGitRepo(projectRoot)) return null
-  return safeGitRaw(projectRoot, ['diff', '--no-color', '-U0'])
 }
 
 function isGitRepo(projectRoot: string): boolean {

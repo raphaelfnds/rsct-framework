@@ -5,7 +5,6 @@ import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import { findActivePlan, findPlanFileBySlug } from '../lib/plan.js'
 import {
   defaultGitExecutor,
-  getStagedDiff,
   getFileAtHead,
   getStagedPaths,
   gitCommit,
@@ -38,6 +37,10 @@ import {
   scanDiffForSecrets,
   type SecretFinding,
 } from '../lib/secrets.js'
+import { scanGitDiff } from '../lib/staged-scan.js'
+
+const STAGED_PATHS_UNREADABLE =
+  'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
 import {
   recordConsumedApproval,
   type DevApproval,
@@ -128,6 +131,8 @@ export type RequestCommitRejectKind =
   | GateRejectKind
   | 'protected_branch'
   | 'secrets'
+  | 'secrets_unreadable'
+  | 'staged_paths_unreadable'
   | 'contract_surface'
   | 'plan_token_invalid'
   | 'message_too_long'
@@ -191,6 +196,7 @@ export interface RequestCommitInternal {
   gitStateOverride?: GitState
   stagedDiffOverride?: string
   stagedPathsOverride?: string[]
+  secretsScanTimeoutMs?: number
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
   shippedScriptsDir?: string | null
@@ -300,7 +306,33 @@ export async function requestCommitHandler(
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
 
   if (resolution.rsct_installed) {
-    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
+    const stagedForDrift = internal.stagedPathsOverride ?? getStagedPaths(projectRoot)
+    if (stagedForDrift === null) {
+      const reason = STAGED_PATHS_UNREADABLE
+      const audit = appendAudit(
+        projectRoot,
+        { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind: 'staged_paths_unreadable', reason, branch: gitState.branch },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel: null,
+        authorized_via: null,
+        reject_kind: 'staged_paths_unreadable',
+        reason,
+        fabrication_signals: [],
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: false, override_used: false },
+        secrets_check: { findings_count: 0, findings: [], override_used: false },
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
     const drift = evaluateSettingsDrift({
       currentHash: hashSettingsFile(projectRoot),
       baseline: readBaselineFromLog(readTextOrNull(resolveAuditPath(projectRoot, config?.audit)) ?? ''),
@@ -692,9 +724,46 @@ export async function requestCommitHandler(
     )
   }
 
-  const diff = internal.stagedDiffOverride ?? getStagedDiff(projectRoot) ?? ''
   const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
-  const findings = scanDiffForSecrets(diff, extras)
+  const scan =
+    internal.stagedDiffOverride !== undefined
+      ? { ok: true as const, findings: scanDiffForSecrets(internal.stagedDiffOverride, extras) }
+      : await scanGitDiff(projectRoot, 'staged', extras, internal.secretsScanTimeoutMs)
+  if (!scan.ok) {
+    const reason = `the secrets scan could not read what this commit carries (${scan.reason}), so it is refused rather than let through unscanned — split the commit, or the developer commits this by hand in their own terminal`
+    const audit = appendAudit(
+      projectRoot,
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind: 'secrets_unreadable',
+        reason,
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+      },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch: gitState.branch,
+      channel,
+      authorized_via: authorizedVia,
+      reject_kind: 'secrets_unreadable',
+      reason,
+      fabrication_signals: fabricationSignals,
+      sha_before: gitState.head_sha,
+      sha_after: null,
+      branch_check: { protected: branchProtected, override_used: branchProtected },
+      secrets_check: { findings_count: 0, findings: [], override_used: false },
+      plan_token: null,
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories([reason]),
+    }
+  }
+  const findings = scan.findings
 
   if (findings.length > 0 && !overrideSecrets) {
     const reason = `${findings.length} secret finding(s) in staged diff — ${
@@ -772,7 +841,41 @@ export async function requestCommitHandler(
     }
     const graph = readContracts(universeRoot)
     contractGateInactive = !graph.available
-    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot) ?? []
+    const stagedPaths = internal.stagedPathsOverride ?? getStagedPaths(projectRoot)
+    if (stagedPaths === null) {
+      const reason = STAGED_PATHS_UNREADABLE
+      const audit = appendAudit(
+        projectRoot,
+        {
+          event: 'request_commit.rejected',
+          tool: 'rsct_request_commit',
+          reject_kind: 'staged_paths_unreadable',
+          reason,
+          branch: gitState.branch,
+          channel,
+          authorized_via: authorizedVia,
+        },
+        config?.audit,
+      )
+      return {
+        status: 'rejected',
+        branch: gitState.branch,
+        channel,
+        authorized_via: authorizedVia,
+        reject_kind: 'staged_paths_unreadable',
+        reason,
+        fabrication_signals: fabricationSignals,
+        sha_before: gitState.head_sha,
+        sha_after: null,
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        plan_token: null,
+        ...auditFields(audit),
+        anti_replay_persisted: null,
+        anti_replay_error: null,
+        hints: withAdvisories([reason]),
+      }
+    }
     const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
     if (hits.length > 0) {
       const ids = hits.map((h) => h.id)
