@@ -16,9 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- A git read with a zero time budget stops at once. One commit-refusal test used a zero budget and
-  raced git under CPU load: it failed 7 times in 25 runs with every core busy, and once in CI. No
-  user setting reaches a zero budget; the commit scan's budget stays 120 s.
+- A git read with a zero time budget fails at once, without starting git. One commit-refusal test
+  used a zero budget and raced git under CPU load: it failed 7 times in 25 runs with every core
+  busy, and once in CI. No user setting reaches a zero budget; the commit scan's budget stays
+  120 s.
 
 ### Migration for existing projects
 
