@@ -29,10 +29,12 @@ function initRepo(branch = 'feat/x'): void {
   git('config', 'user.email', 't@example.invalid')
   git('config', 'user.name', 't')
   git('config', 'core.autocrlf', 'false')
+  git('config', 'commit.gpgsign', 'false')
+  git('config', 'core.hooksPath', '.git/hooks')
   writeFileSync(join(root, 'readme.txt'), 'hello\n')
   git('add', 'readme.txt')
   git('commit', '-q', '-m', 'init')
-  git('switch', '-q', '-c', branch)
+  git('switch', '-q', '-C', branch)
 }
 
 function approval(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -151,7 +153,7 @@ describe.skipIf(!GIT)('the commit is exactly what the developer approved', () =>
     expect(out.reject_kind).toBe('staged_changed')
   })
 
-  it('reports a hook that adds a file to the commit, and locks the next commit until a REVIEW', async () => {
+  it('reports a hook that adds a file with a secret, and how to undo the commit', async () => {
     initRepo()
     writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
     writeFileSync(join(root, 'late.env'), `API_KEY=${SECRET_VALUE}\n`)
@@ -163,16 +165,39 @@ describe.skipIf(!GIT)('the commit is exactly what the developer approved', () =>
     const first = await commit(approval())
     expect(first.out.status).toBe('committed_with_drift')
     expect(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['b.txt', 'late.env'])
-    expect(first.out.hints.some((h) => h.includes('late.env changed after the approval, with 1 secret finding(s)'))).toBe(true)
+    const hint = first.out.hints.find((h) => h.includes('late.env changed after the approval, with 1 secret finding(s)'))
+    expect(hint).toContain('git reset --soft HEAD~1')
     const audit = readdirSync(join(root, '.rsct')).includes('audit.log') ? readFileSync(join(root, '.rsct', 'audit.log'), 'utf8') : ''
     expect(audit).toContain('"event":"request_commit.tree_drift"')
+  })
 
+  it('does not lock later commits after a formatting hook rewrote a non-code file', async () => {
+    initRepo()
+    writeFileSync(join(root, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'test-app', org: 'test-org' } }))
+    const hook = join(root, '.git', 'hooks', 'pre-commit')
+    writeFileSync(hook, '#!/bin/sh\nprintf "# Title\\n" > README.md\ngit add README.md\n')
+    chmodSync(hook, 0o755)
+    writeFileSync(join(root, 'README.md'), '#   Title\n')
+    git('add', 'README.md')
+    const first = await commit(approval())
+    expect(first.out.status).toBe('committed_with_drift')
     rmSync(hook)
     writeFileSync(join(root, 'c.txt'), 'c\n')
     git('add', 'c.txt')
     const second = await commit(approval())
-    expect(second.out.reject_kind).toBe('review_drift')
-    expect(second.dialogs).toEqual([])
+    expect(second.out.status).toBe('committed')
+  })
+
+  it('refuses when the branch is switched while the dialog is open', async () => {
+    initRepo()
+    git('branch', '-f', 'main', 'HEAD')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval(), () => {
+      git('switch', '-q', 'main')
+    })
+    expect(out.reject_kind).toBe('staged_changed')
+    expect(git('log', '--oneline', 'main').trim().split('\n')).toHaveLength(1)
   })
 
   it('reports a hook that adds a file with no secret in it too', async () => {

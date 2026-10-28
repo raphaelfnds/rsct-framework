@@ -103,11 +103,10 @@ function changedEnvKey(before: Record<string, unknown> | null, after: Record<str
   const was = envEntries(before)
   const now = envEntries(after)
   for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
-    if (!(key in was) || !(key in now) || stable(was[key]) !== stable(now[key])) return key
+    if (!Object.hasOwn(was, key) || !Object.hasOwn(now, key) || stable(was[key]) !== stable(now[key])) return key
   }
   return null
 }
-
 
 function markersIn(text: string): string {
   return decodeUnicodeEscapes(text).replace(/\\\\/g, '/').replace(/\\/g, '/')

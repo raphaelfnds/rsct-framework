@@ -15,6 +15,7 @@ import {
   readGitState,
   readHeadBirth,
   readStagedTreeState,
+  baseTreeOf,
   sameStagedTreeState,
   type GitExecutor,
   type GitState,
@@ -43,8 +44,7 @@ import {
   scanDiffForSecrets,
   type SecretFinding,
 } from '../lib/secrets.js'
-import { scanGitDiff, scanTreeDiff } from '../lib/staged-scan.js'
-
+import { scanTreeDiff } from '../lib/staged-scan.js'
 import {
   DevApprovalSchema,
   recordConsumedApproval,
@@ -112,6 +112,9 @@ import { DIALOG_PATH_LIMIT, commitMessageView, dialogList, specLabel } from '../
 const STAGED_PATHS_UNREADABLE =
   'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
 
+const STAGED_STATE_UNREADABLE =
+  'git could not record what is staged for this commit, so it is refused rather than committed unchecked — retry, or the developer commits this by hand in their own terminal'
+
 const DIALOG_FINDINGS_SHOWN = 10
 
 interface CommitOverrides {
@@ -130,7 +133,7 @@ interface ContractFacts {
 function readContractFacts(
   projectRoot: string,
   config: RsctConfig | null | undefined,
-  stagedPathsOverride: string[] | undefined,
+  readCommitPaths: () => string[] | null,
 ): ContractFacts | null {
   const mode = confirmedTopologyMode(config ?? null)
   if (mode !== 'multi-repo') return { mode, ids: [], consumers: [], inactive: false }
@@ -142,7 +145,7 @@ function readContractFacts(
     universeRoot = null
   }
   const graph = readContracts(universeRoot)
-  const stagedPaths = stagedPathsOverride ?? getStagedPaths(projectRoot)
+  const stagedPaths = readCommitPaths()
   if (stagedPaths === null) return null
   const appName = config?.app?.name ?? null
   const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
@@ -174,7 +177,7 @@ function quoted(text: string): string {
   return `"${specLabel(text)}"`
 }
 
-export function commitExceptionLines(
+function commitExceptionLines(
   projectRoot: string,
   facts: {
     branchLabel: string
@@ -334,7 +337,7 @@ function runRetention(
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog — trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused — OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers and repository config cannot hide content); a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths and locks further commits until a REVIEW. On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog — trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused — OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers and repository config cannot hide content); a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, the secret findings in them and how to undo the commit; the code files among them are locked by review_drift as above. On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -419,30 +422,52 @@ export async function requestCommitHandler(
   })
   if (installAdvisory.hint) advisories.unshift(installAdvisory.hint)
 
-  const earlyReject = (reject_kind: RequestCommitRejectKind, reason: string): RequestCommitOutput => {
+  const rejectWith = (
+    reject_kind: RequestCommitRejectKind,
+    reason: string,
+    context: {
+      via: CommitAuthVia | null
+      channel: CommitChannel | null
+      signals: FabricationSignal[]
+      auditExtra?: Record<string, unknown>
+      shape?: Partial<Pick<RequestCommitOutput, 'branch_check' | 'secrets_check' | 'contract_check'>>
+    },
+  ): RequestCommitOutput => {
     const audit = appendAudit(
       projectRoot,
-      { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind, reason, branch: gitState.branch },
+      {
+        event: 'request_commit.rejected',
+        tool: 'rsct_request_commit',
+        reject_kind,
+        reason,
+        branch: gitState.branch,
+        ...(context.via !== null && { channel: context.channel, authorized_via: context.via }),
+        ...context.auditExtra,
+      },
       config?.audit,
     )
     return {
       status: 'rejected',
       branch: gitState.branch,
-      channel: null,
-      authorized_via: null,
+      channel: context.channel,
+      authorized_via: context.via,
       reject_kind,
       reason,
-      fabrication_signals: [],
+      fabrication_signals: context.signals,
       sha_before: gitState.head_sha,
       sha_after: null,
       branch_check: { protected: false, override_used: false },
       secrets_check: { findings_count: 0, findings: [], override_used: false },
+      ...context.shape,
       plan_token: null,
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
       hints: withAdvisories([reason]),
     }
+  }
+  const earlyReject = (reject_kind: RequestCommitRejectKind, reason: string): RequestCommitOutput => {
+    return rejectWith(reject_kind, reason, { via: null, channel: null, signals: [] })
   }
 
   if (resolution.rsct_installed) {
@@ -654,13 +679,20 @@ export async function requestCommitHandler(
   const deadBefore = await runDeadCodeCheck(sweepBefore.checked)
   if (!deadBefore.ok) return rejectDeadCode(deadBefore, 'before_authorization')
 
+  const approvedState = await readStagedTreeState(projectRoot)
+  const baseTree = approvedState?.tree ? baseTreeOf(projectRoot, approvedState.head) : null
+  if (approvedState === null || (approvedState.tree !== null && baseTree === null)) {
+    return earlyReject('staged_state_unreadable', STAGED_STATE_UNREADABLE)
+  }
   const { list: protectedList } = effectiveProtectedList(config)
   const branchProtected = isProtectedBranch(gitState.branch, protectedList)
   const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
   const scan =
     internal.stagedDiffOverride !== undefined
       ? { ok: true as const, findings: scanDiffForSecrets(internal.stagedDiffOverride, extras) }
-      : await scanGitDiff(projectRoot, 'staged', extras, internal.secretsScanTimeoutMs)
+      : approvedState.tree === null || baseTree === null
+        ? { ok: true as const, findings: [] }
+        : await scanTreeDiff(projectRoot, baseTree, approvedState.tree, extras, internal.secretsScanTimeoutMs)
   if (!scan.ok) {
     return earlyReject(
       'secrets_unreadable',
@@ -668,15 +700,14 @@ export async function requestCommitHandler(
     )
   }
   const findings = scan.findings
-  const contractFacts = readContractFacts(projectRoot, config, internal.stagedPathsOverride)
+  const contractFacts = readContractFacts(
+    projectRoot,
+    config,
+    () =>
+      internal.stagedPathsOverride ??
+      (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree)),
+  )
   if (contractFacts === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
-  const approvedState = readStagedTreeState(projectRoot)
-  if (approvedState === null) {
-    return earlyReject(
-      'staged_state_unreadable',
-      'git could not record what is staged for this commit, so it is refused rather than committed unchecked — retry, or the developer commits this by hand in their own terminal',
-    )
-  }
 
   const uncovered = (
     overrides: CommitOverrides,
@@ -690,30 +721,7 @@ export async function requestCommitHandler(
       reason: string,
       auditExtra: Record<string, unknown>,
       shape: Pick<RequestCommitOutput, 'branch_check' | 'secrets_check'> & Partial<Pick<RequestCommitOutput, 'contract_check'>>,
-    ): RequestCommitOutput => {
-      const audit = appendAudit(
-        projectRoot,
-        { event: 'request_commit.rejected', tool: 'rsct_request_commit', reject_kind, reason, branch: gitState.branch, channel: ch, authorized_via: via, ...auditExtra },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch: gitState.branch,
-        channel: ch,
-        authorized_via: via,
-        reject_kind,
-        reason,
-        fabrication_signals: signals,
-        sha_before: gitState.head_sha,
-        sha_after: null,
-        ...shape,
-        plan_token: null,
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
-    }
+    ): RequestCommitOutput => rejectWith(reject_kind, reason, { via, channel: ch, signals, auditExtra, shape })
     if (branchProtected && !overrides.branch) {
       return refuse(
         'protected_branch',
@@ -970,44 +978,24 @@ export async function requestCommitHandler(
   const deadAtCommit = await runDeadCodeCheck(sweepAtCommit.checked)
   if (!deadAtCommit.ok) return rejectDeadCode(deadAtCommit, 'before_commit')
 
-  const stateNow = readStagedTreeState(projectRoot)
+  const stateNow = await readStagedTreeState(projectRoot)
   if (stateNow === null || !sameStagedTreeState(approvedState, stateNow)) {
-    const reason =
+    return rejectWith(
+      stateNow === null ? 'staged_state_unreadable' : 'staged_changed',
       stateNow === null
-        ? 'git could not record what is staged right before the commit, so it is refused — retry, or the developer commits this by hand in their own terminal'
-        : 'what is staged (or HEAD) changed after the approval was asked for, so the developer did not see what would be committed — ask again'
-    const audit = appendAudit(
-      projectRoot,
+        ? STAGED_STATE_UNREADABLE
+        : 'what is staged, HEAD or the branch changed after the approval was asked for, so the developer did not see what would be committed — ask again',
       {
-        event: 'request_commit.rejected',
-        tool: 'rsct_request_commit',
-        reject_kind: 'staged_changed',
-        reason,
-        branch: gitState.branch,
+        via: authorizedVia,
         channel,
-        authorized_via: authorizedVia,
+        signals: fabricationSignals,
+        shape: {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+          contract_check: contractResult,
+        },
       },
-      config?.audit,
     )
-    return {
-      status: 'rejected',
-      branch: gitState.branch,
-      channel,
-      authorized_via: authorizedVia,
-      reject_kind: 'staged_changed',
-      reason,
-      fabrication_signals: fabricationSignals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: branchProtected, override_used: branchProtected },
-      secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
-      plan_token: null,
-      contract_check: contractResult,
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
   }
 
   let reservedToken: PlanAuthorizationBlock | null = null
@@ -1172,16 +1160,12 @@ export async function requestCommitHandler(
     bookkeepingHints.push(
       drift.unverified
         ? `⚠ git committed, but RSCT could not compare the commit with what the developer approved${drift.paths.length > 0 ? ` (${drift.paths.join(', ')})` : ''} — check it before any push.`
-        : `⚠ the commit is not exactly what the developer approved: ${drift.paths.join(', ')} changed after the approval${drift.secrets > 0 ? `, with ${drift.secrets} secret finding(s)` : ''} — most likely a git hook. Those paths need a REVIEW before the next commit.`,
+        : `⚠ the commit is not exactly what the developer approved: ${drift.paths.join(', ')} changed after the approval${drift.secrets > 0 ? `, with ${drift.secrets} secret finding(s)` : ''} — most likely a git hook. Check them before any push; \`git reset --soft HEAD~1\` undoes this commit and keeps everything staged.`,
     )
   }
 
   let sweepDrift: string[] = []
-  if (commit.sha_after && sweepAtCommit.skipped !== null) {
-    const drift = await treeDrift(new Set())
-    reportTreeDrift(drift)
-    sweepDrift = drift.paths
-  }
+  let cleanRewritePaths: ReadonlySet<string> = new Set()
   if (commit.sha_after && sweepAtCommit.skipped === null) {
     const committed = await verifyCommittedSweep({
       projectRoot,
@@ -1222,9 +1206,8 @@ export async function requestCommitHandler(
       if (open.length === 0) delete next.review_drift
       else next.review_drift = { ...state.review_drift, paths: open }
     }
-    const tree = await treeDrift(new Set(cleanRewrites.map((r) => r.path)))
-    reportTreeDrift(tree)
-    const drift = [...new Set([...committed.drift, ...deadRewritten, ...tree.paths])]
+    cleanRewritePaths = new Set(cleanRewrites.map((r) => r.path))
+    const drift = [...new Set([...committed.drift, ...deadRewritten])]
     if (drift.length > 0) {
       sweepDrift = drift
       next.review_drift = { sha: committed.full_sha ?? commit.sha_after, paths: drift, at }
@@ -1244,6 +1227,8 @@ export async function requestCommitHandler(
       }
     }
   }
+  const tree = await treeDrift(cleanRewritePaths)
+  reportTreeDrift(tree)
 
   if (approval) {
     const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
@@ -1338,7 +1323,7 @@ export async function requestCommitHandler(
   }
 
   return {
-    status: sweepDrift.length > 0 ? 'committed_with_drift' : 'committed',
+    status: sweepDrift.length > 0 || tree.paths.length > 0 ? 'committed_with_drift' : 'committed',
     branch: gitState.branch,
     channel,
     authorized_via: authorizedVia,

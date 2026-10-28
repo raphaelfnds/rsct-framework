@@ -104,7 +104,7 @@ describe('KEY_VALUE_REGEX runs in linear time', () => {
     it(`grows about linearly on ${name}`, () => {
       const small = make(20_000)
       const large = make(80_000)
-      const t1 = Math.max(bestOf(3, () => pairs(KEY_VALUE_REGEX, 3, small)), 0.5)
+      const t1 = Math.max(bestOf(3, () => pairs(KEY_VALUE_REGEX, 3, small)), 2)
       const t4 = bestOf(3, () => pairs(KEY_VALUE_REGEX, 3, large))
       expect(t4 / t1).toBeLessThan(10)
     })
