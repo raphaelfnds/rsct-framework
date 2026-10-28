@@ -2770,12 +2770,17 @@ mutant per rule. A project keeps the old guard until `/rsct-setup` refreshes `.r
   characters took about 0.9 s, 256 KiB about 42 s, synchronously.
 
 **Decision**:
-- Every diff the secrets scan reads runs `git -c core.fsmonitor=false -c diff.relative=false diff
+- Every diff the secrets scan reads runs `git -c core.fsmonitor= -c diff.relative=false diff
   --no-color -U0 --text --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
   --ignore-submodules=none`, on the staged changes (`--cached`), the working tree, or the two tree
   ids the commit records (ADR-040).
   - `diff.relative=false` is set through `-c` rather than `--no-relative`, which needs git 2.28 and
     exits 129 on an older git.
+  - `core.fsmonitor` is set empty. MEASURED on git 2.45 and 2.43: an fsmonitor command in the
+    repository config ran 4 times across `diff --cached` and `write-tree`, and 0 times with the
+    empty value or with `false`. Before git 2.36 the setting is a command path, so `false` would
+    run a program of that name; the empty value turns it off on every version (from git's
+    source, not measured on an old git).
   - The read is streamed line by line into the scanner, so its size has no cap; it is bounded by a
     120 s time budget.
 - File headers are recognised only outside a hunk: the hunk header's counts decide what is content.
@@ -2842,12 +2847,23 @@ dialog captured.
   different refuses (`staged_changed`). A state that cannot be read refuses
   (`staged_state_unreadable`); a `write-tree` that finds `index.lock` is retried for about a
   second first.
+- The branch is read from HEAD's symbolic ref. MEASURED: `rev-parse --abbrev-ref HEAD` fails on a
+  branch with no commit yet, so the branch was unknown there and the protected-branch check did
+  not apply. A first commit on a protected branch now needs the exception like any other commit
+  there. The recorded branch must be the one the protection check and the dialog used; a branch
+  switched in between refuses (`staged_changed`).
 - After `git commit`, a commit whose tree or parent differs from what was approved returns
   `committed_with_drift`. RSCT scans the difference, and the hints and the audit log
-  (`request_commit.tree_drift`) name the changed paths, their secret findings, and
-  `git reset --soft HEAD~1` to undo the commit. Code files a hook changed stay under the existing
-  `review_drift` lock. Other files are reported, not locked: a REVIEW stamps code files only, so a
-  lock on a README or a JSON file could never be cleared.
+  (`request_commit.tree_drift`) name the changed paths, how many secret findings they carry, and
+  the command that undoes the commit (`git reset --soft HEAD~1`, or `git update-ref -d HEAD` for a
+  first commit). Code files a hook changed stay under the existing `review_drift` lock. Other files
+  are reported, not locked: a REVIEW stamps code files only, so a lock on a README or a JSON file
+  could never be cleared. A commit RSCT cannot read back is `committed_with_drift` too.
+- MEASURED: a `pre-commit` hook that runs its own `git commit` makes RSCT's `git commit` fail
+  (`cannot lock ref 'HEAD'`), while the hook's commit stays on the branch. When the commit fails
+  and HEAD moved, the hints and the audit (`head_moved_to`) say so.
+- When a report under `.rsct/reports/` cannot be written, the dialog shows the whole list instead
+  of the first 10.
 
 **Direction**: stricter. The developer now sees in the dialog every exception the agent asks for,
 the commit is refused if the staged tree, HEAD or branch moves after the approval, and a commit
@@ -2861,12 +2877,17 @@ that a hook changed is reported.
 - `tests/unit/commit-dialog-exceptions.test.ts` covers, with real git:
   - the dialog lines, the overflow reports for secrets and contracts, and refusal before the
     dialog;
-  - staging, a HEAD move and a branch switch while the dialog is open;
-  - a hook that adds a file with and without a secret, and the undo hint;
+  - staging, a HEAD move and a branch switch while the dialog is open, a branch that differs
+    from the one checked, a detached HEAD;
+  - the first commit on a protected branch;
+  - a hook that adds a file with and without a secret, and the undo hint (also on a first
+    commit);
+  - a hook that makes its own commit, and a commit RSCT cannot read back;
+  - a report that cannot be written;
   - a formatting hook on a non-code file that does not lock later commits;
   - a hook that changes nothing.
-- `tests/unit/secrets-git-reads.test.ts` covers the tree scan, the empty tree and the
-  `index.lock` retry.
+- `tests/unit/secrets-git-reads.test.ts` covers the tree scan, the empty tree, the
+  `index.lock` retry and a repository fsmonitor command that must not run.
 
 ### ADR-041 — The agent cannot add, change or remove any env entry in Claude Code settings (2.23.0)
 **Status**: active. Extends ADR-028 (the settings write guard).
