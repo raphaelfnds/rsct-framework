@@ -2777,7 +2777,8 @@ mutant per rule. A project keeps the old guard until `/rsct-setup` refreshes `.r
   - `diff.relative=false` is set through `-c` rather than `--no-relative`, which needs git 2.28 and
     exits 129 on an older git.
   - `core.fsmonitor` is set empty, which turns it off on every git version (an empty value is
-    accepted both before and after git 2.36 changed what the setting means).
+    accepted both before and after git 2.36 changed what the setting means; measured on git 2.43
+    and 2.45, older versions from git's source).
   - The read is streamed line by line into the scanner, so its size has no cap; it is bounded by a
     120 s time budget.
 - File headers are recognised only outside a hunk: the hunk header's counts decide what is content.
@@ -2821,7 +2822,7 @@ dialog captured.
   into the `dev_approval` it sent.
 - A staged secret plus a pre-filled override produced one generic dialog and `committed`. Without
   the override, the dialog was shown and answered, and the commit was refused afterwards.
-- A pre-commit hook that runs `git add` put a file the developer never saw into the commit.
+- A file a git hook staged during the commit was not reported.
 
 **Decision**:
 - Before any dialog, `rsct_request_commit` computes the protected-branch check, the secrets scan
@@ -2853,9 +2854,8 @@ dialog captured.
   `committed_with_drift`. RSCT scans the difference, and the hints and the audit log
   (`request_commit.tree_drift`) name the changed paths, how many secret findings they carry, and
   the command that undoes the commit (`git reset --soft HEAD~1`, or `git update-ref -d HEAD` for a
-  first commit). Code files a hook changed stay under the existing `review_drift` lock. Other files
-  are reported, not locked: a REVIEW stamps code files only, so a lock on a README or a JSON file
-  could never be cleared. A commit RSCT cannot read back is `committed_with_drift` too, and so is
+  first commit). Code files a hook changed stay under the existing `review_drift` lock; every
+  changed path is reported. A commit RSCT cannot read back is `committed_with_drift` too, and so is
   a commit that lands with HEAD on another branch than the approved one (a hook that switched it;
   `request_commit.branch_drift`).
 - When `git commit` fails and HEAD moved or the branch changed meanwhile, the hints and the audit
@@ -2871,8 +2871,8 @@ the commit is refused if the staged tree, HEAD or branch moves after the approva
 that a hook changed is reported.
 
 **What is given up, by name**:
-- The developer's own git hooks still run on the commit; skipping them would weaken their checks.
-- What a hook changes is caught after the commit, not before.
+- Git hooks still run on the commit, and what they change is reported after it
+  (`committed_with_drift`).
 
 **Consequences**:
 - `tests/unit/commit-dialog-exceptions.test.ts` covers, with real git:
@@ -2908,7 +2908,6 @@ that a hook changed is reported.
 hand.
 
 **What is given up, by name**:
-- ADR-028's named limits apply.
 - The guard is a hook: it reaches a project only through `/rsct-setup`.
 
 **Consequences**: `tests/unit/settings-write-guard.test.ts` covers every env case. Two earlier

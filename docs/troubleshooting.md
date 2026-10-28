@@ -391,9 +391,8 @@ approval counts as used and a plan token's action is not refunded.
 
 - Look at what is there before any push: `git show <sha>`, or `git log --all --oneline -5` when
   the branch changed.
-- Switch back to your branch if it changed, and undo only a commit you find that you did not
-  want: `git reset --soft HEAD~1` keeps its changes staged (on a first commit,
-  `git update-ref -d HEAD`).
+- Undo an unwanted commit on the branch that has it (`git reset --soft HEAD~1` keeps its changes
+  staged; on a first commit, `git update-ref -d HEAD`), then switch back to your branch.
 - Then fix or remove the hook, and ask for the commit again with a fresh approval.
 
 ## The first commit of a new repository is refused with `protected_branch`
