@@ -1,30 +1,12 @@
-/**
- * Single source of truth for INV-6 secret detection.
- *
- * Patterns were originally drafted in an early Bash-hook prototype
- * (sectionE-secrets-leak.sh) that was superseded when the framework
- * adopted the MCP-first architecture; this file is the canonical
- * home now. Any change to the secret regex MUST land here so it
- * propagates to all consumers (rsct_get_environments masking today,
- * rsct_check_secrets in F2.5).
- */
-
 export const MASK_PLACEHOLDER = '***MASKED***'
 
-/**
- * Case-insensitive substring match against the key name. If the key
- * contains any of these tokens, the value is treated as a secret.
- */
 export const SECRET_KEY_PATTERN =
   /\b(jwt[._-]?secret|api[._-]?key|secret|token|password|bearer|credential)\b/i
 
-/**
- * Value shapes that strongly indicate a credential regardless of key name.
- */
 export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
-  /^sk-[a-zA-Z0-9]{20,}$/, // OpenAI / Anthropic-style
-  /^AKIA[0-9A-Z]{16}$/, // AWS access key
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/, // PEM private key block
+  /^sk-[a-zA-Z0-9]{20,}$/,
+  /^AKIA[0-9A-Z]{16}$/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
 ] as const
 
 export type MaskReason = 'key-name' | 'value-shape'
@@ -35,10 +17,6 @@ export interface MaskResult {
   reason?: MaskReason
 }
 
-/**
- * Mask a key/value pair if either the key name or the value shape
- * matches an INV-6 pattern. Empty values are never masked (placeholder).
- */
 export function maskIfSecret(key: string, value: string): MaskResult {
   if (value.length === 0) return { masked: false, value }
 
@@ -55,13 +33,6 @@ export function maskIfSecret(key: string, value: string): MaskResult {
   return { masked: false, value }
 }
 
-/**
- * Line-scan variants of the value-shape patterns. `SECRET_VALUE_PATTERNS`
- * is anchored (`^...$`) because M1's `maskIfSecret` receives an already-
- * extracted env value. When scanning a raw diff line, we need a pattern
- * that finds the credential anywhere in the line, with token boundaries
- * to avoid matches inside larger random strings.
- */
 const LINE_VALUE_PATTERNS: readonly RegExp[] = [
   /\bsk-[a-zA-Z0-9]{20,}\b/,
   /\bAKIA[0-9A-Z]{16}\b/,
@@ -88,14 +59,6 @@ export interface CompileExtraResult {
   invalid: Array<{ index: number; pattern: string; error: string }>
 }
 
-/**
- * Canonical compiler for the user-supplied regex strings in
- * `.rsct.json` `secrets_extra_patterns[]`. Returns the compiled patterns
- * alongside any entries whose `new RegExp(str)` threw — the caller may
- * surface those (rsct_check_secrets does) or ignore them
- * (rsct_request_commit does) but the compile loop itself is owned here
- * so the two call sites cannot drift.
- */
 export function compileExtraPatterns(
   patternStrings: ReadonlyArray<string>,
 ): CompileExtraResult {
@@ -170,26 +133,6 @@ function maskExcerpt(line: string, matched: string): string {
     : masked
 }
 
-/**
- * Scan a unified-diff string for secrets in added lines.
- *
- * Detection order per line:
- *   1. `value-shape` — line matches any pattern in {@link SECRET_VALUE_PATTERNS}
- *      (sk-, AKIA, PEM BEGIN, ...).
- *   2. `key-name`    — line contains a key/value pair where the key matches
- *      {@link SECRET_KEY_PATTERN} and the value is non-empty.
- *   3. `extra-pattern` — line matches any caller-provided regex; the finding
- *      carries `pattern_id` so the dev can trace back to which entry of
- *      `.rsct.json` `secrets_extra_patterns[]` fired.
- *
- * At most one finding per category per line (so a line with two
- * `secrets_extra_patterns` hits still yields a single extra-pattern
- * finding for the first match — keeps output noise low for v1).
- *
- * Excerpts are masked: the matched substring is replaced by
- * `***MASKED***` before being returned so audit consumers cannot
- * accidentally re-leak the value they just blocked.
- */
 export function scanDiffForSecrets(
   diff: string,
   extraPatterns: ReadonlyArray<ExtraPattern> = [],
