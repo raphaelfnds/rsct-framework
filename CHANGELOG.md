@@ -29,8 +29,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   The scan now reads the staged diff as a stream with `--text --no-ext-diff --no-textconv`, fixed
   `a/` `b/` prefixes and `diff.relative` off. A read that fails, times out or cannot tell whether the
-  folder is a repository refuses the commit (`secrets_unreadable`, `staged_paths_unreadable`)
-  instead of scanning nothing. The key/value pattern runs in linear time with the same matches.
+  folder is a repository refuses the commit (`secrets_unreadable`, `staged_paths_unreadable`,
+  `staged_state_unreadable`) instead of scanning nothing. The key/value pattern runs in linear time with the same matches.
   See ADR-039.
 - **The commit approval dialog shows every exception it is asked to approve.**
   - Branch protection, the secrets scan and the contract gate used to run after you answered, with
@@ -38,9 +38,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - The dialog lists the protected branch, each secret finding (`"file":line — rule`, never the
     value), the contract surfaces and their consumers, then the agent's reason for each exception.
   - A check that needs an exception the request does not carry is refused before any dialog opens.
-  - The staged tree, HEAD and branch are checked again right before `git commit` (`staged_changed`).
-  - A commit that a git hook changed after your approval returns `committed_with_drift`, reports
-    the changed paths and their secret findings, and locks further commits until a REVIEW.
+  - The staged tree, HEAD and branch are recorded before the dialog, the scan reads that recorded
+    tree, and all three are checked again right before `git commit` (`staged_changed`).
+  - A commit that a git hook changed after your approval returns `committed_with_drift` and names
+    the changed paths, their secret findings, and `git reset --soft HEAD~1` to undo it. Code files
+    the hook changed stay locked until a REVIEW, as before.
 
   See ADR-040.
 - **The agent cannot add, change or remove any `env` entry in a Claude Code settings file**, not
@@ -49,7 +51,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- `rsct_check_secrets` reads the same stream as the commit and reports a read it could not make in
+- `rsct_check_secrets` reads with the same flags as the commit and reports a read it could not make in
   `read_error`, never as "no findings".
 - `fast-uri` 3.1.9 (Dependabot #144), bundled into `rsct-mcp`.
 

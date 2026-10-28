@@ -2770,9 +2770,10 @@ mutant per rule. A project keeps the old guard until `/rsct-setup` refreshes `.r
   characters took about 0.9 s, 256 KiB about 42 s, synchronously.
 
 **Decision**:
-- Every content read a gate makes runs `git -c core.fsmonitor=false -c diff.relative=false diff
-  [--cached] --no-color -U0 --text --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
-  --ignore-submodules=none`.
+- Every diff the secrets scan reads runs `git -c core.fsmonitor=false -c diff.relative=false diff
+  --no-color -U0 --text --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
+  --ignore-submodules=none`, on the staged changes (`--cached`), the working tree, or the two tree
+  ids the commit records (ADR-040).
   - `diff.relative=false` is set through `-c` rather than `--no-relative`, which needs git 2.28 and
     exits 129 on an older git.
   - The read is streamed line by line into the scanner, so its size has no cap; it is bounded by a
@@ -2820,8 +2821,6 @@ dialog captured.
 - A staged secret plus a pre-filled override produced one generic dialog and `committed`. Without
   the override, the dialog was shown and answered, and the commit was refused afterwards.
 - A pre-commit hook that runs `git add` put a file the developer never saw into the commit.
-- Field audit logs (aggregate): many secrets and contract overrides whose recorded reason does not
-  mention the developer at all.
 
 **Decision**:
 - Before any dialog, `rsct_request_commit` computes the protected-branch check, the secrets scan
@@ -2835,39 +2834,48 @@ dialog captured.
   - an inactive contract gate.
   Then the agent's reason for each exception, quoted and flattened, then the commit message, last.
   A commit with nothing to approve beyond itself shows the same dialog as before.
-- The staged tree (`git write-tree`), HEAD and branch are recorded before the dialog (or token) and
-  compared again right before `git commit`, after the existing sweep and dead-code re-checks.
-  Anything different refuses (`staged_changed`).
+- The staged tree (`git write-tree`), HEAD and branch are recorded before the dialog (or token).
+  The secrets scan and the contract paths read that recorded tree against HEAD's tree (the empty
+  tree for a first commit), so what is scanned is what was recorded. The same three values are
+  read again right before `git commit`, after the existing sweep and dead-code re-checks; anything
+  different refuses (`staged_changed`). A state that cannot be read refuses
+  (`staged_state_unreadable`); a `write-tree` that finds `index.lock` is retried for about a
+  second first.
 - After `git commit`, a commit whose tree or parent differs from what was approved returns
-  `committed_with_drift`. RSCT scans the difference, reports the changed paths and their secret
-  findings, and arms the existing `review_drift` lock for every changed path except a code file the
-  existing post-commit sweep accepted as a clean rewrite. The next commit is refused until a REVIEW
-  covers those paths.
+  `committed_with_drift`. RSCT scans the difference, and the hints and the audit log
+  (`request_commit.tree_drift`) name the changed paths, their secret findings, and
+  `git reset --soft HEAD~1` to undo the commit. Code files a hook changed stay under the existing
+  `review_drift` lock. Other files are reported, not locked: a REVIEW stamps code files only, so a
+  lock on a README or a JSON file could never be cleared.
 
 **Direction**: stricter. The developer now sees in the dialog every exception the agent asks for,
-and a commit cannot carry what the dialog did not show without the lock arming.
+the commit is refused if the staged tree, HEAD or branch moves after the approval, and a commit
+that a hook changed is reported.
 
 **What is given up, by name**:
 - The developer's own git hooks still run on the commit; skipping them would weaken their checks.
 - What a hook changes is caught after the commit, not before.
-- A hook that commits on its own, or a `post-commit` hook, is outside this check.
 
 **Consequences**:
 - `tests/unit/commit-dialog-exceptions.test.ts` covers, with real git:
   - the dialog lines, the overflow report and refusal before the dialog;
-  - staging and a HEAD move while the dialog is open;
-  - a hook that adds a file with and without a secret, and the lock on the next commit;
+  - staging, a HEAD move and a branch switch while the dialog is open;
+  - a hook that adds a file with and without a secret, and the undo hint;
+  - a formatting hook on a non-code file that does not lock later commits;
   - a hook that changes nothing.
+- `tests/unit/secrets-git-reads.test.ts` covers the tree scan, the empty tree and the
+  `index.lock` retry.
 
 ### ADR-041 — The agent cannot add, change or remove any env entry in Claude Code settings (2.23.0)
 **Status**: active. Extends ADR-028 (the settings write guard).
-**Tags**: gates, hooks, settings, mcp
+**Tags**: gates, hooks, settings
 
 **Context**: READ on `main` @ `148f108`.
 - The settings write guard refused only a fixed list of `env` keys (`NODE_OPTIONS`, `PATH`,
   `BASH_ENV`, `LD_*`, …).
 - Keys that redirect Claude Code's traffic or trust (`ANTHROPIC_BASE_URL`, proxy and certificate
   variables, `NODE_TLS_REJECT_UNAUTHORIZED`) and `GIT_*` keys the MCP server inherits passed.
+
 **Decision**:
 - In `.claude/settings*.json`, every agent add, change or removal of an `env` entry is refused.
 - The same applies when the write leaves the file unreadable with an `env` block in it.
@@ -2878,14 +2886,7 @@ hand.
 
 **What is given up, by name**:
 - The guard judges the agent's Write/Edit/MultiEdit calls only. A write from a shell script is not
-  refused here; for settings it is detected at commit time (ADR-028).
-- Settings keys that run a command (`apiKeyHelper`, `statusLine`) and hooks that are not RSCT's are
-  not judged.
-- **The rsct server registration** (in `.mcp.json` and `~/.claude.json`), and the settings keys that
-  enable or disable project servers, are not guarded. A check for them was written and removed: it
-  has to name those keys inside `mcp-server/src`, which the #73 boundary forbids (pinned by
-  `tests/bash/script-install.test.ts`, see ADR-028). Where such a check may live is the
-  developer's decision.
+  refused here (ADR-028).
 - The guard is a hook: it reaches a project only through `/rsct-setup`.
 
 **Consequences**: `tests/unit/settings-write-guard.test.ts` covers every env case. Two earlier
