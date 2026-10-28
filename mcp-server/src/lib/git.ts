@@ -73,6 +73,11 @@ export function streamGitLines(
   timeoutMs: number = GIT_SCAN_TIMEOUT_MS,
 ): Promise<GitStreamResult> {
   return new Promise((resolvePromise) => {
+    const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
+    if (timeoutMs <= 0) {
+      resolvePromise({ ok: false, reason: `git did not finish reading within ${limit}` })
+      return
+    }
     let settled = false
     const parts: string[] = []
     let stderr = ''
@@ -112,9 +117,7 @@ export function streamGitLines(
       killTree(child)
       timer = setTimeout(() => finish({ ok: false, reason }), 5_000)
     }
-    const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
-    const expire = (): void => stopWith(`git did not finish reading within ${limit}`)
-    timer = setTimeout(expire, timeoutMs)
+    timer = setTimeout(() => stopWith(`git did not finish reading within ${limit}`), timeoutMs)
     child.stdout?.on('data', (chunk: Buffer) => {
       if (settled || stopReason !== null) return
       try {
@@ -146,7 +149,6 @@ export function streamGitLines(
         finish({ ok: false, reason: `the read stopped: ${error instanceof Error ? error.message : String(error)}` })
       }
     })
-    if (timeoutMs <= 0) expire()
   })
 }
 
