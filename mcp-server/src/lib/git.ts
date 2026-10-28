@@ -15,7 +15,7 @@ export function readGitState(projectRoot: string): GitState {
     return { available: false, branch: null, head_sha: null, is_clean: null }
   }
 
-  const symbolic = gitReadC(projectRoot, ['symbolic-ref', '-q', 'HEAD']).stdout.trim()
+  const symbolic = readHeadRef(projectRoot) ?? ''
   const branch = symbolic.startsWith(BRANCH_REF_PREFIX)
     ? symbolic.slice(BRANCH_REF_PREFIX.length)
     : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
@@ -220,8 +220,7 @@ export async function readStagedTreeState(projectRoot: string): Promise<StagedTr
   const tree = written.stdout.trim()
   if (!written.ok || !OBJECT_ID.test(tree)) return null
   const head = gitReadC(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).stdout.trim()
-  const ref = gitReadC(projectRoot, ['symbolic-ref', '-q', 'HEAD']).stdout.trim()
-  return { tree, head: OBJECT_ID.test(head) ? head : null, ref: ref.length > 0 ? ref : null }
+  return { tree, head: OBJECT_ID.test(head) ? head : null, ref: readHeadRef(projectRoot) }
 }
 
 export function sameStagedTreeState(a: StagedTreeState, b: StagedTreeState): boolean {

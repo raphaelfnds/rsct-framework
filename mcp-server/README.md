@@ -882,8 +882,9 @@ Since 2.23.0 (ADR-039, ADR-040):
   commit on a protected branch needs `override_protected_branch`. A recorded branch that is not
   the one checked refuses (`staged_changed`).
 - When `git commit` fails but HEAD moved meanwhile (a hook's own commit, or this commit with an
-  error after it), the hints and the audit entry (`head_moved_to`) say so; the approval counts as
-  used and a plan token's action is not refunded.
+  error after it), the hints and the audit entry (`head_moved_to`) say so; when a hook switched
+  the branch instead, they say that (`head_ref_now`). Either way the approval counts as used and a
+  plan token's action is not refunded.
 - A commit that lands with HEAD on another branch than the approved one (a hook that switched it)
   returns `committed_with_drift` and audits `request_commit.branch_drift`.
 - A list that cannot be written to its report is shown whole in the dialog (a dialog over its size

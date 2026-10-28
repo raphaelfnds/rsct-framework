@@ -2863,8 +2863,9 @@ dialog captured.
   `request_commit.branch_drift`).
 - MEASURED: a `pre-commit` hook that runs its own `git commit` makes RSCT's `git commit` fail
   (`cannot lock ref 'HEAD'`), while the hook's commit stays on the branch. When the commit fails
-  and HEAD moved, the hints and the audit (`head_moved_to`) say so, the approval is recorded as
-  used and a plan token's action is not refunded.
+  and HEAD moved, the hints and the audit (`head_moved_to`) say so — or, when a hook switched the
+  branch and git refused the commit, that the branch changed (`head_ref_now`). The approval is
+  recorded as used and a plan token's action is not refunded.
 - When a report under `.rsct/reports/` cannot be written, the dialog shows the whole list instead
   of the first 10; a dialog over its size limit is refused, as every dialog is.
 - `rsct_plan_authorize`, `rsct_request_merge` and `rsct_request_rebase` keep refusing a branch

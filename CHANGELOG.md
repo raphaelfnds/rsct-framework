@@ -51,8 +51,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     files the hook changed stay locked until a REVIEW, as before. A commit RSCT cannot read back
     is `committed_with_drift` too.
   - When `git commit` fails but HEAD moved meanwhile (a hook's own commit, or this commit with an
-    error after it), the result says so, the approval counts as used and a plan token's action is
-    not refunded. A commit that lands on another branch than the approved one (a hook that
+    error after it, or a hook that switched the branch), the result says which, the approval counts
+    as used and a plan token's action is not refunded. A commit that lands on another branch than the approved one (a hook that
     switched it) returns `committed_with_drift`.
 
   See ADR-040.
