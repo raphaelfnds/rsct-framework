@@ -12,6 +12,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.23.1] - 2026-10-28
+
+### Security
+
+- `qs` 6.17.0 (Dependabot #147), for GHSA-6pq8-jhm2-2vcw: `qs.stringify` with
+  `arrayFormat: 'comma'` could throw on crafted array elements. `qs` comes in through the MCP SDK's
+  HTTP server, which `rsct-mcp` does not use. The `qs` code is not in the bundled `rsct-mcp`, so
+  this changes the development toolchain only.
+
+### Migration for existing projects
+
+- Nothing to do. The bundled `rsct-mcp` is 2.23.0 apart from its version number. Running the
+  installer again only updates that number.
+
 ## [2.23.0] - 2026-10-28
 
 ### Security
