@@ -12,6 +12,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.23.2] - 2026-11-08
+
+### Security
+
+- `@hono/node-server` 2.1.6 (Dependabot #150), for GHSA-rmxm-3fg6-px4f: `serveStatic` decoded a
+  request path twice. `@hono/node-server` comes in through the MCP SDK's HTTP server, which
+  `rsct-mcp` does not use (it runs over stdio). The `@hono/node-server` code is not in the bundled
+  `rsct-mcp`, so only the development toolchain changes.
+
+### Fixed
+
+- A git read with a zero time budget fails at once, without starting git. One commit-refusal test
+  used a zero budget and raced git under CPU load: it failed 7 times in 25 runs with every core
+  busy, and once in CI. No user setting reaches a zero budget; the commit scan's budget stays
+  120 s.
+
+### Migration for existing projects
+
+- Nothing to do. Running the installer again picks up the new version.
+
 ## [2.23.1] - 2026-10-28
 
 ### Security

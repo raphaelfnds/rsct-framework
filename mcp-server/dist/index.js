@@ -23018,6 +23018,11 @@ var UNSTAGED_DIFF_ARGS = [...GATE_READ_CONFIG, "diff", ...CONTENT_DIFF_FLAGS];
 var GIT_SCAN_TIMEOUT_MS = 12e4;
 function streamGitLines(cwd2, args2, onLine, timeoutMs = GIT_SCAN_TIMEOUT_MS) {
   return new Promise((resolvePromise) => {
+    const limit = timeoutMs < 1e3 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1e3)} s`;
+    if (timeoutMs <= 0) {
+      resolvePromise({ ok: false, reason: `git did not finish reading within ${limit}` });
+      return;
+    }
     let settled = false;
     const parts2 = [];
     let stderr = "";
@@ -23057,7 +23062,6 @@ function streamGitLines(cwd2, args2, onLine, timeoutMs = GIT_SCAN_TIMEOUT_MS) {
       killTree(child);
       timer = setTimeout(() => finish({ ok: false, reason }), 5e3);
     };
-    const limit = timeoutMs < 1e3 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1e3)} s`;
     timer = setTimeout(() => stopWith(`git did not finish reading within ${limit}`), timeoutMs);
     child.stdout?.on("data", (chunk) => {
       if (settled || stopReason !== null) return;
@@ -24308,7 +24312,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.23.1";
+var RSCT_MCP_VERSION = "2.23.2";
 
 // src/lib/universe.ts
 init_esm_shims();
