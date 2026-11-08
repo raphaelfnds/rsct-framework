@@ -17,9 +17,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 
 - `@hono/node-server` 2.1.6 (Dependabot #150), for GHSA-rmxm-3fg6-px4f: `serveStatic` decoded a
-  request path twice. It comes in through the MCP SDK's HTTP server, which `rsct-mcp` does not use
-  (it runs over stdio). Its code is not in the bundled `rsct-mcp`, so only the development
-  toolchain changes.
+  request path twice. `@hono/node-server` comes in through the MCP SDK's HTTP server, which
+  `rsct-mcp` does not use (it runs over stdio). The `@hono/node-server` code is not in the bundled
+  `rsct-mcp`, so only the development toolchain changes.
 
 ### Fixed
 
