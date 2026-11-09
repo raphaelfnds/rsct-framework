@@ -72,10 +72,20 @@ function gitState(branch: string | null): GitState {
   }
 }
 
+const PINNED = 'c'.repeat(40)
+
+function standardRead(args: string[]): GitExecResult | null {
+  if (args[0] === 'rev-parse' && args[1] === '--verify' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${PINNED}\n`, stderr: '', exitCode: 0 }
+  if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+  return null
+}
+
 function gitExec(spec: Record<string, GitExecResult> = {}, fallback?: GitExecResult): GitExecutor {
   return (_root, args) => {
     const key = args.join(' ')
     if (key in spec) return spec[key]!
+    const standard = standardRead(args)
+    if (standard) return standard
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   }
@@ -220,7 +230,7 @@ describe('rsct_request_merge — happy path', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
-          return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+          return standardRead(args) ?? { ok: true, stdout: '', stderr: '', exitCode: 0 }
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -382,7 +392,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
-          return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+          return standardRead(args) ?? { ok: true, stdout: '', stderr: '', exitCode: 0 }
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,

@@ -44,6 +44,10 @@ export function findingLabel(finding: SecretFinding): string {
   return `"${finding.file}":${finding.line_number ?? '?'} — ${findingRule(finding)}${commit}`
 }
 
+export function findingIdentity(finding: SecretFinding): string {
+  return JSON.stringify([finding.file, findingRule(finding), finding.excerpt])
+}
+
 export function protectedBranchLine(branchLabel: string, doing: string): string {
   return `⚠ '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: ${doing} needs your exception.`
 }
@@ -58,6 +62,37 @@ export function secretFindingLines(projectRoot: string, tool: string, findings: 
   lines.push(dialogList(findings.map(findingLabel), shownLimit(report)))
   if (report !== null) lines.push(`Full list: ${report}`)
   return lines
+}
+
+export interface FindingAction {
+  finding_id: string
+  action: string
+  note?: string | undefined
+}
+
+export function findingActionLines(
+  projectRoot: string,
+  tool: string,
+  actions: readonly FindingAction[],
+  titleOf: (id: string) => string | undefined,
+): { facts: string[]; agent: string[] } {
+  if (actions.length === 0) return { facts: [], agent: [] }
+  const full = (a: FindingAction, i: number): string => {
+    const title = titleOf(a.finding_id)
+    return `#${i + 1} ${a.finding_id} [${a.action}]${title ? ` ${title}` : ''}${a.note ? ` — note: ${a.note}` : ''}`
+  }
+  const report =
+    actions.length > DIALOG_LIST_SHOWN
+      ? writeListReport(projectRoot, tool, 'findings', `Findings and the agent's actions for one ${tool} approval`, actions.map(full))
+      : null
+  const shown = report === null ? actions : actions.slice(0, DIALOG_LIST_SHOWN)
+  const facts = [`Findings and the action the agent proposes for each (${actions.length}):`, ...shown.map((a, i) => `#${i + 1} [${a.action}]`)]
+  if (shown.length < actions.length) facts.push(`… and ${actions.length - shown.length} more — full list: ${report}`)
+  const agent = shown.map((a, i) => {
+    const title = titleOf(a.finding_id)
+    return `#${i + 1} ${specLabel(a.finding_id, 60)}${title ? ` — ${specLabel(title, 80)}` : ''}${a.note ? ` — note: ${specLabel(a.note, 80)}` : ''}`
+  })
+  return { facts, agent: ['What the agent wrote for each finding:', ...agent] }
 }
 
 export function agentReasonLine(what: string, override: OverrideReason | undefined): string[] {
