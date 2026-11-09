@@ -78,7 +78,7 @@ export const phaseCodeStartInputSchema = z
       .unknown()
       .optional()
       .describe(
-        'Required only when one of the override_* flags, or run_alone, is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool.',
+        'Required only when one of the override_* flags, or run_alone, is true; action_scope starts with code_start:. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool.',
       ),
   })
   .strict()

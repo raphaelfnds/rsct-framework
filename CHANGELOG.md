@@ -18,9 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Push, merge and rebase dialogs show every exception they are asked to approve**, as the commit
   dialog has since 2.23.0 (ADR-042).
-  - Branch protection, `--allow-unrelated-histories` and the secrets scan used to run after you
-    answered, with the overrides filled in by the agent. They now run before the dialog, and a
-    request that lacks the override a check needs is refused before any dialog opens.
+  - Branch protection and `--allow-unrelated-histories` used to be checked after you answered, with
+    the override filled in by the agent, and push, merge and rebase did not scan for secrets. All
+    checks now run before the dialog, and a request that lacks the override a check needs is refused
+    before any dialog opens.
   - The dialog lists the protected branch, unrelated histories, each secret finding
     (`"file":line — rule (commit …)`, never the value) and the `pre_merge_ack` answers. The agent's
     reasons and the ack note come after the framework footer.
@@ -30,27 +31,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     cannot change. For a merge commit, only what the merge itself adds counts. A secret added and
     then removed is still found.
   - Commits on the remote's tracking refs are skipped when every push URL names the fetch URL's
-    repository. Otherwise only the old tip the remote reports is skipped, or the whole history is
-    read.
+    repository; otherwise the whole history is read. What the push sends must be a commit.
   - A finding needs `override_secrets_check`. A scan that cannot finish refuses
     (`secrets_unreadable`).
 - **Push shows where it goes and sends only what it shows.**
   - Every push URL (`git remote get-url --push --all`) is listed with credentials masked; a
     `pushurl` used to send a push elsewhere while the dialog said `origin`.
-  - `FORCE` and `DELETE` are shown in words.
+  - The destination is shown as the full ref, and `FORCE` and `DELETE` in words.
+  - The push URLs are read again after the dialog; a change refuses (`push_url_changed`).
   - Push options are listed and sent explicitly. Tags `push.followTags` would add are no longer sent,
     and submodules are checked, never pushed, when the configuration would push or check them.
 - **Merge and rebase scan what they bring before the dialog, and what they wrote after it.**
-  - The source branch or `ref` is pinned to its commit; one that moves after the dialog refuses
-    (`source_moved`).
-  - A finding after the operation that the dialog did not show (a merge driver, a hook) arms
-    `review_drift`.
+  - The source branch or `ref` is pinned to its commit, and git runs on that commit; one that moves
+    after the dialog refuses (`source_moved`), and so does a HEAD that moved to another branch or
+    commit (`target_moved`).
+  - A finding in what the operation wrote that the dialog did not show arms `review_drift`.
 - **An armed `review_drift` lock now refuses push, merge and rebase**, as it refused commits. The
   REVIEW that releases a lock armed by secret findings lists them and forces the dialog.
 - **`git replace` can no longer change what a gate reads.** A replaced blob hid a staged secret from
   the commit scan, and a content merge through a replaced blob wrote the replacement's content.
-  Every git command RSCT runs now sets `GIT_NO_REPLACE_OBJECTS=1` and turns the file-system monitor
-  off.
+  Every git command the RSCT server and its hooks run now sets `GIT_NO_REPLACE_OBJECTS=1` and turns
+  the file-system monitor off.
+- **Two diff settings can no longer hide a staged secret from the commit scan.** With
+  `diff.interHunkContext` and `diff.suppressBlankEmpty` set, git joined nearby hunks and printed a
+  blank unchanged line as an empty line; the scan stopped there and skipped the lines after it, in
+  `rsct_request_commit` and `rsct_check_secrets`. The gate reads now turn both settings off, and the
+  scanner reads an empty line inside a hunk as an unchanged one.
 - **A commit that lands while `git commit` reports a failure** (for example a hook's own commit) is
   checked as one that succeeded: it is scanned for secrets, and unreviewed code or findings no dialog
   showed arm `review_drift`.
@@ -76,8 +82,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `branch: "refs/tags/<name>"`;
   - refuses, through git, a push whose configuration pushes or checks submodules when a submodule
     commit is not on a remote-tracking branch of its submodule;
-  - reads the whole history on a branch's first push when the push URL names another repository
-    than the fetch URL (a fork);
+  - reads the whole history when a push URL names another repository than the fetch URL (a fork),
+    or when another remote is named `<remote>/…`;
   - needs git 2.7 or newer.
 - A dialog that cannot show its text asks the agent to shorten what it wrote; the framework lines
   stay.
@@ -87,8 +93,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration for existing projects
 
 - Run the installer again: the gates live in `rsct-mcp`.
-- `/rsct-setup` refreshes the terminal guard copy in each project; it changed only in how it reads
-  a git alias, and nothing breaks without it.
+- `/rsct-setup` refreshes the three hook copies in each project: their git reads now go through the
+  same launcher (replace refs and the file-system monitor off). Nothing breaks without it.
 
 ## [2.23.2] - 2026-11-08
 

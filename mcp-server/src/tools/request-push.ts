@@ -65,9 +65,9 @@ import {
   stripRefsPrefix,
 } from '../lib/push-refspec.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
-import { DIALOG_PATH_LIMIT, dialogList, specLabel } from '../lib/dialog-text.js'
+import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
-import { ackDialogLines, readDriftLock } from '../lib/integration-gate.js'
+import { ackDialogLines, driftRefusal, readDriftLock, resolvePinned } from '../lib/integration-gate.js'
 import { maskUrl, readFetchUrl, readPushOptions, readPushUrls, readSubmoduleMode, sameRepository } from '../lib/push-target.js'
 import { scanCommits } from '../lib/staged-scan.js'
 import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
@@ -130,6 +130,7 @@ export type RequestPushRejectKind =
   | 'push_options_unreadable'
   | 'secrets'
   | 'secrets_unreadable'
+  | 'push_url_changed'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -198,43 +199,23 @@ function carriedByProbe(read: ProbeRead): { range: RangePathsResult; parsed: boo
   return { range: { status: 'ok', paths: [...paths] }, parsed: true }
 }
 
-function scanRange(args: {
-  projectRoot: string
-  remote: string
-  tip: string
-  fetchUrl: string | null
-  pushUrls: readonly string[]
-  destinationRef: string | null
-  probe: () => PushProbeResult
-}): CommitRange {
-  if (args.fetchUrl !== null && sameRepository(args.fetchUrl, args.pushUrls)) {
-    return { tips: [args.tip], exclude: [], excludeRemote: args.remote }
-  }
-  const probed = args.destinationRef !== null ? args.probe() : { status: 'unavailable' as const }
-  if (probed.status === 'parsed') {
-    const mine = probed.refs.filter((r) => r.to === args.destinationRef)
-    const olds = new Set(mine.map((r) => r.old))
-    const answered = new Set(mine.map((r) => r.url)).size
-    const only = olds.size === 1 ? [...olds][0] : null
-    const known = only !== null && only !== undefined ? resolveCommit(args.projectRoot, only) : null
-    if (answered === args.pushUrls.length && known !== null) return { tips: [args.tip], exclude: [known] }
-  }
-  return { tips: [args.tip], exclude: [] }
+function scanRange(args: { remote: string; tip: string; fetchUrl: string | null; pushUrls: readonly string[]; remotes: readonly string[] | null }): CommitRange {
+  const shadowed = args.remotes === null || args.remotes.some((r) => r !== args.remote && r.startsWith(`${args.remote}/`))
+  return !shadowed && args.fetchUrl !== null && sameRepository(args.fetchUrl, args.pushUrls)
+    ? { tips: [args.tip], exclude: [], excludeRemote: args.remote }
+    : { tips: [args.tip], exclude: [] }
 }
 
-const PUSH_URLS_SHOWN = 5
-const PUSH_OPTIONS_SHOWN = 10
-
-function shownList(label: string, items: readonly string[], shown: number, width: number): string[] {
+function shownList(label: string, items: readonly string[]): string[] {
   if (items.length === 0) return []
-  if (items.length === 1) return [`${label}: ${specLabel(items[0]!, width)}`]
-  return [`${label} (${items.length}):`, dialogList(items, shown, width)]
+  if (items.length === 1) return [`${label}: ${specLabel(items[0]!, DIALOG_UNCUT)}`]
+  return [`${label} (${items.length}):`, dialogList(items, items.length, DIALOG_UNCUT)]
 }
 
 export const requestPushTool: Tool = {
   name: 'rsct_request_push',
   description:
-    "§C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL, otherwise only the destination's old tip the remote reports, or none), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. On rejection the approval is NOT consumed.",
+    "§C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/…', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. On rejection the approval is NOT consumed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -328,11 +309,13 @@ export async function requestPushHandler(
   }
 
   const remoteList = gitExecutor(projectRoot, ['remote'])
+  let remoteNames: string[] | null = null
   if (remoteList.ok) {
     const names = remoteList.stdout
       .split('\n')
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
+    remoteNames = names
     if (!names.includes(remote)) {
       const reason =
         `remote ${JSON.stringify(remote)} is not a configured remote of this repository` +
@@ -498,11 +481,7 @@ export async function requestPushHandler(
     return reject('review_unreadable', `${drift.error} Nothing was pushed and no dialog was shown.`, { protected: branchProtected })
   }
   if (drift.status === 'armed') {
-    return reject(
-      'review_drift',
-      `a commit landed content no dialog showed the developer (${drift.paths.join(', ')}); every push is refused until rsct_phase_review_start / _complete covers those paths. No dialog was shown.`,
-      { protected: branchProtected, audit: { drift_paths: drift.paths } },
-    )
+    return reject('review_drift', driftRefusal(drift.paths, 'every push'), { protected: branchProtected, audit: { drift_paths: drift.paths } })
   }
 
   const urls = readPushUrls(projectRoot, remote, gitExecutor)
@@ -520,8 +499,16 @@ export async function requestPushHandler(
   const submodules = readSubmoduleMode(projectRoot, gitExecutor)
 
   if (!deleting) {
-    const tip = sourceSha ?? (refspec.ok ? refspec.source : branch)
-    const range = scanRange({ projectRoot, remote, tip, fetchUrl: readFetchUrl(projectRoot, remote, gitExecutor), pushUrls, destinationRef, probe })
+    const sent = sourceSha ?? (refspec.ok ? refspec.source : branch)
+    const tip = resolvePinned(projectRoot, sent, gitExecutor)
+    if (tip === null) {
+      return reject(
+        'secrets_unreadable',
+        `what this push sends ('${specLabel(sent, DIALOG_PATH_LIMIT)}') is not a commit — a tag on a tree or a blob, a tree or a blob — so it cannot be scanned for secrets; the developer pushes it by hand in their own terminal. No dialog was shown.`,
+        { protected: branchProtected },
+      )
+    }
+    const range = scanRange({ remote, tip, fetchUrl: readFetchUrl(projectRoot, remote, gitExecutor), pushUrls, remotes: remoteNames })
     const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
     const scan = await (internal.commitScanner ?? scanCommits)(projectRoot, range, extras, internal.secretsScanTimeoutMs, gitExecutor)
     if (!scan.ok) {
@@ -543,20 +530,21 @@ export async function requestPushHandler(
   }
 
   const ack = branchProtected ? ackDialogLines(input.pre_merge_ack) : { facts: [], note: [] }
+  const shownDestination = destinationRef ?? destinationLabel ?? branchLabel
   const facts = [
     `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to remote '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
-    ...(refspec.ok && refspec.destination !== refspec.source
-      ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`]
+    ...(refspec.ok && (refspec.destination !== refspec.source || (destinationRef !== null && !destinationRef.startsWith('refs/heads/')))
+      ? [`Destination: '${specLabel(destinationRef ?? refspec.destination, DIALOG_PATH_LIMIT)}'`]
       : []),
     ...(sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : []),
-    ...shownList('Push URL', pushUrls.map(maskUrl), PUSH_URLS_SHOWN, 200),
-    ...(refspec.ok && refspec.forced ? ['⚠ FORCE: replaces the remote branch even where its history differs; commits there can be lost.'] : []),
-    ...(deleting ? [`⚠ DELETE: removes branch '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' from the remote.`] : []),
+    ...shownList('Push URL', pushUrls.map(maskUrl)),
+    ...(refspec.ok && refspec.forced ? [`⚠ FORCE: replaces '${specLabel(shownDestination, DIALOG_PATH_LIMIT)}' on the remote even where its history differs; commits there can be lost.`] : []),
+    ...(deleting ? [`⚠ DELETE: removes '${specLabel(shownDestination, DIALOG_PATH_LIMIT)}' from the remote.`] : []),
     ...(branchProtected ? [protectedBranchLine(destinationLabel ?? branchLabel, 'pushing here')] : []),
     ...(commitsScanned !== null && findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
     ...secretFindingLines(projectRoot, 'push', findings),
     ...ack.facts,
-    ...shownList('Push option sent', options.value, PUSH_OPTIONS_SHOWN, 100),
+    ...shownList('Push option sent', options.value),
     ...(submodules === 'check' ? ['Submodules: checked, never pushed.'] : []),
     ...(branchProtected && crossCheck === 'degraded'
       ? [
@@ -648,6 +636,15 @@ export async function requestPushHandler(
         channel: gate.channel,
       },
       config?.audit,
+    )
+  }
+
+  const urlsNow = readPushUrls(projectRoot, remote, gitExecutor)
+  if (!urlsNow.ok || urlsNow.value.join('\n') !== pushUrls.join('\n')) {
+    return reject(
+      'push_url_changed',
+      `where '${specLabel(remote, DIALOG_PATH_LIMIT)}' pushes changed after the dialog, so the push would not go where the developer approved — ask again. The approval was not used.`,
+      { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel, ...(urlsNow.ok && { push_urls_now: urlsNow.value.map(maskUrl) }) } },
     )
   }
 

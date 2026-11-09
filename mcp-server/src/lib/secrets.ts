@@ -1,4 +1,12 @@
+import { createHash } from 'node:crypto'
+
 export const MASK_PLACEHOLDER = '***MASKED***'
+
+const LINE_KEYS = new WeakMap<SecretFinding, string>()
+
+export function findingLineKey(finding: SecretFinding): string | undefined {
+  return LINE_KEYS.get(finding)
+}
 
 export const SECRET_KEY_PATTERN =
   /\b(jwt[._-]?secret|api[._-]?key|secret|token|password|bearer|credential)\b/i
@@ -155,8 +163,10 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
   let newLeft = 0
   let newLineNumber = 0
 
-  const found = (finding: SecretFinding): void => {
-    findings.push(currentCommit === null ? finding : { ...finding, commit: currentCommit })
+  const found = (finding: SecretFinding, content: string): void => {
+    const recorded = currentCommit === null ? finding : { ...finding, commit: currentCommit }
+    LINE_KEYS.set(recorded, createHash('sha256').update(content).digest('hex'))
+    findings.push(recorded)
   }
 
   const scanAddedLine = (file: string, lineNumber: number, content: string): void => {
@@ -164,7 +174,7 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
     for (const pattern of LINE_VALUE_PATTERNS) {
       const m = pattern.exec(content)
       if (m) {
-        found({ file, line_number: lineNumber, reason: 'value-shape', excerpt: maskExcerpt(content, m[0]) })
+        found({ file, line_number: lineNumber, reason: 'value-shape', excerpt: maskExcerpt(content, m[0]) }, content)
         valueShapeHit = true
         break
       }
@@ -177,7 +187,7 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
         const key = kv[1]
         const value = kv[3]
         if (key && value && SECRET_KEY_PATTERN.test(key)) {
-          found({ file, line_number: lineNumber, reason: 'key-name', excerpt: maskExcerpt(content, value) })
+          found({ file, line_number: lineNumber, reason: 'key-name', excerpt: maskExcerpt(content, value) }, content)
           break
         }
       }
@@ -193,13 +203,14 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
           reason: 'extra-pattern',
           pattern_id: id,
           excerpt: maskExcerpt(content, m[0]),
-        })
+        }, content)
         break
       }
     }
   }
 
-  const hunkLine = (raw: string): boolean => {
+  const hunkLine = (input: string): boolean => {
+    const raw = input === '' ? ' '.repeat(parents) : input
     const prefix = raw.slice(0, parents)
     if (prefix.length !== parents || !/^[ +-]+$/.test(prefix)) return false
     const removed = prefix.includes('-')

@@ -1,8 +1,8 @@
 import type { GitExecutor } from './git.js'
 
-export type Read<T> = { ok: true; value: T } | { ok: false; reason: string }
+type Read<T> = { ok: true; value: T } | { ok: false; reason: string }
 
-export type SubmoduleMode = 'check' | 'no'
+type SubmoduleMode = 'check' | 'no'
 
 const SCHEME_URL = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)(.*)$/i
 const SCP_LIKE = /^(?:([^@/:]+)@)?([^/:]+):(.*)$/
@@ -21,7 +21,7 @@ export function maskUrl(url: string): string {
 }
 
 function trimRepoPath(path: string): string {
-  return path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '').replace(/\/+$/, '')
+  return path.replace(/\/+$/, '').replace(/\.git$/, '').replace(/\/+$/, '')
 }
 
 export function repoIdentity(url: string): string {
@@ -30,7 +30,7 @@ export function repoIdentity(url: string): string {
     if (scheme[1]!.toLowerCase() === 'file') return `local:${scheme[2]}${scheme[3]}`
     const authority = scheme[2]!
     const host = authority.slice(authority.lastIndexOf('@') + 1)
-    return `${host}/${trimRepoPath(scheme[3]!)}`
+    return `${host}/${trimRepoPath(scheme[3]!.replace(/^\/+/, ''))}`
   }
   const scp = SCP_LIKE.exec(url)
   if (scp && !WINDOWS_DRIVE.test(scp[2]!)) return `${scp[2]}/${trimRepoPath(scp[3]!)}`

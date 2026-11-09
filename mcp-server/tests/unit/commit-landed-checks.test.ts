@@ -59,7 +59,7 @@ beforeEach(() => {
   git('switch', '-q', '-C', 'feat/x')
 })
 afterEach(() => {
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 describe.skipIf(!GIT)('the REVIEW sweep of a commit reads the tree recorded for the approval, not the live index', () => {

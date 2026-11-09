@@ -152,25 +152,56 @@ describe.skipIf(!GIT)('rsct_request_push scans every commit it sends, before any
     expect(out.secrets_check.findings.map((f) => f.file)).toEqual(['old.env'])
   })
 
-  it('uses the old tip the remote reports when the push URL is another repository, and only when every URL answers', async () => {
+  it('asks the remote nothing before the dialog when the push URL is another repository', async () => {
     git(work, 'checkout', '-q', 'main')
     commitFile('old.env', `${SECRET}\n`, 'published before')
-    const published = git(work, 'rev-parse', 'HEAD')
     git(work, 'push', '-q', 'origin', 'main')
     git(work, 'checkout', '-q', '-b', 'feat/y')
     commitFile('b.txt', 'b\n', 'clean work')
-    const fork = bare('fork.git')
-    git(work, 'config', 'remote.origin.pushurl', fork)
-    const answer = (urls: string[]) => () => ({
-      status: 'parsed' as const,
-      refs: urls.map((url) => ({ url, flag: ' ', to: 'refs/heads/feat/y', old: published, next: null })),
-    })
-    const one = await push({ branch: 'feat/y', dev_approval: approval() }, { pushProbe: answer([fork]) })
-    expect([one.out.status, one.out.secrets_check.commits_scanned]).toEqual(['pushed', 1])
+    git(work, 'config', 'remote.origin.pushurl', bare('fork.git'))
+    let probes = 0
+    const { out } = await push({ branch: 'feat/y', dev_approval: approval() }, { pushProbe: () => { probes++; return { status: 'unavailable' } } })
+    expect([out.reject_kind, probes]).toEqual(['secrets', 0])
+  })
 
-    git(work, 'config', '--add', 'remote.origin.pushurl', bare('fork2.git'))
-    const partial = await push({ branch: 'feat/y', dev_approval: approval() }, { pushProbe: answer([fork]) })
-    expect(partial.out.reject_kind).toBe('secrets')
+  it('does not skip tracking refs when another remote is named after this one plus a slash', async () => {
+    git(work, 'checkout', '-q', '-b', 'hidden', 'main')
+    commitFile('hidden.env', `${SECRET}\n`, 'never on origin')
+    git(work, 'remote', 'add', 'origin/mirror', bare('mirror.git'))
+    git(work, 'push', '-q', 'origin/mirror', 'hidden')
+    expect(git(work, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/mirror/hidden'), 'control: the mirror ref sits under refs/remotes/origin/').toMatch(/^[0-9a-f]{40}$/)
+    git(work, 'checkout', '-q', '-b', 'feat/z')
+    commitFile('b.txt', 'b\n', 'work')
+    const { out } = await push({ branch: 'feat/z', dev_approval: approval() })
+    expect(out.reject_kind).toBe('secrets')
+    expect(out.secrets_check.findings.map((f) => f.file)).toEqual(['hidden.env'])
+  })
+
+  it('refuses before the dialog a push whose source is not a commit', async () => {
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: work, input: `${SECRET}\n`, encoding: 'utf8' }).trim()
+    git(work, 'tag', 'leak', blob)
+    const { out, seen } = await push({ branch: 'refs/tags/leak', dev_approval: approval() })
+    expect([out.reject_kind, seen.length]).toEqual(['secrets_unreadable', 0])
+    expect(remoteHas(remote, 'refs/tags/leak')).toBe(false)
+  })
+
+  it('refuses when the push URL changes while the dialog is open', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    const elsewhere = bare('elsewhere.git')
+    const d = dialogs()
+    const out = (await requestPushHandler(
+      { project_root: work, branch: 'feat/x', dev_approval: approval() },
+      {
+        now: NOW,
+        promptFn: async (o) => {
+          git(work, 'config', 'remote.origin.pushurl', elsewhere)
+          return d.fn(o)
+        },
+      },
+    )) as RequestPushOutput
+    expect(out.reject_kind).toBe('push_url_changed')
+    expect(remoteHas(elsewhere, 'refs/heads/feat/x')).toBe(false)
+    expect(out.anti_replay_persisted).toBeNull()
   })
 
   it('fails closed when the scan cannot finish', async () => {
@@ -196,6 +227,20 @@ describe.skipIf(!GIT)('rsct_request_push shows where the push goes and what it s
     expect(out.push_urls).toHaveLength(2)
   })
 
+  it('lists every push URL and every push option in full, however many there are', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    const urls = Array.from({ length: 7 }, (_, i) => bare(`u${i}.git`))
+    for (const u of urls) git(work, 'config', '--add', 'remote.origin.pushurl', u)
+    const long = `opt-${'x'.repeat(150)}`
+    for (let i = 0; i < 12; i++) git(work, 'config', '--add', 'push.pushOption', i === 3 ? long : `opt${i}`)
+    const { text } = await push({ branch: 'feat/x', dev_approval: approval() }, {}, 'no')
+    expect(text).toContain('Push URL (7):')
+    for (const u of urls) expect(text).toContain(u.replace(/^.*[\\/]/, ''))
+    expect(text).toContain('Push option sent (12):')
+    expect(text).toContain(`• ${long}`)
+    expect(text).toContain('• opt11')
+  })
+
   it('masks the credentials of a push URL in the dialog and the audit log', async () => {
     commitFile('b.txt', 'b\n', 'work')
     git(work, 'config', 'remote.origin.pushurl', 'https://ghp_TOKEN123@example.invalid/o/r.git')
@@ -209,10 +254,10 @@ describe.skipIf(!GIT)('rsct_request_push shows where the push goes and what it s
   it('words a force push and a delete as such', async () => {
     commitFile('b.txt', 'b\n', 'work')
     const forced = await push({ branch: '+feat/x', dev_approval: approval() }, {}, 'no')
-    expect(forced.text).toContain('⚠ FORCE: replaces the remote branch')
+    expect(forced.text).toContain("⚠ FORCE: replaces 'refs/heads/feat/x' on the remote")
     git(work, 'push', '-q', 'origin', 'feat/x')
     const deleted = await push({ branch: ':feat/x', dev_approval: approval() }, {}, 'no')
-    expect(deleted.text).toContain("⚠ DELETE: removes branch 'feat/x' from the remote.")
+    expect(deleted.text).toContain("⚠ DELETE: removes 'refs/heads/feat/x' from the remote.")
     expect(deleted.text).not.toContain('Secrets scan')
   })
 

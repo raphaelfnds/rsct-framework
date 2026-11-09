@@ -55,7 +55,16 @@ import {
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
-import { ackDialogLines, armDriftForFindings, readDriftLock, resolvePinned, unapprovedFindings } from '../lib/integration-gate.js'
+import {
+  ackDialogLines,
+  driftRefusal,
+  mergeMessage,
+  readDriftLock,
+  readHeadPosition,
+  rescanLanded,
+  resolvePinned,
+  sameHeadPosition,
+} from '../lib/integration-gate.js'
 import { scanCommits } from '../lib/staged-scan.js'
 import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
 
@@ -114,6 +123,7 @@ export type RequestMergeRejectKind =
   | 'source_moved'
   | 'secrets'
   | 'secrets_unreadable'
+  | 'target_moved'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
@@ -160,7 +170,7 @@ export interface RequestMergeInternal {
 export const requestMergeTool: Tool = {
   name: 'rsct_request_merge',
   description:
-    "§C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). After the merge, every commit it added (a post-merge hook's included) is scanned again; a finding the dialog did not show arms review_drift with its paths, so commits and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated).",
+    "§C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, every commit it added is scanned again; a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -314,11 +324,7 @@ export async function requestMergeHandler(
   const drift = readDriftLock(projectRoot)
   if (drift.status === 'unreadable') return reject('review_unreadable', `${drift.error} Nothing was merged and no dialog was shown.`)
   if (drift.status === 'armed') {
-    return reject(
-      'review_drift',
-      `a commit landed content no dialog showed the developer (${drift.paths.join(', ')}); merges are refused until rsct_phase_review_start / _complete covers those paths. No dialog was shown.`,
-      { audit: { drift_paths: drift.paths } },
-    )
+    return reject('review_drift', driftRefusal(drift.paths, 'every merge'), { audit: { drift_paths: drift.paths } })
   }
 
   const { list: protectedList } = effectiveProtectedList(config)
@@ -333,7 +339,8 @@ export async function requestMergeHandler(
   }
 
   pinned = resolvePinned(projectRoot, input.source_branch, gitExecutor)
-  const head = resolvePinned(projectRoot, 'HEAD', gitExecutor)
+  const headAt = readHeadPosition(projectRoot, gitExecutor)
+  const head = headAt.sha
   if (pinned === null || head === null) {
     return reject('source_unreadable', `git could not resolve '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}'${head === null ? ' or HEAD' : ''} to a commit, so what the merge brings cannot be shown — nothing was merged.`, { protected: targetProtected })
   }
@@ -446,9 +453,15 @@ export async function requestMergeHandler(
       protected: targetProtected,
     })
   }
+  if (!sameHeadPosition(headAt, readHeadPosition(projectRoot, gitExecutor))) {
+    return reject('target_moved', `HEAD moved to another branch or commit after the dialog, so the merge would not land where the developer approved — ask again. The approval was not used.`, {
+      ...after,
+      protected: targetProtected,
+    })
+  }
 
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories }
-  const merge = gitMerge(projectRoot, input.source_branch, { no_ff, allow_unrelated_histories }, gitExecutor)
+  const merge = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor)
   if (!merge.ok) {
     const reason = merge.error ?? merge.stderr ?? 'git merge failed'
     const audit = appendAudit(
@@ -487,26 +500,22 @@ export async function requestMergeHandler(
   const hints: string[] = [
     `Merged '${input.source_branch}' into '${targetLabel}' (${merge.sha_after ?? '<unknown sha>'}).`,
   ]
-  let afterMerge: SecretFinding[] = []
   const landed = merge.sha_after ?? 'HEAD'
-  const rescan = await scanner(projectRoot, { tips: [landed], exclude: [head, pinned] }, extras, internal.secretsScanTimeoutMs, gitExecutor)
-  if (!rescan.ok) {
-    hints.push(`⚠ the merge landed, but RSCT could not scan the commits it added (${rescan.reason}) — check them before any push; the push gate scans them again.`)
-    appendAudit(projectRoot, { event: 'request_merge.after_scan_unverified', tool: 'rsct_request_merge', reason: rescan.reason, sha_after: merge.sha_after }, config?.audit)
-  } else {
-    afterMerge = unapprovedFindings(rescan.findings, findings)
-    if (afterMerge.length > 0) {
-      const armed = armDriftForFindings(projectRoot, landed, afterMerge, now)
-      appendAudit(
-        projectRoot,
-        { event: 'request_merge.after_scan_drift', tool: 'rsct_request_merge', findings_count: afterMerge.length, paths: [...new Set(afterMerge.map((f) => f.file))], sha_after: merge.sha_after, lock_armed: armed.ok },
-        config?.audit,
-      )
-      hints.push(
-        `⚠ the merge added ${afterMerge.length} secret finding(s) the dialog did not show (${[...new Set(afterMerge.map((f) => f.file))].join(', ')}) — most likely a merge driver or a post-merge hook. ${armed.ok ? 'Commits and pushes are refused until rsct_phase_review_start / _complete covers those paths.' : `RSCT could not arm the review_drift lock (${armed.reason}); do not push until they are checked.`}`,
-      )
-    }
-  }
+  const rescan = await rescanLanded({
+    projectRoot,
+    what: 'merge',
+    sha: landed,
+    range: { tips: [landed], exclude: [head, pinned] },
+    approved: findings,
+    extras,
+    timeoutMs: internal.secretsScanTimeoutMs,
+    executor: gitExecutor,
+    scanner,
+    now,
+  })
+  const afterMerge = rescan.findings
+  if (rescan.hint !== null) hints.push(rescan.hint)
+  if (rescan.audit !== null) appendAudit(projectRoot, { event: `request_merge.${rescan.audit.event}`, tool: 'rsct_request_merge', ...rescan.audit.fields }, config?.audit)
 
   const audit = appendAudit(
     projectRoot,

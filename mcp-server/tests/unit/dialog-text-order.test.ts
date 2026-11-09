@@ -331,7 +331,7 @@ describe('every approval dialog shows the framework lines before what the agent 
     expect(seen.messages).toHaveLength(1)
     const lines = seen.messages[0]!.split('\n')
     expect(lines[0]).toContain(`${'x'.repeat(120)}:main`)
-    expect(lines[1]).toBe("Destination branch: 'main'")
+    expect(lines[1]).toBe("Destination: 'refs/heads/main'")
     expect(seen.messages[0]!.includes(LS)).toBe(false)
     expect(seen.messages[0]).toContain('re lease')
   })

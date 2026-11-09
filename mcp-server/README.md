@@ -742,8 +742,9 @@ Scans `git diff --cached` against INV-6 secret patterns
 INV-6 regex). Since 2.23.0 it reads with the flags `rsct_request_commit` uses: `--text
 --no-ext-diff --no-textconv`, fixed `a/` `b/` prefixes and `diff.relative` off, so attributes,
 diff drivers and repository config cannot hide content (ADR-039). Since 2.24.0 every git
-command RSCT runs sets `GIT_NO_REPLACE_OBJECTS=1`, so a `git replace` ref cannot either
-(ADR-042).
+command the RSCT server and its hooks run sets `GIT_NO_REPLACE_OBJECTS=1`, so a `git replace`
+ref cannot either, and the reads turn off `diff.interHunkContext` and `diff.suppressBlankEmpty`,
+which used to let a blank unchanged line end the scan of a hunk early (ADR-042).
 
 - Input: `project_root?`, `staged_only?` (default true), `diff_override?` (programmatic test input)
 - Output: `findings[]` (per-line classification: `key-name`, `value-shape`, etc.), `read_error` (`null`, or why git could not be read — never reported as "no findings"), `scanned_extra_patterns` (how many project patterns were applied), `invalid_extra_patterns[]`
@@ -918,7 +919,7 @@ Pushes the current branch if `dev_approval` is valid + branch is not
 protected (or `override_protected_branch` is set with reason).
 
 - Input: `project_root?`, `remote?` (default `origin` — must be a **configured remote name**; see below), `branch?` (default HEAD), `dev_approval` (`override_protected_branch` and `override_secrets_check` when needed), `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
-- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `push_urls` (credentials masked), `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`), `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'unsafe_push_target' | 'unknown_remote' | 'no_branch' | 'review_drift' | 'review_unreadable' | 'push_url_unreadable' | 'push_options_unreadable' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `push_urls` (credentials masked), `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`), `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'unsafe_push_target' | 'unknown_remote' | 'no_branch' | 'review_drift' | 'review_unreadable' | 'push_url_unreadable' | 'push_options_unreadable' | 'push_url_changed' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
 
 **Every check runs before the dialog, and the dialog shows every exception (since
 2.24.0, ADR-042).** A push with no branch, an armed `review_drift` lock, a protected
@@ -928,12 +929,14 @@ carries is scanned on its own — merge commits included, only what the merge it
 adds — through `git diff-tree`, so repository log and format settings cannot change
 what is read. Commits on `refs/remotes/<remote>/*` are skipped when every push URL
 names the same repository as the fetch URL (host, explicit port and path; an
-`https`/`ssh` pair from `pushInsteadOf` counts as the same); otherwise only the old
-tip the remote reports for the destination is skipped, or the whole history is read.
-The dialog lists every push URL with credentials masked, the destination and commit,
-`FORCE` or `DELETE` in words, the protected branch, each finding as `"file":line —
-rule (commit …)` (never the value), the `pre_merge_ack` answers and the push options
-sent; the agent's reasons and the ack note come after the framework footer. git is
+`https`/`ssh` pair from `pushInsteadOf` counts as the same) and no other remote is
+named `<remote>/…`; otherwise the whole history is read. What the push sends must
+be a commit. The dialog lists every push URL (credentials masked) and every push
+option in full, the destination as its full ref and the commit, `FORCE` or `DELETE`
+in words, the protected branch, each finding as `"file":line — rule (commit …)`
+(never the value) and the `pre_merge_ack` answers; the agent's reasons and the ack
+note come after the framework footer. The push URLs are read again after the dialog
+and a change refuses (`push_url_changed`). git is
 called with `--no-follow-tags` (push a tag on its own with `branch: "refs/tags/<name>"`),
 `--recurse-submodules=check` when the repository config would push or check
 submodules (`=no` otherwise), and exactly the push options the dialog shows. Needs
@@ -974,7 +977,7 @@ Merges `source_branch` into the current branch (extra-strict — refuses
 force-pushy patterns by default).
 
 - Input: `project_root?`, `source_branch`, `no_ff?` (default true), `dev_approval` (`override_protected_branch` and `override_secrets_check` when needed), `pre_merge_ack` (PH-5 — REQUIRED; the pre-integration hygiene checklist; rejects in chat if absent/incomplete, no OS dialog), `allow_unrelated_histories?` (default false). There is no `target_branch` input: the target is the branch HEAD is on.
-- Output: `status: 'merged' | 'rejected' | 'mutation_failed'`, `source_branch`, `source_sha`, `target_branch`, `sha_before`, `sha_after?`, `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`, `after_merge`), `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'detached_head' | 'same_branch' | 'review_drift' | 'source_unreadable' | 'source_moved' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
+- Output: `status: 'merged' | 'rejected' | 'mutation_failed'`, `source_branch`, `source_sha`, `target_branch`, `sha_before`, `sha_after?`, `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`, `after_merge`), `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'detached_head' | 'same_branch' | 'review_drift' | 'review_unreadable' | 'source_unreadable' | 'source_moved' | 'target_moved' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
 
 `override_protected_branch` is dual-purpose here: it ALSO acks the
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
@@ -986,8 +989,9 @@ unrelated histories without the override, and a secret finding in the commits th
 merge brings without `override_secrets_check`. The source is pinned to its commit;
 the dialog names it, the exceptions, each finding and the `pre_merge_ack` answers,
 and the agent's text comes after the footer. A source that moved after the dialog
-refuses (`source_moved`). After the merge every commit it added — a post-merge
-hook's own included — is scanned again; a finding the dialog did not show arms
+refuses (`source_moved`), and so does a HEAD on another branch or commit than at the
+dialog (`target_moved`); git merges the pinned commit, with the usual merge message.
+After the merge every commit it added is scanned again; a finding the dialog did not show arms
 `review_drift` with its paths (`after_merge`).
 
 #### `rsct_request_rebase`
@@ -1001,7 +1005,7 @@ it always requires a `pre_merge_ack`. Runs INV-5 on the CURRENT branch, since
 rewriting a protected branch's history needs `override_protected_branch`.
 
 - Input: `project_root?`, `mode?` (`'rebase' | 'squash'`, default `'rebase'`), `ref`, `dev_approval` (`action_scope` starting with `rebase:` or `squash:`; `override_protected_branch` and `override_secrets_check` when needed), `pre_merge_ack` (REQUIRED)
-- Output: `status: 'rebased' | 'squashed' | 'rejected' | 'mutation_failed'`, `mode`, `ref`, `ref_sha`, `current_branch`, `sha_before`, `sha_after`, `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`, `after_rebase`), `reject_kind?` (incl. `'detached_head' | 'same_ref' | 'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'review_drift' | 'source_unreadable' | 'source_moved' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`
+- Output: `status: 'rebased' | 'squashed' | 'rejected' | 'mutation_failed'`, `mode`, `ref`, `ref_sha`, `current_branch`, `sha_before`, `sha_after`, `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`, `after_rebase`), `reject_kind?` (incl. `'detached_head' | 'same_ref' | 'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'review_drift' | 'review_unreadable' | 'source_unreadable' | 'source_moved' | 'target_moved' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints`
 
 Conflicts surface as `mutation_failed` carrying git's stderr; the working tree is
 left as git leaves it and nothing is force-pushed. `ref` is refused before git

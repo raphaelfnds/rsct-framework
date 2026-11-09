@@ -1059,7 +1059,7 @@ export async function requestCommitHandler(
             checked: sweepAtCommit.checked,
           })
         : { drift: [] as string[] }
-    const scan = await scanCommits(projectRoot, { tips: [tip], exclude: approvedState.head !== null ? [approvedState.head] : [] }, extras, internal.secretsScanTimeoutMs)
+    const scan = await scanCommits(projectRoot, { tips: [tip], exclude: approvedState.head !== null ? [approvedState.head] : [] }, extras, internal.secretsScanTimeoutMs, gitExecutor)
     const secrets = scan.ok ? unapprovedFindings(scan.findings, findings) : []
     const paths = [...new Set([...committed.drift, ...secrets.map((f) => f.file)])]
     const write = paths.length > 0 ? armDriftForFindings(projectRoot, tip, secrets, now, committed.drift) : null

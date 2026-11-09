@@ -84,12 +84,12 @@ export function fabricationThresholdMs(modes: RsctApprovalModes | undefined): nu
   return modes?.fabrication_signal_threshold_ms ?? DEFAULT_FABRICATION_THRESHOLD_MS
 }
 
-const BURST_WINDOW_MS = 10000
-const BURST_THRESHOLD_PRIOR = 3
+export const BURST_WINDOW_MS = 10000
+export const BURST_THRESHOLD_PRIOR = 3
 
 const DEFAULT_SKEW_SECONDS = 180
 const DEFAULT_FABRICATION_THRESHOLD_MS = 500
-const MIN_REASON_LENGTH = 10
+export const MIN_REASON_LENGTH = 10
 
 const APPROVALS_STORE_RELATIVE = '.rsct/approvals-seen.json'
 

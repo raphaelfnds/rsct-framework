@@ -11,11 +11,11 @@ import {
 
 const GIT_CHILD_CONFIG: readonly string[] = ['-c', 'core.fsmonitor=']
 
-export function gitChildArgs(args: readonly string[]): string[] {
+function gitChildArgs(args: readonly string[]): string[] {
   return [...GIT_CHILD_CONFIG, ...args]
 }
 
-export function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return { ...env, GIT_NO_REPLACE_OBJECTS: '1' }
 }
 

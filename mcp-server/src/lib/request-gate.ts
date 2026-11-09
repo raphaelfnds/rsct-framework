@@ -1,4 +1,7 @@
 import {
+  BURST_THRESHOLD_PRIOR,
+  BURST_WINDOW_MS,
+  MIN_REASON_LENGTH,
   expectedScopeTokens,
   fabricationThresholdMs,
   validateDevApproval,
@@ -156,7 +159,7 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
 function signalReason(signal: FabricationSignal, opts: GateOptions): string {
   switch (signal) {
     case 'reason_too_short':
-      return 'its reason is under 10 characters'
+      return `its reason is under ${MIN_REASON_LENGTH} characters`
     case 'implausibly_fast':
       return `it came less than ${fabricationThresholdMs(opts.approvalModes)} ms after the previous approval was used`
     case 'approvals_store_corrupt':
@@ -166,7 +169,7 @@ function signalReason(signal: FabricationSignal, opts: GateOptions): string {
     case 'scope_mismatch':
       return `its action_scope does not start with ${expectedScopeTokens(opts.toolName).map((t) => `'${t}:'`).join(' or ')}`
     case 'burst_pattern':
-      return '3 or more approvals were used in the last 10 seconds'
+      return `${BURST_THRESHOLD_PRIOR} or more approvals were used in the last ${BURST_WINDOW_MS / 1000} seconds`
   }
 }
 
