@@ -1,9 +1,15 @@
 import {
+  BURST_THRESHOLD_PRIOR,
+  BURST_WINDOW_MS,
+  MIN_REASON_LENGTH,
+  expectedScopeTokens,
+  fabricationThresholdMs,
   validateDevApproval,
   type DevApproval,
   type FabricationSignal,
   type ValidateOptions,
 } from './dev-approval.js'
+import { specLabel } from './dialog-text.js'
 import {
   promptYesNo,
   type DialogChannel,
@@ -71,12 +77,12 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
   }
 
   const promptFn = opts.promptFn ?? promptYesNo
-  const dialog = await promptFn(opts.dialog)
+  const dialog = await promptFn(withFabricationWarning(opts, validation.fabrication_signals, validation.approval.action_scope))
 
   if (dialog.input_fault === true) {
     return {
       status: 'rejected',
-      reason: `the approval dialog could not show this request (${dialog.error ?? 'its text was refused'}); shorten the text and call again — trust_allowed_for does not apply`,
+      reason: `the approval dialog could not show this request (${dialog.error ?? 'its text was refused'}); shorten what the agent wrote (reasons, notes, message) and call again — the framework lines cannot be removed, and trust_allowed_for does not apply`,
       reject_kind: 'no_channel',
       fabrication_signals: validation.fabrication_signals,
     }
@@ -148,6 +154,30 @@ export async function gateRequest(opts: GateOptions): Promise<GateResult> {
     reject_kind: 'no_channel',
     fabrication_signals: validation.fabrication_signals,
   }
+}
+
+function signalReason(signal: FabricationSignal, opts: GateOptions): string {
+  switch (signal) {
+    case 'reason_too_short':
+      return `its reason is under ${MIN_REASON_LENGTH} characters`
+    case 'implausibly_fast':
+      return `it came less than ${fabricationThresholdMs(opts.approvalModes)} ms after the previous approval was used`
+    case 'approvals_store_corrupt':
+      return 'the record of used approvals is unreadable'
+    case 'approvals_store_absent':
+      return 'the record of used approvals is missing although approvals were used before'
+    case 'scope_mismatch':
+      return `its action_scope does not start with ${expectedScopeTokens(opts.toolName).map((t) => `'${t}:'`).join(' or ')}`
+    case 'burst_pattern':
+      return `${BURST_THRESHOLD_PRIOR} or more approvals were used in the last ${BURST_WINDOW_MS / 1000} seconds`
+  }
+}
+
+function withFabricationWarning(opts: GateOptions, signals: FabricationSignal[], actionScope: string): DialogOptions {
+  if (signals.length === 0) return opts.dialog
+  const warning = `⚠ This approval looks auto-generated: ${signals.map((s) => signalReason(s, opts)).join('; ')}.`
+  const scope = signals.includes('scope_mismatch') ? `\n\nAgent's action_scope: "${specLabel(actionScope)}"` : ''
+  return { ...opts.dialog, message: `${warning}\n\n${opts.dialog.message}${scope}` }
 }
 
 function dialogFailed(dialog: DialogResult, signals: FabricationSignal[], tail: string): GateResult {

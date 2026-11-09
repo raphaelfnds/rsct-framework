@@ -350,13 +350,14 @@ async function migrationsHold(
   repo: SweepRepo,
   entry: SweepLedgerEntry,
   cache: Map<string, string>,
+  tree: string | null = null,
 ): Promise<boolean> {
   for (const m of entry.migrations) {
     if (typeof m.body !== 'string') return false
     let content = cache.get(m.destination)
     if (content === undefined) {
       const repoPath = `${repo.prefix}${m.destination}`
-      const stagedDest = readStagedBlobId(repo, repoPath)
+      const stagedDest = readStagedBlobId(repo, repoPath, tree)
       const destBytes = stagedDest ? readBlob(repo, stagedDest) : readHeadContent(repo, repoPath)
       content = destBytes ? collapseWhitespace(destBytes.toString('utf8')) : ''
       cache.set(m.destination, content)
@@ -421,10 +422,12 @@ export async function checkStagedSweep(args: {
   unverifiedDecisions: ReadonlySet<string>
   legacyBaselineDecisions: ReadonlySet<string>
   headUnborn: boolean
+  tree?: string | null
 }): Promise<StagedSweepCheck> {
+  const tree = args.tree ?? null
   const repo = openSweepRepo(args.projectRoot)
   if (!repo) return { ok: true, skipped: 'not_git_repo', checked: [] }
-  const staged = readStagedEntries(repo)
+  const staged = readStagedEntries(repo, tree)
   if (staged === null) {
     return { ok: false, reject_kind: 'review_unreadable', reason: 'could not read the staged paths from git', paths: [] }
   }
@@ -449,10 +452,10 @@ export async function checkStagedSweep(args: {
         missing.push(path)
         continue
       }
-      if (!(await migrationsHold(repo, deletionEntry, destinationCache))) reverted.push(path)
+      if (!(await migrationsHold(repo, deletionEntry, destinationCache, tree))) reverted.push(path)
       continue
     }
-    const blob = readStagedBlobId(repo, path)
+    const blob = readStagedBlobId(repo, path, tree)
     const bytes = blob ? readBlob(repo, blob) : null
     if (!blob || !bytes) {
       return { ok: false, reject_kind: 'review_unreadable', reason: `could not read the staged content of ${path}`, paths: [path] }
@@ -477,7 +480,7 @@ export async function checkStagedSweep(args: {
       missing.push(path)
       continue
     }
-    if (!(await migrationsHold(repo, entry, destinationCache))) {
+    if (!(await migrationsHold(repo, entry, destinationCache, tree))) {
       reverted.push(path)
       continue
     }

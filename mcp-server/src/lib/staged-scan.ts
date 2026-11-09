@@ -1,7 +1,34 @@
-import { STAGED_DIFF_ARGS, UNSTAGED_DIFF_ARGS, gitRepoStatus, streamGitLines, treeDiffArgs } from './git.js'
+import {
+  COMMIT_PATCH_ARGS,
+  STAGED_DIFF_ARGS,
+  UNSTAGED_DIFF_ARGS,
+  gitRepoStatus,
+  listCommits,
+  streamGitLines,
+  treeDiffArgs,
+  type CommitRange,
+  type GitExecutor,
+} from './git.js'
 import { createDiffScanner, type ExtraPattern, type SecretFinding } from './secrets.js'
 
 export type DiffScanResult = { ok: true; findings: SecretFinding[] } | { ok: false; reason: string }
+
+export type CommitScanResult = { ok: true; findings: SecretFinding[]; commits: number } | { ok: false; reason: string }
+
+export async function scanCommits(
+  projectRoot: string,
+  range: CommitRange,
+  extraPatterns: ReadonlyArray<ExtraPattern> = [],
+  timeoutMs?: number,
+  executor?: GitExecutor,
+): Promise<CommitScanResult> {
+  const listed = listCommits(projectRoot, range, executor)
+  if (!listed.ok) return listed
+  if (listed.commits.length === 0) return { ok: true, findings: [], commits: 0 }
+  const scanner = createDiffScanner(extraPatterns)
+  const read = await streamGitLines(projectRoot, COMMIT_PATCH_ARGS, scanner.line, timeoutMs, `${listed.commits.join('\n')}\n`)
+  return read.ok ? { ok: true, findings: scanner.findings, commits: listed.commits.length } : { ok: false, reason: read.reason }
+}
 
 export async function scanGitDiff(
   projectRoot: string,

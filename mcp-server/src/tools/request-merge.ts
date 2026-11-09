@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
 import {
@@ -11,6 +11,7 @@ import {
   defaultGitExecutor,
   getRangePaths,
   gitMerge,
+  branchRef,
   readGitState,
   type GitExecutor,
   type GitState,
@@ -20,6 +21,7 @@ import {
   isProtectedBranch,
 } from '../lib/branch-protection.js'
 import {
+  DevApprovalSchema,
   recordConsumedApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
@@ -53,6 +55,19 @@ import {
 } from '../lib/pre-merge-ack.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
+import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import {
+  ackDialogLines,
+  driftRefusal,
+  mergeMessage,
+  readDriftLock,
+  readHeadPosition,
+  rescanLanded,
+  resolvePinned,
+  sameHeadPosition,
+} from '../lib/integration-gate.js'
+import { scanCommits } from '../lib/staged-scan.js'
+import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
 
 export const requestMergeInputSchema = z
   .object({
@@ -103,10 +118,18 @@ export type RequestMergeRejectKind =
   | 'pre_merge_ack_missing'
   | 'pre_merge_ack_incomplete'
   | 'hygiene_range_unreadable'
+  | 'review_drift'
+  | 'review_unreadable'
+  | 'source_unreadable'
+  | 'source_moved'
+  | 'secrets'
+  | 'secrets_unreadable'
+  | 'target_moved'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
   source_branch: string
+  source_sha: string | null
   target_branch: string | null
   channel: GateChannel | null
   reject_kind: RequestMergeRejectKind | null
@@ -117,6 +140,13 @@ export interface RequestMergeOutput {
   branch_check: {
     protected: boolean
     override_used: boolean
+  }
+  secrets_check: {
+    commits_scanned: number | null
+    findings_count: number
+    findings: SecretFinding[]
+    override_used: boolean
+    after_merge: SecretFinding[]
   }
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
@@ -134,12 +164,14 @@ export interface RequestMergeInternal {
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
   rangeReader?: typeof getRangePaths
+  commitScanner?: typeof scanCommits
+  secretsScanTimeoutMs?: number
 }
 
 export const requestMergeTool: Tool = {
   name: 'rsct_request_merge',
   description:
-    "§C-gated merge. Validates dev_approval, pops OS dialog when required, runs INV-5 on the TARGET branch (current HEAD), then executes `git merge` (default --no-ff). Extra-strict: --allow-unrelated-histories is treated as a force-like operation and requires override_protected_branch even on a non-protected target. Detached HEAD and self-merge surface as mutation_failed/same_branch. This is the LOCAL merge-commit path; GitHub PR merges (merge commit / squash / rebase, done by the developer on GitHub) are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated; see §D).",
+    "§C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -162,7 +194,7 @@ export const requestMergeTool: Tool = {
       },
       dev_approval: {
         type: 'object',
-        description: 'dev_approval payload.',
+        description: 'dev_approval payload. override_protected_branch and override_secrets_check are listed in the dialog with their reasons.',
       },
       pre_merge_ack: preMergeAckJsonSchema,
     },
@@ -203,6 +235,46 @@ export async function requestMergeHandler(
   })
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
 
+  let pinned: string | null = null
+  let findings: SecretFinding[] = []
+  let commitsScanned: number | null = null
+  const secretsCheck = (overrideUsed: boolean, afterMerge: SecretFinding[] = []): RequestMergeOutput['secrets_check'] => ({
+    commits_scanned: commitsScanned,
+    findings_count: findings.length,
+    findings,
+    override_used: overrideUsed,
+    after_merge: afterMerge,
+  })
+  const reject = (
+    kind: RequestMergeRejectKind,
+    reason: string,
+    opts: { protected?: boolean; channel?: GateChannel | null; signals?: FabricationSignal[]; audit?: Record<string, unknown>; hints?: string[]; target?: string | null; shaBefore?: string | null } = {},
+  ): RequestMergeOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      { event: 'request_merge.rejected', tool: 'rsct_request_merge', reject_kind: kind, reason, source_branch: input.source_branch, target_branch: targetBranch, ...opts.audit },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      source_branch: input.source_branch,
+      source_sha: pinned,
+      target_branch: opts.target === undefined ? targetBranch : opts.target,
+      channel: opts.channel ?? null,
+      reject_kind: kind,
+      reason,
+      fabrication_signals: opts.signals ?? [],
+      sha_before: opts.shaBefore === undefined ? gitState.head_sha : opts.shaBefore,
+      sha_after: null,
+      branch_check: { protected: opts.protected ?? false, override_used: false },
+      secrets_check: secretsCheck(false),
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories(opts.hints ?? [reason]),
+    }
+  }
+
   const integratingPlan = findPlanByBranch(projectRoot, input.source_branch)
   const progressOpen = branchPlansHaveOpenItems(projectRoot, [input.source_branch])
   const range = (internal.rangeReader ?? getRangePaths)(projectRoot, 'HEAD', input.source_branch)
@@ -228,48 +300,11 @@ export async function requestMergeHandler(
     )
   }
   if (ackDecision.ok && range.status !== 'ok' && !unreadableIsInherent) {
-    const reason = crossCheckBlockedReason(range, 'merge')
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: 'hygiene_range_unreadable',
-        reason,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
-        path_crosscheck: crossCheck,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: null,
-      reject_kind: 'hygiene_range_unreadable',
-      reason,
-      fabrication_signals: [],
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+    return reject('hygiene_range_unreadable', crossCheckBlockedReason(range, 'merge'), { audit: { path_crosscheck: crossCheck } })
   }
   if (!ackDecision.ok) {
-    const hint = preMergeAckHint(ackDecision)
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: ackDecision.kind,
-        reason: hint,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
+    return reject(ackDecision.kind, preMergeAckHint(ackDecision), {
+      audit: {
         pre_merge_ack: input.pre_merge_ack ?? null,
         pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
         path_crosscheck: crossCheck,
@@ -277,25 +312,73 @@ export async function requestMergeHandler(
         ...(ackDecision.kind === 'pre_merge_ack_incomplete' &&
           ackDecision.unswept !== undefined && { files_unswept: ackDecision.unswept }),
       },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: null,
-      reject_kind: ackDecision.kind,
-      reason: hint,
-      fabrication_signals: [],
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([hint]),
-    }
+    })
   }
+
+  if (targetBranch === null || gitState.head_sha === null) {
+    return reject('detached_head', 'cannot merge onto a HEAD that is not on a branch with a commit — checkout the target branch first. No dialog was shown.', { target: null, shaBefore: null })
+  }
+  if (input.source_branch === targetBranch) {
+    return reject('same_branch', `cannot merge '${input.source_branch}' into itself. No dialog was shown.`)
+  }
+
+  const drift = readDriftLock(projectRoot)
+  if (drift.status === 'unreadable') return reject('review_unreadable', `${drift.error} Nothing was merged and no dialog was shown.`)
+  if (drift.status === 'armed') {
+    return reject('review_drift', driftRefusal(drift.paths, 'every merge'), { audit: { drift_paths: drift.paths } })
+  }
+
+  const { list: protectedList } = effectiveProtectedList(config)
+  const targetProtected = isProtectedBranch(targetBranch, protectedList)
+  const raw = DevApprovalSchema.safeParse(input.dev_approval)
+  const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check } : {}
+  if (raw.success && allow_unrelated_histories && !rawOverrides.branch) {
+    return reject('unrelated_histories_without_override', '--allow-unrelated-histories is force-like and requires dev_approval.override_protected_branch: { reason }. No dialog was shown.')
+  }
+  if (raw.success && targetProtected && !rawOverrides.branch) {
+    return reject('protected_branch', `target branch '${targetLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to merge. No dialog was shown.`, { protected: true })
+  }
+
+  pinned = resolvePinned(projectRoot, input.source_branch, gitExecutor)
+  const headAt = readHeadPosition(projectRoot, gitExecutor)
+  if (headAt.ref !== branchRef(targetBranch)) {
+    return reject('target_moved', `HEAD is no longer on '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}', the branch the checks read — nothing was merged and no dialog was shown; ask again.`, { protected: targetProtected })
+  }
+  const head = headAt.sha
+  if (pinned === null || head === null) {
+    return reject('source_unreadable', `git could not resolve '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}'${head === null ? ' or HEAD' : ''} to a commit, so what the merge brings cannot be shown — nothing was merged.`, { protected: targetProtected })
+  }
+  const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
+  const scanner = internal.commitScanner ?? scanCommits
+  const before = await scanner(projectRoot, { tips: [pinned], exclude: [head] }, extras, internal.secretsScanTimeoutMs, gitExecutor)
+  if (!before.ok) {
+    return reject('secrets_unreadable', `the secrets scan could not read the commits this merge brings (${before.reason}), so it is refused rather than merged unscanned — the developer merges this by hand in their own terminal`, { protected: targetProtected })
+  }
+  findings = before.findings
+  commitsScanned = before.commits
+  if (raw.success && findings.length > 0 && !rawOverrides.secrets) {
+    return reject('secrets', `${findings.length} secret finding(s) in the commits this merge brings — pass dev_approval.override_secrets_check: { reason } to merge. No dialog was shown.`, {
+      protected: targetProtected,
+      audit: { findings_count: findings.length },
+    })
+  }
+
+  const ack = ackDialogLines(input.pre_merge_ack)
+  const facts = [
+    `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
+    ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+    `Source commit: ${pinned.slice(0, 12)}`,
+    ...(targetProtected ? [protectedBranchLine(targetLabel, 'merging into it')] : []),
+    ...(allow_unrelated_histories ? ['⚠ --allow-unrelated-histories joins two histories with no common commit; it needs your exception.'] : []),
+    ...(findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
+    ...secretFindingLines(projectRoot, 'merge', findings),
+    ...ack.facts,
+  ]
+  const reasons = [
+    ...agentReasonLine(allow_unrelated_histories && !targetProtected ? 'the unrelated histories' : 'the protected branch', targetProtected || allow_unrelated_histories ? rawOverrides.branch : undefined),
+    ...agentReasonLine('the secret findings', findings.length > 0 ? rawOverrides.secrets : undefined),
+    ...ack.note,
+  ]
 
   const gate = await gateRequest({
     toolName: 'rsct_request_merge',
@@ -304,10 +387,7 @@ export async function requestMergeHandler(
     forceDialogReason: 'a merge needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — merge approval',
-      message: [
-        `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
-        ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
-      ].join('\n') + gateDialogFooter(projectRoot, config),
+      message: facts.join('\n') + gateDialogFooter(projectRoot, config) + (reasons.length > 0 ? `\n\n${reasons.join('\n')}` : ''),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -317,173 +397,24 @@ export async function requestMergeHandler(
   })
 
   if (gate.status === 'rejected') {
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: gate.reject_kind,
-        reason: gate.reason,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
-        fabrication_signals: gate.fabrication_signals,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`]),
-    }
+    return reject(gate.reject_kind, gate.reason, {
+      signals: gate.fabrication_signals,
+      audit: { fabrication_signals: gate.fabrication_signals },
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+    })
   }
 
   const approval = gate.approval
   const overrideBranch = approval.override_protected_branch
-
-  if (targetBranch === null || gitState.head_sha === null) {
-    const reason = 'cannot merge onto a detached HEAD — checkout the target branch first'
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: 'detached_head',
-        reason,
-        source_branch: input.source_branch,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: null,
-      channel: gate.channel,
-      reject_kind: 'detached_head',
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: null,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
-  }
-
-  if (input.source_branch === targetBranch) {
-    const reason = `cannot merge '${input.source_branch}' into itself`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: 'same_branch',
-        reason,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: gate.channel,
-      reject_kind: 'same_branch',
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
-  }
-
+  const after = { channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel } }
   if (allow_unrelated_histories && !overrideBranch) {
-    const reason =
-      '--allow-unrelated-histories is force-like and requires dev_approval.override_protected_branch: { reason }'
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: 'unrelated_histories_without_override',
-        reason,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: gate.channel,
-      reject_kind: 'unrelated_histories_without_override',
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+    return reject('unrelated_histories_without_override', '--allow-unrelated-histories is force-like and requires dev_approval.override_protected_branch: { reason }', after)
   }
-
-  const { list: protectedList } = effectiveProtectedList(config)
-  const targetProtected = isProtectedBranch(targetBranch, protectedList)
-
   if (targetProtected && !overrideBranch) {
-    const reason = `target branch '${targetLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to merge`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_merge.rejected',
-        tool: 'rsct_request_merge',
-        reject_kind: 'protected_branch',
-        reason,
-        source_branch: input.source_branch,
-        target_branch: targetBranch,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      source_branch: input.source_branch,
-      target_branch: targetBranch,
-      channel: gate.channel,
-      reject_kind: 'protected_branch',
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      sha_before: gitState.head_sha,
-      sha_after: null,
-      branch_check: { protected: true, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+    return reject('protected_branch', `target branch '${targetLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to merge`, { ...after, protected: true })
+  }
+  if (findings.length > 0 && !approval.override_secrets_check) {
+    return reject('secrets', `${findings.length} secret finding(s) in the commits this merge brings — pass dev_approval.override_secrets_check: { reason } to merge`, { ...after, protected: targetProtected })
   }
 
   if ((targetProtected || allow_unrelated_histories) && overrideBranch) {
@@ -502,13 +433,39 @@ export async function requestMergeHandler(
       config?.audit,
     )
   }
+  if (findings.length > 0 && approval.override_secrets_check) {
+    appendAudit(
+      projectRoot,
+      {
+        event: 'request_merge.override_invoked',
+        tool: 'rsct_request_merge',
+        override_kind: 'secrets_check',
+        override_reason: approval.override_secrets_check.reason,
+        findings_count: findings.length,
+        source_branch: input.source_branch,
+        target_branch: targetBranch,
+        channel: gate.channel,
+      },
+      config?.audit,
+    )
+  }
 
-  const merge = gitMerge(
-    projectRoot,
-    input.source_branch,
-    { no_ff, allow_unrelated_histories },
-    gitExecutor,
-  )
+  const moved = resolvePinned(projectRoot, input.source_branch, gitExecutor)
+  if (moved !== pinned) {
+    return reject('source_moved', `'${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' moved after the dialog (${pinned.slice(0, 12)} → ${moved?.slice(0, 12) ?? 'gone'}), so the merge would not be the one approved — ask again. The approval was not used.`, {
+      ...after,
+      protected: targetProtected,
+    })
+  }
+  if (!sameHeadPosition(headAt, readHeadPosition(projectRoot, gitExecutor))) {
+    return reject('target_moved', `HEAD moved to another branch or commit after the dialog, so the merge would not land where the developer approved — ask again. The approval was not used.`, {
+      ...after,
+      protected: targetProtected,
+    })
+  }
+
+  const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories }
+  const merge = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor)
   if (!merge.ok) {
     const reason = merge.error ?? merge.stderr ?? 'git merge failed'
     const audit = appendAudit(
@@ -526,6 +483,7 @@ export async function requestMergeHandler(
     return {
       status: 'mutation_failed',
       source_branch: input.source_branch,
+      source_sha: pinned,
       target_branch: targetBranch,
       channel: gate.channel,
       reject_kind: null,
@@ -533,7 +491,8 @@ export async function requestMergeHandler(
       fabrication_signals: gate.fabrication_signals,
       sha_before: merge.sha_before,
       sha_after: null,
-      branch_check: { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories },
+      branch_check: branchCheck,
+      secrets_check: secretsCheck(findings.length > 0),
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -542,12 +501,33 @@ export async function requestMergeHandler(
   }
 
   const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
+  const hints: string[] = [
+    `Merged '${input.source_branch}' into '${targetLabel}' (${merge.sha_after ?? '<unknown sha>'}).`,
+  ]
+  const landed = merge.sha_after ?? 'HEAD'
+  const rescan = await rescanLanded({
+    projectRoot,
+    what: 'merge',
+    sha: landed,
+    range: { tips: [landed], exclude: [head, pinned] },
+    approved: findings,
+    extras,
+    timeoutMs: internal.secretsScanTimeoutMs,
+    executor: gitExecutor,
+    scanner,
+    now,
+  })
+  const afterMerge = rescan.findings
+  if (rescan.hint !== null) hints.push(rescan.hint)
+  if (rescan.audit !== null) appendAudit(projectRoot, { event: `request_merge.${rescan.audit.event}`, tool: 'rsct_request_merge', ...rescan.audit.fields }, config?.audit)
+
   const audit = appendAudit(
     projectRoot,
     {
       event: 'request_merge.merged',
       tool: 'rsct_request_merge',
       source_branch: input.source_branch,
+      source_sha: pinned,
       target_branch: targetBranch,
       channel: gate.channel,
       sha_before: merge.sha_before,
@@ -556,14 +536,13 @@ export async function requestMergeHandler(
       allow_unrelated_histories,
       fabrication_signals: gate.fabrication_signals,
       path_crosscheck: crossCheck,
+      commits_scanned: commitsScanned,
+      secret_findings: findings.length,
       ...(range.status === 'ok' && { carried_paths: range.paths.length }),
     },
     config?.audit,
   )
 
-  const hints: string[] = [
-    `Merged '${input.source_branch}' into '${targetLabel}' (${merge.sha_after ?? '<unknown sha>'}).`,
-  ]
   if (unreadableIsInherent) {
     hints.push(
       '⚠ pre_merge_ack coverage check SKIPPED: unrelated histories have no merge base, so the ' +
@@ -614,6 +593,7 @@ export async function requestMergeHandler(
   return {
     status: 'merged',
     source_branch: input.source_branch,
+    source_sha: pinned,
     target_branch: targetBranch,
     channel: gate.channel,
     reject_kind: null,
@@ -621,7 +601,8 @@ export async function requestMergeHandler(
     fabrication_signals: gate.fabrication_signals,
     sha_before: merge.sha_before,
     sha_after: merge.sha_after,
-    branch_check: { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories },
+    branch_check: branchCheck,
+    secrets_check: secretsCheck(findings.length > 0, afterMerge),
     bootstrap_marker: bootstrap,
     ...afields,
     anti_replay_persisted: record.ok,
@@ -629,4 +610,3 @@ export async function requestMergeHandler(
     hints: withAdvisories(hints),
   }
 }
-

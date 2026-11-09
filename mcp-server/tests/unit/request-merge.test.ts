@@ -63,7 +63,10 @@ function countingPrompt(): {
   }
 }
 
+let headBranch: string | null = null
+
 function gitState(branch: string | null): GitState {
+  headBranch = branch
   return {
     available: branch !== null,
     branch,
@@ -72,10 +75,25 @@ function gitState(branch: string | null): GitState {
   }
 }
 
+const PINNED = 'c'.repeat(40)
+
+function mergeKey(flags: string, target = 'feat/integration'): string {
+  return `merge ${flags ? `${flags} ` : ''}-m Merge branch 'feat/foo' into ${target} -- ${PINNED}`
+}
+
+function standardRead(args: string[]): GitExecResult | null {
+  if (args[0] === 'rev-parse' && args[1] === '--verify' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${PINNED}\n`, stderr: '', exitCode: 0 }
+  if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+  if (args.join(' ') === 'symbolic-ref -q HEAD') return headBranch === null ? { ok: false, stdout: '', stderr: '', exitCode: 1 } : { ok: true, stdout: `refs/heads/${headBranch}\n`, stderr: '', exitCode: 0 }
+  return null
+}
+
 function gitExec(spec: Record<string, GitExecResult> = {}, fallback?: GitExecResult): GitExecutor {
   return (_root, args) => {
     const key = args.join(' ')
     if (key in spec) return spec[key]!
+    const standard = standardRead(args)
+    if (standard) return standard
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   }
@@ -113,7 +131,7 @@ describe('rsct_request_merge — the dialog is required', () => {
     const merges: string[] = []
     const exec = gitExec({
       'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-      'merge --no-ff -- feat/foo': MERGE_OK,
+      [mergeKey('--no-ff')]: MERGE_OK,
     }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 })
     const out = (await requestMergeHandler(
       { project_root: tmpRoot, source_branch: 'feat/foo', dev_approval: approval(), pre_merge_ack: ack() },
@@ -142,7 +160,7 @@ describe('rsct_request_merge — happy path', () => {
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff -- feat/foo': MERGE_OK,
+        [mergeKey('--no-ff')]: MERGE_OK,
       }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -171,7 +189,7 @@ describe('rsct_request_merge — happy path', () => {
       gitStateOverride: gitState('feat/cap33-int'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff -- feat/foo': MERGE_OK,
+        [mergeKey('--no-ff')]: MERGE_OK,
       }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -220,14 +238,14 @@ describe('rsct_request_merge — happy path', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
-          return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+          return standardRead(args) ?? { ok: true, stdout: '', stderr: '', exitCode: 0 }
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
     )) as RequestMergeOutput
     expect(out.status).toBe('merged')
-    expect(mergeArgs).toBe('merge -- feat/foo')
+    expect(mergeArgs).toBe(mergeKey(''))
     expect(mergeArgs).not.toContain('--no-ff')
   })
 })
@@ -382,7 +400,7 @@ describe('rsct_request_merge — extra-strict refusals', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: (_root, args) => {
           if (args[0] === 'merge') mergeArgs = args.join(' ')
-          return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+          return standardRead(args) ?? { ok: true, stdout: '', stderr: '', exitCode: 0 }
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -428,7 +446,7 @@ describe('rsct_request_merge — failure surfaces', () => {
       gitStateOverride: gitState('feat/integration'),
       gitExecutor: gitExec({
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff -- feat/foo': conflict,
+        [mergeKey('--no-ff')]: conflict,
       }),
       promptFn: alwaysYes(),
       now: FIXED_NOW,
@@ -573,7 +591,7 @@ describe('rsct_request_merge — CAP-55 post-merge cleanup hint', () => {
     gitExecutor: gitExec(
       {
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff -- feat/foo': MERGE_OK,
+        [mergeKey('--no-ff')]: MERGE_OK,
       },
       { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
     ),
@@ -789,7 +807,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-          'merge --no-ff -- feat/foo': MERGE_OK,
+          [mergeKey('--no-ff')]: MERGE_OK,
         }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -840,7 +858,7 @@ describe('rsct_request_merge — install-drift advisory (#25)', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-          'merge --no-ff -- feat/foo': MERGE_OK,
+          [mergeKey('--no-ff')]: MERGE_OK,
         }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
         promptFn: async (opts: DialogOptions) => {
           seen = opts.message
@@ -876,7 +894,7 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
     gitExec(
       {
         'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-        'merge --no-ff -- feat/foo': MERGE_OK,
+        [mergeKey('--no-ff')]: MERGE_OK,
       },
       { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 },
     )
@@ -1003,7 +1021,7 @@ describe('rsct_request_merge — #62 carried-path coverage cross-check', () => {
         gitStateOverride: gitState('feat/integration'),
         gitExecutor: gitExec({
           'rev-parse --short HEAD': { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
-          'merge --no-ff --allow-unrelated-histories -- feat/foo': MERGE_OK,
+          [mergeKey('--no-ff --allow-unrelated-histories')]: MERGE_OK,
         }, { ok: true, stdout: 'bbbb222\n', stderr: '', exitCode: 0 }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,

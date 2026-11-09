@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot } from '../lib/project-root.js'
@@ -23,6 +23,7 @@ import {
 } from '../lib/ceremony-gate.js'
 import type { GateRejectKind } from '../lib/request-gate.js'
 import type { DialogOptions, DialogResult } from '../lib/os-dialog.js'
+import { DevApprovalSchema, recordConsumedApproval } from '../lib/dev-approval.js'
 import { gateRunAloneChoice, readRunAlone, runAloneHome, startWouldBeRefused } from '../lib/run-alone.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
@@ -77,7 +78,7 @@ export const phaseCodeStartInputSchema = z
       .unknown()
       .optional()
       .describe(
-        'Required only when one of the override_* flags, or run_alone, is true. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool.',
+        'Required only when one of the override_* flags, or run_alone, is true; action_scope starts with code_start:. Validated via lib/dev-approval; the OS dialog is forced and trust_allowed_for is ignored, because a bypass of V, the classification or plan tracking, and running alone, are per-call decisions, not a pre-authorised tool.',
       ),
   })
   .strict()
@@ -171,6 +172,8 @@ export type PhaseCodeStartOutput =
       classify_gate: ClassifyGate
       plan_tracking_gate: PlanTrackingGate
       bootstrap_marker: BootstrapMarker
+      anti_replay_persisted?: boolean
+      anti_replay_error?: string | null
     })
   | PhaseCodeStartGateRejectedOutput
 
@@ -348,6 +351,58 @@ export function evaluateClassifyGate(args: {
   }
 }
 
+function verificationState(gate: VerificationGate): string {
+  if (gate.status === 'bypassed_tier') return `tier '${gate.spec_tier}' skips V anyway — not needed`
+  if (gate.status === 'satisfied') return `V completed at ${gate.v_completed_at} — not needed`
+  if (gate.status === 'rejected_incomplete') return 'V for this spec was started and not completed'
+  return gate.v_spec_ref !== null ? 'no V for this spec (the last V was for another spec)' : 'no V started for this spec'
+}
+
+function classifyState(gate: ClassifyGate): string {
+  if (gate.status === 'no_record') return 'no classification on record — not needed'
+  if (gate.status === 'satisfied') return `asked '${gate.spec_tier}' is not below the recorded '${gate.tier_max_recorded}' — not needed`
+  return `recorded tier_max '${gate.tier_max_recorded}' (classified at ${gate.classified_at}); asked '${gate.spec_tier}'`
+}
+
+function planTrackingState(gate: PlanTrackingGate): string {
+  switch (gate.status) {
+    case 'bypassed_tier':
+      return `tier '${gate.spec_tier}' skips plan tracking anyway — not needed`
+    case 'satisfied':
+      return 'the plan files are present — not needed'
+    case 'rejected_slug_indeterminate':
+      return 'no plan_slug given'
+    case 'rejected_invalid_slug':
+      return 'plan_slug or spec_slug is not a valid slug'
+    case 'rejected_plan_missing':
+      return 'the plan file is missing'
+    case 'rejected_progress_missing':
+      return 'the progress file is missing'
+    case 'rejected_phase_spec_missing':
+      return 'the phase spec file is missing'
+    default:
+      return gate.status
+  }
+}
+
+function bypassStates(projectRoot: string, input: PhaseCodeStartInput): Partial<Record<CeremonyBypass, string>> {
+  const states: Partial<Record<CeremonyBypass, string>> = {}
+  if (input.override_verification_skip) {
+    states.verification_skip = verificationState(
+      evaluateVerificationGate({ projectRoot, specRef: input.spec_ref, specTier: input.spec_tier, overrideVerificationSkip: false }),
+    )
+  }
+  if (input.override_classify_downgrade) {
+    states.classify_downgrade = classifyState(evaluateClassifyGate({ projectRoot, specTier: input.spec_tier, overrideClassifyDowngrade: false }))
+  }
+  if (input.override_plan_tracking) {
+    states.plan_tracking = planTrackingState(
+      evaluatePlanTrackingGate({ projectRoot, planSlug: input.plan_slug, specSlug: input.spec_slug, specTier: input.spec_tier, overridePlanTracking: false }),
+    )
+  }
+  return states
+}
+
 const SLUG_RE = /^[A-Za-z0-9._-]+$/
 
 const PLAN_TRACKING_REJECTS: ReadonlySet<PlanTrackingGateStatus> = new Set([
@@ -496,6 +551,7 @@ export function evaluatePlanTrackingGate(args: {
 export interface PhaseCodeStartInternal {
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
+  approvalRecorder?: typeof recordConsumedApproval
 }
 
 export async function phaseCodeStartHandler(
@@ -570,6 +626,7 @@ export async function phaseCodeStartHandler(
   if (input.override_classify_downgrade) requestedBypasses.push('classify_downgrade')
   if (input.override_plan_tracking) requestedBypasses.push('plan_tracking')
 
+  const rawApproval = DevApprovalSchema.safeParse(input.dev_approval)
   const bypassGate = await gateCeremonyBypass({
     projectRoot: resolution.root,
     config: resolution.config,
@@ -577,6 +634,8 @@ export async function phaseCodeStartHandler(
     specRef: input.spec_ref,
     specTier: input.spec_tier,
     bypasses: requestedBypasses,
+    states: bypassStates(resolution.root, input),
+    agentReason: rawApproval.success ? rawApproval.data.reason : null,
     devApproval: input.dev_approval,
     ...(internal.promptFn !== undefined && { promptFn: internal.promptFn }),
     ...(internal.now !== undefined && { now: internal.now }),
@@ -924,5 +983,25 @@ export async function phaseCodeStartHandler(
   if (bootstrap.status !== 'fresh' && bootstrap.hint) {
     baseHints.push(bootstrap.hint)
   }
-  return { ...result, ...extras, hints: baseHints }
+  const dialogApproved = bypassGate.status === 'approved' || runAlonePatch !== null
+  if (result.status !== 'started' || !dialogApproved || !rawApproval.success) {
+    return { ...result, ...extras, hints: baseHints }
+  }
+  const record = (internal.approvalRecorder ?? recordConsumedApproval)(rawApproval.data, {
+    projectRoot: resolution.root,
+    ...(internal.now !== undefined && { now: internal.now }),
+    auditConfig: resolution.config?.audit,
+  })
+  if (!record.ok) {
+    baseHints.push(
+      `⚠ the code phase started, but I could not record this approval as used: ${record.error}. The same dev_approval (action_scope='${rawApproval.data.action_scope}', timestamp='${rawApproval.data.timestamp}') could be accepted again by mistake for a short time — use a fresh approval next time, or repair .rsct/approvals-seen.json.`,
+    )
+  }
+  return {
+    ...result,
+    ...extras,
+    anti_replay_persisted: record.ok,
+    anti_replay_error: record.ok ? null : record.error,
+    hints: baseHints,
+  }
 }

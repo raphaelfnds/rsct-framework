@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from './git-launch.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
@@ -2232,7 +2232,7 @@ function denyHooksOff(): TerminalVerdict {
 
 export function defaultAliasResolver(name: string, gitDir: string | null, cwd: string | undefined, timeoutMs: number): AliasLookup {
   const args = [...(gitDir ? ['-C', gitDir] : []), 'config', '--get', `alias.${name}`]
-  const r = spawnSync('git', args, {
+  const r = spawnGitSync(args, {
     cwd,
     encoding: 'utf8',
     timeout: Math.max(1, Math.floor(timeoutMs)),

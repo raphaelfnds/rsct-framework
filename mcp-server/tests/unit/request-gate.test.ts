@@ -164,7 +164,8 @@ describe('gateRequest — dialog stage (no fabrication signals)', () => {
     expect(r.status).toBe('rejected')
     if (r.status === 'rejected') {
       expect(r.reject_kind).toBe('no_channel')
-      expect(r.reason).toContain('shorten the text')
+      expect(r.reason).toContain('shorten what the agent wrote')
+      expect(r.reason).toContain('the framework lines cannot be removed')
     }
   })
 

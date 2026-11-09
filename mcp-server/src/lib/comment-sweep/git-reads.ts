@@ -113,8 +113,9 @@ export function readTouchedPaths(repo: SweepRepo): TouchedPath[] | null {
   return [...byPath.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 }
 
-export function readStagedEntries(repo: SweepRepo): StagedEntry[] | null {
-  const entries = readRaw(repo, ['--cached', ...(repo.headCommit ? [] : [emptyTree(repo) ?? ''])])
+export function readStagedEntries(repo: SweepRepo, tree: string | null = null): StagedEntry[] | null {
+  const base = repo.headCommit ?? emptyTree(repo) ?? ''
+  const entries = readRaw(repo, tree !== null ? [base, tree] : ['--cached', ...(repo.headCommit ? [] : [base])])
   if (entries === null) return null
   return entries.filter(hasContent).map((e) => ({
     path: e.path,
@@ -183,8 +184,8 @@ function verifyObject(repo: SweepRepo, spec: string): string | null {
   return id && id.length > 0 ? id : null
 }
 
-export function readStagedBlobId(repo: SweepRepo, path: string): string | null {
-  return verifyObject(repo, `:0:${path}`)
+export function readStagedBlobId(repo: SweepRepo, path: string, tree: string | null = null): string | null {
+  return verifyObject(repo, tree !== null ? `${tree}:${path}` : `:0:${path}`)
 }
 
 export function readCommitBlobId(repo: SweepRepo, commit: string, path: string): string | null {

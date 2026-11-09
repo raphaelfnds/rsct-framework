@@ -1,6 +1,6 @@
 {
   "name": "rsct-mcp",
-  "version": "2.23.2",
+  "version": "2.24.0",
   "description": "MCP server for the RSCT framework — institutional consciousness layer (recall + phase machine + personas) for Claude Code",
   "type": "module",
   "bin": {
@@ -45,7 +45,7 @@
     "typescript": "^5.6.0",
     "vitest": "^4.1.12",
     "web-tree-sitter": "0.25.10",
-    "zod": "^3.23.0"
+    "zod": "^4.6.7"
   },
   "overrides": {
     "esbuild": "0.28.1"

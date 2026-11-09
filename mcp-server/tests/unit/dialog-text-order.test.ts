@@ -86,8 +86,19 @@ function expectQuestionKeepsIt(message: string): void {
 }
 
 const OK: GitExecResult = { ok: true, stdout: '', stderr: '', exitCode: 0 }
-const exec: GitExecutor = (_root, args) => (args[0] === 'remote' ? { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 } : OK)
-const state = (branch: string): GitState => ({ available: true, branch, head_sha: 'aaaa111', is_clean: true })
+const exec: GitExecutor = (_root, args) => {
+  if (args.join(' ') === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
+  if (args[0] === 'remote' && args[1] === 'get-url') return { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 }
+  if (args[0] === 'rev-parse' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${'c'.repeat(40)}\n`, stderr: '', exitCode: 0 }
+  if (args[0] === 'config') return { ok: false, stdout: '', stderr: '', exitCode: 1 }
+  if (args[0] === 'symbolic-ref') return { ok: true, stdout: `refs/heads/${headBranch}\n`, stderr: '', exitCode: 0 }
+  return OK
+}
+let headBranch = ''
+const state = (branch: string): GitState => {
+  headBranch = branch
+  return { available: true, branch, head_sha: 'aaaa111', is_clean: true }
+}
 
 describe('dialog text helpers', () => {
   it('specLabel turns every line break and tab into a space and drops control and format characters', () => {
@@ -163,7 +174,8 @@ describe('every approval dialog shows the framework lines before what the agent 
     )
     expect(seen.messages).toHaveLength(1)
     expectFlattenedLast(seen.messages[0]!)
-    expect(seen.messages[0]!.split('\n').at(-1)!.startsWith("Spec: 'feat-a ")).toBe(true)
+    expect(seen.messages[0]!.split('\n').at(-2)!.startsWith("Spec: 'feat-a ")).toBe(true)
+    expect(seen.messages[0]!.split('\n').at(-1)!.startsWith("Agent's reason: ")).toBe(true)
   })
 
   it('code complete: the dialog gains the repository line and the spec comes last', async () => {
@@ -324,7 +336,7 @@ describe('every approval dialog shows the framework lines before what the agent 
     expect(seen.messages).toHaveLength(1)
     const lines = seen.messages[0]!.split('\n')
     expect(lines[0]).toContain(`${'x'.repeat(120)}:main`)
-    expect(lines[1]).toBe("Destination branch: 'main'")
+    expect(lines[1]).toBe("Destination: 'refs/heads/main'")
     expect(seen.messages[0]!.includes(LS)).toBe(false)
     expect(seen.messages[0]).toContain('re lease')
   })

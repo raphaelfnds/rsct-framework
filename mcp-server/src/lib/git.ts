@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+import { runGitBuffer, runGitText, spawnGit } from './git-launch.js'
 
 export interface GitState {
   available: boolean
@@ -16,11 +17,9 @@ export function readGitState(projectRoot: string): GitState {
   }
 
   const symbolic = readHeadRef(projectRoot) ?? ''
-  const branch = symbolic.startsWith(BRANCH_REF_PREFIX)
-    ? symbolic.slice(BRANCH_REF_PREFIX.length)
-    : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const branch = symbolic.startsWith(BRANCH_REF_PREFIX) ? symbolic.slice(BRANCH_REF_PREFIX.length) : null
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
-  const status = safeGit(projectRoot, ['-c', 'core.fsmonitor=', 'status', '--porcelain'])
+  const status = safeGit(projectRoot, ['status', '--porcelain'])
 
   return {
     available: true,
@@ -33,7 +32,7 @@ export function readGitState(projectRoot: string): GitState {
 const BRANCH_REF_PREFIX = 'refs/heads/'
 
 export function branchRef(branch: string | null): string | null {
-  return branch === null || branch === 'HEAD' ? null : `${BRANCH_REF_PREFIX}${branch}`
+  return branch === null ? null : `${BRANCH_REF_PREFIX}${branch}`
 }
 
 export function readHeadRef(projectRoot: string): string | null {
@@ -42,8 +41,9 @@ export function readHeadRef(projectRoot: string): string | null {
 }
 
 const GATE_READ_CONFIG: readonly string[] = [
-  '-c', 'core.fsmonitor=',
   '-c', 'diff.relative=false',
+  '-c', 'diff.interHunkContext=0',
+  '-c', 'diff.suppressBlankEmpty=false',
 ]
 
 const CONTENT_DIFF_FLAGS: readonly string[] = [
@@ -61,6 +61,36 @@ const NAME_DIFF_FLAGS: readonly string[] = ['--name-only', '-z', '--no-renames',
 
 export const STAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', '--cached', ...CONTENT_DIFF_FLAGS]
 export const UNSTAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS]
+export const COMMIT_PATCH_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff-tree', '--stdin', '-p', '--cc', '--root', '-r', ...CONTENT_DIFF_FLAGS]
+
+export interface CommitRange {
+  tips: readonly string[]
+  exclude: readonly string[]
+  excludeRemote?: string
+}
+
+type CommitListResult = { ok: true; commits: string[] } | { ok: false; reason: string }
+
+const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export function listCommits(projectRoot: string, range: CommitRange, executor: GitExecutor = defaultGitExecutor): CommitListResult {
+  const revs = [...range.tips, ...range.exclude]
+  const unsafe = revs.find((rev) => !isSafeRevisionToken(rev))
+  if (unsafe !== undefined) return { ok: false, reason: `not a revision RSCT can pass to git: ${JSON.stringify(unsafe)}` }
+  if (range.excludeRemote !== undefined && !REMOTE_NAME.test(range.excludeRemote)) {
+    return { ok: false, reason: `not a remote name RSCT can pass to git: ${JSON.stringify(range.excludeRemote)}` }
+  }
+  if (range.tips.length === 0) return { ok: true, commits: [] }
+  const not = [...range.exclude, ...(range.excludeRemote !== undefined ? [`--remotes=${range.excludeRemote}`] : [])]
+  const out = executor(projectRoot, ['rev-list', ...range.tips, ...(not.length > 0 ? ['--not', ...not] : [])])
+  if (!out.ok) {
+    const said = firstLine(out.stderr)
+    return { ok: false, reason: `git rev-list could not list the commits${said.length > 0 ? `: "${said}"` : ''}` }
+  }
+  const commits = out.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
+  if (!commits.every((c) => OBJECT_ID.test(c))) return { ok: false, reason: 'git rev-list printed something that is not a commit id' }
+  return { ok: true, commits }
+}
 
 export type GitStreamResult = { ok: true } | { ok: false; reason: string }
 
@@ -71,6 +101,7 @@ export function streamGitLines(
   args: readonly string[],
   onLine: (line: string) => void,
   timeoutMs: number = GIT_SCAN_TIMEOUT_MS,
+  input?: string,
 ): Promise<GitStreamResult> {
   return new Promise((resolvePromise) => {
     const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
@@ -104,10 +135,14 @@ export function streamGitLines(
     }
     let child: ChildProcess
     try {
-      child = spawn('git', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      child = spawnGit(args, { cwd, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true })
     } catch (error) {
       finish({ ok: false, reason: `git could not start: ${error instanceof Error ? error.message : String(error)}` })
       return
+    }
+    if (input !== undefined) {
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(input)
     }
     let stopReason: string | null = null
     const stopWith = (reason: string): void => {
@@ -177,9 +212,8 @@ interface GitRead {
 
 function gitReadC(cwd: string, args: readonly string[], input?: string): GitRead {
   try {
-    const stdout = execFileSync('git', [...args], {
+    const stdout = runGitText(args, {
       cwd,
-      encoding: 'utf8',
       input: input ?? '',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: GIT_READ_TIMEOUT_MS,
@@ -487,9 +521,8 @@ function recordGitFailure(cwd: string, args: readonly string[], error: unknown):
 
 function safeGitRaw(cwd: string, args: string[]): string | null {
   try {
-    return execFileSync('git', args, {
+    return runGitText(args, {
       cwd,
-      encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 16 * 1024 * 1024,
       timeout: GIT_READ_TIMEOUT_MS,
@@ -507,7 +540,7 @@ export function safeGitBuffer(
   maxBuffer: number = 64 * 1024 * 1024,
 ): Buffer | null {
   try {
-    return execFileSync('git', args, {
+    return runGitBuffer(args, {
       cwd,
       input: input ?? '',
       ...(env !== undefined && { env: { ...process.env, ...env } }),
@@ -533,9 +566,8 @@ export type GitExecutor = (projectRoot: string, args: string[]) => GitExecResult
 
 export const defaultGitExecutor: GitExecutor = (cwd, args) => {
   try {
-    const stdout = execFileSync('git', args, {
+    const stdout = runGitText(args, {
       cwd,
-      encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 16 * 1024 * 1024,
     })
@@ -653,15 +685,30 @@ export interface GitPushResult {
   stdout?: string
 }
 
+interface GitPushOptions {
+  submodules: 'check' | 'no'
+  pushOptions: readonly string[]
+}
+
 export function gitPush(
   projectRoot: string,
   remote: string,
   refspec: string,
-  executor: GitExecutor = defaultGitExecutor,
+  executor: GitExecutor,
+  options: GitPushOptions,
 ): GitPushResult {
   const bad = unsafeOperand({ remote, refspec })
   if (bad) return { ok: false, error: bad }
-  const exec = executor(projectRoot, ['push', '--', remote, refspec])
+  const exec = executor(projectRoot, [
+    '-c', 'push.pushOption=',
+    'push',
+    '--no-follow-tags',
+    `--recurse-submodules=${options.submodules}`,
+    ...options.pushOptions.map((o) => `--push-option=${o}`),
+    '--',
+    remote,
+    refspec,
+  ])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()
@@ -675,6 +722,7 @@ export function gitPush(
 export interface GitMergeOptions {
   no_ff: boolean
   allow_unrelated_histories: boolean
+  message?: string
 }
 
 export interface GitMergeResult {
@@ -697,6 +745,7 @@ export function gitMerge(
   const args = ['merge']
   if (options.no_ff) args.push('--no-ff')
   if (options.allow_unrelated_histories) args.push('--allow-unrelated-histories')
+  if (options.message !== undefined) args.push('-m', options.message)
   args.push('--', sourceBranch)
 
   const sha_before = getHeadSha(projectRoot, executor)
