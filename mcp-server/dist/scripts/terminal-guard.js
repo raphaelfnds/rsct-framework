@@ -568,6 +568,16 @@ function readDatabaseSwitches(start, reader = defaultPackageReader) {
   if (!parsed.ok) return ON;
   return { database: parsed.json.database_guard !== false, test: parsed.json.database_test_guard !== false };
 }
+var GIT_CHILD_CONFIG = ["-c", "core.fsmonitor="];
+function gitChildArgs(args) {
+  return [...GIT_CHILD_CONFIG, ...args];
+}
+function gitChildEnv(env = process.env) {
+  return { ...env, GIT_NO_REPLACE_OBJECTS: "1" };
+}
+function spawnGitSync(args, options) {
+  return spawnSync("git", gitChildArgs(args), { ...options, env: gitChildEnv(options.env) });
+}
 
 // src/lib/database-guard.ts
 var OK = { ok: true };
@@ -3189,7 +3199,7 @@ function denyHooksOff() {
 }
 function defaultAliasResolver(name, gitDir, cwd, timeoutMs) {
   const args = [...gitDir ? ["-C", gitDir] : [], "config", "--get", `alias.${name}`];
-  const r = spawnSync("git", args, {
+  const r = spawnGitSync(args, {
     cwd,
     encoding: "utf8",
     timeout: Math.max(1, Math.floor(timeoutMs)),

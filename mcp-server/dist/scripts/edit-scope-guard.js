@@ -102,6 +102,16 @@ function matchesAnyGlob(path, globs, projectRoot) {
   }
   return { matched: false };
 }
+var GIT_CHILD_CONFIG = ["-c", "core.fsmonitor="];
+function gitChildArgs(args) {
+  return [...GIT_CHILD_CONFIG, ...args];
+}
+function gitChildEnv(env = process.env) {
+  return { ...env, GIT_NO_REPLACE_OBJECTS: "1" };
+}
+function runGitText(args, options) {
+  return execFileSync("git", gitChildArgs(args), { ...options, encoding: "utf8", env: gitChildEnv(options.env) });
+}
 function readWorktreeInfo(projectRoot) {
   if (safeGit(projectRoot, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
     return { in_git_repo: false, is_worktree: false, toplevel: null, name: null };
@@ -130,9 +140,8 @@ var GIT_READ_TIMEOUT_MS = 3e4;
 new AsyncLocalStorage();
 function safeGitRaw(cwd2, args) {
   try {
-    return execFileSync("git", args, {
+    return runGitText(args, {
       cwd: cwd2,
-      encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 16 * 1024 * 1024,
       timeout: GIT_READ_TIMEOUT_MS
