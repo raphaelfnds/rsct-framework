@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'

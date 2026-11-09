@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 
 /**
  * The shared finding vocabulary (#19), plus the shared findings gate (#40).

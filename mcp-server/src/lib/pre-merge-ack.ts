@@ -1,5 +1,5 @@
 
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import type { RangePathsResult } from './git.js'
 
 export const preMergeAckSchema = z

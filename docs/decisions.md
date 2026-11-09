@@ -2994,6 +2994,35 @@ are pushed on their own. A submodule commit published only through a tag refuses
 config checks submodules. A merge through RSCT records the message git writes by default for a
 branch (without `merge.log` or `merge.suppressDest`).
 
+### ADR-043 — RSCT's schemas import `zod/v3`; the package is zod 4 (2.24.0)
+**Status**: active.
+**Tags**: dependencies, schemas, security
+
+**Context**: MEASURED on `release/2.24.0` @ `9f8f392`:
+- GHSA-mrhx-c7xc-m3w5 covers zod below 4.6.6, with no 3.x fix. The MCP SDK imports `zod/v4`, and
+  that code (`handleArrayResult`, without the 4.6.6 `capSize` check) is in `dist/index.js` of every
+  published 2.x release. The hook bundles carry no zod v4 code.
+- zod 4.6.7 still ships the v3 API as `zod/v3`. Its ESM code differs from 3.25.76's only in
+  `ZodError.format()`/`flatten()`, the emoji regex and the `__proto__` skip in intersections, none
+  of which `src` calls.
+- With zod 4.6.7 and `zod/v3` imports, the old and new servers gave the same tool list (40 tools)
+  and byte-identical answers to 13 valid and invalid calls over stdio, zod's error text included.
+  The one difference: arguments with an own `constructor` key, refused by the SDK before and by
+  RSCT's strict schemas now; an own `__proto__` key behaves the same in both.
+
+**Decision**: the dependency is zod 4.6.7 or newer; every `src` file imports `zod/v3`.
+`zod-v3-imports.test.ts` refuses any other zod specifier, since `tsc` accepts a bare `zod` import
+in these files without error and it would switch them to v4 behaviour.
+
+**Direction**: neutral for the gates (same schemas, same refusals); stricter for the bundle (the
+patched v4 core).
+
+**What is given up, by name**: moving the schemas to the v4 API is left for a later release; the
+`zod/v3` path stays only while zod ships it.
+
+**Consequences**: a zod release that drops `zod/v3` fails the typecheck and the build, not at run
+time.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic

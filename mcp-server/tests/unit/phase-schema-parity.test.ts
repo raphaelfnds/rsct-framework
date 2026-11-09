@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { ZodObject, ZodRawShape } from 'zod'
+import type { ZodObject, ZodRawShape } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import {
