@@ -333,6 +333,7 @@ export interface CompletePhaseInternal {
   now?: Date
   auditWriter?: typeof appendAuditEntry
   approvalRecorder?: typeof recordConsumedApproval
+  dialogFacts?: string
   dialogDetail?: string
   forceDialog?: boolean
   forceDialogReason?: string
@@ -461,6 +462,7 @@ export async function gatePhaseComplete(
       title: `RSCT — ${input.phase} complete`,
       message:
         `Complete the ${input.phase} phase?` +
+        (internal.dialogFacts ? `\n\n${internal.dialogFacts}` : '') +
         gateDialogFooter(input.projectRoot) +
         (internal.dialogDetail ? `\n\n${internal.dialogDetail}` : '') +
         `\n\nSpec: '${specLabel(input.specRef, DIALOG_UNCUT)}'`,

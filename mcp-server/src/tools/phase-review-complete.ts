@@ -67,6 +67,7 @@ import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 import { approvePendingPhases, closeRunAlone } from '../lib/run-alone.js'
 import { gateDialogFooter } from '../lib/gate-dialog.js'
 import { DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
+import { findingActionLines } from '../lib/gate-exceptions.js'
 import { readClassifyEvidence } from '../lib/ceremony-gate.js'
 
 const findingActionSchema = z
@@ -717,18 +718,35 @@ export async function phaseReviewCompleteHandler(
   }
   if (mustForce) detailParts.push(specLabel(reportLine, DIALOG_UNCUT))
 
+  const titles = new Map((baseline ?? []).map((f) => [f.id, f.title]))
+  const listed = findingActionLines(projectRoot, 'review', input.findings_actions, (id) => titles.get(id))
+  const driftSecrets = driftBefore?.secrets ?? []
+  const factParts = [
+    ...listed.facts,
+    ...(driftSecrets.length > 0
+      ? [
+          `⚠ This REVIEW releases a review_drift lock that a commit, merge or rebase armed with ${driftSecrets.length} secret finding(s) no dialog showed (file:line — rule; values are never shown):`,
+          dialogList(driftSecrets, 10, DIALOG_UNCUT),
+        ]
+      : []),
+  ]
+  detailParts.push(...listed.agent)
+  const forceReason = mustForce
+    ? commentForce
+      ? 'this REVIEW removed comments, allows unverified files or changes allowlisted comments'
+      : 'this REVIEW keeps dead code at your request or exempts exports through public_api'
+    : driftSecrets.length > 0
+      ? 'this REVIEW releases a review_drift lock armed by secret findings no dialog showed'
+      : null
+
   const result = await gatePhaseComplete(
     { projectRoot, phase: 'review', specRef: input.spec_ref, devApproval: input.dev_approval },
     config,
     {
       ...internal,
+      ...(factParts.length > 0 && { dialogFacts: factParts.join('\n') }),
       dialogDetail: detailParts.filter(Boolean).join('\n'),
-      ...(mustForce && {
-        forceDialog: true,
-        forceDialogReason: commentForce
-          ? 'this REVIEW removed comments, allows unverified files or changes allowlisted comments'
-          : 'this REVIEW keeps dead code at your request or exempts exports through public_api',
-      }),
+      ...(forceReason !== null && { forceDialog: true, forceDialogReason: forceReason }),
     },
   )
 
