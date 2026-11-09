@@ -116,6 +116,20 @@ describe.skipIf(!GIT)('RSCT git calls never run the repository fsmonitor command
   })
 })
 
+describe.skipIf(!GIT)('the launcher keeps what each read gives git and gets back', () => {
+  it('a buffer read that sends text on stdin returns bytes', () => {
+    initRepo()
+    const out = safeGitBuffer(root, ['hash-object', '--stdin'], 'hello\n')
+    expect(Buffer.isBuffer(out)).toBe(true)
+    expect(out?.toString('utf8').trim()).toBe(git('rev-parse', 'HEAD:readme.txt').trim())
+  })
+
+  it('a text read that sends text on stdin returns text', () => {
+    initRepo()
+    expect(baseTreeOf(root, null)).toMatch(/^[0-9a-f]{40,64}$/)
+  })
+})
+
 describe.skipIf(!GIT)('RSCT git calls read the real objects, never a git replace', () => {
   it('the commit scan sees a staged secret whose blob was replaced by a clean one', async () => {
     initRepo()
