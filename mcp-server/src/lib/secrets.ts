@@ -47,6 +47,7 @@ export interface SecretFinding {
   reason: SecretFindingReason
   pattern_id?: string
   excerpt: string
+  commit?: string
 }
 
 export interface ExtraPattern {
@@ -80,6 +81,8 @@ export function compileExtraPatterns(
 
 const FILE_HEADER_REGEX = /^\+\+\+\s+(.+?)\s*$/
 const HUNK_HEADER_REGEX = /^@@\s+-\d+(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/
+const COMBINED_HUNK_HEADER_REGEX = /^(@{3,}) ((?:-\d+(?:,\d+)? )+)\+(\d+)(?:,(\d+))? \1/
+const COMMIT_ID_LINE = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/
 export const KEY_VALUE_REGEX =
   /["']?(?=[a-zA-Z])(?<![a-zA-Z][a-zA-Z0-9_.-]*?)([a-zA-Z](?=([a-zA-Z0-9_.-]+))\2)["']?\s*[:=]\s*["']?([^\s"',;}]+)["']?/g
 const EXCERPT_MAX_LENGTH = 160
@@ -145,17 +148,23 @@ export function scanDiffForSecrets(
 export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = []): DiffScanner {
   const findings: SecretFinding[] = []
   let currentFile: string | null = null
+  let currentCommit: string | null = null
   let inHunk = false
-  let oldLeft = 0
+  let parents = 1
+  let oldLeft: number[] = [0]
   let newLeft = 0
   let newLineNumber = 0
+
+  const found = (finding: SecretFinding): void => {
+    findings.push(currentCommit === null ? finding : { ...finding, commit: currentCommit })
+  }
 
   const scanAddedLine = (file: string, lineNumber: number, content: string): void => {
     let valueShapeHit = false
     for (const pattern of LINE_VALUE_PATTERNS) {
       const m = pattern.exec(content)
       if (m) {
-        findings.push({ file, line_number: lineNumber, reason: 'value-shape', excerpt: maskExcerpt(content, m[0]) })
+        found({ file, line_number: lineNumber, reason: 'value-shape', excerpt: maskExcerpt(content, m[0]) })
         valueShapeHit = true
         break
       }
@@ -168,7 +177,7 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
         const key = kv[1]
         const value = kv[3]
         if (key && value && SECRET_KEY_PATTERN.test(key)) {
-          findings.push({ file, line_number: lineNumber, reason: 'key-name', excerpt: maskExcerpt(content, value) })
+          found({ file, line_number: lineNumber, reason: 'key-name', excerpt: maskExcerpt(content, value) })
           break
         }
       }
@@ -178,7 +187,7 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
       pattern.lastIndex = 0
       const m = pattern.exec(content)
       if (m && m[0].length > 0) {
-        findings.push({
+        found({
           file,
           line_number: lineNumber,
           reason: 'extra-pattern',
@@ -190,26 +199,42 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
     }
   }
 
+  const hunkLine = (raw: string): boolean => {
+    const prefix = raw.slice(0, parents)
+    if (prefix.length !== parents || !/^[ +-]+$/.test(prefix)) return false
+    const removed = prefix.includes('-')
+    if (!removed) {
+      if (currentFile && !prefix.includes(' ')) scanAddedLine(currentFile, newLineNumber, raw.slice(parents))
+      newLineNumber++
+      newLeft--
+    }
+    for (let i = 0; i < parents; i++) {
+      if (prefix[i] === (removed ? '-' : ' ')) oldLeft[i] = (oldLeft[i] ?? 0) - 1
+    }
+    return true
+  }
+
+  const openHunk = (counts: number[], start: number, newCount: number): void => {
+    parents = counts.length
+    oldLeft = counts
+    newLineNumber = start
+    newLeft = newCount
+    inHunk = newLeft > 0 || oldLeft.some((n) => n > 0)
+  }
+
   const line = (input: string): void => {
     const raw = normalizeDiffLine(input)
     if (inHunk) {
-      if (raw.startsWith('+')) {
-        if (currentFile) scanAddedLine(currentFile, newLineNumber, raw.slice(1))
-        newLineNumber++
-        newLeft--
-      } else if (raw.startsWith('-')) {
-        oldLeft--
-      } else if (raw.startsWith(' ')) {
-        newLineNumber++
-        oldLeft--
-        newLeft--
-      } else if (!raw.startsWith('\\')) {
-        inHunk = false
-      }
+      if (!hunkLine(raw) && !raw.startsWith('\\')) inHunk = false
       if (inHunk) {
-        if (oldLeft <= 0 && newLeft <= 0) inHunk = false
+        if (newLeft <= 0 && oldLeft.every((n) => n <= 0)) inHunk = false
         return
       }
+    }
+    if (COMMIT_ID_LINE.test(raw)) {
+      currentCommit = raw
+      currentFile = null
+      return
     }
     if (raw.startsWith('diff ')) {
       currentFile = null
@@ -217,11 +242,16 @@ export function createDiffScanner(extraPatterns: ReadonlyArray<ExtraPattern> = [
     }
     const hunk = HUNK_HEADER_REGEX.exec(raw)
     if (hunk?.[2]) {
-      oldLeft = hunk[1] === undefined ? 1 : parseInt(hunk[1], 10)
-      newLineNumber = parseInt(hunk[2], 10)
-      newLeft = hunk[3] === undefined ? 1 : parseInt(hunk[3], 10)
-      inHunk = oldLeft > 0 || newLeft > 0
+      openHunk([hunk[1] === undefined ? 1 : parseInt(hunk[1], 10)], parseInt(hunk[2], 10), hunk[3] === undefined ? 1 : parseInt(hunk[3], 10))
       return
+    }
+    const combined = COMBINED_HUNK_HEADER_REGEX.exec(raw)
+    if (combined?.[3]) {
+      const ranges = combined[2]!.trim().split(' ').map((r) => (r.includes(',') ? parseInt(r.slice(r.indexOf(',') + 1), 10) : 1))
+      if (ranges.length === combined[1]!.length - 1) {
+        openHunk(ranges, parseInt(combined[3], 10), combined[4] === undefined ? 1 : parseInt(combined[4], 10))
+        return
+      }
     }
     if (raw.startsWith('+++')) currentFile = headerPath(raw)
   }

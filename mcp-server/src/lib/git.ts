@@ -57,6 +57,37 @@ const NAME_DIFF_FLAGS: readonly string[] = ['--name-only', '-z', '--no-renames',
 
 export const STAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', '--cached', ...CONTENT_DIFF_FLAGS]
 export const UNSTAGED_DIFF_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff', ...CONTENT_DIFF_FLAGS]
+export const COMMIT_PATCH_ARGS: readonly string[] = [...GATE_READ_CONFIG, 'diff-tree', '--stdin', '-p', '--cc', '--root', '-r', ...CONTENT_DIFF_FLAGS]
+
+export interface CommitRange {
+  tips: readonly string[]
+  exclude: readonly string[]
+  excludeRemote?: string
+}
+
+export type CommitListResult = { ok: true; commits: string[] } | { ok: false; reason: string }
+
+const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const COMMIT_LIST_MAX_BYTES = 64 * 1024 * 1024
+
+export function listCommits(projectRoot: string, range: CommitRange): CommitListResult {
+  const revs = [...range.tips, ...range.exclude]
+  const unsafe = revs.find((rev) => !isSafeRevisionToken(rev))
+  if (unsafe !== undefined) return { ok: false, reason: `not a revision RSCT can pass to git: ${JSON.stringify(unsafe)}` }
+  if (range.excludeRemote !== undefined && !REMOTE_NAME.test(range.excludeRemote)) {
+    return { ok: false, reason: `not a remote name RSCT can pass to git: ${JSON.stringify(range.excludeRemote)}` }
+  }
+  if (range.tips.length === 0) return { ok: true, commits: [] }
+  const not = [...range.exclude, ...(range.excludeRemote !== undefined ? [`--remotes=${range.excludeRemote}`] : [])]
+  const out = withGitFailures(() => {
+    const raw = safeGitBuffer(projectRoot, ['rev-list', ...range.tips, ...(not.length > 0 ? ['--not', ...not] : [])], undefined, undefined, COMMIT_LIST_MAX_BYTES)
+    return raw === null ? { ok: false as const, reason: gitFailureDetail('git rev-list could not list the commits') } : { ok: true as const, text: raw.toString('utf8') }
+  })
+  if (!out.ok) return out
+  const commits = out.text.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
+  if (!commits.every((c) => OBJECT_ID.test(c))) return { ok: false, reason: 'git rev-list printed something that is not a commit id' }
+  return { ok: true, commits }
+}
 
 export type GitStreamResult = { ok: true } | { ok: false; reason: string }
 
@@ -67,6 +98,7 @@ export function streamGitLines(
   args: readonly string[],
   onLine: (line: string) => void,
   timeoutMs: number = GIT_SCAN_TIMEOUT_MS,
+  input?: string,
 ): Promise<GitStreamResult> {
   return new Promise((resolvePromise) => {
     const limit = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`
@@ -100,10 +132,14 @@ export function streamGitLines(
     }
     let child: ChildProcess
     try {
-      child = spawnGit(args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      child = spawnGit(args, { cwd, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true })
     } catch (error) {
       finish({ ok: false, reason: `git could not start: ${error instanceof Error ? error.message : String(error)}` })
       return
+    }
+    if (input !== undefined) {
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(input)
     }
     let stopReason: string | null = null
     const stopWith = (reason: string): void => {
