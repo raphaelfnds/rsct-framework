@@ -159,6 +159,7 @@ export interface ReviewDriftBlock {
   sha: string
   paths: string[]
   at: string
+  secrets?: string[]
 }
 
 export interface PhaseFindingsBlock {
