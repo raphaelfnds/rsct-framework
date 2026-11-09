@@ -75,6 +75,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The V and REVIEW complete dialogs list each finding** with the action the agent proposes. Over
   ten, the rest go to a report under `.rsct/reports/`. The finding ids, titles and notes come after
   the footer.
+- `zod` 4.6.7, for GHSA-mrhx-c7xc-m3w5: validating a large array could exhaust memory. The zod code
+  the MCP SDK uses is bundled into `rsct-mcp` (not into the hook scripts); every earlier 2.x release
+  carries the unpatched version.
+  - RSCT's own schemas now import `zod/v3`, the v3 API zod 4.6.7 still ships, so what they accept
+    and the errors they return do not change: the old and new servers gave the same tool list and
+    the same answers to valid and invalid calls (ADR-043).
+  - One call shape changes who refuses it: arguments with a `constructor` key were refused by the
+    SDK and are now refused by RSCT's strict schemas.
+- `body-parser` 2.4.0 (GHSA-27r3-jxmh-p828) and `ip-address` 10.7.6 (GHSA-rxp7-6hxx-x8q5) come in
+  through the MCP SDK's HTTP server, which `rsct-mcp` does not use (it runs over stdio). Neither is
+  in the bundle, so only the development toolchain changes. `npm audit` reports 0 vulnerabilities.
 
 ### Changed
 

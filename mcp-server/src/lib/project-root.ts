@@ -1,7 +1,7 @@
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { cwd } from 'node:process'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { appendAuditEntry, resolveAuditPath } from './audit-log.js'
 
 export interface RsctApprovalModes {

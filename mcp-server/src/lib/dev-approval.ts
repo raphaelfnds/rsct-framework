@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { ensureParentDir } from './io-utils.js'
 import { anchorFor, protectRelocatedState } from './repo-anchor.js'
 import { decideAuditPath } from './audit-log.js'

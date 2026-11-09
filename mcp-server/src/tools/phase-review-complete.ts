@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { resolveProjectRoot, type RsctConfig } from '../lib/project-root.js'
