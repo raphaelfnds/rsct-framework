@@ -59,19 +59,29 @@ export interface ValidateOptions {
   auditConfig?: RsctAuditConfig | undefined
 }
 
-const EXPECTED_SCOPE_TOKEN: Record<string, string> = {
-  rsct_request_commit: 'commit',
-  rsct_request_push: 'push',
-  rsct_request_merge: 'merge',
-  rsct_phase_verification_complete: 'verification_complete',
-  rsct_phase_research_complete: 'research_complete',
-  rsct_phase_spec_complete: 'spec_complete',
-  rsct_phase_code_complete: 'code_complete',
-  rsct_phase_review_complete: 'review_complete',
-  rsct_phase_test_complete: 'test_complete',
-  rsct_phase_abandon: 'phase_abandon',
-  rsct_capture_issue: 'capture_issue',
-  rsct_plan_authorize: 'plan_authorize',
+const EXPECTED_SCOPE_TOKENS: Record<string, readonly string[]> = {
+  rsct_request_commit: ['commit'],
+  rsct_request_push: ['push'],
+  rsct_request_merge: ['merge'],
+  rsct_request_rebase: ['rebase', 'squash'],
+  rsct_phase_code_start: ['code_start'],
+  rsct_phase_verification_complete: ['verification_complete'],
+  rsct_phase_research_complete: ['research_complete'],
+  rsct_phase_spec_complete: ['spec_complete'],
+  rsct_phase_code_complete: ['code_complete'],
+  rsct_phase_review_complete: ['review_complete'],
+  rsct_phase_test_complete: ['test_complete'],
+  rsct_phase_abandon: ['phase_abandon'],
+  rsct_capture_issue: ['capture_issue'],
+  rsct_plan_authorize: ['plan_authorize'],
+}
+
+export function expectedScopeTokens(toolName: string): readonly string[] {
+  return EXPECTED_SCOPE_TOKENS[toolName] ?? []
+}
+
+export function fabricationThresholdMs(modes: RsctApprovalModes | undefined): number {
+  return modes?.fabrication_signal_threshold_ms ?? DEFAULT_FABRICATION_THRESHOLD_MS
 }
 
 const BURST_WINDOW_MS = 10000
@@ -182,9 +192,7 @@ export function validateDevApproval(
   const now = options.now ?? new Date()
   const skewSeconds =
     options.approvalModes?.timestamp_skew_seconds ?? DEFAULT_SKEW_SECONDS
-  const fabricationThresholdMs =
-    options.approvalModes?.fabrication_signal_threshold_ms ??
-    DEFAULT_FABRICATION_THRESHOLD_MS
+  const thresholdMs = fabricationThresholdMs(options.approvalModes)
 
   const tsDate = new Date(approval.timestamp)
   if (Number.isNaN(tsDate.getTime())) {
@@ -238,7 +246,7 @@ export function validateDevApproval(
   const lastConsumed = lastConsumedAt(store)
   if (lastConsumed) {
     const gapMs = now.getTime() - lastConsumed.getTime()
-    if (gapMs >= 0 && gapMs < fabricationThresholdMs) {
+    if (gapMs >= 0 && gapMs < thresholdMs) {
       signals.push('implausibly_fast')
     }
   }
@@ -264,10 +272,10 @@ function detectScopeMismatch(
   toolName: string | undefined,
 ): boolean {
   if (!toolName) return false
-  const expected = EXPECTED_SCOPE_TOKEN[toolName]
-  if (expected === undefined) return false
-  const firstToken = actionScope.split(':')[0]
-  return firstToken !== expected
+  const expected = expectedScopeTokens(toolName)
+  if (expected.length === 0) return false
+  const firstToken = actionScope.split(':')[0] ?? ''
+  return !expected.includes(firstToken)
 }
 
 function detectBurstPattern(store: ApprovalsStore, now: Date): boolean {
