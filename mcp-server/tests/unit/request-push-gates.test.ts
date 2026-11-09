@@ -177,6 +177,36 @@ describe.skipIf(!GIT)('rsct_request_push scans every commit it sends, before any
     expect(out.secrets_check.findings.map((f) => f.file)).toEqual(['hidden.env'])
   })
 
+  it('also treats a remote whose name differs only in letter case as another one', async () => {
+    git(work, 'checkout', '-q', '-b', 'hidden', 'main')
+    commitFile('hidden.env', `${SECRET}\n`, 'never on origin')
+    git(work, 'remote', 'add', 'Origin/mirror', bare('mirror2.git'))
+    git(work, 'push', '-q', 'Origin/mirror', 'hidden')
+    git(work, 'checkout', '-q', '-b', 'feat/z')
+    commitFile('b.txt', 'b\n', 'work')
+    const { out } = await push({ branch: 'feat/z', dev_approval: approval() })
+    expect(out.reject_kind).toBe('secrets')
+  })
+
+  it('names the commit an annotated tag points at, not the tag object', async () => {
+    const head = commitFile('b.txt', 'b\n', 'work')
+    git(work, 'tag', '-a', 'v1', '-m', 'v1')
+    const { text } = await push({ branch: 'refs/tags/v1', dev_approval: approval() }, {}, 'no')
+    expect(text).toContain(`Commit: ${head.slice(0, 12)}`)
+  })
+
+  it('says so when where the remote pushes changed while git pushed', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    const executor: GitExecutor = (r, args) => {
+      const out = defaultGitExecutor(r, args)
+      if (args.includes('push') && args.includes('--no-follow-tags')) git(work, 'config', 'remote.origin.pushurl', bare('later.git'))
+      return out
+    }
+    const { out } = await push({ branch: 'feat/x', dev_approval: approval() }, { gitExecutor: executor })
+    expect(out.status).toBe('pushed')
+    expect(out.hints.some((h) => h.startsWith("⚠ where 'origin' pushes changed while git pushed"))).toBe(true)
+  })
+
   it('refuses before the dialog a push whose source is not a commit', async () => {
     const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: work, input: `${SECRET}\n`, encoding: 'utf8' }).trim()
     git(work, 'tag', 'leak', blob)

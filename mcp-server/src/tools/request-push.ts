@@ -200,7 +200,10 @@ function carriedByProbe(read: ProbeRead): { range: RangePathsResult; parsed: boo
 }
 
 function scanRange(args: { remote: string; tip: string; fetchUrl: string | null; pushUrls: readonly string[]; remotes: readonly string[] | null }): CommitRange {
-  const shadowed = args.remotes === null || args.remotes.some((r) => r !== args.remote && r.startsWith(`${args.remote}/`))
+  const own = args.remote.toLowerCase()
+  const shadowed =
+    args.remotes === null ||
+    args.remotes.some((r) => r !== args.remote && (r.toLowerCase() === own || r.toLowerCase().startsWith(`${own}/`)))
   return !shadowed && args.fetchUrl !== null && sameRepository(args.fetchUrl, args.pushUrls)
     ? { tips: [args.tip], exclude: [], excludeRemote: args.remote }
     : { tips: [args.tip], exclude: [] }
@@ -498,9 +501,11 @@ export async function requestPushHandler(
   if (!options.ok) return reject('push_options_unreadable', `${options.reason}, so the dialog cannot show what this push sends — nothing was pushed.`, { protected: branchProtected })
   const submodules = readSubmoduleMode(projectRoot, gitExecutor)
 
+  let pushedCommit: string | null = null
   if (!deleting) {
     const sent = sourceSha ?? (refspec.ok ? refspec.source : branch)
     const tip = resolvePinned(projectRoot, sent, gitExecutor)
+    pushedCommit = tip
     if (tip === null) {
       return reject(
         'secrets_unreadable',
@@ -536,7 +541,7 @@ export async function requestPushHandler(
     ...(refspec.ok && (refspec.destination !== refspec.source || (destinationRef !== null && !destinationRef.startsWith('refs/heads/')))
       ? [`Destination: '${specLabel(destinationRef ?? refspec.destination, DIALOG_PATH_LIMIT)}'`]
       : []),
-    ...(sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : []),
+    ...(pushedCommit !== null ? [`Commit: ${pushedCommit.slice(0, 12)}`] : []),
     ...shownList('Push URL', pushUrls.map(maskUrl)),
     ...(refspec.ok && refspec.forced ? [`⚠ FORCE: replaces '${specLabel(shownDestination, DIALOG_PATH_LIMIT)}' on the remote even where its history differs; commits there can be lost.`] : []),
     ...(deleting ? [`⚠ DELETE: removes '${specLabel(shownDestination, DIALOG_PATH_LIMIT)}' from the remote.`] : []),
@@ -683,6 +688,8 @@ export async function requestPushHandler(
   }
 
   const record = recordApproval(approval, { projectRoot, now, auditConfig: config?.audit })
+  const urlsAfter = readPushUrls(projectRoot, remote, gitExecutor)
+  const urlsMoved = !urlsAfter.ok || urlsAfter.value.join('\n') !== pushUrls.join('\n')
   const audit = appendAudit(
     projectRoot,
     {
@@ -693,6 +700,7 @@ export async function requestPushHandler(
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
       push_urls: pushUrls.map(maskUrl),
+      ...(urlsMoved && { push_urls_after: urlsAfter.ok ? urlsAfter.value.map(maskUrl) : null }),
       commits_scanned: commitsScanned,
       secret_findings: findings.length,
       ...(crossCheck !== null && { path_crosscheck: crossCheck }),
@@ -701,6 +709,9 @@ export async function requestPushHandler(
   )
 
   const hints: string[] = [`Pushed '${branch}' to '${remote}'.`]
+  if (urlsMoved) {
+    hints.push(`⚠ where '${remote}' pushes changed while git pushed; the push may have gone elsewhere than the dialog showed — check the remote before anything else.`)
+  }
   if (degradedHint !== null) hints.push(degradedHint)
   if (!record.ok) {
     hints.push(

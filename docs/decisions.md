@@ -2954,7 +2954,7 @@ refusals.
 - **Push.** Commits on `refs/remotes/<remote>/*` are skipped when every push URL names the fetch
   URL's repository (host, explicit port and path, case kept; an scp-style absolute path differs from
   a home-relative one) and no other remote is named `<remote>/…`; otherwise the whole history is
-  read, and RSCT asks the remote nothing before the dialog. What the push sends must peel to a
+  read; the secrets scan asks the remote nothing. What the push sends must peel to a
   commit. Every push URL and push option is shown in full, URLs with credentials masked, and the
   push URLs are read again after the dialog (`push_url_changed`). The destination is shown as the
   full ref.
@@ -2989,8 +2989,8 @@ refusals.
 
 **Consequences**: `--no-follow-tags` changes a release flow that relied on `push.followTags`: tags
 are pushed on their own. A submodule commit published only through a tag refuses a push whose
-config checks submodules. A merge through RSCT records the merge message git would write by
-default for a branch.
+config checks submodules. A merge through RSCT records the message git writes by default for a
+branch (without `merge.log` or `merge.suppressDest`).
 
 ## Anti-decisions (tried, rejected, do not retry)
 

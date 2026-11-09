@@ -12,6 +12,7 @@ import {
   getRangePaths,
   gitRebase,
   gitSquash,
+  branchRef,
   readGitState,
   type GitExecutor,
   type GitState,
@@ -268,6 +269,9 @@ export async function requestRebaseHandler(
 
   pinned = resolvePinned(projectRoot, input.ref, gitExecutor)
   const headAt = readHeadPosition(projectRoot, gitExecutor)
+  if (headAt.ref !== branchRef(currentBranch)) {
+    return reject('target_moved', `HEAD is no longer on '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}', the branch the checks read — nothing was changed and no dialog was shown; ask again.`, { protected: currentProtected })
+  }
   const head = headAt.sha
   if (pinned === null || head === null) {
     return reject('source_unreadable', `git could not resolve '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'${head === null ? ' or HEAD' : ''} to a commit, so what the ${mode} brings cannot be shown — nothing was changed.`, { protected: currentProtected })

@@ -63,7 +63,10 @@ function countingPrompt(): {
   }
 }
 
+let headBranch: string | null = null
+
 function gitState(branch: string | null): GitState {
+  headBranch = branch
   return {
     available: branch !== null,
     branch,
@@ -81,6 +84,7 @@ function mergeKey(flags: string, target = 'feat/integration'): string {
 function standardRead(args: string[]): GitExecResult | null {
   if (args[0] === 'rev-parse' && args[1] === '--verify' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${PINNED}\n`, stderr: '', exitCode: 0 }
   if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+  if (args.join(' ') === 'symbolic-ref -q HEAD') return headBranch === null ? { ok: false, stdout: '', stderr: '', exitCode: 1 } : { ok: true, stdout: `refs/heads/${headBranch}\n`, stderr: '', exitCode: 0 }
   return null
 }
 
