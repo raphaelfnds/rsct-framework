@@ -40,6 +40,11 @@ function bare(name: string): string {
   return path
 }
 
+function addRemoteByConfig(name: string, url: string): void {
+  git(work, 'config', `remote.${name}.url`, url)
+  git(work, 'config', `remote.${name}.fetch`, `+refs/heads/*:refs/remotes/${name}/*`)
+}
+
 function remoteHas(path: string, ref: string): boolean {
   try {
     git(path, 'rev-parse', '--verify', '-q', ref)
@@ -167,7 +172,7 @@ describe.skipIf(!GIT)('rsct_request_push scans every commit it sends, before any
   it('does not skip tracking refs when another remote is named after this one plus a slash', async () => {
     git(work, 'checkout', '-q', '-b', 'hidden', 'main')
     commitFile('hidden.env', `${SECRET}\n`, 'never on origin')
-    git(work, 'remote', 'add', 'origin/mirror', bare('mirror.git'))
+    addRemoteByConfig('origin/mirror', bare('mirror.git'))
     git(work, 'push', '-q', 'origin/mirror', 'hidden')
     expect(git(work, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/mirror/hidden'), 'control: the mirror ref sits under refs/remotes/origin/').toMatch(/^[0-9a-f]{40}$/)
     git(work, 'checkout', '-q', '-b', 'feat/z')
@@ -180,7 +185,7 @@ describe.skipIf(!GIT)('rsct_request_push scans every commit it sends, before any
   it('also treats a remote whose name differs only in letter case as another one', async () => {
     git(work, 'checkout', '-q', '-b', 'hidden', 'main')
     commitFile('hidden.env', `${SECRET}\n`, 'never on origin')
-    git(work, 'remote', 'add', 'Origin/mirror', bare('mirror2.git'))
+    addRemoteByConfig('Origin/mirror', bare('mirror2.git'))
     git(work, 'push', '-q', 'Origin/mirror', 'hidden')
     git(work, 'checkout', '-q', '-b', 'feat/z')
     commitFile('b.txt', 'b\n', 'work')
