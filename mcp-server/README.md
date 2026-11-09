@@ -921,8 +921,8 @@ protected (or `override_protected_branch` is set with reason).
 - Input: `project_root?`, `remote?` (default `origin` — must be a **configured remote name**; see below), `branch?` (default HEAD), `dev_approval` (`override_protected_branch` and `override_secrets_check` when needed), `pre_merge_ack?` (PH-5 — required only when the target branch is protected; rejects in chat if absent/incomplete, no OS dialog)
 - Output: `status: 'pushed' | 'rejected' | 'mutation_failed'`, `branch`, `remote`, `push_urls` (credentials masked), `secrets_check` (`commits_scanned`, `findings_count`, `findings`, `override_used`), `reject_kind?` (incl. `'pre_merge_ack_missing' | 'pre_merge_ack_incomplete' | 'unsafe_push_target' | 'unknown_remote' | 'no_branch' | 'review_drift' | 'review_unreadable' | 'push_url_unreadable' | 'push_options_unreadable' | 'push_url_changed' | 'secrets' | 'secrets_unreadable'`), `audit_path`, `audit_error`, `anti_replay_persisted`, `anti_replay_error`, `hints` — same post-mutation failure surface as `rsct_request_commit`.
 
-**Every check runs before the dialog, and the dialog shows every exception (since
-2.24.0, ADR-042).** A push with no branch, an armed `review_drift` lock, a protected
+**What needs an exception is checked before the dialog, and the dialog shows every
+exception (since 2.24.0, ADR-042).** A push with no branch, an armed `review_drift` lock, a protected
 destination without `override_protected_branch`, or a secret finding without
 `override_secrets_check` is refused before any dialog opens. Every commit the push
 carries is scanned on its own — merge commits included, only what the merge itself
@@ -930,9 +930,10 @@ adds — through `git diff-tree`, so repository log and format settings cannot c
 what is read. Commits on `refs/remotes/<remote>/*` are skipped when every push URL
 names the same repository as the fetch URL (host, explicit port and path; an
 `https`/`ssh` pair from `pushInsteadOf` counts as the same) and no other remote is
-named `<remote>/…`; otherwise the whole history is read. What the push sends must
+named `<remote>/…` (in any letter case); otherwise the whole history is read. What the push sends must
 be a commit. The dialog lists every push URL (credentials masked) and every push
-option in full, the destination as its full ref and the commit, `FORCE` or `DELETE`
+option in full, a destination other than the pushed branch as its full ref, and the
+commit, `FORCE` or `DELETE`
 in words, the protected branch, each finding as `"file":line — rule (commit …)`
 (never the value) and the `pre_merge_ack` answers; the agent's reasons and the ack
 note come after the framework footer. The push URLs are read again after the dialog
@@ -983,7 +984,7 @@ force-pushy patterns by default).
 force-like risk of `allow_unrelated_histories=true`. Documented so devs
 don't accidentally pass the flag without the override.
 
-**Since 2.24.0 (ADR-042)** every check runs before the dialog: a HEAD that is not
+**Since 2.24.0 (ADR-042)** these checks run before the dialog: a HEAD that is not
 on a branch with a commit, an armed `review_drift` lock, a protected target or
 unrelated histories without the override, and a secret finding in the commits the
 merge brings without `override_secrets_check`. The source is pinned to its commit;
@@ -991,7 +992,8 @@ the dialog names it, the exceptions, each finding and the `pre_merge_ack` answer
 and the agent's text comes after the footer. A source that moved after the dialog
 refuses (`source_moved`), and so does a HEAD on another branch or commit than at the
 dialog (`target_moved`); git merges the pinned commit, with the usual merge message.
-After the merge every commit it added is scanned again; a finding the dialog did not show arms
+After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned
+before the dialog, at the pinned commit); a finding the dialog did not show arms
 `review_drift` with its paths (`after_merge`).
 
 #### `rsct_request_rebase`

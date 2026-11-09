@@ -19,7 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Push, merge and rebase dialogs show every exception they are asked to approve**, as the commit
   dialog has since 2.23.0 (ADR-042).
   - Branch protection and `--allow-unrelated-histories` used to be checked after you answered, with
-    the override filled in by the agent, and push, merge and rebase did not scan for secrets. All
+    the override filled in by the agent, and push, merge and rebase did not scan for secrets. These
     checks now run before the dialog, and a request that lacks the override a check needs is refused
     before any dialog opens.
   - The dialog lists the protected branch, unrelated histories, each secret finding
@@ -34,10 +34,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     repository; otherwise the whole history is read. What the push sends must be a commit.
   - A finding needs `override_secrets_check`. A scan that cannot finish refuses
     (`secrets_unreadable`).
-- **Push shows where it goes and sends only what it shows.**
+- **Push shows where it goes, and git gets only what it shows.**
   - Every push URL (`git remote get-url --push --all`) is listed with credentials masked; a
     `pushurl` used to send a push elsewhere while the dialog said `origin`.
-  - The destination is shown as the full ref, and `FORCE` and `DELETE` in words.
+  - A destination other than the pushed branch is shown as its full ref, and `FORCE` and `DELETE`
+    in words.
   - The push URLs are read again after the dialog; a change refuses (`push_url_changed`).
   - Push options are listed and sent explicitly. Tags `push.followTags` would add are no longer sent,
     and submodules are checked, never pushed, when the configuration would push or check them.
@@ -46,6 +47,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     after the dialog refuses (`source_moved`), and so does a HEAD that moved to another branch or
     commit (`target_moved`).
   - A finding in what the operation wrote that the dialog did not show arms `review_drift`.
+  - A squash only stages; it is scanned when `rsct_request_commit` commits it.
 - **An armed `review_drift` lock now refuses push, merge and rebase**, as it refused commits. The
   REVIEW that releases a lock armed by secret findings lists them and forces the dialog.
 - **`git replace` can no longer change what a gate reads.** A replaced blob hid a staged secret from
@@ -82,7 +84,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - refuses, through git, a push whose configuration pushes or checks submodules when a submodule
     commit is not on a remote-tracking branch of its submodule;
   - reads the whole history when a push URL names another repository than the fetch URL (a fork),
-    or when another remote is named `<remote>/…`;
+    or when another remote is named `<remote>/…` (in any letter case);
   - needs git 2.7 or newer.
 - A dialog that cannot show its text asks the agent to shorten what it wrote; the framework lines
   stay.

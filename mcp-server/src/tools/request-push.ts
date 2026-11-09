@@ -509,7 +509,7 @@ export async function requestPushHandler(
     if (tip === null) {
       return reject(
         'secrets_unreadable',
-        `what this push sends ('${specLabel(sent, DIALOG_PATH_LIMIT)}') is not a commit — a tag on a tree or a blob, a tree or a blob — so it cannot be scanned for secrets; the developer pushes it by hand in their own terminal. No dialog was shown.`,
+        `what this push sends ('${specLabel(sent, DIALOG_PATH_LIMIT)}') is not a commit — a tree, a blob, or a tag on one — so it cannot be scanned for secrets; the developer pushes it by hand in their own terminal. No dialog was shown.`,
         { protected: branchProtected },
       )
     }

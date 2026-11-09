@@ -401,8 +401,8 @@ the hint names the paths. Run a REVIEW over them (or undo the commit) before any
 
 ## A push, merge or rebase is refused with `review_drift`
 
-A commit, merge or rebase landed content no dialog showed you: something wrote it while the
-operation ran. Since 2.24.0 an armed `review_drift` lock refuses pushes, merges
+A commit landed code no REVIEW covers, or a commit, merge or rebase landed a secret finding no
+dialog showed you. Since 2.24.0 an armed `review_drift` lock refuses pushes, merges
 and rebases as it refuses commits. The refusal names the paths. Look at them, then run
 `rsct_phase_review_start` / `_complete`: a REVIEW that releases a lock armed by secret findings lists
 them in its dialog. Or undo the commit that brought them.
@@ -417,10 +417,10 @@ removed in a later one is still found — the history carries it.
   last commit), or, for a known test value, ask again with `dev_approval.override_secrets_check`:
   the dialog lists the findings with that reason.
 - A push whose push URL names another repository than the fetch URL (a fork), or with another
-  remote named `<remote>/…`, reads the whole history; if older commits carry secret-like test data,
+  remote named `<remote>/…` (in any letter case), reads the whole history; if older commits carry secret-like test data,
   that needs the override.
-- `secrets_unreadable` with "is not a commit" — the push sends a tag on a tree or a blob, a tree or
-  a blob, which RSCT cannot scan. Push it by hand.
+- `secrets_unreadable` with "is not a commit" — the push sends a tree, a blob, or a tag on one,
+  which RSCT cannot scan. Push it by hand.
 - `secrets_unreadable` — the scan could not finish (for example, a very large first push). Push by
   hand in your own terminal.
 - `push_url_unreadable` — `git remote get-url --push --all` failed. It needs git 2.7 or newer.

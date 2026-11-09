@@ -2953,11 +2953,12 @@ refusals.
   lines every parent lacks count. Findings name their commit.
 - **Push.** Commits on `refs/remotes/<remote>/*` are skipped when every push URL names the fetch
   URL's repository (host, explicit port and path, case kept; an scp-style absolute path differs from
-  a home-relative one) and no other remote is named `<remote>/…`; otherwise the whole history is
+  a home-relative one) and no other remote is named `<remote>/…` (in any letter case); otherwise
+  the whole history is
   read; the secrets scan asks the remote nothing. What the push sends must peel to a
   commit. Every push URL and push option is shown in full, URLs with credentials masked, and the
-  push URLs are read again after the dialog (`push_url_changed`). The destination is shown as the
-  full ref.
+  push URLs are read again after the dialog (`push_url_changed`). A destination other than the
+  pushed branch is shown as its full ref.
   `--no-follow-tags`; `--recurse-submodules=check` when the effective config would push or check
   submodules, `=no` otherwise (never weaker than the user's `check`); `-c push.pushOption=` plus each
   configured option after the last empty value, shown and sent explicitly.
@@ -2965,7 +2966,8 @@ refusals.
   message); a source that moved, or a HEAD on another branch or commit, after the dialog refuses
   (`source_moved`, `target_moved`). They scan what the operation brings before the dialog and what
   it wrote after it; a finding the dialog did not show arms `review_drift` with its paths and the
-  finding labels, which the REVIEW that releases the lock lists in a forced dialog. A finding counts
+  finding labels, which the REVIEW that releases the lock lists in a forced dialog. A squash only
+  stages; `rsct_request_commit` scans it when it commits it. A finding counts
   as already approved only when its whole line matches (a hash kept in memory, never written).
 - **Commit.** A commit that lands while `git commit` reports a failure is checked as one that
   succeeded. The REVIEW sweep of a commit reads the staged tree recorded for the approval.
