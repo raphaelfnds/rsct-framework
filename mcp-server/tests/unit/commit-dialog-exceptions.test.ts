@@ -41,7 +41,7 @@ function initRepo(branch = 'feat/x'): void {
 
 function approval(extra: Record<string, unknown> = {}): Record<string, unknown> {
   stamp++
-  return { timestamp: new Date(Date.now() - 15_000).toISOString(), action_scope: `commit:${stamp}`, reason: `change ${stamp}`, ...extra }
+  return { timestamp: new Date(Date.now() - 15_000).toISOString(), action_scope: `commit:${stamp}`, reason: `change ${stamp} for the dialog test`, ...extra }
 }
 
 async function commit(
