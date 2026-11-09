@@ -2914,6 +2914,74 @@ hand.
 assertions said an ordinary env key and an env removal were allowed; by this decision they are now
 refusals.
 
+### ADR-042 — Every integration dialog shows what it approves, and RSCT reads git through one launcher (2.24.0)
+**Status**: active. Extends ADR-040 (the commit dialog) to push, merge and rebase; extends ADR-039.
+**Tags**: gates, dialog, secrets, git
+
+**Context**: MEASURED on `main` @ `9c44851` (git 2.45.1 Windows, 2.43.0 WSL):
+- `rsct_request_push`, `rsct_request_merge` and `rsct_request_rebase` opened the dialog first and
+  read `override_protected_branch` after it; the dialog never showed the exception. Push scanned
+  nothing for secrets.
+- `git replace` of a staged blob made the commit scan read the replacement (`+nothing`) while the
+  commit stored the real secret. A content merge through a replaced blob wrote the replacement's
+  content.
+- `remote.<name>.pushurl` sent a push to another repository while the dialog said `origin`; with two
+  push URLs `get-url --push` printed one and the push reached both. `push.followTags` sent a tag and
+  `push.pushOption` reached the remote without the dialog showing either.
+- `git log -p` is changed by `log.showRoot` (the root commit's diff disappears) and `format.pretty`
+  (it can print a fake hunk header). The diff scanner never opened a combined (`@@@`) hunk.
+- On a detached HEAD, and with HEAD pointing at `refs/remotes/*`, `readGitState` named a branch, so
+  the refusals for a missing branch never fired.
+- A `core.fsmonitor` command ran on the REVIEW sweep's `ls-files`/`diff` reads and on RSCT's own
+  `git commit` and `git merge`.
+
+**Decision**:
+- **One launcher.** `lib/git-launch.ts` is the only place that starts git; it adds
+  `-c core.fsmonitor=` and `GIT_NO_REPLACE_OBJECTS=1`. `tests/unit/git-launch.test.ts` fails if any
+  source file starts git on its own.
+- **Checks before the dialog, exceptions in it.** Push, merge and rebase refuse before any dialog a
+  request that lacks the override a check needs, a HEAD with no branch, and an armed `review_drift`.
+  The dialog lists each exception and the `pre_merge_ack` answers before the framework footer; what
+  the agent wrote (reasons, ack note) comes after it (ADR-031). Shared lines live in
+  `lib/gate-exceptions.ts`.
+- **Each commit is scanned on its own.** `git rev-list` piped into `git diff-tree --stdin -p --cc
+  --root` (plumbing: byte-identical under 15 diff/log/color settings). For a merge commit only the
+  lines every parent lacks count. Findings name their commit.
+- **Push.** Commits on `refs/remotes/<remote>/*` are skipped when every push URL names the fetch
+  URL's repository (host, explicit port and path, case kept); otherwise only the destination's old
+  tip that every push URL reports, or nothing. Every push URL is shown with credentials masked.
+  `--no-follow-tags`; `--recurse-submodules=check` when the effective config would push or check
+  submodules, `=no` otherwise (never weaker than the user's `check`); `-c push.pushOption=` plus each
+  configured option after the last empty value, shown and sent explicitly.
+- **Merge and rebase** pin the source to its commit (refused if it moved after the dialog), scan
+  what the operation brings before the dialog, and what it wrote after it; a finding the dialog did
+  not show arms `review_drift` with its paths and the finding labels, which the REVIEW that releases
+  the lock lists in a forced dialog.
+- **Commit.** A commit that lands while `git commit` reports a failure is checked as one that
+  succeeded. The REVIEW sweep of a commit reads the staged tree recorded for the approval.
+- **Branch.** A branch is named only when `symbolic-ref HEAD` is `refs/heads/*`.
+- **Other dialogs.** The `rsct_phase_code_start` bypass dialog shows each bypass's real state and
+  records the approval once the start succeeds. A dialog whose approval looks auto-generated says so
+  at the top. The V and REVIEW complete dialogs list each finding with its proposed action.
+
+**Direction**: stricter.
+
+**What is given up, by name**:
+- A ref the agent writes into `refs/remotes/<remote>/` (`update-ref`, `fetch . x:refs/remotes/…`)
+  hides the commits it reaches from the push scan — the same ref-write limit as ADR-028.
+- A branch's first push whose push URL names another repository than the fetch URL reads the whole
+  history; in a repository with secret-like test data that asks for `override_secrets_check`.
+- Commit and tag messages are not scanned.
+- Content resolved by hand during `git rebase --continue` is outside RSCT; the push scan reads it.
+- The window between recording the staged tree and `git commit` stays; a change there is reported
+  as `committed_with_drift`.
+- `rsct_request_push` needs git 2.7 or newer.
+
+**Consequences**: `--no-follow-tags` changes a release flow that relied on `push.followTags`: tags
+are pushed on their own. A submodule commit published only through a tag refuses a push whose
+config checks submodules. A developer's hooks inherit `GIT_NO_REPLACE_OBJECTS` and run without the
+file-system monitor during RSCT's git calls.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic
