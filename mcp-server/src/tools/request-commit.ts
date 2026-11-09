@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -110,7 +108,16 @@ import {
   affectedConsumers,
 } from '../lib/contracts.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
-import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, commitMessageView, dialogList, specLabel } from '../lib/dialog-text.js'
+import { DIALOG_PATH_LIMIT, commitMessageView, specLabel } from '../lib/dialog-text.js'
+import {
+  DIALOG_LIST_SHOWN,
+  agentReasonLine,
+  inlineList,
+  protectedBranchLine,
+  secretFindingLines,
+  shownLimit,
+  writeListReport,
+} from '../lib/gate-exceptions.js'
 
 const STAGED_PATHS_UNREADABLE =
   'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
@@ -120,8 +127,6 @@ const STAGED_STATE_UNREADABLE =
 
 const BRANCH_MOVED =
   'the branch changed while this commit was being prepared, so the branch checked and shown is not the one git would commit on — look at git status and ask again'
-
-const DIALOG_LIST_SHOWN = 10
 
 interface CommitOverrides {
   branch?: { reason: string } | undefined
@@ -158,39 +163,6 @@ function readContractFacts(
   return { mode, ids: hits.map((h) => h.id), consumers: affectedConsumers(hits), inactive: !graph.available }
 }
 
-function findingRule(finding: SecretFinding): string {
-  return finding.reason === 'extra-pattern' ? `extra pattern ${finding.pattern_id ?? '?'}` : finding.reason
-}
-
-function findingLabel(finding: SecretFinding): string {
-  return `"${finding.file}":${finding.line_number ?? '?'} — ${findingRule(finding)}`
-}
-
-function writeListReport(projectRoot: string, kind: string, title: string, entries: readonly string[]): string | null {
-  const content = [`# ${title}`, '', ...entries.map((e) => `- ${e}`), ''].join('\n')
-  const rel = join('.rsct', 'reports', `commit-${kind}-${createHash('sha256').update(content).digest('hex').slice(0, 16)}.md`)
-  try {
-    mkdirSync(join(projectRoot, '.rsct', 'reports'), { recursive: true })
-    writeFileSync(join(projectRoot, rel), content, 'utf8')
-    return rel.replace(/\\/g, '/')
-  } catch {
-    return null
-  }
-}
-
-function quoted(text: string): string {
-  return `"${specLabel(text)}"`
-}
-
-function inlineList(items: readonly string[], limit: number): string {
-  const shown = items.slice(0, limit).map(quoted).join(', ')
-  return items.length > limit ? `${shown} … and ${items.length - limit} more` : shown
-}
-
-function shownLimit(report: string | null): number {
-  return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN
-}
-
 function commitExceptionLines(
   projectRoot: string,
   facts: {
@@ -202,29 +174,13 @@ function commitExceptionLines(
   },
 ): { facts: string[]; reasons: string[] } {
   const lines: string[] = []
-  const reasons: string[] = []
-  if (facts.branchProtected) {
-    lines.push(`⚠ '${specLabel(facts.branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: committing here needs your exception.`)
-  }
-  if (facts.findings.length > 0) {
-    lines.push(`⚠ The secrets scan found ${facts.findings.length} line(s) that look like a credential (file:line — rule; values are never shown):`)
-    const report =
-      facts.findings.length > DIALOG_LIST_SHOWN
-        ? writeListReport(
-            projectRoot,
-            'secrets',
-            'Secret scan findings for one commit approval',
-            facts.findings.map((f) => `${findingLabel(f)} — ${f.excerpt}`),
-          )
-        : null
-    lines.push(dialogList(facts.findings.map(findingLabel), shownLimit(report)))
-    if (report !== null) lines.push(`Full list: ${report}`)
-  }
+  if (facts.branchProtected) lines.push(protectedBranchLine(facts.branchLabel, 'committing here'))
+  lines.push(...secretFindingLines(projectRoot, 'commit', facts.findings))
   if (facts.contract.ids.length > 0) {
     const { ids, consumers } = facts.contract
     const cut = ids.length > DIALOG_LIST_SHOWN || consumers.length > DIALOG_LIST_SHOWN
     const report = cut
-      ? writeListReport(projectRoot, 'contracts', 'Contract surfaces for one commit approval', [
+      ? writeListReport(projectRoot, 'commit', 'contracts', 'Contract surfaces for one commit approval', [
           ...ids.map((id) => `surface ${JSON.stringify(id)}`),
           ...consumers.map((c) => `consumer ${JSON.stringify(c)}`),
         ])
@@ -236,15 +192,11 @@ function commitExceptionLines(
   if (facts.contract.inactive) {
     lines.push('⚠ The contract gate is inactive: no readable contracts.json for this universe, so cross-repo impact is not checked.')
   }
-  if (facts.branchProtected && facts.overrides.branch) {
-    reasons.push(`Agent's reason for the protected branch: ${quoted(facts.overrides.branch.reason)}`)
-  }
-  if (facts.findings.length > 0 && facts.overrides.secrets) {
-    reasons.push(`Agent's reason for the secret findings: ${quoted(facts.overrides.secrets.reason)}`)
-  }
-  if (facts.contract.ids.length > 0 && facts.overrides.contract) {
-    reasons.push(`Agent's reason for the contract surface: ${quoted(facts.overrides.contract.reason)}`)
-  }
+  const reasons = [
+    ...agentReasonLine('the protected branch', facts.branchProtected ? facts.overrides.branch : undefined),
+    ...agentReasonLine('the secret findings', facts.findings.length > 0 ? facts.overrides.secrets : undefined),
+    ...agentReasonLine('the contract surface', facts.contract.ids.length > 0 ? facts.overrides.contract : undefined),
+  ]
   return { facts: lines, reasons }
 }
 
