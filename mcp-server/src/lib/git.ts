@@ -68,9 +68,8 @@ export interface CommitRange {
 export type CommitListResult = { ok: true; commits: string[] } | { ok: false; reason: string }
 
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-const COMMIT_LIST_MAX_BYTES = 64 * 1024 * 1024
 
-export function listCommits(projectRoot: string, range: CommitRange): CommitListResult {
+export function listCommits(projectRoot: string, range: CommitRange, executor: GitExecutor = defaultGitExecutor): CommitListResult {
   const revs = [...range.tips, ...range.exclude]
   const unsafe = revs.find((rev) => !isSafeRevisionToken(rev))
   if (unsafe !== undefined) return { ok: false, reason: `not a revision RSCT can pass to git: ${JSON.stringify(unsafe)}` }
@@ -79,12 +78,12 @@ export function listCommits(projectRoot: string, range: CommitRange): CommitList
   }
   if (range.tips.length === 0) return { ok: true, commits: [] }
   const not = [...range.exclude, ...(range.excludeRemote !== undefined ? [`--remotes=${range.excludeRemote}`] : [])]
-  const out = withGitFailures(() => {
-    const raw = safeGitBuffer(projectRoot, ['rev-list', ...range.tips, ...(not.length > 0 ? ['--not', ...not] : [])], undefined, undefined, COMMIT_LIST_MAX_BYTES)
-    return raw === null ? { ok: false as const, reason: gitFailureDetail('git rev-list could not list the commits') } : { ok: true as const, text: raw.toString('utf8') }
-  })
-  if (!out.ok) return out
-  const commits = out.text.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
+  const out = executor(projectRoot, ['rev-list', ...range.tips, ...(not.length > 0 ? ['--not', ...not] : [])])
+  if (!out.ok) {
+    const said = firstLine(out.stderr)
+    return { ok: false, reason: `git rev-list could not list the commits${said.length > 0 ? `: "${said}"` : ''}` }
+  }
+  const commits = out.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
   if (!commits.every((c) => OBJECT_ID.test(c))) return { ok: false, reason: 'git rev-list printed something that is not a commit id' }
   return { ok: true, commits }
 }
@@ -682,15 +681,30 @@ export interface GitPushResult {
   stdout?: string
 }
 
+export interface GitPushOptions {
+  submodules: 'check' | 'no'
+  pushOptions: readonly string[]
+}
+
 export function gitPush(
   projectRoot: string,
   remote: string,
   refspec: string,
-  executor: GitExecutor = defaultGitExecutor,
+  executor: GitExecutor,
+  options: GitPushOptions,
 ): GitPushResult {
   const bad = unsafeOperand({ remote, refspec })
   if (bad) return { ok: false, error: bad }
-  const exec = executor(projectRoot, ['push', '--', remote, refspec])
+  const exec = executor(projectRoot, [
+    '-c', 'push.pushOption=',
+    'push',
+    '--no-follow-tags',
+    `--recurse-submodules=${options.submodules}`,
+    ...options.pushOptions.map((o) => `--push-option=${o}`),
+    '--',
+    remote,
+    refspec,
+  ])
   if (!exec.ok) {
     const result: GitPushResult = { ok: false }
     if (exec.stderr) result.stderr = exec.stderr.trim()
