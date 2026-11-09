@@ -74,11 +74,30 @@ function gitState(branch: string | null): GitState {
   }
 }
 
+const PUSH_PREFIX = ['-c', 'push.pushOption=', 'push', '--no-follow-tags', '--recurse-submodules=no']
+
+function pushTail(args: string[]): string[] | null {
+  return PUSH_PREFIX.every((a, i) => args[i] === a) ? ['push', ...args.slice(PUSH_PREFIX.length)] : null
+}
+
+const NOT_SET: GitExecResult = { ok: false, stdout: '', stderr: '', exitCode: 1 }
+
+function standardRead(args: string[]): GitExecResult | null {
+  const key = args.join(' ')
+  const url = /^remote get-url (?:--push --all )?(\S+)$/.exec(key)
+  if (url) return { ok: true, stdout: `https://example.invalid/${url[1]}.git\n`, stderr: '', exitCode: 0 }
+  if (key === 'config -z --get-all push.pushOption' || key === 'config --get push.recurseSubmodules' || key === 'config --bool --get submodule.recurse') return NOT_SET
+  if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+  return null
+}
+
 function gitExec(spec: Record<string, GitExecResult> = {}, fallback?: GitExecResult): GitExecutor {
   return (_root, args) => {
-    const key = args.join(' ')
+    const key = (pushTail(args) ?? args).join(' ')
     if (key in spec) return spec[key]!
     if (key === 'remote') return { ok: true, stdout: 'origin\nupstream\n', stderr: '', exitCode: 0 }
+    const standard = standardRead(args)
+    if (standard) return standard
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   }
@@ -117,7 +136,7 @@ describe('rsct_request_push — the dialog is required', () => {
       {
         gitStateOverride: gitState('feat/foo'),
         gitExecutor: (root, args) => {
-          if (args[0] === 'push') pushes.push(args.join(' '))
+          if (pushTail(args) !== null) pushes.push(args.join(' '))
           return gitExec({ 'push -- origin feat/foo': PUSH_OK })(root, args)
         },
         promptFn: dialog({ response: 'no-channel', channel: 'none', error: 'no display' }),
@@ -311,6 +330,7 @@ describe('rsct_request_push — schema', () => {
       { project_root: tmpRoot },
       {
         gitStateOverride: gitState('feat/foo'),
+        gitExecutor: gitExec(),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
       },
@@ -684,18 +704,18 @@ describe('rsct_request_push — B5 remote allow-list', () => {
     const seen: string[][] = []
     const out = await withRemote('--mirror', (_r, args) => { seen.push(args); return PUSH_OK })
     expect(out.reject_kind).toBe('unknown_remote')
-    expect(seen.some((a) => a[0] === 'push')).toBe(false)
+    expect(seen.some((a) => a.includes('push'))).toBe(false)
   })
 
   it('an EMPTY remote list rejects; an UNREADABLE one skips the check', async () => {
     const empty = await withRemote('origin', (_r, args) =>
-      args[0] === 'remote' ? { ok: true, stdout: '', stderr: '', exitCode: 0 } : PUSH_OK)
+      args.join(' ') === 'remote' ? { ok: true, stdout: '', stderr: '', exitCode: 0 } : standardRead(args) ?? PUSH_OK)
     expect(empty.reject_kind).toBe('unknown_remote')
 
     const unreadable = await withRemote('origin', (_r, args) =>
-      args[0] === 'remote'
+      args.join(' ') === 'remote'
         ? { ok: false, stdout: '', stderr: 'not a git repository', exitCode: 128 }
-        : PUSH_OK)
+        : standardRead(args) ?? PUSH_OK)
     expect(unreadable.status).toBe('pushed')
   })
 
@@ -716,7 +736,13 @@ describe('rsct_request_push — B5 argv shape', () => {
           remote: { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 },
           'rev-parse --symbolic-full-name feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
           'rev-parse --verify -q refs/heads/feat/foo^{object}': { ok: true, stdout: `${'a'.repeat(40)}\n`, stderr: '', exitCode: 0 },
-          [`push -- origin ${'a'.repeat(40)}:refs/heads/feat/foo`]: PUSH_OK,
+          'remote get-url --push --all origin': { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 },
+          'remote get-url origin': { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 },
+          'config -z --get-all push.pushOption': NOT_SET,
+          'config --get push.recurseSubmodules': NOT_SET,
+          'config --bool --get submodule.recurse': NOT_SET,
+          [`rev-list ${'a'.repeat(40)} --not --remotes=origin`]: { ok: true, stdout: '', stderr: '', exitCode: 0 },
+          [`-c push.pushOption= push --no-follow-tags --recurse-submodules=no -- origin ${'a'.repeat(40)}:refs/heads/feat/foo`]: PUSH_OK,
         }),
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -734,9 +760,9 @@ describe('rsct_request_push — B5 ref-store resolution arm', () => {
       {
         gitStateOverride: gitState('feat/foo'),
         gitExecutor: (_r, args) => {
-          if (args[0] === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
+          if (args.join(' ') === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
           if (args[0] === 'rev-parse') return { ok: true, stdout: resolved, stderr: '', exitCode: 0 }
-          return PUSH_OK
+          return standardRead(args) ?? PUSH_OK
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,
@@ -864,7 +890,7 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
   let realRoot: string
   const attempted: string[][] = []
   const realExceptPush: GitExecutor = (r, args) => {
-    if (args[0] === 'push') {
+    if (pushTail(args) !== null) {
       attempted.push(args)
       return { ok: false, stdout: '', stderr: 'intercepted by test', exitCode: 1 }
     }
@@ -909,7 +935,7 @@ describe('rsct_request_push — Rv-A: the ref-store arm against REAL git', () =>
     const out = await push('HEAD')
     expect(out.branch_check.protected).toBe(false)
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: realRoot, encoding: 'utf8' }).trim()
-    expect(attempted).toEqual([['push', '--', 'origin', `${sha}:refs/heads/feat/real`]])
+    expect(attempted).toEqual([[...PUSH_PREFIX, '--', 'origin', `${sha}:refs/heads/feat/real`]])
   })
 
   it('recognises refs/heads/main and heads/main through the string arm', async () => {

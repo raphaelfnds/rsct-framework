@@ -14,16 +14,18 @@ import {
   gitPush,
   readGitState,
   resolveCommit,
+  type CommitRange,
   type GitExecutor,
   type GitState,
   type RangePathsResult,
 } from '../lib/git.js'
-import { defaultPushProbe, type PushProbe } from '../lib/push-probe.js'
+import { defaultPushProbe, type PushProbe, type PushProbeResult } from '../lib/push-probe.js'
 import {
   effectiveProtectedList,
   isProtectedBranch,
 } from '../lib/branch-protection.js'
 import {
+  DevApprovalSchema,
   recordConsumedApproval,
   type FabricationSignal,
 } from '../lib/dev-approval.js'
@@ -63,7 +65,12 @@ import {
   stripRefsPrefix,
 } from '../lib/push-refspec.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
-import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
+import { DIALOG_PATH_LIMIT, dialogList, specLabel } from '../lib/dialog-text.js'
+import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { ackDialogLines, readDriftLock } from '../lib/integration-gate.js'
+import { maskUrl, readFetchUrl, readPushOptions, readPushUrls, readSubmoduleMode, sameRepository } from '../lib/push-target.js'
+import { scanCommits } from '../lib/staged-scan.js'
+import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
 
 export const requestPushInputSchema = z
   .object({
@@ -116,6 +123,13 @@ export type RequestPushRejectKind =
   | 'unsafe_push_target'
   | 'unknown_remote'
   | 'hygiene_range_unreadable'
+  | 'no_branch'
+  | 'review_drift'
+  | 'review_unreadable'
+  | 'push_url_unreadable'
+  | 'push_options_unreadable'
+  | 'secrets'
+  | 'secrets_unreadable'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -129,6 +143,13 @@ export interface RequestPushOutput {
     protected: boolean
     override_used: boolean
   }
+  secrets_check: {
+    commits_scanned: number | null
+    findings_count: number
+    findings: SecretFinding[]
+    override_used: boolean
+  }
+  push_urls: string[]
   bootstrap_marker?: BootstrapMarker | null
   audit_path: string | null
   audit_error: string | null
@@ -147,21 +168,21 @@ export interface RequestPushInternal {
   rangeReader?: typeof getRangePaths
   treeReader?: typeof getTreePaths
   pushProbe?: PushProbe
+  commitScanner?: typeof scanCommits
+  secretsScanTimeoutMs?: number
 }
 
 interface ProbeRead {
   projectRoot: string
-  remote: string
-  refspec: string
   destinationRef: string
   head: string
-  probe: PushProbe
+  probe: () => PushProbeResult
   treeReader: typeof getTreePaths
   rangeReader: typeof getRangePaths
 }
 
 function carriedByProbe(read: ProbeRead): { range: RangePathsResult; parsed: boolean } {
-  const probed = read.probe(read.projectRoot, read.remote, read.refspec)
+  const probed = read.probe()
   if (probed.status !== 'parsed') return { range: { status: 'unavailable' }, parsed: false }
   const mine = probed.refs.filter((r) => r.to === read.destinationRef)
   if (mine.length === 0) return { range: { status: 'unavailable' }, parsed: false }
@@ -177,10 +198,43 @@ function carriedByProbe(read: ProbeRead): { range: RangePathsResult; parsed: boo
   return { range: { status: 'ok', paths: [...paths] }, parsed: true }
 }
 
+function scanRange(args: {
+  projectRoot: string
+  remote: string
+  tip: string
+  fetchUrl: string | null
+  pushUrls: readonly string[]
+  destinationRef: string | null
+  probe: () => PushProbeResult
+}): CommitRange {
+  if (args.fetchUrl !== null && sameRepository(args.fetchUrl, args.pushUrls)) {
+    return { tips: [args.tip], exclude: [], excludeRemote: args.remote }
+  }
+  const probed = args.destinationRef !== null ? args.probe() : { status: 'unavailable' as const }
+  if (probed.status === 'parsed') {
+    const mine = probed.refs.filter((r) => r.to === args.destinationRef)
+    const olds = new Set(mine.map((r) => r.old))
+    const answered = new Set(mine.map((r) => r.url)).size
+    const only = olds.size === 1 ? [...olds][0] : null
+    const known = only !== null && only !== undefined ? resolveCommit(args.projectRoot, only) : null
+    if (answered === args.pushUrls.length && known !== null) return { tips: [args.tip], exclude: [known] }
+  }
+  return { tips: [args.tip], exclude: [] }
+}
+
+const PUSH_URLS_SHOWN = 5
+const PUSH_OPTIONS_SHOWN = 10
+
+function shownList(label: string, items: readonly string[], shown: number, width: number): string[] {
+  if (items.length === 0) return []
+  if (items.length === 1) return [`${label}: ${specLabel(items[0]!, width)}`]
+  return [`${label} (${items.length}):`, dialogList(items, shown, width)]
+}
+
 export const requestPushTool: Tool = {
   name: 'rsct_request_push',
   description:
-    "§C-gated push. Validates dev_approval, pops OS dialog when required, runs INV-5 branch check, then executes `git push <remote>` with an explicit full refspec built from the parsed request (so a remote.<name>.push mapping cannot redirect it). No secrets scan — the commit step already enforced INV-6. On rejection the approval is NOT consumed; dev can add an override and retry. `remote` must be a CONFIGURED remote name (a URL or path is refused), and INV-5 compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main; a leading '-', a '*' glob refspec and an empty destination reject before git runs.",
+    "§C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL, otherwise only the destination's old tip the remote reports, or none), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. On rejection the approval is NOT consumed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -200,7 +254,7 @@ export const requestPushTool: Tool = {
       },
       dev_approval: {
         type: 'object',
-        description: 'dev_approval payload.',
+        description: 'dev_approval payload. override_protected_branch and override_secrets_check are listed in the dialog with their reasons.',
       },
       pre_merge_ack: preMergeAckJsonSchema,
     },
@@ -242,6 +296,37 @@ export async function requestPushHandler(
   })
   if (installAdvisory.hint) advisories.push(installAdvisory.hint)
 
+  let pushUrls: string[] = []
+  let findings: SecretFinding[] = []
+  let commitsScanned: number | null = null
+  const reject = (
+    kind: RequestPushRejectKind,
+    reason: string,
+    opts: { protected?: boolean; channel?: GateChannel | null; signals?: FabricationSignal[]; audit?: Record<string, unknown>; hints?: string[] } = {},
+  ): RequestPushOutput => {
+    const audit = appendAudit(
+      projectRoot,
+      { event: 'request_push.rejected', tool: 'rsct_request_push', reject_kind: kind, reason, branch, remote, ...(pushUrls.length > 0 && { push_urls: pushUrls.map(maskUrl) }), ...opts.audit },
+      config?.audit,
+    )
+    return {
+      status: 'rejected',
+      branch,
+      remote,
+      channel: opts.channel ?? null,
+      reject_kind: kind,
+      reason,
+      fabrication_signals: opts.signals ?? [],
+      branch_check: { protected: opts.protected ?? false, override_used: false },
+      secrets_check: { commits_scanned: commitsScanned, findings_count: findings.length, findings, override_used: false },
+      push_urls: pushUrls.map(maskUrl),
+      ...auditFields(audit),
+      anti_replay_persisted: null,
+      anti_replay_error: null,
+      hints: withAdvisories(opts.hints ?? [reason]),
+    }
+  }
+
   const remoteList = gitExecutor(projectRoot, ['remote'])
   if (remoteList.ok) {
     const names = remoteList.stdout
@@ -254,66 +339,13 @@ export async function requestPushHandler(
         `${names.length > 0 ? ` (configured: ${names.join(', ')})` : ' (none configured)'}` +
         '. RSCT pushes only to NAMED remotes — a URL or path here would send the ' +
         'repository somewhere branch protection cannot see. Add it with `git remote add` first.'
-      const audit = appendAudit(
-        projectRoot,
-        {
-          event: 'request_push.rejected',
-          tool: 'rsct_request_push',
-          reject_kind: 'unknown_remote',
-          reason,
-          branch,
-          remote,
-          configured_remotes: names,
-        },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch,
-        remote,
-        channel: null,
-        reject_kind: 'unknown_remote',
-        reason,
-        fabrication_signals: [],
-        branch_check: { protected: false, override_used: false },
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
+      return reject('unknown_remote', reason, { audit: { configured_remotes: names } })
     }
   }
 
   const refspec = parsePushRefspec(branch ?? '')
   if (branch !== null && !refspec.ok) {
-    const reason = pushRefspecRejectReason(refspec.reason, branch)
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_push.rejected',
-        tool: 'rsct_request_push',
-        reject_kind: 'unsafe_push_target',
-        refspec_reject: refspec.reason,
-        reason,
-        branch,
-        remote,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch,
-      remote,
-      channel: null,
-      reject_kind: 'unsafe_push_target',
-      reason,
-      fabrication_signals: [],
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+    return reject('unsafe_push_target', pushRefspecRejectReason(refspec.reason, branch), { audit: { refspec_reject: refspec.reason } })
   }
 
   const candidates = new Set(refspec.ok ? refspec.candidates : [])
@@ -368,6 +400,14 @@ export async function requestPushHandler(
     }
   }
   const branchProtected = [...candidates].some((c) => isProtectedBranch(c, protectedList))
+  const deleting = refspec.ok && refspec.source.length === 0
+  let probeResult: PushProbeResult | null = null
+  const probe = (): PushProbeResult => {
+    if (probeResult === null) {
+      probeResult = explicitRefspec !== null ? (internal.pushProbe ?? defaultPushProbe)(projectRoot, remote, explicitRefspec) : { status: 'unavailable' }
+    }
+    return probeResult
+  }
   let crossCheck: PathCrossCheck | null = null
   let degradedHint: string | null = null
 
@@ -384,11 +424,9 @@ export async function requestPushHandler(
     if (range.status === 'unavailable' && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
       const carried = carriedByProbe({
         projectRoot,
-        remote,
-        refspec: explicitRefspec,
         destinationRef,
         head: sourceSha ?? rangeHead,
-        probe: internal.pushProbe ?? defaultPushProbe,
+        probe,
         treeReader: internal.treeReader ?? getTreePaths,
         rangeReader,
       })
@@ -400,59 +438,14 @@ export async function requestPushHandler(
       const reason =
         `refusing to push: this push carries ${range.paths.length} files, over the ${MAX_FILES_SWEPT} the ` +
         'coverage check can attest. A first publication this large is one the developer pushes by hand in their own terminal.'
-      const audit = appendAudit(
-        projectRoot,
-        { event: 'request_push.rejected', tool: 'rsct_request_push', reject_kind: 'hygiene_range_unreadable', reason, branch, remote, path_crosscheck: crossCheck },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch,
-        remote,
-        channel: null,
-        reject_kind: 'hygiene_range_unreadable',
-        reason,
-        fabrication_signals: [],
-        branch_check: { protected: true, override_used: false },
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
+      return reject('hygiene_range_unreadable', reason, { protected: true, audit: { path_crosscheck: crossCheck } })
     }
     const ackDecision = evaluatePreMergeAck(input.pre_merge_ack, {
       progressHasOpenItems: progressOpen,
       carriedPaths: range.status === 'ok' ? range.paths : null,
     })
     if (ackDecision.ok && range.status !== 'ok' && probeParsed) {
-      const reason = crossCheckBlockedReason(range, 'push')
-      const audit = appendAudit(
-        projectRoot,
-        {
-          event: 'request_push.rejected',
-          tool: 'rsct_request_push',
-          reject_kind: 'hygiene_range_unreadable',
-          reason,
-          branch,
-          remote,
-          path_crosscheck: crossCheck,
-        },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch,
-        remote,
-        channel: null,
-        reject_kind: 'hygiene_range_unreadable',
-        reason,
-        fabrication_signals: [],
-        branch_check: { protected: true, override_used: false },
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([reason]),
-      }
+      return reject('hygiene_range_unreadable', crossCheckBlockedReason(range, 'push'), { protected: true, audit: { path_crosscheck: crossCheck } })
     }
     if (ackDecision.ok && range.status !== 'ok') {
       const named = rangeBase !== null && rangeHead !== null
@@ -482,15 +475,9 @@ export async function requestPushHandler(
     }
     if (!ackDecision.ok) {
       const hint = preMergeAckHint(ackDecision)
-      const audit = appendAudit(
-        projectRoot,
-        {
-          event: 'request_push.rejected',
-          tool: 'rsct_request_push',
-          reject_kind: ackDecision.kind,
-          reason: hint,
-          branch,
-          remote,
+      return reject(ackDecision.kind, hint, {
+        protected: true,
+        audit: {
           pre_merge_ack: input.pre_merge_ack ?? null,
           pre_merge_ack_self_attested: PRE_MERGE_ACK_ITEMS,
           path_crosscheck: crossCheck,
@@ -498,24 +485,94 @@ export async function requestPushHandler(
           ...(ackDecision.kind === 'pre_merge_ack_incomplete' &&
             ackDecision.unswept !== undefined && { files_unswept: ackDecision.unswept }),
         },
-        config?.audit,
-      )
-      return {
-        status: 'rejected',
-        branch,
-        remote,
-        channel: null,
-        reject_kind: ackDecision.kind,
-        reason: hint,
-        fabrication_signals: [],
-        branch_check: { protected: true, override_used: false },
-        ...auditFields(audit),
-        anti_replay_persisted: null,
-        anti_replay_error: null,
-        hints: withAdvisories([hint]),
-      }
+      })
     }
   }
+
+  if (branch === null) {
+    return reject('no_branch', 'no branch resolved — HEAD is not on a branch; pass `branch` explicitly or check out the branch to push. No dialog was shown.')
+  }
+
+  const drift = readDriftLock(projectRoot)
+  if (drift.status === 'unreadable') {
+    return reject('review_unreadable', `${drift.error} Nothing was pushed and no dialog was shown.`, { protected: branchProtected })
+  }
+  if (drift.status === 'armed') {
+    return reject(
+      'review_drift',
+      `a commit landed content no dialog showed the developer (${drift.paths.join(', ')}); every push is refused until rsct_phase_review_start / _complete covers those paths. No dialog was shown.`,
+      { protected: branchProtected, audit: { drift_paths: drift.paths } },
+    )
+  }
+
+  const urls = readPushUrls(projectRoot, remote, gitExecutor)
+  if (!urls.ok) return reject('push_url_unreadable', `${urls.reason}, so the dialog cannot show where this push goes — nothing was pushed.`, { protected: branchProtected })
+  pushUrls = urls.value
+
+  const raw = DevApprovalSchema.safeParse(input.dev_approval)
+  const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check } : {}
+  if (raw.success && branchProtected && !rawOverrides.branch) {
+    return reject('protected_branch', `branch '${branchLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to push. No dialog was shown.`, { protected: true })
+  }
+
+  const options = readPushOptions(projectRoot, gitExecutor)
+  if (!options.ok) return reject('push_options_unreadable', `${options.reason}, so the dialog cannot show what this push sends — nothing was pushed.`, { protected: branchProtected })
+  const submodules = readSubmoduleMode(projectRoot, gitExecutor)
+
+  if (!deleting) {
+    const tip = sourceSha ?? (refspec.ok ? refspec.source : branch)
+    const range = scanRange({ projectRoot, remote, tip, fetchUrl: readFetchUrl(projectRoot, remote, gitExecutor), pushUrls, destinationRef, probe })
+    const extras = compileExtraPatterns(config?.secrets_extra_patterns ?? []).compiled
+    const scan = await (internal.commitScanner ?? scanCommits)(projectRoot, range, extras, internal.secretsScanTimeoutMs, gitExecutor)
+    if (!scan.ok) {
+      return reject(
+        'secrets_unreadable',
+        `the secrets scan could not read the commits this push carries (${scan.reason}), so it is refused rather than pushed unscanned — the developer pushes this by hand in their own terminal`,
+        { protected: branchProtected },
+      )
+    }
+    findings = scan.findings
+    commitsScanned = scan.commits
+  }
+  if (raw.success && findings.length > 0 && !rawOverrides.secrets) {
+    return reject(
+      'secrets',
+      `${findings.length} secret finding(s) in the commits this push carries — pass dev_approval.override_secrets_check: { reason } to push. No dialog was shown.`,
+      { protected: branchProtected, audit: { findings_count: findings.length } },
+    )
+  }
+
+  const ack = branchProtected ? ackDialogLines(input.pre_merge_ack) : { facts: [], note: [] }
+  const facts = [
+    `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to remote '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
+    ...(refspec.ok && refspec.destination !== refspec.source
+      ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`]
+      : []),
+    ...(sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : []),
+    ...shownList('Push URL', pushUrls.map(maskUrl), PUSH_URLS_SHOWN, 200),
+    ...(refspec.ok && refspec.forced ? ['⚠ FORCE: replaces the remote branch even where its history differs; commits there can be lost.'] : []),
+    ...(deleting ? [`⚠ DELETE: removes branch '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' from the remote.`] : []),
+    ...(branchProtected ? [protectedBranchLine(destinationLabel ?? branchLabel, 'pushing here')] : []),
+    ...(commitsScanned !== null && findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
+    ...secretFindingLines(projectRoot, 'push', findings),
+    ...ack.facts,
+    ...shownList('Push option sent', options.value, PUSH_OPTIONS_SHOWN, 100),
+    ...(submodules === 'check' ? ['Submodules: checked, never pushed.'] : []),
+    ...(branchProtected && crossCheck === 'degraded'
+      ? [
+          '⚠ files_swept NOT checked: RSCT could not read what this push carries.' +
+            (rangeHead !== null
+              ? ` If the remote has no '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' yet, this push carries the whole branch.`
+              : ''),
+        ]
+      : []),
+    ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
+  ]
+  const reasons = [
+    ...agentReasonLine('the protected branch', branchProtected ? rawOverrides.branch : undefined),
+    ...agentReasonLine('the secret findings', findings.length > 0 ? rawOverrides.secrets : undefined),
+    ...ack.note,
+  ]
 
   const gate = await gateRequest({
     toolName: 'rsct_request_push',
@@ -524,22 +581,7 @@ export async function requestPushHandler(
     forceDialogReason: 'a push needs the developer in the OS dialog; a batch token covers commit only; with no dialog channel, the developer runs it by hand in their own terminal',
     dialog: {
       title: 'RSCT — push approval',
-      message: [
-        `Approve push of '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' to '${specLabel(remote, DIALOG_PATH_LIMIT)}'?`,
-        ...(refspec.ok && refspec.destination !== refspec.source
-          ? [`Destination branch: '${specLabel(refspec.destination, DIALOG_PATH_LIMIT)}'`]
-          : []),
-        ...(sourceSha !== null ? [`Commit: ${sourceSha.slice(0, 12)}`] : []),
-        ...(branchProtected && crossCheck === 'degraded'
-          ? [
-              '⚠ files_swept NOT checked: RSCT could not read what this push carries.' +
-                (rangeHead !== null
-                  ? ` If the remote has no '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' yet, this push carries the whole branch.`
-                  : ''),
-            ]
-          : []),
-        ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
-      ].join('\n') + gateDialogFooter(projectRoot, config),
+      message: facts.join('\n') + gateDialogFooter(projectRoot, config) + (reasons.length > 0 ? `\n\n${reasons.join('\n')}` : ''),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && { approvalModes: config.approval_modes }),
@@ -549,67 +591,32 @@ export async function requestPushHandler(
   })
 
   if (gate.status === 'rejected') {
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_push.rejected',
-        tool: 'rsct_request_push',
-        reject_kind: gate.reject_kind,
-        reason: gate.reason,
-        branch,
-        remote,
-        fabrication_signals: gate.fabrication_signals,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch,
-      remote,
-      channel: null,
-      reject_kind: gate.reject_kind,
-      reason: gate.reason,
-      fabrication_signals: gate.fabrication_signals,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([`Approval rejected (${gate.reject_kind}): ${gate.reason}`]),
-    }
+    return reject(gate.reject_kind, gate.reason, {
+      signals: gate.fabrication_signals,
+      audit: { fabrication_signals: gate.fabrication_signals },
+      hints: [`Approval rejected (${gate.reject_kind}): ${gate.reason}`],
+    })
   }
 
   const approval = gate.approval
   const overrideBranch = approval.override_protected_branch
+  const overrideSecrets = approval.override_secrets_check
 
   if (branchProtected && !overrideBranch) {
-    const reason = `branch '${branchLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to push`
-    const audit = appendAudit(
-      projectRoot,
-      {
-        event: 'request_push.rejected',
-        tool: 'rsct_request_push',
-        reject_kind: 'protected_branch',
-        reason,
-        branch,
-        remote,
-        channel: gate.channel,
-      },
-      config?.audit,
-    )
-    return {
-      status: 'rejected',
-      branch,
-      remote,
+    return reject('protected_branch', `branch '${branchLabel}' is protected — pass dev_approval.override_protected_branch: { reason } to push`, {
+      protected: true,
       channel: gate.channel,
-      reject_kind: 'protected_branch',
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      branch_check: { protected: true, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
+      signals: gate.fabrication_signals,
+      audit: { channel: gate.channel },
+    })
+  }
+  if (findings.length > 0 && !overrideSecrets) {
+    return reject('secrets', `${findings.length} secret finding(s) in the commits this push carries — pass dev_approval.override_secrets_check: { reason } to push`, {
+      protected: branchProtected,
+      channel: gate.channel,
+      signals: gate.fabrication_signals,
+      audit: { channel: gate.channel, findings_count: findings.length },
+    })
   }
 
   if (branchProtected && overrideBranch) {
@@ -627,37 +634,25 @@ export async function requestPushHandler(
       config?.audit,
     )
   }
-
-  if (branch === null) {
-    const reason = 'no branch resolved — pass `branch` explicitly or run from inside a git worktree on a named branch'
-    const audit = appendAudit(
+  if (findings.length > 0 && overrideSecrets) {
+    appendAudit(
       projectRoot,
       {
-        event: 'request_push.mutation_failed',
+        event: 'request_push.override_invoked',
         tool: 'rsct_request_push',
-        reason,
+        override_kind: 'secrets_check',
+        override_reason: overrideSecrets.reason,
+        findings_count: findings.length,
+        branch,
         remote,
         channel: gate.channel,
       },
       config?.audit,
     )
-    return {
-      status: 'mutation_failed',
-      branch: null,
-      remote,
-      channel: gate.channel,
-      reject_kind: null,
-      reason,
-      fabrication_signals: gate.fabrication_signals,
-      branch_check: { protected: false, override_used: false },
-      ...auditFields(audit),
-      anti_replay_persisted: null,
-      anti_replay_error: null,
-      hints: withAdvisories([reason]),
-    }
   }
 
-  const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor)
+  const secretsCheck = { commits_scanned: commitsScanned, findings_count: findings.length, findings, override_used: findings.length > 0 }
+  const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor, { submodules, pushOptions: options.value })
   if (!push.ok) {
     const reason = push.error ?? push.stderr ?? 'git push failed'
     const audit = appendAudit(
@@ -681,6 +676,8 @@ export async function requestPushHandler(
       reason,
       fabrication_signals: gate.fabrication_signals,
       branch_check: { protected: branchProtected, override_used: branchProtected },
+      secrets_check: secretsCheck,
+      push_urls: pushUrls.map(maskUrl),
       ...auditFields(audit),
       anti_replay_persisted: null,
       anti_replay_error: null,
@@ -698,6 +695,9 @@ export async function requestPushHandler(
       remote,
       channel: gate.channel,
       fabrication_signals: gate.fabrication_signals,
+      push_urls: pushUrls.map(maskUrl),
+      commits_scanned: commitsScanned,
+      secret_findings: findings.length,
       ...(crossCheck !== null && { path_crosscheck: crossCheck }),
     },
     config?.audit,
@@ -736,7 +736,7 @@ export async function requestPushHandler(
   }
 
   if (branchProtected) {
-    const donePlan = (branch ? findPlanByBranch(projectRoot, branch) : null) ?? findActivePlan(projectRoot)
+    const donePlan = findPlanByBranch(projectRoot, branch) ?? findActivePlan(projectRoot)
     if (donePlan) {
       const report = planCleanupReport(projectRoot, donePlan.slug, config ?? null)
       hints.push(
@@ -754,6 +754,8 @@ export async function requestPushHandler(
     reason: null,
     fabrication_signals: gate.fabrication_signals,
     branch_check: { protected: branchProtected, override_used: branchProtected },
+    secrets_check: secretsCheck,
+    push_urls: pushUrls.map(maskUrl),
     bootstrap_marker: bootstrap,
     ...afields,
     anti_replay_persisted: record.ok,
@@ -761,4 +763,3 @@ export async function requestPushHandler(
     hints: withAdvisories(hints),
   }
 }
-

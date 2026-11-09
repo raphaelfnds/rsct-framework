@@ -249,6 +249,7 @@ describe.skipIf(!GIT)('lib/git — getRangePaths', () => {
 // version — and this project declares no minimum one).
 // ============================================================================
 describe('lib/git — mutating helpers guard their operands', () => {
+  const PUSH_DEFAULTS = { submodules: 'no' as const, pushOptions: [] }
   const seen: string[][] = []
   const spy: GitExecutor = (_root, args) => {
     seen.push(args)
@@ -263,8 +264,16 @@ describe('lib/git — mutating helpers guard their operands', () => {
   // `git push --exec=X -- main` still runs the program, because `remote` is an
   // agent slot sitting in an option position. The sentinel must come first.
   it('gitPush puts -- BEFORE the remote', () => {
-    gitPush('/tmp/x', 'origin', 'main', spy)
-    expect(lastOf('push')).toEqual(['push', '--', 'origin', 'main'])
+    gitPush('/tmp/x', 'origin', 'main', spy, PUSH_DEFAULTS)
+    expect(seen.at(-1)).toEqual(['-c', 'push.pushOption=', 'push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', 'main'])
+  })
+
+  it('gitPush sends the submodule mode and exactly the push options it is given, all before --', () => {
+    gitPush('/tmp/x', 'origin', 'main', spy, { submodules: 'check', pushOptions: ['ci.skip', '-x'] })
+    expect(seen.at(-1)).toEqual([
+      '-c', 'push.pushOption=', 'push', '--no-follow-tags', '--recurse-submodules=check',
+      '--push-option=ci.skip', '--push-option=-x', '--', 'origin', 'main',
+    ])
   })
 
   // Breaks on: dropping `--` from gitMerge. Flags there are built from booleans,
@@ -291,8 +300,8 @@ describe('lib/git — mutating helpers guard their operands', () => {
   // alone also makes these fail, so a weaker "the call failed" check would pass
   // with the predicate deleted and the second barrier silently gone.
   it.each([
-    ['gitPush/remote', () => gitPush('/tmp/x', '--exec=/tmp/pwn.sh', 'main', spy)],
-    ['gitPush/branch', () => gitPush('/tmp/x', 'origin', '--exec=/tmp/pwn.sh', spy)],
+    ['gitPush/remote', () => gitPush('/tmp/x', '--exec=/tmp/pwn.sh', 'main', spy, PUSH_DEFAULTS)],
+    ['gitPush/branch', () => gitPush('/tmp/x', 'origin', '--exec=/tmp/pwn.sh', spy, PUSH_DEFAULTS)],
     ['gitRebase', () => gitRebase('/tmp/x', '--exec=/tmp/pwn.sh', spy)],
     ['gitMerge', () => gitMerge('/tmp/x', '--exec=/tmp/pwn.sh', { no_ff: true, allow_unrelated_histories: false }, spy)],
     ['gitSquash', () => gitSquash('/tmp/x', '--exec=/tmp/pwn.sh', spy)],
@@ -306,7 +315,7 @@ describe('lib/git — mutating helpers guard their operands', () => {
   // VACUITY CONTROL. Every assertion above is satisfied by a helper that refuses
   // everything. This is the one that is not.
   it('VACUITY: ordinary operands still reach git', () => {
-    expect(gitPush('/tmp/x', 'origin', 'release/2.0', spy).ok).toBe(true)
+    expect(gitPush('/tmp/x', 'origin', 'release/2.0', spy, PUSH_DEFAULTS).ok).toBe(true)
     expect(gitRebase('/tmp/x', 'origin/main', spy).ok).toBe(true)
     expect(gitMerge('/tmp/x', 'feat/café', { no_ff: false, allow_unrelated_histories: false }, spy).ok).toBe(true)
     expect(seen.length).toBeGreaterThan(0)

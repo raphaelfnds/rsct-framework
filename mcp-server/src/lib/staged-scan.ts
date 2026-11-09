@@ -7,6 +7,7 @@ import {
   streamGitLines,
   treeDiffArgs,
   type CommitRange,
+  type GitExecutor,
 } from './git.js'
 import { createDiffScanner, type ExtraPattern, type SecretFinding } from './secrets.js'
 
@@ -19,8 +20,9 @@ export async function scanCommits(
   range: CommitRange,
   extraPatterns: ReadonlyArray<ExtraPattern> = [],
   timeoutMs?: number,
+  executor?: GitExecutor,
 ): Promise<CommitScanResult> {
-  const listed = listCommits(projectRoot, range)
+  const listed = listCommits(projectRoot, range, executor)
   if (!listed.ok) return listed
   if (listed.commits.length === 0) return { ok: true, findings: [], commits: 0 }
   const scanner = createDiffScanner(extraPatterns)
