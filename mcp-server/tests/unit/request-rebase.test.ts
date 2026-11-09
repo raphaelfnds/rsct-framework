@@ -24,13 +24,18 @@ afterEach(() => {
   if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
 })
 
+let headBranch: string | null = null
 function gitState(branch: string | null): GitState {
+  headBranch = branch
   return { available: branch !== null, branch, head_sha: branch ? 'aaaa111' : null, is_clean: false }
 }
 const PINNED = 'c'.repeat(40)
 const okExec: GitExecutor = (_r, args) => ({
   ok: true,
-  stdout: args[0] === 'rev-parse' ? (args[3]?.endsWith('^{commit}') ? `${PINNED}\n` : 'bbbb222') : '',
+  stdout:
+    args[0] === 'rev-parse'
+      ? args[3]?.endsWith('^{commit}') ? `${PINNED}\n` : 'bbbb222'
+      : args[0] === 'symbolic-ref' ? `refs/heads/${headBranch}\n` : '',
   stderr: '',
   exitCode: 0,
 })
@@ -45,7 +50,7 @@ function ack(over: Record<string, unknown> = {}) {
 }
 const emptyRange: RequestRebaseInternal['rangeReader'] = () => ({ status: 'ok', paths: [] })
 function internal(over: Partial<RequestRebaseInternal> = {}): RequestRebaseInternal {
-  return { gitStateOverride: gitState('feat/x'), gitExecutor: okExec, promptFn: alwaysYes(), now: FIXED_NOW, rangeReader: emptyRange, ...over }
+  return { gitExecutor: okExec, promptFn: alwaysYes(), now: FIXED_NOW, rangeReader: emptyRange, ...over, gitStateOverride: over.gitStateOverride ?? gitState('feat/x') }
 }
 
 describe('rsct_request_rebase', () => {
@@ -165,7 +170,7 @@ describe('rsct_request_rebase', () => {
   it('surfaces a mutation_failed on a rebase conflict', async () => {
     const conflictExec: GitExecutor = (_r, args) => {
       if (args[0] === 'rebase') return { ok: false, stdout: '', stderr: 'CONFLICT (content)', exitCode: 1 }
-      return args[0] === 'rev-parse' || args[0] === 'rev-list' ? okExec(_r, args) : { ok: true, stdout: 'aaa', stderr: '', exitCode: 0 }
+      return args[0] === 'rev-parse' || args[0] === 'rev-list' || args[0] === 'symbolic-ref' ? okExec(_r, args) : { ok: true, stdout: 'aaa', stderr: '', exitCode: 0 }
     }
     const out = (await requestRebaseHandler(
       { project_root: tmpRoot, ref: 'main', dev_approval: approval(), pre_merge_ack: ack() },

@@ -91,9 +91,14 @@ const exec: GitExecutor = (_root, args) => {
   if (args[0] === 'remote' && args[1] === 'get-url') return { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 }
   if (args[0] === 'rev-parse' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${'c'.repeat(40)}\n`, stderr: '', exitCode: 0 }
   if (args[0] === 'config') return { ok: false, stdout: '', stderr: '', exitCode: 1 }
+  if (args[0] === 'symbolic-ref') return { ok: true, stdout: `refs/heads/${headBranch}\n`, stderr: '', exitCode: 0 }
   return OK
 }
-const state = (branch: string): GitState => ({ available: true, branch, head_sha: 'aaaa111', is_clean: true })
+let headBranch = ''
+const state = (branch: string): GitState => {
+  headBranch = branch
+  return { available: true, branch, head_sha: 'aaaa111', is_clean: true }
+}
 
 describe('dialog text helpers', () => {
   it('specLabel turns every line break and tab into a space and drops control and format characters', () => {

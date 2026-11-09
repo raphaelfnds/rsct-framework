@@ -57,7 +57,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   blank unchanged line as an empty line; the scan stopped there and skipped the lines after it, in
   `rsct_request_commit` and `rsct_check_secrets`. The gate reads now turn both settings off, and the
   scanner reads an empty line inside a hunk as an unchanged one.
-- **A commit that lands while `git commit` reports a failure** (for example a hook's own commit) is
+- **A commit that lands while `git commit` reports a failure** (for example a commit made during the attempt) is
   checked as one that succeeded: it is scanned for secrets, and unreviewed code or findings no dialog
   showed arm `review_drift`.
 - **The REVIEW sweep of a commit reads the staged tree recorded for the approval**, not the live

@@ -11,6 +11,7 @@ import {
   defaultGitExecutor,
   getRangePaths,
   gitMerge,
+  branchRef,
   readGitState,
   type GitExecutor,
   type GitState,
@@ -340,6 +341,9 @@ export async function requestMergeHandler(
 
   pinned = resolvePinned(projectRoot, input.source_branch, gitExecutor)
   const headAt = readHeadPosition(projectRoot, gitExecutor)
+  if (headAt.ref !== branchRef(targetBranch)) {
+    return reject('target_moved', `HEAD is no longer on '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}', the branch the checks read — nothing was merged and no dialog was shown; ask again.`, { protected: targetProtected })
+  }
   const head = headAt.sha
   if (pinned === null || head === null) {
     return reject('source_unreadable', `git could not resolve '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}'${head === null ? ' or HEAD' : ''} to a commit, so what the merge brings cannot be shown — nothing was merged.`, { protected: targetProtected })

@@ -142,5 +142,8 @@ describe('the REVIEW complete dialog lists findings and the secrets behind a dri
     const text = seen.find((o) => o.title === 'RSCT — review complete')!.message
     expect(text).toContain('… and 2 more')
     expect(text).not.toContain('p'.repeat(300))
+    const report = /Full list: (\S+)/.exec(text)?.[1]
+    expect(report).toMatch(/^\.rsct\/reports\/review-drift-secrets-[0-9a-f]{16}\.md$/)
+    expect(readFileSync(join(root, report!), 'utf8')).toContain(`${'p'.repeat(300)}11.env`)
   })
 })

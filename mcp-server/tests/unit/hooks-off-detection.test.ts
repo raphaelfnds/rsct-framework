@@ -152,10 +152,17 @@ function capture(dialogs: string[]): (o: DialogOptions) => Promise<DialogResult>
 
 const NOW = new Date('2026-07-11T12:00:00.000Z')
 const TS = '2026-07-11T11:59:45.000Z'
-const branch = (b: string): GitState => ({ available: true, branch: b, head_sha: 'aaaa111', is_clean: false })
+let headBranch = ''
+const branch = (b: string): GitState => {
+  headBranch = b
+  return { available: true, branch: b, head_sha: 'aaaa111', is_clean: false }
+}
 const okExec: GitExecutor = (_r, args) => ({
   ok: true,
-  stdout: args[0] === 'rev-parse' ? (args[3]?.endsWith('^{commit}') ? `${'c'.repeat(40)}\n` : 'bbbb222') : '',
+  stdout:
+    args[0] === 'rev-parse'
+      ? args[3]?.endsWith('^{commit}') ? `${'c'.repeat(40)}\n` : 'bbbb222'
+      : args[0] === 'symbolic-ref' ? `refs/heads/${headBranch}\n` : '',
   stderr: '',
   exitCode: 0,
 })

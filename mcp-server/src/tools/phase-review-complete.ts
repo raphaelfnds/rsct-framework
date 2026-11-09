@@ -67,7 +67,7 @@ import { inferRejectKind, type GateRejectKind } from '../lib/request-gate.js'
 import { approvePendingPhases, closeRunAlone } from '../lib/run-alone.js'
 import { gateDialogFooter } from '../lib/gate-dialog.js'
 import { DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
-import { DIALOG_LIST_SHOWN, findingActionLines } from '../lib/gate-exceptions.js'
+import { DIALOG_LIST_SHOWN, findingActionLines, shownLimit, writeListReport } from '../lib/gate-exceptions.js'
 import { readClassifyEvidence } from '../lib/ceremony-gate.js'
 
 const findingActionSchema = z
@@ -721,12 +721,17 @@ export async function phaseReviewCompleteHandler(
   const titles = new Map((baseline ?? []).map((f) => [f.id, f.title]))
   const listed = findingActionLines(projectRoot, 'review', input.findings_actions, (id) => titles.get(id))
   const driftSecrets = driftBefore?.secrets ?? []
+  const driftReport =
+    driftSecrets.length > DIALOG_LIST_SHOWN
+      ? writeListReport(projectRoot, 'review', 'drift-secrets', 'Secret findings behind the review_drift lock', driftSecrets)
+      : null
   const factParts = [
     ...listed.facts,
     ...(driftSecrets.length > 0
       ? [
           `⚠ This REVIEW releases a review_drift lock that a commit, merge or rebase armed with ${driftSecrets.length} secret finding(s) no dialog showed (file:line — rule; values are never shown):`,
-          dialogList(driftSecrets, DIALOG_LIST_SHOWN),
+          dialogList(driftSecrets, shownLimit(driftReport)),
+          ...(driftReport !== null ? [`Full list: ${driftReport}`] : []),
         ]
       : []),
   ]

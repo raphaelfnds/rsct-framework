@@ -163,6 +163,32 @@ describe.skipIf(!GIT)('rsct_request_merge scans what it brings and shows every e
     expect(git('rev-parse', 'main')).toBe(mainBefore)
   })
 
+  it('refuses before the dialog when HEAD moves between the checks and the pin', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    git('checkout', '-q', '-b', 'main', 'integ')
+    git('checkout', '-q', 'integ')
+    const mainBefore = git('rev-parse', 'main')
+    for (const run of ['merge', 'rebase'] as const) {
+      let moved = false
+      const executor = (r: string, args: string[]) => {
+        if (!moved && args[0] === 'rev-parse' && args[3]?.endsWith('^{commit}')) {
+          moved = true
+          git('checkout', '-q', 'main')
+        }
+        return defaultGitExecutor(r, args)
+      }
+      const d = dialogs()
+      const input = { project_root: root, pre_merge_ack: { ...ACK, files_swept: swept() }, dev_approval: approval() }
+      const out =
+        run === 'merge'
+          ? ((await requestMergeHandler({ ...input, source_branch: 'feat/x' }, { promptFn: d.fn, now: NOW, gitExecutor: executor })) as RequestMergeOutput)
+          : ((await requestRebaseHandler({ ...input, ref: 'feat/x' }, { promptFn: d.fn, now: NOW, gitExecutor: executor })) as RequestRebaseOutput)
+      expect([run, out.reject_kind, d.seen.length]).toEqual([run, 'target_moved', 0])
+      expect(git('rev-parse', 'main')).toBe(mainBefore)
+      git('checkout', '-q', 'integ')
+    }
+  })
+
   it('merges the pinned commit, with the merge message naming the branch', async () => {
     commitFile('b.txt', 'b\n', 'work')
     const source = git('rev-parse', 'HEAD')
