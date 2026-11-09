@@ -38,6 +38,7 @@ import {
 import { getHeadShaFull } from '../lib/git.js'
 import { gateDialogFooter } from '../lib/gate-dialog.js'
 import { DIALOG_UNCUT, specLabel } from '../lib/dialog-text.js'
+import { findingActionLines } from '../lib/gate-exceptions.js'
 
 
 const findingActionSchema = z
@@ -347,6 +348,8 @@ export async function phaseVerificationCompleteHandler(
     }
   }
 
+  const titles = new Map((baseline ?? []).map((f) => [f.id, f.title]))
+  const listed = findingActionLines(projectRoot, 'verification', input.findings_actions, (id) => titles.get(id))
   const gate = await gateRequest({
     toolName: 'rsct_phase_verification_complete',
     approval: input.dev_approval,
@@ -354,8 +357,10 @@ export async function phaseVerificationCompleteHandler(
       title: 'RSCT — verification complete',
       message:
         `Complete V phase?\n\n${input.findings_actions.length} action(s): ${summary['address-now']} address-now, ${summary['capture-as-issue']} capture, ${summary.defer} defer, ${summary.accept} accept\n\nEvidence: ${describeEvidenceMix(evidence_mix)}` +
+        (listed.facts.length > 0 ? `\n\n${listed.facts.join('\n')}` : '') +
         gateDialogFooter(projectRoot) +
-        `\nSpec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`,
+        `\nSpec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'` +
+        (listed.agent.length > 0 ? `\n\n${listed.agent.join('\n')}` : ''),
     },
     projectRoot,
     ...(config?.approval_modes !== undefined && {
