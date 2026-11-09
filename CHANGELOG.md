@@ -12,6 +12,84 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-11-08
+
+### Security
+
+- **Push, merge and rebase dialogs show every exception they are asked to approve**, as the commit
+  dialog has since 2.23.0 (ADR-042).
+  - Branch protection, `--allow-unrelated-histories` and the secrets scan used to run after you
+    answered, with the overrides filled in by the agent. They now run before the dialog, and a
+    request that lacks the override a check needs is refused before any dialog opens.
+  - The dialog lists the protected branch, unrelated histories, each secret finding
+    (`"file":line — rule (commit …)`, never the value) and the `pre_merge_ack` answers. The agent's
+    reasons and the ack note come after the framework footer.
+- **Push scans every commit it sends.** Until now a push carried commits made outside
+  `rsct_request_commit` unscanned.
+  - Each commit is read on its own with `git diff-tree`, which repository log and format settings
+    cannot change. For a merge commit, only what the merge itself adds counts. A secret added and
+    then removed is still found.
+  - Commits on the remote's tracking refs are skipped when every push URL names the fetch URL's
+    repository. Otherwise only the old tip the remote reports is skipped, or the whole history is
+    read.
+  - A finding needs `override_secrets_check`. A scan that cannot finish refuses
+    (`secrets_unreadable`).
+- **Push shows where it goes and sends only what it shows.**
+  - Every push URL (`git remote get-url --push --all`) is listed with credentials masked; a
+    `pushurl` used to send a push elsewhere while the dialog said `origin`.
+  - `FORCE` and `DELETE` are shown in words.
+  - Push options are listed and sent explicitly. Tags `push.followTags` would add are no longer sent,
+    and submodules are checked, never pushed, when the configuration would push or check them.
+- **Merge and rebase scan what they bring before the dialog, and what they wrote after it.**
+  - The source branch or `ref` is pinned to its commit; one that moves after the dialog refuses
+    (`source_moved`).
+  - A finding after the operation that the dialog did not show (a merge driver, a hook) arms
+    `review_drift`.
+- **An armed `review_drift` lock now refuses push, merge and rebase**, as it refused commits. The
+  REVIEW that releases a lock armed by secret findings lists them and forces the dialog.
+- **`git replace` can no longer change what a gate reads.** A replaced blob hid a staged secret from
+  the commit scan, and a content merge through a replaced blob wrote the replacement's content.
+  Every git command RSCT runs now sets `GIT_NO_REPLACE_OBJECTS=1` and turns the file-system monitor
+  off.
+- **A commit that lands while `git commit` reports a failure** (for example a hook's own commit) is
+  checked as one that succeeded: it is scanned for secrets, and unreviewed code or findings no dialog
+  showed arm `review_drift`.
+- **The REVIEW sweep of a commit reads the staged tree recorded for the approval**, not the live
+  index.
+- **A branch is named only when HEAD points at `refs/heads/`.** A detached HEAD, or HEAD pointing at
+  a remote-tracking ref, now has no branch, so the refusals for a missing branch apply to
+  `rsct_plan_authorize`, merge, rebase and push.
+- **The `rsct_phase_code_start` bypass dialog shows the real state** of each bypass (V started or
+  not, the recorded tier, a missing plan file, or "not needed") and the agent's reason after the
+  footer. The approval is recorded as used once the code phase starts.
+- **A dialog says when an approval looks auto-generated, and why**, in one line at the top.
+  `rsct_request_rebase` approvals start with `rebase:` or `squash:`, and `rsct_phase_code_start`
+  approvals with `code_start:`.
+- **The V and REVIEW complete dialogs list each finding** with the action the agent proposes. Over
+  ten, the rest go to a report under `.rsct/reports/`. The finding ids, titles and notes come after
+  the footer.
+
+### Changed
+
+- `rsct_request_push`:
+  - no longer sends tags `push.followTags` would add — push a tag on its own with
+    `branch: "refs/tags/<name>"`;
+  - refuses, through git, a push whose configuration pushes or checks submodules when a submodule
+    commit is not on a remote-tracking branch of its submodule;
+  - reads the whole history on a branch's first push when the push URL names another repository
+    than the fetch URL (a fork);
+  - needs git 2.7 or newer.
+- A dialog that cannot show its text asks the agent to shorten what it wrote; the framework lines
+  stay.
+- `mcp-server/README.md`: the merge entry no longer lists a `target_branch` input, which the tool
+  never accepted (part of #83).
+
+### Migration for existing projects
+
+- Run the installer again: the gates live in `rsct-mcp`.
+- `/rsct-setup` refreshes the terminal guard copy in each project; it changed only in how it reads
+  a git alias, and nothing breaks without it.
+
 ## [2.23.2] - 2026-11-08
 
 ### Security
