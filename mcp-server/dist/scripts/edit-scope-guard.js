@@ -725,13 +725,28 @@ var ZodError = class _ZodError extends Error {
           while (i < issue.path.length) {
             const el = issue.path[i];
             const terminal = i === issue.path.length - 1;
-            if (!terminal) {
-              curr[el] = curr[el] || { _errors: [] };
-            } else {
-              curr[el] = curr[el] || { _errors: [] };
-              curr[el]._errors.push(mapper(issue));
+            if (el === "_errors") {
+              if (terminal)
+                curr._errors.push(mapper(issue));
+              i++;
+              continue;
+            }
+            if (!Object.prototype.hasOwnProperty.call(curr, el)) {
+              if (el === "__proto__") {
+                Object.defineProperty(curr, el, {
+                  value: { _errors: [] },
+                  writable: true,
+                  enumerable: true,
+                  configurable: true
+                });
+              } else {
+                curr[el] = { _errors: [] };
+              }
             }
             curr = curr[el];
+            if (terminal) {
+              curr._errors.push(mapper(issue));
+            }
             i++;
           }
         }
@@ -755,7 +770,7 @@ var ZodError = class _ZodError extends Error {
     return this.issues.length === 0;
   }
   flatten(mapper = (issue) => issue.message) {
-    const fieldErrors = {};
+    const fieldErrors = /* @__PURE__ */ Object.create(null);
     const formErrors = [];
     for (const sub of this.issues) {
       if (sub.path.length > 0) {
@@ -1359,7 +1374,7 @@ var nanoidRegex = /^[a-z0-9_-]{21}$/i;
 var jwtRegex = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/;
 var durationRegex = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
 var emailRegex = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
-var _emojiRegex = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
+var _emojiRegex = `^[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`;
 var emojiRegex;
 var ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
 var ipv4CidrRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/(3[0-2]|[12]?[0-9])$/;
@@ -3325,7 +3340,11 @@ function mergeValues(a, b) {
     const bKeys = util.objectKeys(b);
     const sharedKeys = util.objectKeys(a).filter((key) => bKeys.indexOf(key) !== -1);
     const newObj = { ...a, ...b };
+    if (Object.prototype.hasOwnProperty.call(newObj, "__proto__"))
+      delete newObj.__proto__;
     for (const key of sharedKeys) {
+      if (key === "__proto__")
+        continue;
       const sharedValue = mergeValues(a[key], b[key]);
       if (!sharedValue.valid) {
         return { valid: false };
