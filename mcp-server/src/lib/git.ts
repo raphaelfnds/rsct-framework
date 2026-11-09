@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+import { runGitBuffer, runGitText, spawnGit } from './git-launch.js'
 
 export interface GitState {
   available: boolean
@@ -20,7 +21,7 @@ export function readGitState(projectRoot: string): GitState {
     ? symbolic.slice(BRANCH_REF_PREFIX.length)
     : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
-  const status = safeGit(projectRoot, ['-c', 'core.fsmonitor=', 'status', '--porcelain'])
+  const status = safeGit(projectRoot, ['status', '--porcelain'])
 
   return {
     available: true,
@@ -41,10 +42,7 @@ export function readHeadRef(projectRoot: string): string | null {
   return ref.length > 0 ? ref : null
 }
 
-const GATE_READ_CONFIG: readonly string[] = [
-  '-c', 'core.fsmonitor=',
-  '-c', 'diff.relative=false',
-]
+const GATE_READ_CONFIG: readonly string[] = ['-c', 'diff.relative=false']
 
 const CONTENT_DIFF_FLAGS: readonly string[] = [
   '--no-color',
@@ -104,7 +102,7 @@ export function streamGitLines(
     }
     let child: ChildProcess
     try {
-      child = spawn('git', [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      child = spawnGit(args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     } catch (error) {
       finish({ ok: false, reason: `git could not start: ${error instanceof Error ? error.message : String(error)}` })
       return
@@ -177,9 +175,8 @@ interface GitRead {
 
 function gitReadC(cwd: string, args: readonly string[], input?: string): GitRead {
   try {
-    const stdout = execFileSync('git', [...args], {
+    const stdout = runGitText(args, {
       cwd,
-      encoding: 'utf8',
       input: input ?? '',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: GIT_READ_TIMEOUT_MS,
@@ -487,9 +484,8 @@ function recordGitFailure(cwd: string, args: readonly string[], error: unknown):
 
 function safeGitRaw(cwd: string, args: string[]): string | null {
   try {
-    return execFileSync('git', args, {
+    return runGitText(args, {
       cwd,
-      encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 16 * 1024 * 1024,
       timeout: GIT_READ_TIMEOUT_MS,
@@ -507,7 +503,7 @@ export function safeGitBuffer(
   maxBuffer: number = 64 * 1024 * 1024,
 ): Buffer | null {
   try {
-    return execFileSync('git', args, {
+    return runGitBuffer(args, {
       cwd,
       input: input ?? '',
       ...(env !== undefined && { env: { ...process.env, ...env } }),
@@ -533,9 +529,8 @@ export type GitExecutor = (projectRoot: string, args: string[]) => GitExecResult
 
 export const defaultGitExecutor: GitExecutor = (cwd, args) => {
   try {
-    const stdout = execFileSync('git', args, {
+    const stdout = runGitText(args, {
       cwd,
-      encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 16 * 1024 * 1024,
     })
