@@ -17,9 +17,7 @@ export function readGitState(projectRoot: string): GitState {
   }
 
   const symbolic = readHeadRef(projectRoot) ?? ''
-  const branch = symbolic.startsWith(BRANCH_REF_PREFIX)
-    ? symbolic.slice(BRANCH_REF_PREFIX.length)
-    : safeGit(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const branch = symbolic.startsWith(BRANCH_REF_PREFIX) ? symbolic.slice(BRANCH_REF_PREFIX.length) : null
   const head_sha = safeGit(projectRoot, ['rev-parse', '--short', 'HEAD'])
   const status = safeGit(projectRoot, ['status', '--porcelain'])
 
@@ -34,7 +32,7 @@ export function readGitState(projectRoot: string): GitState {
 const BRANCH_REF_PREFIX = 'refs/heads/'
 
 export function branchRef(branch: string | null): string | null {
-  return branch === null || branch === 'HEAD' ? null : `${BRANCH_REF_PREFIX}${branch}`
+  return branch === null ? null : `${BRANCH_REF_PREFIX}${branch}`
 }
 
 export function readHeadRef(projectRoot: string): string | null {

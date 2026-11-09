@@ -363,9 +363,9 @@ function buildHints({
     hints.push(
       `Active plan: ${active_plan.slug} (status: ${status}). Continue from progress file if status is 'approved' or 'in-progress'.`,
     )
-    if (active_plan.branch && git.available && git.branch && active_plan.branch !== git.branch) {
+    if (active_plan.branch && git.available && (git.branch !== null || git.head_sha !== null) && active_plan.branch !== git.branch) {
       hints.push(
-        `Plan branch '${active_plan.branch}' differs from the current branch '${git.branch}' — ask the dev which branch to continue in.`,
+        `Plan branch '${active_plan.branch}' differs from the current ${git.branch === null ? 'HEAD, which is not on a branch' : `branch '${git.branch}'`} — ask the dev which branch to continue in.`,
       )
     }
   } else {
