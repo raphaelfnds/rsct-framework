@@ -24,7 +24,7 @@ export function runGitText(args: readonly string[], options: Omit<ExecFileSyncOp
 }
 
 export function runGitBuffer(args: readonly string[], options: Omit<ExecFileSyncOptions, 'encoding'>): Buffer {
-  return execFileSync('git', gitChildArgs(args), { ...options, encoding: 'buffer', env: gitChildEnv(options.env) })
+  return execFileSync('git', gitChildArgs(args), { ...options, env: gitChildEnv(options.env) }) as Buffer
 }
 
 export function spawnGit(args: readonly string[], options: SpawnOptions): ChildProcess {
