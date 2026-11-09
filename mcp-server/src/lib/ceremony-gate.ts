@@ -2,6 +2,7 @@ import { deriveAuditCeiling, higherTier, isFreeTier } from './free-commit.js'
 import { gateRequest, type GateChannel, type GateRejectKind } from './request-gate.js'
 import { gateDialogFooter } from './gate-dialog.js'
 import { DIALOG_UNCUT, specLabel } from './dialog-text.js'
+import { quoted } from './gate-exceptions.js'
 import { readPhaseState } from './phase-scope.js'
 import type { DialogOptions, DialogResult } from './os-dialog.js'
 import type { RsctConfig } from './project-root.js'
@@ -86,13 +87,17 @@ export async function gateCeremonyBypass(args: {
   specRef: string
   specTier: string
   bypasses: CeremonyBypass[]
+  states: Partial<Record<CeremonyBypass, string>>
+  agentReason: string | null
   devApproval: unknown
   promptFn?: (options: DialogOptions) => Promise<DialogResult>
   now?: Date
 }): Promise<CeremonyGateResult> {
   if (args.bypasses.length === 0) return { status: 'not_required' }
 
-  const asked = args.bypasses.map((b) => `• ${CEREMONY_BYPASS_LABELS[b]}`).join('\n')
+  const asked = args.bypasses
+    .map((b) => `• ${CEREMONY_BYPASS_LABELS[b]}${args.states[b] !== undefined ? ` — now: ${args.states[b]}` : ''}`)
+    .join('\n')
   const gate = await gateRequest({
     toolName: args.toolName,
     approval: args.devApproval,
@@ -103,7 +108,8 @@ export async function gateCeremonyBypass(args: {
         `This start asks to:\n\n${asked}\n\n` +
         `These are the checks that catch a task being treated as smaller than it is.` +
         gateDialogFooter(args.projectRoot) +
-        `\nSpec: '${specLabel(args.specRef, DIALOG_UNCUT)}'`,
+        `\nSpec: '${specLabel(args.specRef, DIALOG_UNCUT)}'` +
+        (args.agentReason !== null ? `\nAgent's reason: ${quoted(args.agentReason)}` : ''),
     },
     projectRoot: args.projectRoot,
     ...(args.config?.approval_modes !== undefined && {
