@@ -40,7 +40,11 @@ export function readHeadRef(projectRoot: string): string | null {
   return ref.length > 0 ? ref : null
 }
 
-const GATE_READ_CONFIG: readonly string[] = ['-c', 'diff.relative=false']
+const GATE_READ_CONFIG: readonly string[] = [
+  '-c', 'diff.relative=false',
+  '-c', 'diff.interHunkContext=0',
+  '-c', 'diff.suppressBlankEmpty=false',
+]
 
 const CONTENT_DIFF_FLAGS: readonly string[] = [
   '--no-color',
@@ -65,7 +69,7 @@ export interface CommitRange {
   excludeRemote?: string
 }
 
-export type CommitListResult = { ok: true; commits: string[] } | { ok: false; reason: string }
+type CommitListResult = { ok: true; commits: string[] } | { ok: false; reason: string }
 
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -681,7 +685,7 @@ export interface GitPushResult {
   stdout?: string
 }
 
-export interface GitPushOptions {
+interface GitPushOptions {
   submodules: 'check' | 'no'
   pushOptions: readonly string[]
 }
@@ -718,6 +722,7 @@ export function gitPush(
 export interface GitMergeOptions {
   no_ff: boolean
   allow_unrelated_histories: boolean
+  message?: string
 }
 
 export interface GitMergeResult {
@@ -740,6 +745,7 @@ export function gitMerge(
   const args = ['merge']
   if (options.no_ff) args.push('--no-ff')
   if (options.allow_unrelated_histories) args.push('--allow-unrelated-histories')
+  if (options.message !== undefined) args.push('-m', options.message)
   args.push('--', sourceBranch)
 
   const sha_before = getHeadSha(projectRoot, executor)

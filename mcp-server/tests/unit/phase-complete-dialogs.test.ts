@@ -130,4 +130,17 @@ describe('the REVIEW complete dialog lists findings and the secrets behind a dri
     expect(text).toContain('• "hook.env":1 — value-shape (commit aaaaaaaaaaaa)')
     expect(r.status, 'trust_allowed_for cannot complete a REVIEW that releases secret findings').not.toBe('completed')
   })
+
+  it('shows at most ten drift findings, cut to width, and says how many more there are', async () => {
+    const labels = Array.from({ length: 12 }, (_, i) => `"${'p'.repeat(300)}${i}.env":1 — value-shape`)
+    writeState({ phase: 'review', spec_slug: 'feat-x', review_drift: { sha: 'a'.repeat(40), paths: ['readme.md'], at: NOW.toISOString(), secrets: labels } })
+    const seen: DialogOptions[] = []
+    await phaseReviewCompleteHandler(
+      { project_root: root, spec_ref: 'feat-x', dev_approval: { timestamp: TS, action_scope: 'review_complete:feat-x', reason: 'review done with the developer' } },
+      { promptFn: async (o) => { seen.push(o); return { response: 'no', channel: 'windows' } }, now: NOW },
+    )
+    const text = seen.find((o) => o.title === 'RSCT — review complete')!.message
+    expect(text).toContain('… and 2 more')
+    expect(text).not.toContain('p'.repeat(300))
+  })
 })

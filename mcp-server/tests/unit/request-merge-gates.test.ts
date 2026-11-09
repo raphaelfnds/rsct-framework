@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { requestMergeHandler, type RequestMergeOutput } from '../../src/tools/request-merge.js'
 import { requestRebaseHandler, type RequestRebaseOutput } from '../../src/tools/request-rebase.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { defaultGitExecutor } from '../../src/lib/git.js'
 
 const GIT = (() => {
   try {
@@ -152,6 +153,38 @@ describe.skipIf(!GIT)('rsct_request_merge scans what it brings and shows every e
     expect(out.anti_replay_persisted).toBeNull()
   })
 
+  it('refuses when HEAD moves to another branch while the dialog is open, and merges nothing there', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    git('checkout', '-q', '-b', 'main', 'integ')
+    git('checkout', '-q', 'integ')
+    const mainBefore = git('rev-parse', 'main')
+    const { out } = await merge({ source_branch: 'feat/x', dev_approval: approval() }, 'yes', () => git('checkout', '-q', 'main'))
+    expect(out.reject_kind).toBe('target_moved')
+    expect(git('rev-parse', 'main')).toBe(mainBefore)
+  })
+
+  it('merges the pinned commit, with the merge message naming the branch', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    const source = git('rev-parse', 'HEAD')
+    git('checkout', '-q', 'integ')
+    const d = dialogs()
+    const sent: string[][] = []
+    const out = (await requestMergeHandler(
+      { project_root: root, source_branch: 'feat/x', pre_merge_ack: { ...ACK, files_swept: swept() }, dev_approval: approval() },
+      {
+        promptFn: d.fn,
+        now: NOW,
+        gitExecutor: (r, args) => {
+          if (args[0] === 'merge') sent.push(args)
+          return defaultGitExecutor(r, args)
+        },
+      },
+    )) as RequestMergeOutput
+    expect(out.status).toBe('merged')
+    expect(sent.at(-1)?.at(-1)).toBe(source)
+    expect(git('log', '-1', '--format=%s')).toBe("Merge branch 'feat/x' into integ")
+  })
+
   it('arms review_drift when a post-merge hook lands a secret the dialog did not show', async () => {
     commitFile('b.txt', 'b\n', 'work')
     git('checkout', '-q', 'integ')
@@ -205,6 +238,19 @@ describe.skipIf(!GIT)('rsct_request_rebase scans both sides since the merge base
     git('checkout', '-q', '-b', 'main', 'integ')
     const { out, seen } = await rebase({ ref: 'feat/x', dev_approval: approval() })
     expect([out.reject_kind, seen.length]).toEqual(['protected_branch', 0])
+  })
+
+  it('refuses when HEAD moves while the rebase dialog is open', async () => {
+    commitFile('b.txt', 'b\n', 'work')
+    git('checkout', '-q', 'integ')
+    commitFile('m.txt', 'm\n', 'upstream')
+    git('checkout', '-q', 'feat/x')
+    const d = dialogs()
+    const out = (await requestRebaseHandler(
+      { project_root: root, ref: 'integ', pre_merge_ack: { ...ACK, files_swept: swept() }, dev_approval: approval() },
+      { now: NOW, promptFn: async (o) => { git('checkout', '-q', 'integ'); return d.fn(o) } },
+    )) as RequestRebaseOutput
+    expect(out.reject_kind).toBe('target_moved')
   })
 
   it('refuses while review_drift is armed, before any dialog', async () => {

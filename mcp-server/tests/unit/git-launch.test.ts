@@ -5,7 +5,6 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { baseTreeOf, defaultGitExecutor, gitIsTracked, gitMerge, gitRebase, readStagedTreeState, safeGitBuffer, streamGitLines } from '../../src/lib/git.js'
 import { spawnGitSync } from '../../src/lib/git-launch.js'
-import { defaultPushProbe } from '../../src/lib/push-probe.js'
 import { scanTreeDiff } from '../../src/lib/staged-scan.js'
 
 const GIT = (() => {
@@ -87,7 +86,7 @@ describe.skipIf(!GIT)('RSCT git calls never run the repository fsmonitor command
     git('config', 'core.fsmonitor', `echo ran >> ${MARKER}; exit 1; :`)
   }
 
-  it('commit, merge, rebase, ls-files, status, a streamed read and the push probe run without it', async () => {
+  it('commit, merge, rebase, ls-files, status and a streamed read run without it', async () => {
     const main = initRepo()
     git('checkout', '-q', '-b', 'side')
     writeFileSync(join(root, 'side.txt'), 'side\n')
@@ -108,7 +107,6 @@ describe.skipIf(!GIT)('RSCT git calls never run the repository fsmonitor command
     expect(safeGitBuffer(root, ['ls-files', '-s', '-z'])).not.toBeNull()
     expect(spawnGitSync(['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).status).toBe(0)
     expect(await streamGitLines(root, ['diff', '--name-only'], () => {})).toEqual({ ok: true })
-    expect(defaultPushProbe(root, 'origin', 'refs/heads/side:refs/heads/side').status).toBe('parsed')
     expect(existsSync(join(root, MARKER))).toBe(false)
 
     git('status', '--porcelain')

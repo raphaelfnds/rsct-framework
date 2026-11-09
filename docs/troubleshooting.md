@@ -401,8 +401,8 @@ the hint names the paths. Run a REVIEW over them (or undo the commit) before any
 
 ## A push, merge or rebase is refused with `review_drift`
 
-A commit, merge or rebase landed content no dialog showed you — a hook's own commit, a merge
-driver, a hook during a rebase. Since 2.24.0 an armed `review_drift` lock refuses pushes, merges
+A commit, merge or rebase landed content no dialog showed you: something wrote it while the
+operation ran. Since 2.24.0 an armed `review_drift` lock refuses pushes, merges
 and rebases as it refuses commits. The refusal names the paths. Look at them, then run
 `rsct_phase_review_start` / `_complete`: a REVIEW that releases a lock armed by secret findings lists
 them in its dialog. Or undo the commit that brought them.
@@ -412,12 +412,15 @@ them in its dialog. Or undo the commit that brought them.
 Since 2.24.0 every commit a push carries is scanned on its own, so a secret added in one commit and
 removed in a later one is still found — the history carries it.
 
-- `secrets` — the refusal lists each finding as `"file":line — rule (commit …)`. Remove it from
-  history before pushing (`git rebase -i`, or `git commit --amend` for the last commit), or, for a
-  known test value, ask again with `dev_approval.override_secrets_check`: the dialog lists the
-  findings with that reason.
-- A first push whose push URL names another repository than the fetch URL (a fork) reads the whole
-  history; if older commits carry secret-like test data, that needs the override once.
+- `secrets` — the refusal's `secrets_check.findings` names each finding (file, line, rule and
+  commit). Remove it from history before pushing (`git rebase -i`, or `git commit --amend` for the
+  last commit), or, for a known test value, ask again with `dev_approval.override_secrets_check`:
+  the dialog lists the findings with that reason.
+- A push whose push URL names another repository than the fetch URL (a fork), or with another
+  remote named `<remote>/…`, reads the whole history; if older commits carry secret-like test data,
+  that needs the override.
+- `secrets_unreadable` with "is not a commit" — the push sends a tag on a tree or a blob, a tree or
+  a blob, which RSCT cannot scan. Push it by hand.
 - `secrets_unreadable` — the scan could not finish (for example, a very large first push). Push by
   hand in your own terminal.
 - `push_url_unreadable` — `git remote get-url --push --all` failed. It needs git 2.7 or newer.
@@ -435,12 +438,13 @@ When the repository config would push or check submodules (`push.recurseSubmodul
 remote-tracking branch of that submodule. Push the submodule first (a commit reachable only from a
 tag does not count), then push again.
 
-## A merge or rebase is refused with `source_moved` or `source_unreadable`
+## A merge, rebase or push is refused with `source_moved`, `target_moved` or `push_url_changed`
 
-The source branch (merge) or `ref` (rebase) is pinned to its commit before the dialog.
-`source_moved`: it moved after the dialog (another session, an IDE auto-fetch), so the operation
-would not be the one you approved — ask again. `source_unreadable`: git could not resolve it to a
-commit; check the name.
+The source branch (merge) or `ref` (rebase) is pinned to its commit before the dialog, and git runs
+on that commit. `source_moved`: it moved after the dialog (another session, an IDE auto-fetch).
+`target_moved`: HEAD is on another branch or commit than at the dialog. `push_url_changed`: where
+the remote pushes changed after the dialog. In each case the operation would not be the one you
+approved — ask again. `source_unreadable`: git could not resolve the name to a commit; check it.
 
 ## The first commit of a new repository is refused with `protected_branch`
 

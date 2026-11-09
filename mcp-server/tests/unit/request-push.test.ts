@@ -77,7 +77,8 @@ function gitState(branch: string | null): GitState {
 const PUSH_PREFIX = ['-c', 'push.pushOption=', 'push', '--no-follow-tags', '--recurse-submodules=no']
 
 function pushTail(args: string[]): string[] | null {
-  return PUSH_PREFIX.every((a, i) => args[i] === a) ? ['push', ...args.slice(PUSH_PREFIX.length)] : null
+  const at = args.indexOf('push')
+  return at !== -1 && args.includes('--') ? ['push', ...args.slice(args.indexOf('--', at))] : null
 }
 
 const NOT_SET: GitExecResult = { ok: false, stdout: '', stderr: '', exitCode: 1 }
@@ -88,6 +89,7 @@ function standardRead(args: string[]): GitExecResult | null {
   if (url) return { ok: true, stdout: `https://example.invalid/${url[1]}.git\n`, stderr: '', exitCode: 0 }
   if (key === 'config -z --get-all push.pushOption' || key === 'config --get push.recurseSubmodules' || key === 'config --bool --get submodule.recurse') return NOT_SET
   if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+  if (args[0] === 'rev-parse' && args[1] === '--verify' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${'c'.repeat(40)}\n`, stderr: '', exitCode: 0 }
   return null
 }
 
@@ -736,6 +738,7 @@ describe('rsct_request_push — B5 argv shape', () => {
           remote: { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 },
           'rev-parse --symbolic-full-name feat/foo': { ok: true, stdout: 'refs/heads/feat/foo\n', stderr: '', exitCode: 0 },
           'rev-parse --verify -q refs/heads/feat/foo^{object}': { ok: true, stdout: `${'a'.repeat(40)}\n`, stderr: '', exitCode: 0 },
+          [`rev-parse --verify -q ${'a'.repeat(40)}^{commit}`]: { ok: true, stdout: `${'a'.repeat(40)}\n`, stderr: '', exitCode: 0 },
           'remote get-url --push --all origin': { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 },
           'remote get-url origin': { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 },
           'config -z --get-all push.pushOption': NOT_SET,
@@ -761,8 +764,10 @@ describe('rsct_request_push — B5 ref-store resolution arm', () => {
         gitStateOverride: gitState('feat/foo'),
         gitExecutor: (_r, args) => {
           if (args.join(' ') === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
+          const standard = standardRead(args)
+          if (standard) return standard
           if (args[0] === 'rev-parse') return { ok: true, stdout: resolved, stderr: '', exitCode: 0 }
-          return standardRead(args) ?? PUSH_OK
+          return PUSH_OK
         },
         promptFn: alwaysYes(),
         now: FIXED_NOW,

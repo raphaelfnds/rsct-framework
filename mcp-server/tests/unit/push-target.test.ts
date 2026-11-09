@@ -37,6 +37,12 @@ describe('sameRepository', () => {
     expect(sameRepository('https://github.com/o/r.git', ['git@github.com:O/R.git'])).toBe(false)
   })
 
+  it('keeps an absolute scp-style path apart from a home-relative one', () => {
+    expect(sameRepository('git@host.example:o/r.git', ['git@host.example:/o/r.git'])).toBe(false)
+    expect(sameRepository('git@host.example:/o/r.git', ['ssh://git@host.example/o/r.git'])).toBe(false)
+    expect(sameRepository('git@host.example:/o/r.git', ['git@host.example:/o/r'])).toBe(true)
+  })
+
   it('needs every push URL to match, and compares local paths as typed', () => {
     expect(sameRepository('https://github.com/o/r.git', ['git@github.com:o/r.git', 'https://example.invalid/o/r.git'])).toBe(false)
     expect(sameRepository('https://github.com/o/r.git', [])).toBe(false)

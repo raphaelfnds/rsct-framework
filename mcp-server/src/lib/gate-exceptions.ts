@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, dialogList, specLabel } from './dialog-text.js'
-import type { SecretFinding } from './secrets.js'
+import { findingLineKey, type SecretFinding } from './secrets.js'
 
 export const DIALOG_LIST_SHOWN = 10
 
-export interface OverrideReason {
+interface OverrideReason {
   reason: string
 }
 
@@ -45,7 +45,7 @@ export function findingLabel(finding: SecretFinding): string {
 }
 
 export function findingIdentity(finding: SecretFinding): string {
-  return JSON.stringify([finding.file, findingRule(finding), finding.excerpt])
+  return JSON.stringify([finding.file, findingRule(finding), findingLineKey(finding) ?? finding.excerpt])
 }
 
 export function protectedBranchLine(branchLabel: string, doing: string): string {
@@ -64,7 +64,7 @@ export function secretFindingLines(projectRoot: string, tool: string, findings: 
   return lines
 }
 
-export interface FindingAction {
+interface FindingAnswer {
   finding_id: string
   action: string
   note?: string | undefined
@@ -73,11 +73,11 @@ export interface FindingAction {
 export function findingActionLines(
   projectRoot: string,
   tool: string,
-  actions: readonly FindingAction[],
+  actions: readonly FindingAnswer[],
   titleOf: (id: string) => string | undefined,
 ): { facts: string[]; agent: string[] } {
   if (actions.length === 0) return { facts: [], agent: [] }
-  const full = (a: FindingAction, i: number): string => {
+  const full = (a: FindingAnswer, i: number): string => {
     const title = titleOf(a.finding_id)
     return `#${i + 1} ${a.finding_id} [${a.action}]${title ? ` ${title}` : ''}${a.note ? ` — note: ${a.note}` : ''}`
   }

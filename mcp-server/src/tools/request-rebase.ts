@@ -35,7 +35,7 @@ import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
-import { ackDialogLines, armDriftForFindings, readDriftLock, resolvePinned, unapprovedFindings } from '../lib/integration-gate.js'
+import { ackDialogLines, driftRefusal, readDriftLock, readHeadPosition, rescanLanded, resolvePinned, sameHeadPosition } from '../lib/integration-gate.js'
 import { scanCommits } from '../lib/staged-scan.js'
 import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
 
@@ -76,6 +76,7 @@ export type RequestRebaseRejectKind =
   | 'source_moved'
   | 'secrets'
   | 'secrets_unreadable'
+  | 'target_moved'
 
 export interface RequestRebaseOutput {
   status: RequestRebaseStatus
@@ -120,14 +121,14 @@ export interface RequestRebaseInternal {
 export const requestRebaseTool: Tool = {
   name: 'rsct_request_rebase',
   description:
-    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved). mode='rebase' runs `git rebase <ref>` and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed.",
+    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed.",
   inputSchema: {
     type: 'object',
     properties: {
       project_root: { type: 'string', description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.' },
       mode: { type: 'string', enum: ['rebase', 'squash'], description: "'rebase' or 'squash' (default 'rebase')." },
       ref: { type: 'string', description: 'Upstream to rebase onto, or branch to squash-merge.' },
-      dev_approval: { type: 'object', description: 'dev_approval payload. override_protected_branch and override_secrets_check are listed in the dialog with their reasons.' },
+      dev_approval: { type: 'object', description: 'dev_approval payload; action_scope starts with rebase: or squash:. override_protected_branch and override_secrets_check are listed in the dialog with their reasons.' },
       pre_merge_ack: preMergeAckJsonSchema,
     },
     required: ['ref', 'dev_approval'],
@@ -254,11 +255,7 @@ export async function requestRebaseHandler(
   const drift = readDriftLock(projectRoot)
   if (drift.status === 'unreadable') return reject('review_unreadable', `${drift.error} Nothing was ${mode === 'rebase' ? 'rebased' : 'squashed'} and no dialog was shown.`)
   if (drift.status === 'armed') {
-    return reject(
-      'review_drift',
-      `a commit landed content no dialog showed the developer (${drift.paths.join(', ')}); ${mode} is refused until rsct_phase_review_start / _complete covers those paths. No dialog was shown.`,
-      { audit: { drift_paths: drift.paths } },
-    )
+    return reject('review_drift', driftRefusal(drift.paths, `every ${mode}`), { audit: { drift_paths: drift.paths } })
   }
 
   const { list: protectedList } = effectiveProtectedList(config)
@@ -270,7 +267,8 @@ export async function requestRebaseHandler(
   }
 
   pinned = resolvePinned(projectRoot, input.ref, gitExecutor)
-  const head = resolvePinned(projectRoot, 'HEAD', gitExecutor)
+  const headAt = readHeadPosition(projectRoot, gitExecutor)
+  const head = headAt.sha
   if (pinned === null || head === null) {
     return reject('source_unreadable', `git could not resolve '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'${head === null ? ' or HEAD' : ''} to a commit, so what the ${mode} brings cannot be shown — nothing was changed.`, { protected: currentProtected })
   }
@@ -363,9 +361,15 @@ export async function requestRebaseHandler(
       protected: currentProtected,
     })
   }
+  if (!sameHeadPosition(headAt, readHeadPosition(projectRoot, gitExecutor))) {
+    return reject('target_moved', `HEAD moved to another branch or commit after the dialog, so the ${mode} would not change what the developer approved — ask again. The approval was not used.`, {
+      ...after,
+      protected: currentProtected,
+    })
+  }
 
   const branchCheck = { protected: currentProtected, override_used: currentProtected }
-  const result = mode === 'rebase' ? gitRebase(projectRoot, input.ref, gitExecutor) : gitSquash(projectRoot, input.ref, gitExecutor)
+  const result = mode === 'rebase' ? gitRebase(projectRoot, pinned, gitExecutor) : gitSquash(projectRoot, pinned, gitExecutor)
   if (!result.ok) {
     const reason = result.error ?? result.stderr ?? `git ${mode} failed`
     const audit = appendAudit(
@@ -398,25 +402,21 @@ export async function requestRebaseHandler(
   let afterRebase: SecretFinding[] = []
   if (mode === 'rebase') {
     const landed = result.sha_after ?? 'HEAD'
-    const rescan = await scanner(projectRoot, { tips: [landed], exclude: [pinned] }, extras, internal.secretsScanTimeoutMs, gitExecutor)
-    if (!rescan.ok) {
-      hints.push(`⚠ the rebase landed, but RSCT could not scan the rewritten commits (${rescan.reason}) — check them before any push; the push gate scans them again.`)
-      appendAudit(projectRoot, { event: 'request_rebase.after_scan_unverified', tool: 'rsct_request_rebase', reason: rescan.reason, sha_after: result.sha_after }, config?.audit)
-    } else {
-      afterRebase = unapprovedFindings(rescan.findings, findings)
-      if (afterRebase.length > 0) {
-        const paths = [...new Set(afterRebase.map((f) => f.file))]
-        const armed = armDriftForFindings(projectRoot, landed, afterRebase, now)
-        appendAudit(
-          projectRoot,
-          { event: 'request_rebase.after_scan_drift', tool: 'rsct_request_rebase', findings_count: afterRebase.length, paths, sha_after: result.sha_after, lock_armed: armed.ok },
-          config?.audit,
-        )
-        hints.push(
-          `⚠ the rebase landed ${afterRebase.length} secret finding(s) the dialog did not show (${paths.join(', ')}) — most likely a git hook. ${armed.ok ? 'Commits and pushes are refused until rsct_phase_review_start / _complete covers those paths.' : `RSCT could not arm the review_drift lock (${armed.reason}); do not push until they are checked.`}`,
-        )
-      }
-    }
+    const rescan = await rescanLanded({
+      projectRoot,
+      what: 'rebase',
+      sha: landed,
+      range: { tips: [landed], exclude: [pinned] },
+      approved: findings,
+      extras,
+      timeoutMs: internal.secretsScanTimeoutMs,
+      executor: gitExecutor,
+      scanner,
+      now,
+    })
+    afterRebase = rescan.findings
+    if (rescan.hint !== null) hints.push(rescan.hint)
+    if (rescan.audit !== null) appendAudit(projectRoot, { event: `request_rebase.${rescan.audit.event}`, tool: 'rsct_request_rebase', ...rescan.audit.fields }, config?.audit)
   }
 
   const audit = appendAudit(

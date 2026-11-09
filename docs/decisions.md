@@ -2932,13 +2932,17 @@ refusals.
   (it can print a fake hunk header). The diff scanner never opened a combined (`@@@`) hunk.
 - On a detached HEAD, and with HEAD pointing at `refs/remotes/*`, `readGitState` named a branch, so
   the refusals for a missing branch never fired.
-- A `core.fsmonitor` command ran on the REVIEW sweep's `ls-files`/`diff` reads and on RSCT's own
-  `git commit` and `git merge`.
+- Some RSCT git reads did not turn the file-system monitor off.
+- With `diff.interHunkContext` and `diff.suppressBlankEmpty` set, git joined nearby hunks of the
+  commit scan's diff and printed a blank unchanged line as an empty line; the scanner closed the
+  hunk there and skipped the added lines after it (`rsct_request_commit`, `rsct_check_secrets`).
 
 **Decision**:
-- **One launcher.** `lib/git-launch.ts` is the only place that starts git; it adds
-  `-c core.fsmonitor=` and `GIT_NO_REPLACE_OBJECTS=1`. `tests/unit/git-launch.test.ts` fails if any
-  source file starts git on its own.
+- **One launcher.** `lib/git-launch.ts` is the only place in the server and hooks that starts git;
+  it adds `-c core.fsmonitor=` and `GIT_NO_REPLACE_OBJECTS=1`. `tests/unit/git-launch.test.ts` fails
+  if a source file passes a literal `git` to a process start. The gate reads also set
+  `diff.interHunkContext=0` and `diff.suppressBlankEmpty=false`, and the scanner reads an empty line
+  inside a hunk as an unchanged one.
 - **Checks before the dialog, exceptions in it.** Push, merge and rebase refuse before any dialog a
   request that lacks the override a check needs, a HEAD with no branch, and an armed `review_drift`.
   The dialog lists each exception and the `pre_merge_ack` answers before the framework footer; what
@@ -2948,15 +2952,21 @@ refusals.
   --root` (plumbing: byte-identical under 15 diff/log/color settings). For a merge commit only the
   lines every parent lacks count. Findings name their commit.
 - **Push.** Commits on `refs/remotes/<remote>/*` are skipped when every push URL names the fetch
-  URL's repository (host, explicit port and path, case kept); otherwise only the destination's old
-  tip that every push URL reports, or nothing. Every push URL is shown with credentials masked.
+  URL's repository (host, explicit port and path, case kept; an scp-style absolute path differs from
+  a home-relative one) and no other remote is named `<remote>/…`; otherwise the whole history is
+  read, and RSCT asks the remote nothing before the dialog. What the push sends must peel to a
+  commit. Every push URL and push option is shown in full, URLs with credentials masked, and the
+  push URLs are read again after the dialog (`push_url_changed`). The destination is shown as the
+  full ref.
   `--no-follow-tags`; `--recurse-submodules=check` when the effective config would push or check
   submodules, `=no` otherwise (never weaker than the user's `check`); `-c push.pushOption=` plus each
   configured option after the last empty value, shown and sent explicitly.
-- **Merge and rebase** pin the source to its commit (refused if it moved after the dialog), scan
-  what the operation brings before the dialog, and what it wrote after it; a finding the dialog did
-  not show arms `review_drift` with its paths and the finding labels, which the REVIEW that releases
-  the lock lists in a forced dialog.
+- **Merge and rebase** pin the source to its commit and run git on it (merge with the usual merge
+  message); a source that moved, or a HEAD on another branch or commit, after the dialog refuses
+  (`source_moved`, `target_moved`). They scan what the operation brings before the dialog and what
+  it wrote after it; a finding the dialog did not show arms `review_drift` with its paths and the
+  finding labels, which the REVIEW that releases the lock lists in a forced dialog. A finding counts
+  as already approved only when its whole line matches (a hash kept in memory, never written).
 - **Commit.** A commit that lands while `git commit` reports a failure is checked as one that
   succeeded. The REVIEW sweep of a commit reads the staged tree recorded for the approval.
 - **Branch.** A branch is named only when `symbolic-ref HEAD` is `refs/heads/*`.
@@ -2969,8 +2979,8 @@ refusals.
 **What is given up, by name**:
 - A ref the agent writes into `refs/remotes/<remote>/` (`update-ref`, `fetch . x:refs/remotes/…`)
   hides the commits it reaches from the push scan — the same ref-write limit as ADR-028.
-- A branch's first push whose push URL names another repository than the fetch URL reads the whole
-  history; in a repository with secret-like test data that asks for `override_secrets_check`.
+- A push whose push URL names another repository than the fetch URL reads the whole history; in a
+  repository with secret-like test data that asks for `override_secrets_check`.
 - Commit and tag messages are not scanned.
 - Content resolved by hand during `git rebase --continue` is outside RSCT; the push scan reads it.
 - The window between recording the staged tree and `git commit` stays; a change there is reported
@@ -2979,8 +2989,8 @@ refusals.
 
 **Consequences**: `--no-follow-tags` changes a release flow that relied on `push.followTags`: tags
 are pushed on their own. A submodule commit published only through a tag refuses a push whose
-config checks submodules. A developer's hooks inherit `GIT_NO_REPLACE_OBJECTS` and run without the
-file-system monitor during RSCT's git calls.
+config checks submodules. A merge through RSCT records the merge message git would write by
+default for a branch.
 
 ## Anti-decisions (tried, rejected, do not retry)
 
@@ -3208,6 +3218,14 @@ runs, and exports nothing that could tempt an import.
 Constraints and measurements that lived beside the code until the 2.11.0 REVIEW swept
 those files. Keyed by module and symbol; restatements of what the code says were dropped.
 
+### `lib/version.ts`
+
+- `RSCT_MCP_VERSION` is written by `npm run sync-version` from `/VERSION`, together with
+  `mcp-server/package.json` and the lock; never edit it by hand. `version-source.test.ts` and the
+  installer's two-axis report catch a drift. CAP-15 (0.7.0): the two drifted (0.6.7 against 0.2.1)
+  and `npm install -g` reported "up to date" against a stale package. (Moved from the file's
+  docstring in the 2.24.0 REVIEW.)
+
 ### `lib/git.ts`
 
 - **A failed git read keeps what git said, for the call that made it** (#104, 2.12.1). The store is
@@ -3233,7 +3251,8 @@ those files. Keyed by module and symbol; restatements of what the code says were
   `main..feat`, `+feat`, `a b`, `feat.lock`, `feat/` all fail cleanly with 128/129).
   An earlier draft that also rejected `~ ^ : ? * [ .. @{` and bare `@` was refuted:
   `HEAD~1`, `HEAD^`, `HEAD@{0}` and `@` resolve, and since merge/rebase fail closed a false
-  reject is a hard stop with no override. Rejected alternatives, both measured:
+  reject is a hard stop with no override. An `/^[A-Za-z0-9._/-]+$/` allow-list was rejected for the
+  same reason: it refuses a branch whose name is not ASCII. Rejected alternatives, both measured:
   `--end-of-options` needs git ≥ 2.24 (no minimum is declared, so older git would fail every
   read); `--` reclassifies the token as a pathspec and returns rc 0 with empty output — an
   attack turned into a silent pass.
