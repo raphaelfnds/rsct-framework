@@ -37,7 +37,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     git repository, and what changed since the last approved commit: a universe added or gone, the gate
     mode or app name, history that moved backwards or no longer resolves, a switch to another branch, contracts gone, changed or no longer readable. A plan token never covers
     such a change (`universe_changed`).
-- **The agent's editor tools no longer reach what git or Claude Code runs** (ADR-044). The edit guard
+- **The agent's editor tools are refused on more of what git or Claude Code runs** (ADR-044). The edit guard
   refuses the following, and a malformed `.rsct.json` no longer turns it off:
   - files in a git folder, also one moved by `git init --separate-git-dir`, git configuration files,
     RSCT's `.rsct/` folder and a configured audit log, and a write that leaves a `.rsct.json` the server rejects or changes its `audit` key;

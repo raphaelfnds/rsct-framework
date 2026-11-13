@@ -3023,7 +3023,7 @@ patched v4 core).
 **Consequences**: a zod release that drops `zod/v3` fails the typecheck and the build, not at run
 time.
 
-### ADR-044 — Integration dialogs list the programs git runs; the contract gate reads every source; the agent plants nothing that runs (2.24.1)
+### ADR-044 — Integration dialogs list the programs git runs; the contract gate reads every source; the edit and terminal guards refuse hooks, git programs and Claude Code command settings (2.24.1)
 **Status**: active. Narrows ADR-030's named limit "hooks the agent writes" for the editor tools and the terminal guard's git commands, and the #73 boundary pin (Decision 5).
 **Tags**: gates, hooks, terminal, universe, contracts, settings, cross-os
 
