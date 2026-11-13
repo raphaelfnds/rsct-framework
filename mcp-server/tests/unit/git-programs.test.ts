@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -248,5 +248,69 @@ describe('git-programs — dialog lines', () => {
     const report = lines.find((l) => l.startsWith('Full list: '))!.slice('Full list: '.length)
     expect(existsSync(join(r, report))).toBe(true)
     expect(readFileSync(join(r, report), 'utf8')).toContain('h11')
+  })
+})
+
+describe('git-programs — REVIEW round 1', () => {
+  it.skipIf(process.platform === 'win32')('a hook made executable is new, since git starts running it', () => {
+    const r = repo()
+    const path = hook(join(r, '.git', 'hooks'), 'pre-commit')
+    chmodSync(path, 0o644)
+    const first = check(r)
+    appendAuditEntry(r, baselineEntry(first.read, first.baseline))
+    expect(check(r).fresh).toEqual([])
+    chmodSync(path, 0o755)
+    expect(check(r).fresh).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('lists a dangling hook link instead of refusing every call', () => {
+    const r = repo()
+    mkdirSync(join(r, '.git', 'hooks'), { recursive: true })
+    symlinkSync(join(base, 'gone'), join(r, '.git', 'hooks', 'pre-commit'))
+    expect(labels(r).some((l) => l.includes('a link to the missing'))).toBe(true)
+  })
+
+  it('reads the repository git would push to: ./sub with sub.git beside an empty sub folder', () => {
+    const r = repo()
+    mkdirSync(join(r, 'sub'))
+    const bare = join(r, 'sub.git')
+    mkdirSync(bare)
+    git(bare, 'init', '-q', '--bare')
+    hook(join(bare, 'hooks'), 'pre-receive')
+    expect(labels(r, { urls: ['./sub'] }).some((l) => l.startsWith('local remote hook "pre-receive"'))).toBe(true)
+  })
+
+  it('expands ~ and reads a Windows drive-relative path as local, as git does', () => {
+    const r = repo()
+    expect(localPathRemote('~/evil.git', r, join(base, 'home'))).toBe(resolve(base, 'home', 'evil.git'))
+    if (process.platform === 'win32') expect(localPathRemote('C:..\bare.git', r)).not.toBeNull()
+  })
+
+  it('a commit after a push does not make the local remote\'s entries new again', () => {
+    const r = repo()
+    hook(join(r, '.git', 'hooks'), 'pre-commit')
+    const bare = join(base, 'remote.git')
+    mkdirSync(bare)
+    git(bare, 'init', '-q', '--bare')
+    hook(join(bare, 'hooks'), 'pre-receive')
+    const pushCheck = (): ReturnType<typeof check> => {
+      const c = checkGitPrograms(r, defaultGitExecutor, undefined, { urls: [bare] })
+      if (!c.ok) throw new Error(c.reason)
+      return c
+    }
+    const firstPush = pushCheck()
+    expect(firstPush.fresh.length).toBe(2)
+    appendAuditEntry(r, baselineEntry(firstPush.read, firstPush.baseline))
+    const commit = check(r)
+    appendAuditEntry(r, baselineEntry(commit.read, commit.baseline))
+    expect(pushCheck().fresh).toEqual([])
+  })
+
+  it('masks every credential before the last @ of a URL', () => {
+    const r = repo()
+    git(r, 'config', 'remote.o.url', 'foo::https://user:p@ss@host.invalid/x')
+    const shown = labels(r).join('\n')
+    expect(shown).toContain('***@host.invalid')
+    expect(shown).not.toContain('ss@host')
   })
 })

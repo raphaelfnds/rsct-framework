@@ -1,5 +1,8 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { bareName, pathComponents } from './protected-paths.js'
+import { parseRsctConfigText } from './project-root.js'
+import { canonicalPath } from './repo-anchor.js'
 import { decodeUnicodeEscapes } from './terminal-guard.js'
 
 export const RSCT_HOOK_MARKERS: readonly string[] = [
@@ -63,7 +66,7 @@ function readOrNull(path: string): string | null {
 }
 
 function bare(name: string): string {
-  return name.replace(/::\$data$/i, '').replace(/[. ]+$/, '').toLowerCase()
+  return bareName(name)
 }
 
 function realOrNull(path: string): string | null {
@@ -86,7 +89,7 @@ function namesRsctConfig(path: string): boolean {
 function spellings(filePath: string): string[] {
   const lexical = resolve(filePath)
   const realDir = realOrNull(dirname(lexical))
-  return [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+  return [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
 }
 
 function anySpellingNames(filePath: string, names: (path: string) => boolean): boolean {
@@ -102,7 +105,7 @@ function firstSpelling<T>(filePath: string, judge: (path: string) => T | null): 
 }
 
 function bareParts(path: string): string[] {
-  return path.split(/[\\/]+/).filter((c) => c.length > 0).map(bare)
+  return pathComponents(path)
 }
 
 function wholeFileKind(path: string): string | null {
@@ -142,19 +145,13 @@ function assetKind(path: string): AssetKind | null {
   return null
 }
 
-function frontmatterHooks(text: string): string {
-  const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text.replace(/^﻿/, ''))
-  if (!match) return ''
-  const lines = match[1]!.split('\n')
-  const at = lines.findIndex((l) => /^hooks\s*:/i.test(l))
-  if (at === -1) return ''
-  const block = [lines[at]!]
-  for (let i = at + 1; i < lines.length && (lines[i] === '' || /^[ \t]/.test(lines[i]!)); i++) block.push(lines[i]!)
-  return block.join('\n')
+function frontmatter(text: string): string {
+  const match = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(lf(text).replace(/^﻿/, ''))
+  return match ? match[1]! : ''
 }
 
 function shellLines(text: string): string {
-  const inline = text.match(/!`[^`\n]*`/g) ?? []
+  const inline = lf(text).match(/!`[^`]*`/g) ?? []
   const fenced = text.match(/^```!.*$[\s\S]*?^```/gm) ?? []
   return JSON.stringify([...inline, ...fenced].sort())
 }
@@ -173,7 +170,9 @@ export function judgeClaudeAssetWrite(
   const applied = resultingText(toolName, input, current)
   if (applied === null) return PASS
   if (applied.missed) return { block: true, reason: INEXACT_EDIT }
-  if (frontmatterHooks(current) !== frontmatterHooks(applied.text)) {
+  const before = frontmatter(current)
+  const after = frontmatter(applied.text)
+  if (before !== after && (/hooks/i.test(before) || /hooks/i.test(after))) {
     return { block: true, reason: `this write would add, change or remove the hooks of a Claude Code ${kind}, which run commands; that is the developer's own edit` }
   }
   if (shellLines(current) !== shellLines(applied.text)) {
@@ -317,8 +316,8 @@ export function judgeRsctConfigWrite(
   const after = applied.text
   const afterJson = parseObject(after)
   const beforeJson = parseObject(current)
-  if (afterJson === null && beforeJson !== null) {
-    return { block: true, reason: "this write would leave .rsct.json unreadable, which switches every RSCT edit check off; that is the developer's own edit" }
+  if (parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok) {
+    return { block: true, reason: "this write would leave a .rsct.json RSCT rejects (unparseable, or outside its schema), which switches every RSCT edit check off; that is the developer's own edit" }
   }
   if (afterJson !== null && stable((beforeJson ?? {}).audit) !== stable(afterJson.audit)) {
     return { block: true, reason: "this write would change where or whether RSCT keeps its audit log (\"audit\" in .rsct.json); that is the developer's own edit" }

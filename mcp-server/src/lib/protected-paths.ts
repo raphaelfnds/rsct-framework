@@ -10,11 +10,15 @@ const GIT_FOLDER =
   "this write would change a file inside a git folder, where hooks, config and refs live; that is the developer's own edit"
 
 export function bareName(name: string): string {
-  return name.replace(/::\$(data|index_allocation)$/i, '').replace(/[. ]+$/, '').toLowerCase()
+  const stream = name.indexOf(':')
+  return (stream === -1 ? name : name.slice(0, stream)).replace(/[. ]+$/, '').toLowerCase()
 }
 
 export function pathComponents(path: string): string[] {
-  return path.split(/[\\/]+/).filter((c) => c.length > 0).map(bareName)
+  return path
+    .split(/[\\/]+/)
+    .filter((c) => c.length > 0)
+    .map((c, i) => (i === 0 && /^[A-Za-z]:$/.test(c) ? c.toLowerCase() : bareName(c)))
 }
 
 function exists(path: string, kind: 'file' | 'dir'): boolean {
@@ -26,7 +30,7 @@ function exists(path: string, kind: 'file' | 'dir'): boolean {
   }
 }
 
-function holdsGitRepository(dir: string): boolean {
+export function holdsGitRepository(dir: string): boolean {
   return exists(join(dir, 'HEAD'), 'file') && exists(join(dir, 'objects'), 'dir') && exists(join(dir, 'refs'), 'dir')
 }
 

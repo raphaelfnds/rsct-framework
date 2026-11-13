@@ -874,8 +874,7 @@ Since 2.23.0 (ADR-039, ADR-040):
   `.rsct/reports/commit-contracts-*.md`), and an inactive contract gate. Then come the
   agent's reasons, then the commit message.
 - **Programs git runs inside the commit (since 2.24.1, ADR-044).** The dialog lists every file in
-  the hooks folder git runs and every configured key that runs a program, with its origin, values
-  masked, marking what is new or changed since the last approved call. The list is read again
+  the hooks folder git runs and every configured key that runs a program, with its origin, URL credentials masked, marking what is new or changed since the last approved call. The list is read again
   right before `git commit` (`programs_moved`); a list that cannot be read refuses
   (`programs_unreadable`); a plan token never covers a new entry (`programs_changed`). Push, merge
   and rebase list the same, a push also a local-path remote's own.

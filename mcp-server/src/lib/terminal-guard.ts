@@ -277,6 +277,7 @@ interface Ctx {
   pkg: PackageState
   database: boolean
   databaseTestGuard: boolean
+  text: string
 }
 
 const ALLOW: TerminalVerdict = { verdict: 'allow' }
@@ -1654,7 +1655,7 @@ function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx, pi
 
     let v: TerminalVerdict = ALLOW
     const dashed = w.value.includes('://') ? undefined : /^git-(.+)$/.exec(name)?.[1]
-    if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic(), values.slice(0, i).filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x)))
+    if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic())
     else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest(), restDynamic()) ? ALLOW : denyGit(dashed)
     else if (name === 'gh') v = judgeGh(rest(), restDynamic())
     else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest(), bodies, ctx)
@@ -2046,33 +2047,50 @@ const PROGRAM_CONFIG_SECTIONS = new Set([
   'core', 'include', 'includeif', 'url', 'init', 'rebase', 'filter', 'merge', 'diff', 'gpg', 'commit', 'push',
   'credential', 'remote', 'protocol', 'submodule', 'gc', 'receive', 'uploadpack', 'sequence', 'hook',
 ])
-const CONFIG_VALUE_OPTIONS = new Set(['-f', '--file', '--blob', '--type', '--default', '--comment', '--value', '--url'])
-const CONFIG_WRITE_OPTIONS = new Set(['--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section'])
-const CONFIG_READ_OPTIONS = new Set(['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--get-color', '--get-colorbool', '-l', '--list'])
+const CONFIG_LONG_OPTIONS = [
+  'global', 'system', 'local', 'worktree', 'file', 'blob', 'get', 'get-all', 'get-regexp', 'get-urlmatch', 'replace-all', 'add',
+  'unset', 'unset-all', 'rename-section', 'remove-section', 'list', 'fixed-value', 'type', 'no-type', 'bool', 'int', 'bool-or-int',
+  'path', 'expiry-date', 'null', 'name-only', 'includes', 'no-includes', 'show-origin', 'show-scope', 'get-color', 'get-colorbool',
+  'edit', 'default', 'comment', 'value', 'url', 'all', 'regexp',
+]
+const CONFIG_VALUE_LONG = new Set(['file', 'blob', 'type', 'default', 'comment', 'value', 'url'])
+const CONFIG_WRITE_LONG = new Set(['replace-all', 'add', 'unset', 'unset-all', 'rename-section', 'remove-section'])
+const CONFIG_READ_LONG = new Set(['get', 'get-all', 'get-regexp', 'get-urlmatch', 'get-color', 'get-colorbool', 'list'])
 const CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section'])
 const CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
-const PLANTING_ENV = /^(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)=/i
+const PLANTING_OPTIONS = ['template', 'separate-git-dir', 'config', 'config-env']
+const PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i
 
 function sectionOf(key: string): string {
   return (key.split('.')[0] ?? '').toLowerCase()
+}
+
+function longOption(word: string, known: readonly string[]): { name: string | null; glued: boolean; matches: string[] } {
+  const body = word.slice(2)
+  const eq = body.indexOf('=')
+  const typed = (eq === -1 ? body : body.slice(0, eq)).toLowerCase()
+  const glued = eq !== -1
+  if (known.includes(typed)) return { name: typed, glued, matches: [typed] }
+  const matches = known.filter((o) => o.startsWith(typed))
+  return { name: matches.length === 1 ? matches[0]! : null, glued, matches }
 }
 
 function denyConfigWrite(key: string): TerminalVerdict {
   return deny(`\`git config\` would change '${key}', in a section whose keys can make git run programs (hooks, filters, ssh, credential helpers) inside RSCT's approved git calls; that is the developer's own edit, in their own terminal`)
 }
 
+const DENY_CONFIG_EDIT = "`git config --edit` opens the whole configuration, whose keys can make git run programs inside RSCT's approved git calls; that is the developer's own edit, in their own terminal"
+
 function judgeConfigWrite(rest: string[], dynamic: boolean[]): TerminalVerdict {
   let at = 0
   let write = false
   let read = false
-  let rename = false
+  let sections = false
   const head = rest[0]?.toLowerCase()
-  if (head === 'edit' || rest.includes('-e') || rest.includes('--edit')) {
-    return deny("`git config --edit` opens the whole configuration, whose keys can make git run programs inside RSCT's approved git calls; that is the developer's own edit, in their own terminal")
-  }
+  if (head === 'edit') return deny(DENY_CONFIG_EDIT)
   if (head !== undefined && CONFIG_WRITE_SUBCOMMANDS.has(head)) {
     write = true
-    rename = head === 'rename-section'
+    sections = head.endsWith('-section')
     at = 1
   } else if (head !== undefined && CONFIG_READ_SUBCOMMANDS.has(head)) {
     return ALLOW
@@ -2084,52 +2102,67 @@ function judgeConfigWrite(rest: string[], dynamic: boolean[]): TerminalVerdict {
       for (let m = k + 1; m < rest.length; m++) positional.push({ value: rest[m]!, dynamic: dynamic[m] === true })
       break
     }
-    if (CONFIG_VALUE_OPTIONS.has(a)) {
-      k++
+    if (a.startsWith('--')) {
+      const { name, glued, matches } = longOption(a, CONFIG_LONG_OPTIONS)
+      if (name === 'edit') return deny(DENY_CONFIG_EDIT)
+      if (matches.length > 0 && matches.every((m) => CONFIG_WRITE_LONG.has(m))) write = true
+      if (matches.some((m) => m.endsWith('-section'))) sections = true
+      if (name !== null && CONFIG_READ_LONG.has(name)) read = true
+      if (name !== null && CONFIG_VALUE_LONG.has(name) && !glued) k++
       continue
     }
-    if (CONFIG_WRITE_OPTIONS.has(a)) {
-      write = true
-      if (a === '--rename-section') rename = true
+    if (a.startsWith('-') && a.length > 1) {
+      const cluster = a.slice(1)
+      for (let c = 0; c < cluster.length; c++) {
+        const flag = cluster[c]!
+        if (flag === 'e') return deny(DENY_CONFIG_EDIT)
+        if (flag === 'l') read = true
+        if (flag === 'f') {
+          if (c === cluster.length - 1) k++
+          break
+        }
+      }
       continue
     }
-    if (CONFIG_READ_OPTIONS.has(a)) {
-      read = true
-      continue
-    }
-    if (a.startsWith('-')) continue
     positional.push({ value: a, dynamic: dynamic[k] === true })
   }
   if (!write && (read || positional.length < 2)) return ALLOW
-  const named = rename ? positional.slice(0, 2) : positional.slice(0, 1)
-  for (const p of named) {
+  for (const p of positional.slice(0, sections ? 2 : 1)) {
     if (p.dynamic) return deny(`\`git config\` writes a key built from a variable ('${p.value}'), which cannot be read, so the command was refused — write the key out`)
+  }
+  for (const p of positional) {
+    if (p.dynamic || (!sections && !p.value.includes('.'))) continue
     if (PROGRAM_CONFIG_SECTIONS.has(sectionOf(p.value))) return denyConfigWrite(p.value)
   }
   return ALLOW
 }
 
-function plantsByConfig(values: readonly string[]): string | null {
+function plantingOption(values: readonly string[]): string | null {
   for (let k = 0; k < values.length; k++) {
     const a = values[k]!
-    const glued = /^(?:-c|--config(?:-env)?=)(.+)$/.exec(a)
-    const next = a === '-c' || a === '--config' || a === '--config-env' ? values[k + 1] : undefined
-    const item = glued?.[1] ?? next
-    if (item !== undefined && PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split('=')[0] ?? ''))) return item
+    if (a.startsWith('--')) {
+      const typed = a.slice(2).split('=')[0]!.toLowerCase()
+      if (typed.length > 0 && PLANTING_OPTIONS.some((o) => o.startsWith(typed))) {
+        const item = a.includes('=') ? a.slice(a.indexOf('=') + 1) : (values[k + 1] ?? '')
+        if (!'config'.startsWith(typed) && !'config-env'.startsWith(typed)) return a
+        if (PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split('=')[0] ?? ''))) return `${a} ${item}`
+      }
+      continue
+    }
+    const glued = /^-c(.+)$/.exec(a)
+    const item = glued?.[1] ?? (a === '-c' ? values[k + 1] : undefined)
+    if (item !== undefined && PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split('=')[0] ?? ''))) return `-c ${item}`
   }
   return null
 }
 
-function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], env: readonly string[]): TerminalVerdict {
+function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], text: string): TerminalVerdict {
   if (verb === 'config') return judgeConfigWrite(rest, dynamic)
   if (verb === 'init' || verb === 'clone') {
-    const planted = env.find((x) => PLANTING_ENV.test(x))
-    if (planted !== undefined) return deny(`\`git ${verb}\` with ${planted.split('=')[0]} set can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
-    if (rest.some((a) => /^--(separate-git-dir|template)(=|$)/.test(a))) {
-      return deny(`\`git ${verb}\` with --template or --separate-git-dir can plant hooks or move the git folder out of the guards' sight; that is the developer's own command, in their own terminal`)
-    }
-    const configured = plantsByConfig([...globals, ...rest])
-    if (configured !== null) return deny(`\`git ${verb}\` with '${configured}' sets a key that can make git run programs; that is the developer's own command, in their own terminal`)
+    const variable = PLANTING_VARIABLE.exec(text)
+    if (variable !== null) return deny(`\`git ${verb}\` in a command that sets ${variable[1]} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
+    const planted = plantingOption([...globals, ...rest])
+    if (planted !== null) return deny(`\`git ${verb}\` with '${planted}' can plant hooks or configuration, or move the git folder, that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
     return ALLOW
   }
   if (verb === 'remote' && (rest[0] === 'add' || rest[0] === 'set-url')) {
@@ -2141,7 +2174,7 @@ function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynam
   return ALLOW
 }
 
-function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string>, dynamic: boolean[] = [], env: readonly string[] = []): TerminalVerdict {
+function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string>, dynamic: boolean[] = []): TerminalVerdict {
   const flags = args.map((_, k) => dynamic[k] === true)
   const scan = scanGitOptions(args)
   const aliases = { ...inlineAliases, ...scan.aliases }
@@ -2161,7 +2194,7 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   }
   if (verb === 'submodule' && rest[0] === 'foreach') return judgeText(rest.slice(1).filter((r) => !r.startsWith('--')).join(' '), 'bash', ctx)
   if (verb === 'bisect' && rest[0] === 'run') return judgeText(joinWords(rest.slice(1), 'bash'), 'bash', ctx)
-  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), env)
+  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.text)
   if (isDeny(planting)) return planting
   if (GIT_BUILTINS.has(verb)) return ALLOW
 
@@ -2178,7 +2211,7 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   const deeper: Ctx = { ...ctx, aliasDepth: ctx.aliasDepth + 1 }
   if (value.trimStart().startsWith('!')) return judgeText(value.trimStart().slice(1), 'bash', deeper)
   const expanded = wordsOf(lex(value, 'bash').tokens).map((w) => w.value)
-  return judgeGit([...args.slice(0, j), ...expanded, ...rest], deeper, aliases, [...flags.slice(0, j), ...expanded.map(() => false), ...flags.slice(j + 1)], env)
+  return judgeGit([...args.slice(0, j), ...expanded, ...rest], deeper, aliases, [...flags.slice(0, j), ...expanded.map(() => false), ...flags.slice(j + 1)])
 }
 
 function judgeGh(args: string[], dynamic: boolean[] = []): TerminalVerdict {
@@ -2371,6 +2404,7 @@ export function judgeCommand(text: string, options: JudgeOptions = {}): Terminal
     },
     database: options.database ?? false,
     databaseTestGuard: options.databaseTestGuard ?? true,
+    text,
   }
   return judgeText(text, options.dialect ?? 'bash', ctx)
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -193,5 +193,56 @@ describe('V reads the same facts as the commit gate', () => {
     writeFileSync(join(p, '.rsct', 'phase-state.json'), JSON.stringify({ spec_slug: 'feat-x' }))
     const started = await phaseVerificationStartHandler({ project_root: p, spec_ref: 'feat-x', spec_tier: 'standard', declared_paths: ['api/openapi.yaml'] })
     expect(started.findings.some((f) => f.title.includes("Contract 'orders-api' surface touched"))).toBe(true)
+  })
+})
+
+describe('contract facts — the universe cannot go quiet (REVIEW round 1)', () => {
+  it('an orphan branch with a broken contracts.json is a change, not silence', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS])
+    const p = project(u)
+    record(p, facts(p))
+    git(u, 'checkout', '-q', '--orphan', 'x')
+    writeFileSync(join(u, 'contracts.json'), '{ broken')
+    const f = facts(p)
+    expect(universeFactsChanged(f)).toBe(true)
+    expect(f.lines.join('\n')).toMatch(/no longer resolves|another branch|can be read/)
+  })
+
+  it('a switch to another branch of the universe is a change', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS])
+    const p = project(u)
+    record(p, facts(p))
+    git(u, 'checkout', '-q', '-b', 'other')
+    expect(facts(p).lines.join('\n')).toContain('another branch')
+  })
+
+  it('recorded contracts that can no longer be read in a universe without git are a change', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS], false)
+    const p = project(u)
+    record(p, facts(p))
+    writeFileSync(join(u, 'contracts.json'), '{ broken')
+    expect(universeFactsChanged(facts(p))).toBe(true)
+  })
+
+  it('a malformed recorded baseline counts as no record instead of failing', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS])
+    const p = project(u)
+    const recorded = facts(p).baseline as { scopes: Record<string, unknown> }
+    const broken = Object.fromEntries(Object.keys(recorded.scopes).map((k) => [k, { mode: 'x' }]))
+    appendAuditEntry(p, { event: 'universe.baseline', scopes: { ...broken, other: 7 } })
+    const f = facts(p)
+    expect(f.ids).toEqual(['orders-api'])
+    expect(universeFactsChanged(f)).toBe(true)
+  })
+
+  it('reads the HEAD .rsct.json of a project opened through a link to its folder', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS])
+    const p = project(u)
+    writeFileSync(join(p, '.rsct.json'), rsctJson({ topology: { mode: 'mono' }, universe: { local: u } }))
+    const link = join(base, 'link-to-project')
+    symlinkSync(p, link, process.platform === 'win32' ? 'junction' : 'dir')
+    const f = facts(link)
+    expect(f.multiRepo).toBe(true)
+    expect(f.ids).toEqual(['orders-api'])
   })
 })
