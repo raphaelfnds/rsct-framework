@@ -101,3 +101,50 @@ describe('terminal guard — remotes that run a transport helper (2.24.1)', () =
     expect(verdictOf(command)).toBe('allow')
   })
 })
+
+describe('terminal guard — abbreviations, short clusters and planting variables set earlier (REVIEW round 1)', () => {
+  it.each([
+    'git config --fil .git/config hook.a.command evil',
+    'git config --typ path core.hooksPath .h',
+    'git config -zf .git/config hook.a.command evil',
+    'git config -fx.cfg core.hooksPath .h',
+    'git config --comm x core.hooksPath .h',
+    'git config --uns core.fsmonitor',
+    'git config --replace core.sshCommand evil',
+    'git config --ed',
+    'git init --templ=tpl',
+    'git init --t tpl',
+    'git init --separate=../gd',
+    'git clone --conf core.hooksPath=h src dst',
+    'git clone -ccore.hooksPath=h src dst',
+    'export GIT_TEMPLATE_DIR=tpl; git init',
+    'GIT_TEMPLATE_DIR=/t; export GIT_TEMPLATE_DIR; git init',
+    'GIT_CONFIG_GLOBAL=/x/cfg git init',
+    'export GIT_CONFIG_SYSTEM=/x/cfg && git clone https://example.invalid/r.git',
+  ])('refuses %s', (command) => {
+    expect(verdictOf(command)).toBe('deny')
+  })
+
+  it('refuses a planting variable set in PowerShell before git init', () => {
+    expect(verdictOf("$env:GIT_TEMPLATE_DIR='C:\t'; git init", 'powershell')).toBe('deny')
+    expect(verdictOf("$env:GIT_CONFIG_COUNT=1; git init", 'powershell')).toBe('deny')
+  })
+
+  it.each([
+    'git config --gl user.name Someone',
+    'git config --get core.hooksPath',
+    'git config --get-a core.hooksPath',
+    'git config -l',
+    'git config -z --list',
+    'export FOO=1; git init',
+  ])('allows %s', (command) => {
+    expect(verdictOf(command)).toBe('allow')
+  })
+})
+
+describe('terminal guard — a value from a variable is still a value (REVIEW round 1)', () => {
+  it('allows a config value built from a variable, refuses a key built from one', () => {
+    expect(verdictOf('git config user.email "$EMAIL"')).toBe('allow')
+    expect(verdictOf('git config "$KEY" value')).toBe('deny')
+  })
+})
