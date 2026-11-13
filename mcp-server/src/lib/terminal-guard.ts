@@ -1,4 +1,5 @@
 import { spawnGitSync } from './git-launch.js'
+import { helperUrl } from './git-url.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
@@ -1653,7 +1654,7 @@ function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx, pi
 
     let v: TerminalVerdict = ALLOW
     const dashed = w.value.includes('://') ? undefined : /^git-(.+)$/.exec(name)?.[1]
-    if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic())
+    if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic(), values.slice(0, i).filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x)))
     else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest(), restDynamic()) ? ALLOW : denyGit(dashed)
     else if (name === 'gh') v = judgeGh(rest(), restDynamic())
     else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest(), bodies, ctx)
@@ -2041,7 +2042,106 @@ function scanGitOptions(args: string[]): { verbIndex: number; gitDir: string | n
   return { verbIndex: j, gitDir, aliases }
 }
 
-function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string>, dynamic: boolean[] = []): TerminalVerdict {
+const PROGRAM_CONFIG_SECTIONS = new Set([
+  'core', 'include', 'includeif', 'url', 'init', 'rebase', 'filter', 'merge', 'diff', 'gpg', 'commit', 'push',
+  'credential', 'remote', 'protocol', 'submodule', 'gc', 'receive', 'uploadpack', 'sequence', 'hook',
+])
+const CONFIG_VALUE_OPTIONS = new Set(['-f', '--file', '--blob', '--type', '--default', '--comment', '--value', '--url'])
+const CONFIG_WRITE_OPTIONS = new Set(['--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section'])
+const CONFIG_READ_OPTIONS = new Set(['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--get-color', '--get-colorbool', '-l', '--list'])
+const CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section'])
+const CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
+const PLANTING_ENV = /^(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)=/i
+
+function sectionOf(key: string): string {
+  return (key.split('.')[0] ?? '').toLowerCase()
+}
+
+function denyConfigWrite(key: string): TerminalVerdict {
+  return deny(`\`git config\` would change '${key}', in a section whose keys can make git run programs (hooks, filters, ssh, credential helpers) inside RSCT's approved git calls; that is the developer's own edit, in their own terminal`)
+}
+
+function judgeConfigWrite(rest: string[], dynamic: boolean[]): TerminalVerdict {
+  let at = 0
+  let write = false
+  let read = false
+  let rename = false
+  const head = rest[0]?.toLowerCase()
+  if (head === 'edit' || rest.includes('-e') || rest.includes('--edit')) {
+    return deny("`git config --edit` opens the whole configuration, whose keys can make git run programs inside RSCT's approved git calls; that is the developer's own edit, in their own terminal")
+  }
+  if (head !== undefined && CONFIG_WRITE_SUBCOMMANDS.has(head)) {
+    write = true
+    rename = head === 'rename-section'
+    at = 1
+  } else if (head !== undefined && CONFIG_READ_SUBCOMMANDS.has(head)) {
+    return ALLOW
+  }
+  const positional: Array<{ value: string; dynamic: boolean }> = []
+  for (let k = at; k < rest.length; k++) {
+    const a = rest[k]!
+    if (a === '--') {
+      for (let m = k + 1; m < rest.length; m++) positional.push({ value: rest[m]!, dynamic: dynamic[m] === true })
+      break
+    }
+    if (CONFIG_VALUE_OPTIONS.has(a)) {
+      k++
+      continue
+    }
+    if (CONFIG_WRITE_OPTIONS.has(a)) {
+      write = true
+      if (a === '--rename-section') rename = true
+      continue
+    }
+    if (CONFIG_READ_OPTIONS.has(a)) {
+      read = true
+      continue
+    }
+    if (a.startsWith('-')) continue
+    positional.push({ value: a, dynamic: dynamic[k] === true })
+  }
+  if (!write && (read || positional.length < 2)) return ALLOW
+  const named = rename ? positional.slice(0, 2) : positional.slice(0, 1)
+  for (const p of named) {
+    if (p.dynamic) return deny(`\`git config\` writes a key built from a variable ('${p.value}'), which cannot be read, so the command was refused — write the key out`)
+    if (PROGRAM_CONFIG_SECTIONS.has(sectionOf(p.value))) return denyConfigWrite(p.value)
+  }
+  return ALLOW
+}
+
+function plantsByConfig(values: readonly string[]): string | null {
+  for (let k = 0; k < values.length; k++) {
+    const a = values[k]!
+    const glued = /^(?:-c|--config(?:-env)?=)(.+)$/.exec(a)
+    const next = a === '-c' || a === '--config' || a === '--config-env' ? values[k + 1] : undefined
+    const item = glued?.[1] ?? next
+    if (item !== undefined && PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split('=')[0] ?? ''))) return item
+  }
+  return null
+}
+
+function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], env: readonly string[]): TerminalVerdict {
+  if (verb === 'config') return judgeConfigWrite(rest, dynamic)
+  if (verb === 'init' || verb === 'clone') {
+    const planted = env.find((x) => PLANTING_ENV.test(x))
+    if (planted !== undefined) return deny(`\`git ${verb}\` with ${planted.split('=')[0]} set can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
+    if (rest.some((a) => /^--(separate-git-dir|template)(=|$)/.test(a))) {
+      return deny(`\`git ${verb}\` with --template or --separate-git-dir can plant hooks or move the git folder out of the guards' sight; that is the developer's own command, in their own terminal`)
+    }
+    const configured = plantsByConfig([...globals, ...rest])
+    if (configured !== null) return deny(`\`git ${verb}\` with '${configured}' sets a key that can make git run programs; that is the developer's own command, in their own terminal`)
+    return ALLOW
+  }
+  if (verb === 'remote' && (rest[0] === 'add' || rest[0] === 'set-url')) {
+    const url = rest.slice(1).filter((a) => !a.startsWith('-')).find((a) => helperUrl(a))
+    if (url !== undefined) {
+      return deny(`\`git remote ${rest[0]}\` with '${url}' names a transport helper, a program git runs on every fetch and push; that is the developer's own command, in their own terminal`)
+    }
+  }
+  return ALLOW
+}
+
+function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string>, dynamic: boolean[] = [], env: readonly string[] = []): TerminalVerdict {
   const flags = args.map((_, k) => dynamic[k] === true)
   const scan = scanGitOptions(args)
   const aliases = { ...inlineAliases, ...scan.aliases }
@@ -2061,6 +2161,8 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   }
   if (verb === 'submodule' && rest[0] === 'foreach') return judgeText(rest.slice(1).filter((r) => !r.startsWith('--')).join(' '), 'bash', ctx)
   if (verb === 'bisect' && rest[0] === 'run') return judgeText(joinWords(rest.slice(1), 'bash'), 'bash', ctx)
+  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), env)
+  if (isDeny(planting)) return planting
   if (GIT_BUILTINS.has(verb)) return ALLOW
 
   if (ctx.aliasDepth >= MAX_ALIAS_DEPTH) return deny(`the git alias '${verbWord}' expands through too many other aliases to be read; run the full git command`)
@@ -2076,7 +2178,7 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   const deeper: Ctx = { ...ctx, aliasDepth: ctx.aliasDepth + 1 }
   if (value.trimStart().startsWith('!')) return judgeText(value.trimStart().slice(1), 'bash', deeper)
   const expanded = wordsOf(lex(value, 'bash').tokens).map((w) => w.value)
-  return judgeGit([...args.slice(0, j), ...expanded, ...rest], deeper, aliases, [...flags.slice(0, j), ...expanded.map(() => false), ...flags.slice(j + 1)])
+  return judgeGit([...args.slice(0, j), ...expanded, ...rest], deeper, aliases, [...flags.slice(0, j), ...expanded.map(() => false), ...flags.slice(j + 1)], env)
 }
 
 function judgeGh(args: string[], dynamic: boolean[] = []): TerminalVerdict {

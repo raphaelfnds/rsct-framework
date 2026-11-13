@@ -9,13 +9,13 @@ import { defaultGitExecutor } from '../../src/lib/git.js'
 import {
   baselineEntry,
   checkGitPrograms,
-  helperUrl,
   isProgramKey,
   localPathRemote,
   programsDialogLines,
   programsStillSame,
   readGitPrograms,
 } from '../../src/lib/git-programs.js'
+import { helperUrl } from '../../src/lib/git-url.js'
 
 let base: string
 

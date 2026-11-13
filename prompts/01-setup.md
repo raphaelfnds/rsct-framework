@@ -3924,7 +3924,9 @@ PREVIEW the assembled entry as JSON and require an **explicit approval** before 
 
 **Safe value handoff (BINDING — injection safety).** The answers are dev free text. To keep them out of
 the shell AND the `node -e` source, WRITE each answer **verbatim** to a scratch file using your
-file-write tool (NOT a shell heredoc/echo — zero shell quoting) under a fresh dir `$CONTRACT_SCRATCH`:
+file-write tool (NOT a shell heredoc/echo — zero shell quoting) under a fresh dir `$CONTRACT_SCRATCH`
+OUTSIDE the project, such as one `mktemp -d` prints (never under `.rsct/` or `.git/`: the edit guard
+refuses writes there):
 - `$CONTRACT_SCRATCH/id`, `/producer`, `/description` (one scalar file each; omit `description` if empty),
 - `$CONTRACT_SCRATCH/surface/1`, `/2`, … (one file per glob),
 - `$CONTRACT_SCRATCH/consumers/1`, `/2`, … (one file per app).
@@ -4263,7 +4265,7 @@ if [ -n "$SANITIZER_SRC" ]; then
         if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
         settings = JSON.parse(raw);
       } catch (e) {
-        console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
+        console.error("ERROR: " + target + " is malformed JSON — the developer fixes it in their own editor, then re-runs /rsct-setup.");
         process.exit(1);
       }
     }
@@ -4367,7 +4369,7 @@ if [ -n "$SANITIZER_SRC" ]; then
           if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
           settings = JSON.parse(raw);
         } catch (e) {
-          console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
+          console.error("ERROR: " + target + " is malformed JSON — the developer fixes it in their own editor, then re-runs /rsct-setup.");
           process.exit(1);
         }
       }
@@ -4477,7 +4479,7 @@ if [ -n "$SANITIZER_SRC" ]; then
           if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
           settings = JSON.parse(raw);
         } catch (e) {
-          console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup.");
+          console.error("ERROR: " + target + " is malformed JSON — the developer fixes it in their own editor, then re-runs /rsct-setup.");
           process.exit(1);
         }
       }
@@ -4566,7 +4568,7 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
         if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
         cfg = JSON.parse(raw);
       }
-      catch (e) { console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup."); process.exit(1); }
+      catch (e) { console.error("ERROR: " + target + " is malformed JSON — the developer fixes it in their own editor, then re-runs /rsct-setup."); process.exit(1); }
     }
     cfg.mcpServers = cfg.mcpServers || {};
     const existing = cfg.mcpServers.rsct;
@@ -4631,7 +4633,7 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
         if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
         cfg = raw.trim() ? JSON.parse(raw) : {};
       }
-      catch (e) { console.error("ERROR: " + target + " is malformed JSON — fix manually then re-run /rsct-setup."); process.exit(1); }
+      catch (e) { console.error("ERROR: " + target + " is malformed JSON — the developer fixes it in their own editor, then re-runs /rsct-setup."); process.exit(1); }
     }
     // `null`, `[]`, `"x"` and `42` are all VALID JSON that survive the parse
     // above. Without this guard: null threw a raw TypeError (aborting the phase
@@ -4641,7 +4643,7 @@ if [ -n "$SANITIZER_SRC" ] && [ "$MCP_SCOPE" = "project" ]; then
     // that never landed — the report-success-for-nothing class this whole issue
     // is about.
     if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
-      console.error("ERROR: " + target + " is valid JSON but not an object — fix manually then re-run /rsct-setup.");
+      console.error("ERROR: " + target + " is valid JSON but not an object — the developer fixes it in their own editor, then re-runs /rsct-setup.");
       process.exit(1);
     }
     const disabled = Array.isArray(cfg.disabledMcpjsonServers) ? cfg.disabledMcpjsonServers : [];
