@@ -308,3 +308,37 @@ describe.skipIf(!GIT)('rsct_request_rebase scans both sides since the merge base
     expect(state.review_drift?.paths).toEqual(['hook.env'])
   })
 })
+
+describe.skipIf(!GIT)('merge and rebase list the programs git runs inside them', () => {
+  it('a merge lists a hook before the footer, marked new', async () => {
+    commitFile('m.txt', 'm\n', 'm')
+    git('checkout', '-q', 'integ')
+    hook('post-merge', 'exit 0')
+    const { out, text } = await merge({ source_branch: 'feat/x', no_ff: true, dev_approval: approval() })
+    expect(out.status).toBe('merged')
+    const line = text.indexOf('NEW OR CHANGED: hook "post-merge"')
+    expect(line, 'present').toBeGreaterThanOrEqual(0)
+    expect(line).toBeLessThan(footerAt(text))
+  })
+
+  it('a hook planted while the merge dialog is open refuses the merge with programs_moved', async () => {
+    commitFile('m.txt', 'm\n', 'm')
+    git('checkout', '-q', 'integ')
+    const head = git('rev-parse', 'HEAD')
+    const { out } = await merge({ source_branch: 'feat/x', no_ff: true, dev_approval: approval() }, 'yes', () => hook('post-merge', 'exit 0'))
+    expect(out.reject_kind).toBe('programs_moved')
+    expect(git('rev-parse', 'HEAD')).toBe(head)
+  })
+
+  it('a hook planted while the rebase dialog is open refuses the rebase with programs_moved', async () => {
+    commitFile('b.txt', 'b\n', 'b')
+    git('checkout', '-q', 'integ')
+    commitFile('c.txt', 'c\n', 'c')
+    git('checkout', '-q', 'feat/x')
+    const head = git('rev-parse', 'HEAD')
+    const d = dialogs('yes', () => hook('post-rewrite', 'exit 0'))
+    const out = (await requestRebaseHandler({ project_root: root, ref: 'integ', pre_merge_ack: { ...ACK, files_swept: swept() }, dev_approval: approval() }, { promptFn: d.fn, now: NOW })) as RequestRebaseOutput
+    expect(out.reject_kind).toBe('programs_moved')
+    expect(git('rev-parse', 'HEAD')).toBe(head)
+  })
+})

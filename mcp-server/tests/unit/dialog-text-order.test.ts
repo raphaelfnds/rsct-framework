@@ -21,6 +21,7 @@ import { classifyTaskHandler } from '../../src/tools/classify-task.js'
 import type { GitExecResult, GitExecutor, GitState } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { git, initSweepRepo } from '../sweep-repo.js'
+import { emptyProgramsRead } from './fake-git-programs.js'
 
 const c = (...codes: number[]): string => String.fromCharCode(...codes)
 const LF = c(10)
@@ -87,6 +88,8 @@ function expectQuestionKeepsIt(message: string): void {
 
 const OK: GitExecResult = { ok: true, stdout: '', stderr: '', exitCode: 0 }
 const exec: GitExecutor = (_root, args) => {
+  const programs = emptyProgramsRead(args)
+  if (programs) return programs
   if (args.join(' ') === 'remote') return { ok: true, stdout: 'origin\n', stderr: '', exitCode: 0 }
   if (args[0] === 'remote' && args[1] === 'get-url') return { ok: true, stdout: 'https://example.invalid/r.git\n', stderr: '', exitCode: 0 }
   if (args[0] === 'rev-parse' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${'c'.repeat(40)}\n`, stderr: '', exitCode: 0 }

@@ -36,6 +36,7 @@ import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import { ackDialogLines, driftRefusal, readDriftLock, readHeadPosition, rescanLanded, resolvePinned, sameHeadPosition } from '../lib/integration-gate.js'
 import { scanCommits } from '../lib/staged-scan.js'
 import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
@@ -78,6 +79,8 @@ export type RequestRebaseRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'target_moved'
+  | 'programs_unreadable'
+  | 'programs_moved'
 
 export interface RequestRebaseOutput {
   status: RequestRebaseStatus
@@ -293,6 +296,11 @@ export async function requestRebaseHandler(
     })
   }
 
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit)
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed — nothing was changed and no dialog was shown.`, { protected: currentProtected })
+  }
+
   const ack = ackDialogLines(input.pre_merge_ack)
   const facts = [
     `Approve ${mode} of '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}' ${mode === 'rebase' ? 'onto' : 'from'} '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'? (history-rewriting)`,
@@ -302,6 +310,7 @@ export async function requestRebaseHandler(
     ...(mode === 'rebase' && findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
     ...(mode === 'squash' ? ['Secrets scan: the squashed change is scanned when rsct_request_commit commits it.'] : []),
     ...secretFindingLines(projectRoot, 'rebase', findings),
+    ...programsDialogLines(projectRoot, 'rebase', mode, programs.read, programs.fresh),
     ...ack.facts,
   ]
   const reasons = [
@@ -371,6 +380,10 @@ export async function requestRebaseHandler(
       protected: currentProtected,
     })
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor)
+  if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected })
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const branchCheck = { protected: currentProtected, override_used: currentProtected }
   const result = mode === 'rebase' ? gitRebase(projectRoot, pinned, gitExecutor) : gitSquash(projectRoot, pinned, gitExecutor)

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { requestCommitHandler, type RequestCommitInternal, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { defaultGitExecutor, type GitExecutor } from '../../src/lib/git.js'
+import { PROGRAMS_REV_PARSE, emptyProgramsRead } from './fake-git-programs.js'
 
 const GIT = (() => {
   try {
@@ -389,7 +390,7 @@ describe.skipIf(!GIT)('the branch, the first commit and a commit a hook makes on
     writeFileSync(join(root, 'b.txt'), 'b\n')
     git('add', 'b.txt')
     const { out } = await commit(approval(), () => {}, {
-      gitExecutor: () => ({ ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 }),
+      gitExecutor: (_cwd, args) => emptyProgramsRead(args) ?? { ok: true, stdout: 'aaaa111\n', stderr: '', exitCode: 0 },
     })
     expect(out.status).toBe('committed_with_drift')
     expect(out.hints.some((h) => h.includes('could not compare the commit'))).toBe(true)
@@ -417,7 +418,7 @@ describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
     git('add', 'b.txt')
     let headReads = 0
     const executor: GitExecutor = (cwd, args) => {
-      if (args[0] === 'rev-parse' && ++headReads > 1) return { ok: false, stdout: '', stderr: 'boom', exitCode: 1 }
+      if (args[0] === 'rev-parse' && args.join(' ') !== PROGRAMS_REV_PARSE && ++headReads > 1) return { ok: false, stdout: '', stderr: 'boom', exitCode: 1 }
       return defaultGitExecutor(cwd, args)
     }
     const { out } = await commit(approval(), () => {}, { gitExecutor: executor })
@@ -502,5 +503,32 @@ describe.skipIf(!GIT)('what lands is checked after git commit too', () => {
     const again = await commit(used)
     expect(again.out.reject_kind).toBe('reused')
     expect(again.dialogs).toEqual([])
+  })
+})
+
+describe.skipIf(!GIT)('the commit dialog lists the programs git runs inside the commit', () => {
+  it('lists a hook marked new until an approved call has shown it', async () => {
+    initRepo()
+    hook('exit 0')
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const first = await commit(approval())
+    expect(first.out.status).toBe('committed')
+    expect(first.dialogs[0]).toContain('Programs git runs inside this commit: 1 — 1 new or changed')
+    expect(first.dialogs[0]).toContain('NEW OR CHANGED: hook "pre-commit"')
+    writeFileSync(join(root, 'c.txt'), 'c\n')
+    git('add', 'c.txt')
+    const second = await commit(approval())
+    expect(second.out.status).toBe('committed')
+    expect(second.dialogs[0]).toContain('Programs git runs inside this commit: 1 — 0 new or changed')
+  })
+
+  it('refuses with programs_moved, and commits nothing, when a hook appears while the dialog is open', async () => {
+    initRepo()
+    writeFileSync(join(root, 'b.txt'), 'b\n')
+    git('add', 'b.txt')
+    const { out } = await commit(approval(), () => hook('exit 0'))
+    expect(out.reject_kind).toBe('programs_moved')
+    expect(git('rev-list', '--count', 'HEAD').trim()).toBe('1')
   })
 })

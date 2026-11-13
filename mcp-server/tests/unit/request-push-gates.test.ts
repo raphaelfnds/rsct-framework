@@ -392,3 +392,35 @@ describe.skipIf(!GIT)('rsct_request_push refuses before any dialog', () => {
     expect([out.reject_kind, seen.length]).toEqual(['push_url_unreadable', 0])
   })
 })
+
+describe.skipIf(!GIT)('rsct_request_push lists the programs git runs inside it', () => {
+  function remoteHook(name: string): void {
+    mkdirSync(join(remote, 'hooks'), { recursive: true })
+    writeFileSync(join(remote, 'hooks', name), '#!/bin/sh\nexit 0\n')
+    if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(remote, 'hooks', name)])
+  }
+
+  it('refuses before the coverage dry run when that dry run would run a program no approved call has shown', async () => {
+    writeFileSync(join(work, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 't', org: 't' }, protected_branches: ['release'] }))
+    git(work, 'checkout', '-q', '-b', 'release')
+    commitFile('r.txt', 'r\n', 'release note')
+    remoteHook('pre-receive')
+    let probes = 0
+    const { out, seen } = await push(
+      { branch: 'release', dev_approval: approval({ override_protected_branch: { reason: 'first release push' } }), pre_merge_ack: { ...ACK, files_swept: ['r.txt'] } },
+      { pushProbe: () => { probes++; return { status: 'unavailable' } } },
+    )
+    expect([out.reject_kind, probes, seen.length]).toEqual(['programs_changed', 0, 0])
+    expect(remoteHas(remote, 'refs/heads/release')).toBe(false)
+  })
+
+  it('lists the local remote\'s own hook before the footer, marked new', async () => {
+    commitFile('b.txt', 'b\n', 'b')
+    remoteHook('pre-receive')
+    const { out, text } = await push({ branch: 'feat/x', dev_approval: approval() })
+    expect(out.status).toBe('pushed')
+    const line = text.indexOf('NEW OR CHANGED: local remote hook "pre-receive"')
+    expect(line, 'present').toBeGreaterThanOrEqual(0)
+    expect(line).toBeLessThan(footerAt(text))
+  })
+})

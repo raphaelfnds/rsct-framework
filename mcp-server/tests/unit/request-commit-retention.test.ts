@@ -13,6 +13,7 @@ import { AUDIT_RETENTION_DAYS, clearRetentionMemo, pruneAuditLog } from '../../s
 import { clearAnchorCache } from '../../src/lib/repo-anchor.js'
 import type { GitExecutor } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { withEmptyPrograms } from './fake-git-programs.js'
 
 const NOW = new Date('2026-10-10T12:00:00.000Z')
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -70,12 +71,12 @@ function events(): string[] {
     .map((entry) => String((JSON.parse(entry) as Record<string, unknown>).event))
 }
 
-const okExec: GitExecutor = (_root, args) => ({
+const okExec: GitExecutor = withEmptyPrograms((_root, args) => ({
   ok: true,
   stdout: args.join(' ').startsWith('rev-parse') ? 'bbbb222' : '',
   stderr: '',
   exitCode: 0,
-})
+}))
 
 function internal(answer: DialogResult['response'], over: Partial<RequestCommitInternal>): RequestCommitInternal {
   return {

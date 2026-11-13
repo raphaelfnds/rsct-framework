@@ -1,0 +1,5 @@
+[user]
+	name = rsct-test
+	email = rsct-test@example.invalid
+[core]
+	autocrlf = true

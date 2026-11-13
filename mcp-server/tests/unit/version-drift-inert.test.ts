@@ -9,6 +9,7 @@ import type { DialogOptions } from '../../src/lib/os-dialog.js'
 import { EDIT_GUARD_HOOK, TERMINAL_GUARD_HOOK, getInstallDriftNotice, readScriptEvidence } from '../../src/lib/version-drift.js'
 import { requestCommitHandler, type RequestCommitOutput } from '../../src/tools/request-commit.js'
 import { statusHandler } from '../../src/tools/status.js'
+import { withEmptyPrograms } from './fake-git-programs.js'
 
 const DIST = resolve(__dirname, '..', '..', 'dist', 'scripts')
 const GUARD = 'edit-scope-guard.js'
@@ -193,12 +194,12 @@ describe('an inert guard reaches the dialogs and the audit log (#114)', () => {
 describe('the tools a developer meets, in a project that holds an inert guard (#114)', () => {
   const NOW = new Date('2026-07-11T12:00:00.000Z')
   const WARNING = '⚠ RSCT enforcement is NOT running in this project (see hints).'
-  const commitOk: GitExecutor = (_root, args) => ({
+  const commitOk: GitExecutor = withEmptyPrograms((_root, args) => ({
     ok: true,
     stdout: args.join(' ').startsWith('rev-parse') ? 'bbbb222' : '',
     stderr: '',
     exitCode: 0,
-  })
+  }))
 
   function managed(guard: string): string {
     const root = project(guard)
