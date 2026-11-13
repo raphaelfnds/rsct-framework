@@ -45,7 +45,7 @@ function hook(dir: string, name: string, body = 'echo hi'): string {
   return path
 }
 
-function labels(root: string, push?: { urls: readonly string[] }): string[] {
+function labels(root: string, push?: { urls?: readonly string[]; incoming?: string }): string[] {
   const read = readGitPrograms(root, defaultGitExecutor, push)
   if (!read.ok) throw new Error(read.reason)
   return read.entries.map((e) => e.label)
@@ -354,5 +354,45 @@ describe('git-programs — REVIEW round 1', () => {
     const shown = labels(r).join('\n')
     expect(shown).toContain('***@host.invalid')
     expect(shown).not.toContain('ss@host')
+  })
+})
+
+describe('git-programs — what git runs from somewhere the list did not read (REVIEW round 3)', () => {
+  it('reads a relative hooks path from the real folder when the project folder is a link into a subfolder', () => {
+    const r = repo()
+    mkdirSync(join(r, 'sub'))
+    git(r, 'config', 'core.hooksPath', 'myhooks')
+    hook(join(r, 'myhooks'), 'pre-commit')
+    mkdirSync(join(base, 'jx'))
+    const link = join(base, 'jx', 'apilink')
+    symlinkSync(join(r, 'sub'), link, process.platform === 'win32' ? 'junction' : 'dir')
+    expect(labels(link).some((l) => l.includes('myhooks/pre-commit'))).toBe(true)
+  })
+
+  it('lists gc.recentObjectsHook, which auto maintenance runs after a commit', () => {
+    expect(isProgramKey('gc.recentObjectsHook', 'x', 'repository')).toBe(true)
+    expect(isProgramKey('gc.auto', '0', 'repository')).toBe(false)
+    const r = repo()
+    git(r, 'config', 'gc.recentObjectsHook', 'evil')
+    expect(labels(r).some((l) => l.toLowerCase().includes('gc.recentobjectshook'))).toBe(true)
+  })
+
+  it('lists a hook of a tracked hooks folder as a merge, rebase or squash brings it, and only one that changes', () => {
+    const r = repo()
+    git(r, 'config', 'core.hooksPath', '.husky')
+    hook(join(r, '.husky'), 'post-merge', 'echo v1')
+    hook(join(r, '.husky'), 'pre-push', 'echo same')
+    git(r, 'add', '-A')
+    git(r, 'commit', '-q', '-m', 'v1')
+    git(r, 'checkout', '-q', '-b', 'feature')
+    hook(join(r, '.husky'), 'post-merge', 'echo v2')
+    git(r, 'commit', '-q', '-am', 'v2')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', '-')
+    const brought = labels(r, { incoming: tip }).filter((l) => l.includes('as this operation brings it'))
+    expect(brought).toHaveLength(1)
+    expect(brought[0]).toContain('"post-merge"')
+    expect(labels(r).some((l) => l.includes('as this operation brings it'))).toBe(false)
+    expect(labels(r, { incoming: git(r, 'rev-parse', 'HEAD').trim() }).some((l) => l.includes('as this operation brings it'))).toBe(false)
   })
 })

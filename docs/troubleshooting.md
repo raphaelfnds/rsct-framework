@@ -474,8 +474,9 @@ approved — ask again. `source_unreadable`: git could not resolve the name to a
 
 Since 2.24.1 commit, push, merge and rebase list every file in the hooks folder git runs and every
 configured key that runs a program (ssh command, credential helper, filters, merge drivers,
-signing, remote programs, transport helpers), with where each comes from, and for a push to a
-local path that repository's own. `NEW OR CHANGED` marks what your last approved call did not
+signing, remote programs, transport helpers, the gc hook), with where each comes from, and for a push to a
+local path that repository's own. A merge, rebase or squash also lists the hooks it brings into a
+hooks folder kept in the work tree (husky and the like), in the version git will run. `NEW OR CHANGED` marks what your last approved call did not
 list; the first call after the upgrade marks everything. If you did not add an entry, find out who
 did before you approve.
 
