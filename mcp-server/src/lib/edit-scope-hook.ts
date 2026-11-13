@@ -1,8 +1,15 @@
 import { isAbsolute, resolve } from 'node:path'
+import { decideAuditPath } from './audit-log.js'
 import { evaluateEditGuard } from './edit-guard.js'
 import { resolveProjectRootFromArgs } from './hook-project-root.js'
 import { resolveProjectRoot } from './project-root.js'
-import { judgeRsctConfigWrite, judgeSettingsWrite } from './settings-write-guard.js'
+import { judgeProtectedPath, pathComponents } from './protected-paths.js'
+import { canonicalPath } from './repo-anchor.js'
+import { judgeClaudeAssetWrite, judgeClaudeConfigFile, judgeRsctConfigWrite, judgeSettingsWrite } from './settings-write-guard.js'
+
+function samePath(a: string, b: string): boolean {
+  return pathComponents(canonicalPath(a)).join('/') === pathComponents(canonicalPath(b)).join('/')
+}
 
 export interface GuardDecision {
   exitCode: 0 | 2
@@ -39,15 +46,27 @@ export function decide(
 
     const cwdForResolve = typeof payload.cwd === 'string' && payload.cwd.length > 0 ? payload.cwd : cwd
     const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : ''
-    for (const filePath of paths) {
-      const absolute = isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath)
+    const absolutes = paths.map((filePath) => (isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath)))
+    for (const absolute of absolutes) {
+      const guarded = judgeProtectedPath(absolute)
+      if (guarded.block) return { exitCode: 2, message: `[rsct] Edit blocked (protected_path): ${guarded.reason}` }
+      const configFile = judgeClaudeConfigFile(toolName, absolute)
+      if (configFile.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${configFile.reason}` }
       const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute)
       if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` }
       const configWrite = judgeRsctConfigWrite(toolName, toolInput, absolute)
       if (configWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (rsct_config): ${configWrite.reason}` }
+      const asset = judgeClaudeAssetWrite(toolName, toolInput, absolute)
+      if (asset.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${asset.reason}` }
     }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve })
     const resolution = resolveProjectRoot(projectRoot)
+    if (resolution.config?.audit?.path !== undefined) {
+      const auditPath = decideAuditPath(resolution.root, resolution.config.audit).path
+      if (absolutes.some((absolute) => samePath(absolute, auditPath))) {
+        return { exitCode: 2, message: "[rsct] Edit blocked (protected_path): this write would change RSCT's audit log; that is the developer's own edit" }
+      }
+    }
     for (const filePath of paths) {
       const guard = evaluate({
         projectRoot: resolution.root,

@@ -7,12 +7,12 @@ import { dialogList, specLabel } from './dialog-text.js'
 import type { GitExecutor } from './git.js'
 import type { RsctAuditConfig } from './project-root.js'
 import { canonicalPath } from './repo-anchor.js'
+import { helperUrl } from './git-url.js'
 
 export const GIT_PROGRAMS_BASELINE_EVENT = 'git_programs.baseline'
 
 const VALUE_SHOWN = 200
 const LABEL_SHOWN = 600
-const NATIVE_SCHEMES = new Set(['ssh', 'git', 'http', 'https', 'ftp', 'ftps', 'file', 'git+ssh', 'ssh+git'])
 const CORE_PROGRAM_KEYS = new Set(['sshcommand', 'askpass', 'gitproxy', 'alternaterefscommand'])
 const FILTER_KEYS = new Set(['clean', 'smudge', 'process'])
 const REMOTE_PROGRAM_KEYS = new Set(['receivepack', 'uploadpack', 'vcs'])
@@ -50,12 +50,6 @@ function shown(text: string): string {
 function credentialShown(value: string): string {
   const trimmed = value.trimStart()
   return trimmed.startsWith('!') ? `!… (shell code, ${trimmed.length} characters)` : shown(value)
-}
-
-export function helperUrl(value: string): boolean {
-  if (value.includes('::')) return true
-  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(value)
-  return scheme !== null && !NATIVE_SCHEMES.has(scheme[1]!.toLowerCase())
 }
 
 interface ConfigEntry {
