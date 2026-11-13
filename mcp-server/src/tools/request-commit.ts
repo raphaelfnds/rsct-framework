@@ -102,12 +102,7 @@ import {
   type TokenInvalidReason,
 } from '../lib/plan-authorization.js'
 import { confirmedTopologyMode } from '../lib/topology.js'
-import { resolveUniverseRoot } from '../lib/universe.js'
-import {
-  readContracts,
-  contractsTouchingPaths,
-  affectedConsumers,
-} from '../lib/contracts.js'
+import { gatherContractFacts, universeFactsChanged } from '../lib/contract-facts.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, commitMessageView, specLabel } from '../lib/dialog-text.js'
 import {
@@ -141,28 +136,6 @@ interface ContractFacts {
   ids: string[]
   consumers: string[]
   inactive: boolean
-}
-
-function readContractFacts(
-  projectRoot: string,
-  config: RsctConfig | null | undefined,
-  readCommitPaths: () => string[] | null,
-): ContractFacts | null {
-  const mode = confirmedTopologyMode(config ?? null)
-  if (mode !== 'multi-repo') return { mode, ids: [], consumers: [], inactive: false }
-  let universeRoot: string | null = null
-  try {
-    const r = resolveUniverseRoot(config ?? null, projectRoot)
-    universeRoot = r.kind === 'found' ? r.path : null
-  } catch {
-    universeRoot = null
-  }
-  const graph = readContracts(universeRoot)
-  const stagedPaths = readCommitPaths()
-  if (stagedPaths === null) return null
-  const appName = config?.app?.name ?? null
-  const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
-  return { mode, ids: hits.map((h) => h.id), consumers: affectedConsumers(hits), inactive: !graph.available }
 }
 
 function commitExceptionLines(
@@ -246,6 +219,7 @@ export type RequestCommitRejectKind =
   | 'programs_unreadable'
   | 'programs_changed'
   | 'programs_moved'
+  | 'universe_changed'
 
 export type CommitAuthVia = 'dev_approval' | 'plan_token'
 
@@ -692,14 +666,22 @@ export async function requestCommitHandler(
     )
   }
   const findings = scan.findings
-  const contractFacts = readContractFacts(
+  const universe = gatherContractFacts({
     projectRoot,
-    config,
-    () =>
+    config: config ?? null,
+    readPaths: () =>
       internal.stagedPathsOverride ??
       (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree)),
-  )
-  if (contractFacts === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+    executor: gitExecutor,
+    ...(config?.audit !== undefined && { auditConfig: config.audit }),
+  })
+  if (universe === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+  const contractFacts: ContractFacts = {
+    mode: universe.multiRepo ? 'multi-repo' : confirmedTopologyMode(config ?? null),
+    ids: universe.ids,
+    consumers: universe.consumers,
+    inactive: universe.multiRepo && universe.inactive,
+  }
   const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit)
   if (!programs.ok) {
     return earlyReject(
@@ -767,6 +749,17 @@ export async function requestCommitHandler(
         },
       )
     }
+    if (tokenPath && universeFactsChanged(universe)) {
+      return refuse(
+        'universe_changed',
+        'what the contract gate reads (the universe and the .rsct.json files) changed since the last approved commit, or is read for the first time. A plan authorization never covers that; commit with a per-action dev_approval so the developer sees it in the dialog.',
+        {},
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        },
+      )
+    }
     if (tokenPath && freshPrograms.length > 0) {
       return refuse(
         'programs_changed',
@@ -820,6 +813,7 @@ export async function requestCommitHandler(
             ...(retentionLine ? [retentionLine] : []),
             ...exceptions.facts,
             ...programsDialogLines(projectRoot, 'commit', 'commit', programs.read, freshPrograms),
+            ...universe.lines,
           ].join('\n') +
           gateDialogFooter(projectRoot, config) +
           (exceptions.reasons.length > 0 ? `\n\n${exceptions.reasons.join('\n')}` : '') +
@@ -1024,6 +1018,7 @@ export async function requestCommitHandler(
     })
   }
   appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
+  if (universe.recordBaseline) appendAudit(projectRoot, universe.baseline, config?.audit)
 
   let reservedToken: PlanAuthorizationBlock | null = null
   if (tokenCtx) {
@@ -1363,6 +1358,7 @@ export async function requestCommitHandler(
       sha_before: commit.sha_before,
       sha_after: commit.sha_after,
       fabrication_signals: fabricationSignals,
+      ...(universe.multiRepo && { universe: universe.record }),
       ...(tokenSummary !== null && {
         plan_slug: tokenSummary.plan_slug,
         plan_token_actions_used: tokenSummary.actions_used,

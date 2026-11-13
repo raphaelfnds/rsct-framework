@@ -58,6 +58,7 @@ describe('audit-log readers and the retention rule name the same events (#93)', 
       'review.unverified_decision',
       'settings.baseline',
       'tutor.step',
+      'universe.baseline',
     ])
   })
 

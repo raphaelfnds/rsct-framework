@@ -73,6 +73,7 @@ export const NEWEST_ONLY_EVENTS: ReadonlySet<string> = new Set([
   'sanitize.migration_skipped',
   'settings.drift_detected',
   'git_programs.baseline',
+  'universe.baseline',
   AUDIT_PRUNED_EVENT,
 ])
 
