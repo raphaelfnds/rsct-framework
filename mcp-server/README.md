@@ -877,7 +877,8 @@ Since 2.23.0 (ADR-039, ADR-040):
   the hooks folder git runs and every configured key that runs a program, with its origin, URL credentials masked, marking what is new or changed since the last approved call. The list is read again
   right before `git commit` (`programs_moved`); a list that cannot be read refuses
   (`programs_unreadable`); a plan token never covers a new entry (`programs_changed`). Push, merge
-  and rebase list the same, a push also a local-path remote's own.
+  and rebase list the same, a push also a local-path remote's own, and a merge, rebase or squash
+  also the hooks it brings into a hooks folder kept in the work tree, in the version git will run.
 - **The contract gate reads every source (since 2.24.1, ADR-044):** every `.rsct.json` from the
   project folder to the repository top, working tree and HEAD, at their strictest; the universe
   they name plus the one read at the last approved commit; and in each universe its working tree,

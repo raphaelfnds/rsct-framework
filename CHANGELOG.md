@@ -19,8 +19,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Commit, push, merge and rebase dialogs list the programs git runs inside them** (ADR-044).
   - Every file in the hooks folder git runs (`.sample` files excluded, `.exe` hooks on Windows included)
     and every configured key that runs a program — ssh command, credential helper, filters, merge
-    drivers, signing, remote programs, transport helpers — with where each comes from; for a push to a
-    local path, that repository's own. Credentials in URLs are masked; a shell credential helper is shown by its length.
+    drivers, signing, remote programs, transport helpers, the gc hook — with where each comes from; for
+    a push to a local path, that repository's own; for a merge, rebase or squash, the hooks it brings
+    into a hooks folder kept in the work tree, in the version git will run. Credentials in URLs are
+    masked; a shell credential helper is shown by its length.
   - What is new or changed since your last approved call is marked. The first call after the upgrade
     marks everything.
   - The list is read again right before git runs; a change refuses (`programs_moved`), and a list that
@@ -40,7 +42,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The agent's editor tools are refused on more of what git or Claude Code runs** (ADR-044). The edit guard
   refuses the following, and a malformed `.rsct.json` no longer turns it off:
   - files in a git folder, also one moved by `git init --separate-git-dir`, git configuration files,
-    RSCT's `.rsct/` folder and a configured audit log, and a write that leaves a `.rsct.json` the server rejects or changes its `audit` key;
+    the project's `.rsct/` folder and a configured audit log, and a write that leaves a `.rsct.json` the server rejects or changes its `audit` key;
   - `.mcp.json`, `.claude.json`, managed settings and plugin files, whole;
   - any hook entry, and any key that runs a command or loads servers or plugins, in
     `.claude/settings.json` and `.claude/settings.local.json`;

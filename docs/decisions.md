@@ -3045,7 +3045,10 @@ time.
 
 **Decision**:
 1. Commit, push, merge, rebase and squash list, before the dialog, every file in the hooks folder git runs
-   (`.sample` excluded) and every configured key that runs a program, with origins, and for a push to a
+   (`.sample` excluded; a relative path git prints is read from the real project folder, not a link to
+   it) and every configured key that runs a program, with origins; for a merge, rebase or squash, the
+   hooks it brings into a hooks folder kept in the work tree, in the version git will run (the
+   operation replaces the file before git runs it); and for a push to a
    local path that repository's own (each under its own git folder, found in git's order, where the
    first regular file is read as a gitfile whatever its name, with a relative `core.hooksPath` read
    from the remote's git folder, where push hooks run; another user's home `~name` or a relative
@@ -3061,7 +3064,7 @@ time.
    approved commit (`universe.baseline`): roots, gate mode, app names, history that moved backwards or no longer resolves, a branch switch, contracts gone, changed or no longer readable; a plan token never covers a change (`universe_changed`).
 3. The edit guard, before the project is read (a malformed `.rsct.json` no longer turns it off), refuses
    the editor tools on git folders (by name and by content, so a folder moved by `--separate-git-dir` is
-   covered), git configuration files, RSCT's `.rsct/` state and its configured audit log, a write that leaves a `.rsct.json` the server rejects or changes its `audit` key; whole files that register or approve MCP servers or carry
+   covered), git configuration files, a project's `.rsct/` state and its configured audit log, a write that leaves a `.rsct.json` the server rejects or changes its `audit` key; whole files that register or approve MCP servers or carry
    managed settings or plugins; any hook entry or command key in `.claude/settings*.json`; hooks and `!`
    lines in skills, commands and agents, and an agent's `mcpServers` (Claude Code starts inline servers
    with the agent). A front matter change that holds a backslash (a YAML escape can spell a key) or a
