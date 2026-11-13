@@ -2059,6 +2059,12 @@ const CONFIG_READ_LONG = new Set(['get', 'get-all', 'get-regexp', 'get-urlmatch'
 const CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section'])
 const CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
 const PLANTING_OPTIONS = ['template', 'separate-git-dir', 'config', 'config-env']
+const SHORT_VALUE_FLAGS = new Set(['c', 'o', 'b', 'u', 'j'])
+const HOME_NAMES = 'HOME|XDG_CONFIG_HOME|USERPROFILE|HOMEDRIVE|HOMEPATH'
+const PLANTING_HOME = new RegExp(
+  `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=|\\$env:(${HOME_NAMES})\\s*=|\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b|(?<!\\$)\\benv:(${HOME_NAMES})\\b|SetEnvironmentVariable\\s*\\(\\s*['"](${HOME_NAMES})['"]`,
+  'i',
+)
 const PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i
 
 function sectionOf(key: string): string {
@@ -2117,7 +2123,7 @@ function judgeConfigWrite(rest: string[], dynamic: boolean[]): TerminalVerdict {
         const flag = cluster[c]!
         if (flag === 'e') return deny(DENY_CONFIG_EDIT)
         if (flag === 'l') read = true
-        if (flag === 'f') {
+        if (flag === 'f' || flag === 't') {
           if (c === cluster.length - 1) k++
           break
         }
@@ -2149,18 +2155,28 @@ function plantingOption(values: readonly string[]): string | null {
       }
       continue
     }
-    const glued = /^-c(.+)$/.exec(a)
-    const item = glued?.[1] ?? (a === '-c' ? values[k + 1] : undefined)
+    const item = shortConfigValue(a, values[k + 1])
     if (item !== undefined && PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split('=')[0] ?? ''))) return `-c ${item}`
   }
   return null
 }
 
+function shortConfigValue(word: string, next: string | undefined): string | undefined {
+  if (!word.startsWith('-') || word.length < 2) return undefined
+  for (let c = 1; c < word.length; c++) {
+    const flag = word[c]!
+    if (!SHORT_VALUE_FLAGS.has(flag)) continue
+    if (flag !== 'c') return undefined
+    return c === word.length - 1 ? next : word.slice(c + 1)
+  }
+  return undefined
+}
+
 function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], text: string): TerminalVerdict {
   if (verb === 'config') return judgeConfigWrite(rest, dynamic)
   if (verb === 'init' || verb === 'clone') {
-    const variable = PLANTING_VARIABLE.exec(text)
-    if (variable !== null) return deny(`\`git ${verb}\` in a command that sets ${variable[1]} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
+    const variable = PLANTING_VARIABLE.exec(text)?.[1] ?? PLANTING_HOME.exec(text)?.slice(1).find((n) => n !== undefined)
+    if (variable !== undefined) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
     const planted = plantingOption([...globals, ...rest])
     if (planted !== null) return deny(`\`git ${verb}\` with '${planted}' can plant hooks or configuration, or move the git folder, that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
     return ALLOW
