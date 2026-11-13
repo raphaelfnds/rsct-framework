@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -406,5 +407,40 @@ describe('judgeClaudeAssetWrite — skills, commands and agents run nothing new 
   it('leaves markdown outside a .claude folder alone', () => {
     const file = join('p', 'docs', 'skills', 's', 'SKILL.md')
     expect(judgeClaudeAssetWrite('Write', { content: '---\nhooks: x\n---\n!`rm -rf`\n' }, file, read(skill)).block).toBe(false)
+  })
+})
+
+describe('Claude Code files under other spellings of .claude, and front matter in any form (REVIEW round 1)', () => {
+  const read = (text: string) => () => text
+  const skill = '---\nname: s\ndescription: d\n---\n\nBody text.\n'
+  const hooked = '---\nname: s\nhooks:\n  Stop:\n    - command: x\n---\n\nBody text.\n'
+
+  it('refuses an agent or plugin file reached through an NTFS stream suffix on the .claude folder', () => {
+    const root = project(null)
+    const agent = join(root, '.claude::$INDEX_ALLOCATION', 'agents', 'e.md')
+    expect(judgeClaudeAssetWrite('Write', { content: hooked }, agent, read('')).block).toBe(true)
+    expect(judgeClaudeConfigFile('Write', join(root, '.claude::$INDEX_ALLOCATION', 'plugins', 'p', 'hooks', 'hooks.json')).block).toBe(true)
+    expect(judgeClaudeConfigFile('Write', join(root, '.mcp.json:$DATA')).block).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32')('refuses an agent file reached through the Windows short name of .claude', () => {
+    const root = project(null)
+    const short = execFileSync('cmd', ['/c', 'dir', '/x', '/a', root], { encoding: 'utf8' })
+    const name = /\s(\S+~\d)\s+\.claude\s*$/m.exec(short)?.[1]
+    if (name === undefined) return
+    expect(judgeClaudeAssetWrite('Write', { content: hooked }, join(root, name, 'agents', 'e.md'), read('')).block).toBe(true)
+  })
+
+  it('reads front matter written with CRLF, a fence with trailing spaces, or a quoted hooks key', () => {
+    const file = join('p', '.claude', 'skills', 's', 'SKILL.md')
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace(/\n/g, '\r\n') }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace('---\n', '--- \n') }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"hooks": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace(/\n/g, '\r\n') }, file, read(hooked.replace(/\n/g, '\r\n'))).block).toBe(false)
+  })
+
+  it('reads a !`command` line that spans lines', () => {
+    const file = join('p', '.claude', 'commands', 'run.md')
+    expect(judgeClaudeAssetWrite('Write', { content: `${skill}!\`git\npush\`\n` }, file, read(skill)).block).toBe(true)
   })
 })
