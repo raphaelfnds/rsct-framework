@@ -1,8 +1,15 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isClaudeSettingsFile, judgeSettingsWrite } from '../../src/lib/settings-write-guard.js'
+import {
+  isClaudeSettingsFile,
+  judgeClaudeAssetWrite,
+  judgeClaudeConfigFile,
+  judgeRsctConfigWrite,
+  judgeSettingsWrite,
+} from '../../src/lib/settings-write-guard.js'
 import { decide } from '../../src/lib/edit-scope-hook.js'
 
 const roots: string[] = []
@@ -148,8 +155,12 @@ describe('judgeSettingsWrite — what keeps working', () => {
     expect(blocked('Write', { file_path: other, content: 'disableAllHooks: true' }, other)).toBe(false)
     const notSettings = join(root, '.claude', 'commands.json')
     expect(blocked('Write', { file_path: notSettings, content: '{"disableAllHooks": true}' }, notSettings)).toBe(false)
+  })
+
+  it('refuses a notebook edit of a settings file, which it cannot judge (2.24.1)', () => {
+    const root = project(null)
     const file = join(root, '.claude', 'settings.json')
-    expect(blocked('NotebookEdit', { notebook_path: file, new_source: '{"disableAllHooks": true}' }, file)).toBe(false)
+    expect(blocked('NotebookEdit', { notebook_path: file, new_source: '{"disableAllHooks": true}' }, file)).toBe(true)
   })
 
   it('recognises settings files by name and folder only', () => {
@@ -299,7 +310,188 @@ describe('judgeSettingsWrite — the RSCT hook entry itself (REVIEW #91 round 3)
     const file = join(root, '.claude', 'settings.local.json')
     const reordered = JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: hook.command, type: 'command' }], matcher: entry.matcher }] }, permissions: { allow: ['Bash(npm test)'] } })
     expect(blocked('Write', { file_path: file, content: reordered }, file)).toBe(false)
+  })
+
+  it('refuses a new hook entry that is not RSCT\'s, since every hook runs a command (2.24.1)', () => {
+    const root = project({ permissions: { allow: [] }, ...GUARD_ENTRY })
+    const file = join(root, '.claude', 'settings.local.json')
     const added = withHooks({ PreToolUse: [entry, { matcher: 'Bash', hooks: [{ type: 'command', command: 'node lint.js' }] }] })
-    expect(blocked('Write', { file_path: file, content: added }, file)).toBe(false)
+    expect(blocked('Write', { file_path: file, content: added }, file)).toBe(true)
+  })
+})
+
+describe('judgeClaudeConfigFile — files the agent never edits (2.24.1)', () => {
+  it('refuses every editor tool on server registrations, approvals, managed settings and plugin files', () => {
+    const root = project(null)
+    const files = [
+      join(root, '.mcp.json'),
+      join(root, 'home', '.claude.json'),
+      join(root, 'etc', 'claude-code', 'managed-settings.json'),
+      join(root, 'etc', 'claude-code', 'managed-settings.d', '10-team.json'),
+      join(root, 'etc', 'claude-code', 'managed-mcp.json'),
+      join(root, '.claude', 'skills', 'tool', '.claude-plugin', 'plugin.json'),
+      join(root, 'home', '.claude', 'plugins', 'cache', 'm', 'p', '1.0.0', 'hooks', 'hooks.json'),
+      join(root, '.claude', 'hooks.json'),
+      join(root, '.MCP.JSON'),
+    ]
+    for (const file of files) {
+      for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(judgeClaudeConfigFile(tool, file).block, `${tool} ${file}`).toBe(true)
+    }
+  })
+
+  it('leaves other files and other tools alone', () => {
+    const root = project(null)
+    expect(judgeClaudeConfigFile('Write', join(root, 'docs', 'mcp.md')).block).toBe(false)
+    expect(judgeClaudeConfigFile('Write', join(root, 'src', 'hooks.json')).block).toBe(false)
+    expect(judgeClaudeConfigFile('Bash', join(root, '.mcp.json')).block).toBe(false)
+  })
+})
+
+describe('judgeSettingsWrite — every hook and every key that runs a command (2.24.1)', () => {
+  it('refuses adding, changing or removing a key that runs a command, and allows permissions', () => {
+    const root = project({ permissions: { allow: [] }, enabledPlugins: { 'p@m': true } })
+    const file = join(root, '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ permissions: { allow: [] }, enabledPlugins: { 'p@m': true }, statusLine: { type: 'command', command: 'x' } }) }, file)).toBe(true)
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ permissions: { allow: [] }, enabledPlugins: { 'p@m': false } }) }, file)).toBe(true)
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ permissions: { allow: [] } }) }, file)).toBe(true)
+    expect(blocked('Write', { file_path: file, content: JSON.stringify({ permissions: { allow: ['Bash(npm test)'] }, enabledPlugins: { 'p@m': true } }) }, file)).toBe(false)
+  })
+
+  it('refuses a write that leaves the file unreadable where it held hooks or a listed key, or names one', () => {
+    const held = project({ apiKeyHelper: 'x' })
+    const heldFile = join(held, '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: heldFile, content: '{' }, heldFile)).toBe(true)
+    const empty = project({})
+    const emptyFile = join(empty, '.claude', 'settings.local.json')
+    expect(blocked('Write', { file_path: emptyFile, content: '{"statusLine": ' }, emptyFile)).toBe(true)
+    expect(blocked('Write', { file_path: emptyFile, content: '{' }, emptyFile)).toBe(false)
+  })
+})
+
+describe('judgeRsctConfigWrite — what keeps the edit checks and the audit log on (2.24.1)', () => {
+  const read = (text: string) => () => text
+  const config = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } })
+
+  it('refuses a write that leaves .rsct.json unreadable, or that touches audit', () => {
+    expect(judgeRsctConfigWrite('Write', { content: '{' }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+    expect(judgeRsctConfigWrite('Write', { content: JSON.stringify({ ...JSON.parse(config), audit: { path: 'x.log' } }) }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+    expect(judgeRsctConfigWrite('NotebookEdit', { new_source: config }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+  })
+
+  it('still allows the fields /rsct-setup edits by hand', () => {
+    const changed = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'renamed', org: 'o' }, universe: { name: 'u', local: '../u-universe' } })
+    expect(judgeRsctConfigWrite('Write', { content: changed }, join('p', '.rsct.json'), read(config)).block).toBe(false)
+  })
+})
+
+describe('judgeClaudeAssetWrite — skills, commands and agents run nothing new (2.24.1)', () => {
+  const read = (text: string) => () => text
+  const skill = '---\nname: s\ndescription: d\n---\n\nBody text.\n'
+
+  it('refuses adding hooks to a skill frontmatter, and allows editing its body', () => {
+    const file = join('p', '.claude', 'skills', 's', 'SKILL.md')
+    const withHooks = '---\nname: s\ndescription: d\nhooks:\n  PreToolUse:\n    - command: x\n---\n\nBody text.\n'
+    expect(judgeClaudeAssetWrite('Write', { content: withHooks }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: skill.replace('Body text.', 'Better body text.') }, file, read(skill)).block).toBe(false)
+  })
+
+  it('refuses adding a shell line or block to a command, and a hooks change to an agent', () => {
+    const command = join('p', '.claude', 'commands', 'team', 'deploy.md')
+    expect(judgeClaudeAssetWrite('Edit', { old_string: 'Body text.', new_string: 'Body text. !`git push`' }, command, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: `${skill}\n\`\`\`!\ngit push\n\`\`\`\n` }, command, read(skill)).block).toBe(true)
+    const agent = join('p', '.claude', 'agents', 'helper.md')
+    const agentWithHooks = '---\nname: a\nhooks:\n  Stop: []\n---\nx\n'
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: a\n---\nx\n' }, agent, read(agentWithHooks)).block).toBe(true)
+  })
+
+  it('leaves markdown outside a .claude folder alone', () => {
+    const file = join('p', 'docs', 'skills', 's', 'SKILL.md')
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nhooks: x\n---\n!`rm -rf`\n' }, file, read(skill)).block).toBe(false)
+  })
+})
+
+describe('Claude Code files under other spellings of .claude, and front matter in any form (REVIEW round 1)', () => {
+  const read = (text: string) => () => text
+  const skill = '---\nname: s\ndescription: d\n---\n\nBody text.\n'
+  const hooked = '---\nname: s\nhooks:\n  Stop:\n    - command: x\n---\n\nBody text.\n'
+
+  it('refuses an agent or plugin file reached through an NTFS stream suffix on the .claude folder', () => {
+    const root = project(null)
+    const agent = join(root, '.claude::$INDEX_ALLOCATION', 'agents', 'e.md')
+    expect(judgeClaudeAssetWrite('Write', { content: hooked }, agent, read('')).block).toBe(true)
+    expect(judgeClaudeConfigFile('Write', join(root, '.claude::$INDEX_ALLOCATION', 'plugins', 'p', 'hooks', 'hooks.json')).block).toBe(true)
+    expect(judgeClaudeConfigFile('Write', join(root, '.mcp.json:$DATA')).block).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32')('refuses an agent file reached through the Windows short name of .claude', () => {
+    const root = project(null)
+    const short = execFileSync('cmd', ['/c', 'dir', '/x', '/a', root], { encoding: 'utf8' })
+    const name = /\s(\S+~\d)\s+\.claude\s*$/m.exec(short)?.[1]
+    if (name === undefined) return
+    expect(judgeClaudeAssetWrite('Write', { content: hooked }, join(root, name, 'agents', 'e.md'), read('')).block).toBe(true)
+  })
+
+  it('reads front matter written with CRLF, a fence with trailing spaces, or a quoted hooks key', () => {
+    const file = join('p', '.claude', 'skills', 's', 'SKILL.md')
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace(/\n/g, '\r\n') }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace('---\n', '--- \n') }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"hooks": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: hooked.replace(/\n/g, '\r\n') }, file, read(hooked.replace(/\n/g, '\r\n'))).block).toBe(false)
+  })
+
+  it('reads a !`command` line that spans lines', () => {
+    const file = join('p', '.claude', 'commands', 'run.md')
+    expect(judgeClaudeAssetWrite('Write', { content: `${skill}!\`git\npush\`\n` }, file, read(skill)).block).toBe(true)
+  })
+})
+
+describe('judgeRsctConfigWrite — a .rsct.json the server rejects is refused like an unreadable one (REVIEW round 1)', () => {
+  const read = (text: string) => () => text
+  const config = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } })
+
+  it('refuses a byte-order mark or a value outside the schema, which the server rejects', () => {
+    expect(judgeRsctConfigWrite('Write', { content: `\uFEFF${config}` }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+    expect(judgeRsctConfigWrite('Write', { content: JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: '' } }) }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+  })
+
+  it('allows a write to a .rsct.json the server already rejects (the developer repairs it)', () => {
+    expect(judgeRsctConfigWrite('Write', { content: config }, join('p', '.rsct.json'), read('{')).block).toBe(false)
+  })
+})
+
+describe('front matter the guard cannot read word by word, and a .rsct.json left unparseable (REVIEW round 2)', () => {
+  const read = (text: string) => () => text
+  const skill = '---\nname: s\ndescription: d\n---\n\nBody text.\n'
+  const file = join('p', '.claude', 'skills', 's', 'SKILL.md')
+
+  it('refuses a front matter change that holds a YAML escape, which can spell hooks', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"hook\\x73": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"ho\\\n  oks": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\nx: {"hook\\u0073": []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+  })
+
+  it('reads a front matter with no closing line, or opened with a language word, to the end', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\nhooks: {Stop: []}\n#---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---yaml\nname: s\nhooks: {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+  })
+
+  it('refuses adding or changing the MCP servers of an agent, which Claude Code starts with the agent', () => {
+    const agent = join('p', '.claude', 'agents', 'helper.md')
+    const plain = '---\nname: a\ndescription: d\n---\nx\n'
+    const inline = '---\nname: a\ndescription: d\nmcpServers:\n  - evil:\n      type: stdio\n      command: sh\n---\nx\n'
+    expect(judgeClaudeAssetWrite('Write', { content: inline }, agent, read(plain)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: inline.replace('command: sh', 'command: node') }, agent, read(inline)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: plain.replace('description: d', 'description: e') }, agent, read(plain)).block).toBe(false)
+  })
+
+  it('still allows a description edit and a body edit beside a front matter with a backslash', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: skill.replace('description: d', 'description: better') }, file, read(skill)).block).toBe(false)
+    const withPath = '---\nname: s\ndescription: reads C:\\data\n---\n\nBody text.\n'
+    expect(judgeClaudeAssetWrite('Write', { content: withPath.replace('Body text.', 'More body.') }, file, read(withPath)).block).toBe(false)
+  })
+
+  it('refuses a write that leaves unparseable a .rsct.json that parsed, even one outside the schema', () => {
+    const outside = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: '' }, audit: { path: 'x.log' } })
+    expect(judgeRsctConfigWrite('Write', { content: '{' }, join('p', '.rsct.json'), read(outside)).block).toBe(true)
   })
 })

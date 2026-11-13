@@ -36,6 +36,7 @@ import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { evaluateInstallAdvisory } from '../lib/install-advisory.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import { ackDialogLines, driftRefusal, readDriftLock, readHeadPosition, rescanLanded, resolvePinned, sameHeadPosition } from '../lib/integration-gate.js'
 import { scanCommits } from '../lib/staged-scan.js'
 import { compileExtraPatterns, type SecretFinding } from '../lib/secrets.js'
@@ -78,6 +79,8 @@ export type RequestRebaseRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'target_moved'
+  | 'programs_unreadable'
+  | 'programs_moved'
 
 export interface RequestRebaseOutput {
   status: RequestRebaseStatus
@@ -122,7 +125,7 @@ export interface RequestRebaseInternal {
 export const requestRebaseTool: Tool = {
   name: 'rsct_request_rebase',
   description:
-    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed.",
+    "§C-gated rebase / squash — the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing — rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the ref brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -293,6 +296,11 @@ export async function requestRebaseHandler(
     })
   }
 
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: pinned })
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed — nothing was changed and no dialog was shown.`, { protected: currentProtected })
+  }
+
   const ack = ackDialogLines(input.pre_merge_ack)
   const facts = [
     `Approve ${mode} of '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}' ${mode === 'rebase' ? 'onto' : 'from'} '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'? (history-rewriting)`,
@@ -302,6 +310,7 @@ export async function requestRebaseHandler(
     ...(mode === 'rebase' && findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
     ...(mode === 'squash' ? ['Secrets scan: the squashed change is scanned when rsct_request_commit commits it.'] : []),
     ...secretFindingLines(projectRoot, 'rebase', findings),
+    ...programsDialogLines(projectRoot, 'rebase', mode, programs.read, programs.fresh),
     ...ack.facts,
   ]
   const reasons = [
@@ -371,6 +380,10 @@ export async function requestRebaseHandler(
       protected: currentProtected,
     })
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned })
+  if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected })
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const branchCheck = { protected: currentProtected, override_used: currentProtected }
   const result = mode === 'rebase' ? gitRebase(projectRoot, pinned, gitExecutor) : gitSquash(projectRoot, pinned, gitExecutor)

@@ -25,9 +25,9 @@ import {
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel, leftoverTaskHint, leftoverTaskSlug } from '../lib/phase-machine.js'
-import { getHeadShaFull } from '../lib/git.js'
-import { detectTopology } from '../lib/topology.js'
-import { readContracts } from '../lib/contracts.js'
+import { defaultGitExecutor, getHeadShaFull } from '../lib/git.js'
+import { EMPTY_CONTRACT_GRAPH, type ContractGraph } from '../lib/contracts.js'
+import { gatherContractFacts } from '../lib/contract-facts.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -99,24 +99,12 @@ export interface PhaseVerificationStartOutput {
   declared_paths: string[]
   discovered_importers: DiscoveredImporter[]
   findings: VerificationFinding[]
-  /**
-   * #40: identifies the SET of findings above. `rsct_phase_verification_complete`
-   * echoes it back so an answer set prepared before a re-run is rejected as stale.
-   * `null` when nothing was persisted (a skipped tier, or a failed write) — a run id
-   * for a baseline that does not exist would have the agent answer against nothing.
-   */
   findings_run_id: string | null
   walk_stats: ReverseDepStats
-  /**
-   * #54. How much of `declared_paths` the reverse-dep walk was able to look at.
-   * Travels on every return path as `walk_stats` does — unlike
-   * `discovered_importers`, which is zeroed where no phase started.
-   */
   walk_coverage: WalkCoverage
   checklist_stats: ChecklistStats
   phase_state_path: string
   phase_state_written: boolean
-  /** The phase that blocked this start, when status is phase_already_active. */
   existing_phase: string | null
   audit_path: string | null
   audit_error: string | null
@@ -126,7 +114,7 @@ export interface PhaseVerificationStartOutput {
 export const phaseVerificationStartTool: Tool = {
   name: 'rsct_phase_verification_start',
   description:
-    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given — omitting spec_claims or existing_project_files shrinks the baseline it can raise.',
+    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given — omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -195,11 +183,18 @@ export async function phaseVerificationStartHandler(
     maxDepth: input.max_depth,
   })
 
-  // #75 Part B. Read here rather than inside the checklist: `detectTopology`
-  // needs the config, and the checklist deliberately takes a project root and
-  // nothing else. Degrades to the empty graph on every failure path.
-  const topology = detectTopology(config, projectRoot)
-  const contractGraph = readContracts(topology.universe_root)
+  const universe = gatherContractFacts({
+    projectRoot,
+    config: config ?? null,
+    readPaths: () => walk.declared,
+    executor: defaultGitExecutor,
+    always: true,
+    ...(config?.audit !== undefined && { auditConfig: config.audit }),
+  })
+  const contractGraph: ContractGraph =
+    universe === null || !universe.universeLinked
+      ? EMPTY_CONTRACT_GRAPH
+      : { available: !universe.inactive, contracts: universe.contracts, note: universe.note }
 
   const checklistArgs: Parameters<typeof runVerificationChecklist>[0] = {
     projectRoot,
@@ -207,8 +202,8 @@ export async function phaseVerificationStartHandler(
     discoveredImporters: walk.discovered,
     specTier: input.spec_tier,
     contractGraph,
-    appName: config?.app?.name ?? null,
-    universeLinked: topology.universe_root !== null,
+    appNames: universe?.apps ?? (config?.app?.name ? [config.app.name] : []),
+    universeLinked: universe?.universeLinked === true,
   }
   if (input.spec_claims !== undefined) checklistArgs.specClaims = input.spec_claims
   if (input.existing_project_files !== undefined) {
@@ -226,7 +221,6 @@ export async function phaseVerificationStartHandler(
         spec_ref: input.spec_ref,
         spec_tier: input.spec_tier,
         requested_persona: requestedPersona,
-        // Recorded here too: the only artifact a trivial/small run leaves.
         walk_coverage: walk.coverage,
       },
       config?.audit,
@@ -263,24 +257,6 @@ export async function phaseVerificationStartHandler(
   const baseState: PhaseState = existing.state ?? {}
   const existingPhase = baseState.phase ?? null
 
-  // #27. Every other `_start` routes through `startPhaseGeneric`, which refuses
-  // to overwrite a DIFFERENT active phase. This tool owns its own plumbing (the
-  // checklist and reverse-dep walk diverge from the symmetric pattern) and, as a
-  // side effect, used to write `phase: 'verification'` over whatever label was
-  // there — no gate, no approval, no audit. An agent mid-Code could reach Test
-  // without ever calling `code_complete`, and the phase history would no longer
-  // describe what happened.
-  //
-  // Deliberately placed AFTER the `skipped_tier` return above, so that path
-  // still writes no state at all — which is what makes its "audit-only" claim
-  // literally true.
-  //
-  // Note what is NOT mirrored here: `startPhaseGeneric`'s stale-label exception
-  // is unreachable in this tool. It requires `existingPhase === 'verification'`,
-  // while the guard it excuses requires `existingPhase !== input.phase` — and
-  // here `input.phase` IS `'verification'`, so the two conditions are mutually
-  // exclusive. A literal mirror would be dead code. The live case is a stale
-  // SAME-label restart, handled below.
   if (existingPhase !== null && existingPhase !== 'verification') {
     const rejectAudit = appendAuditEntry(
       projectRoot,
@@ -389,16 +365,8 @@ export async function phaseVerificationStartHandler(
     }
   }
 
-  // A completed V being reopened. `startPhaseGeneric` stays silent on a same-label
-  // restart, and that is right for it — restarting the phase you are already in
-  // is routine. Here it is not: the block about to be rebuilt carries a
-  // `completed_at`, so a finished verification record is being discarded. That is
-  // the transition #15's gate exception leans on, and it deserves a forensic line.
   const staleRestart = isStaleVerificationLabel(baseState)
 
-  // #75 Part C. One git spawn, full sha, null outside a repo. Read here rather
-  // than at `_complete` so the record says what HEAD WAS when the findings were
-  // produced — a working tree is a moving target and only a commit is fixed.
   const headSha = getHeadShaFull(projectRoot)
 
   const verificationBlock: PhaseVerificationBlock = {
@@ -411,8 +379,6 @@ export async function phaseVerificationStartHandler(
     started_at: startedAt,
     observed_at: startedAt,
   }
-  // Conditional, not `?? null`: `exactOptionalPropertyTypes` is on, and a stamp
-  // that is absent outside a git repo is honest where a null one is noise.
   if (headSha !== null) verificationBlock.head_sha = headSha
   if (requestedPersona !== null) verificationBlock.persona = requestedPersona
 
@@ -424,8 +390,6 @@ export async function phaseVerificationStartHandler(
   }
   const writeResult = writePhaseState(projectRoot, newState)
 
-  // Emitted AFTER the write, like the generic's equivalent: a `locked` or failed
-  // write must not leave the log asserting a transition that never landed.
   if (staleRestart) {
     appendAuditEntry(
       projectRoot,
@@ -453,15 +417,7 @@ export async function phaseVerificationStartHandler(
       requested_persona: requestedPersona,
       declared_count: walk.declared.length,
       discovered_count: walk.discovered.length,
-      // #54. Hints are not audited, so a V that ran blind used to leave no
-      // queryable trace — `discovered_count: 0` reads identically whether the
-      // graph was empty, unavailable, or merely incomplete. All three of these
-      // are needed to tell them apart: the seed counts do not capture a
-      // resolver that dropped every edge while every seed was analyzable.
       walk_coverage: walk.coverage,
-      // #75 Part B. Which of the four contract-graph states this run saw — the
-      // difference between "no adjacent app depends on this" and "nobody has ever
-      // written the manifest that would say so" is invisible from a finding count.
       contract_graph: checklist.stats.contract_graph,
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
@@ -485,8 +441,6 @@ export async function phaseVerificationStartHandler(
         severity: finding.severity,
         source: finding.source,
         title: finding.title,
-        // #75. The class, per finding, in the forensic record — so a past run can
-        // be re-read for what it actually knew, not only for what it decided.
         evidence_kind: finding.evidence.kind,
       },
       config?.audit,
@@ -509,23 +463,16 @@ export async function phaseVerificationStartHandler(
       `⚠ phase-state.json write failed: ${writeResult.error}. Verification ran but state was not persisted; rsct_phase_verification_complete will not find an active block.`,
     )
   }
-  // #54. Before the walk's and the checklist's hints, not after: this is the
-  // correction to the checklist's "found no findings to surface against the
-  // available corpus", and appended last it would be read after the sentence it
-  // exists to qualify. Prepending an advisory is the convention here
-  // (`lib/install-advisory.ts`, the three request tools). Emitted only on the
-  // non-skipped paths — see `coverageHints`.
   hints.push(...coverageHints(walk))
   hints.push(...walk.hints)
   hints.push(...checklist.hints)
+  hints.push(...(universe?.lines ?? []))
   if (fields.audit_error !== null) {
     hints.push(`⚠ audit log write failed: ${fields.audit_error}.`)
   }
 
   return {
     status: writeResult.ok ? 'verified' : 'state_write_failed',
-    // null on a failed write: advertising a run id for a baseline that was never
-    // stored would have the agent answer against nothing.
     findings_run_id: writeResult.ok ? findingsRunId : null,
     rsct_installed: resolution.rsct_installed,
     spec_ref: input.spec_ref,

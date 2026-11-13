@@ -3023,6 +3023,71 @@ patched v4 core).
 **Consequences**: a zod release that drops `zod/v3` fails the typecheck and the build, not at run
 time.
 
+### ADR-044 — Integration dialogs list the programs git runs; the contract gate reads every source; the edit and terminal guards refuse hooks, git programs and Claude Code command settings (2.24.1)
+**Status**: active. Narrows ADR-030's named limit "hooks the agent writes" for the editor tools and the terminal guard's git commands, and the #73 boundary pin (Decision 5).
+**Tags**: gates, hooks, terminal, universe, contracts, settings, cross-os
+
+**Context**: MEASURED on git 2.45.1 (Windows), 2.43.0 (WSL) with RSCT's own git calls in throwaway repos:
+- `git commit -m` runs pre-commit, prepare-commit-msg, commit-msg, post-commit, post-index-change and
+  reference-transaction; a merge runs pre-merge-commit and post-merge; a rebase runs pre-rebase,
+  post-checkout, post-commit and post-rewrite (the apply backend also the applypatch hooks); a push runs
+  pre-push, and for a remote that is a local path that repository's own receive hooks run on this machine.
+  On Windows git also runs `<hook>.exe`; `core.hooksPath` moves the folder.
+- Configured programs ran inside those calls: clean/smudge filters (also on `commit -m`), merge drivers,
+  `gpg.program`, `remote.<name>.receivepack`, `core.sshCommand`, a `<scheme>::` or unknown-scheme
+  transport helper; the push coverage dry run ran transport programs before any dialog.
+- Claude Code 2.1.173 (docs and `claude mcp list` with an isolated config): MCP precedence on one name is
+  local → project → user; `enableAllProjectMcpServers` starts an unapproved `.mcp.json` server; approval is
+  by name; hooks, `statusLine`, `apiKeyHelper` and other keys run commands; skills, commands and agents can
+  carry hooks, and skills/commands run `` !`…` `` lines before their text reaches the model.
+- The contract gate read the universe working tree only, through the first candidate folder found, and the
+  `.rsct.json` fields of the folder passed as `project_root`.
+
+**Decision**:
+1. Commit, push, merge, rebase and squash list, before the dialog, every file in the hooks folder git runs
+   (`.sample` excluded; a relative path git prints is read from the real project folder, not a link to
+   it) and every configured key that runs a program, with origins; for a merge, rebase or squash, the
+   hooks it brings into a hooks folder kept in the work tree, in the version git will run (the
+   operation replaces the file before git runs it); and for a push to a
+   local path that repository's own (each under its own git folder, found in git's order, where the
+   first regular file is read as a gitfile whatever its name, with a relative `core.hooksPath` read
+   from the remote's git folder, where push hooks run; another user's home `~name` or a relative
+   `file://` URL is refused); credentials in URLs are masked and a shell credential helper is shown by its length. An audit baseline per git folder (identities are
+   hashes of name and value or content) marks what is new or changed since the last approved call; a
+   missing baseline makes everything new. The list is read again right before git runs (`programs_moved`);
+   a read that fails refuses (`programs_unreadable`); a plan token never covers a new entry
+   (`programs_changed`); the push coverage dry run runs only when nothing listed is new.
+2. The contract gate (commit and V, one function) reads every `.rsct.json` from the project root to the
+   repository top, in the working tree and at HEAD, at their strictest; the resolved universe and the one
+   recorded at the last approved commit; and in each its working tree, HEAD and fetched upstream. A
+   contract fires when any source matches. The dialog lists disagreements and what changed since the last
+   approved commit (`universe.baseline`): roots, gate mode, app names, history that moved backwards or no longer resolves, a branch switch, contracts gone, changed or no longer readable; a plan token never covers a change (`universe_changed`).
+3. The edit guard, before the project is read (a malformed `.rsct.json` no longer turns it off), refuses
+   the editor tools on git folders (by name and by content, so a folder moved by `--separate-git-dir` is
+   covered), git configuration files, a project's `.rsct/` state and its configured audit log, a write that leaves a `.rsct.json` the server rejects or changes its `audit` key; whole files that register or approve MCP servers or carry
+   managed settings or plugins; any hook entry or command key in `.claude/settings*.json`; hooks and `!`
+   lines in skills, commands and agents, and an agent's `mcpServers` (Claude Code starts inline servers
+   with the agent). A front matter change that holds a backslash (a YAML escape can spell a key) or a
+   front matter with no closing line counts as one that names them. Names are compared case-folded on
+   every OS, NTFS suffixes removed.
+4. The terminal guard refuses `git config` writes in sections whose keys run programs, `git init`/`clone`
+   that plant hooks or configuration, and remotes that name a transport helper.
+5. The #73 boundary keeps its purpose: the server never reads, resolves or writes Claude Code's host
+   configuration — the installer and the `claude` CLI own it, and a host-config reference reachable from a
+   tool call would be a machine-wide side effect. The edit guard names `.claude.json` and the two approval
+   keys only to refuse agent edits; the pin allows exactly those lines and still forbids every other
+   reference. The pin
+   (`tests/bash/script-install.test.ts`) also checks that the file holding that refusal list (`settings-write-guard.ts`) reads no home folder or environment and writes nothing, and that `src/index.ts` never loads it.
+
+**Direction**: stricter everywhere. New refusals: the reject kinds above; edits and git commands listed.
+
+**What is given up, by name**: a script the agent runs and a shell write stay given up (ADR-028); keys Claude Code adds later are not on the list until
+a release adds them; the first read of the programs list and of the universe trusts what it sees and asks
+the developer in a dialog.
+
+**Consequences**: the first plan-token commit after the upgrade is refused once (`programs_changed`, and `universe_changed` in a multi-repo project) until one commit with a per-action approval records both; the developer adds MCP servers, plugins, hooks and command keys
+in their own editor; the guards are hook scripts, so they reach a project through `/rsct-setup`.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic
@@ -3903,6 +3968,50 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **The premise-check findings show `score N, shared: …` (#79)** — the match carries them and the
   developer needs them to triage by strength; display-only, the gate baseline never reads `detail`.
 
+### `lib/contracts.ts`, `tools/phase-verification-start.ts` (migrated in the 2.24.1 REVIEW)
+
+- **`contracts.json` is hand-written at the universe root and the server only reads it.** No
+  installer writes it, so the no-reformat rule for managed files does not apply to it. Surface
+  matching reuses the phase-scope glob matcher (`*`, `**`, `?`, `\` read as `/`). A missing,
+  malformed or oversize file reads as the empty graph and never throws; the size cap keeps a
+  multi-MB file out of memory for a small graph. A contract whose surface normalizes to an empty
+  list can never match a path, so it is counted in `note` (RV4) instead of silently never gating.
+- **Matching is producer-side only (V FV8)**: a consumer touching the producer's surface does not
+  match. The gate compares `c.producer === app` exactly — case-sensitive, no trim — so
+  `unregisteredNames` reports `unregistered` (no registered app matches in any case) and
+  `case_mismatch` (only the case differs; the suggestion is the registered spelling). A name with
+  stray whitespace is really unregistered and warns (§9.C); an empty registered set makes every
+  name unregistered (§9.D, callers cap the list); on a case-insensitive collision the first
+  registered name in input order wins (§9.B); the output keeps input order without duplicates.
+- **`findings_run_id` (#40)** identifies the set of findings; `rsct_phase_verification_complete`
+  echoes it back, so an answer set prepared before a re-run is refused as stale. It is `null` when
+  nothing was stored (a skipped tier or a failed write): a run id for a baseline that does not
+  exist would have the agent answer against nothing. On a trivial or small tier the audit record
+  is the only thing the run leaves.
+- **`walk_coverage` (#54)** says how much of `declared_paths` the reverse-dep walk could look at
+  and travels on every return path, as `walk_stats` does, unlike `discovered_importers`, which is
+  zeroed where no phase started. Hints are not audited, so the audit record carries the numbers
+  that tell an empty, unavailable and incomplete graph apart (`discovered_count: 0` reads the same
+  for all three, and the seed counts miss a resolver that dropped every edge), the contract-graph
+  state the run saw (#75 Part B: "no adjacent app depends on this" and "nobody wrote the manifest"
+  look the same as a finding count), and each finding's evidence class (#75). The coverage
+  advisory goes before the walk's and the checklist's hints: it qualifies the checklist's "no
+  findings" sentence and would be read after it if appended. It is emitted only on non-skipped
+  paths.
+- **This tool refuses to overwrite a different active phase (#27).** It owns its plumbing (the
+  checklist and the walk differ from `startPhaseGeneric`) and used to write
+  `phase: 'verification'` over any label with no gate, approval or audit, so an agent mid-Code
+  could reach Test without `code_complete`. The check sits after the `skipped_tier` return, so
+  that path still writes no state. `startPhaseGeneric`'s stale-label exception is not mirrored: it
+  needs `existingPhase === 'verification'` while the guard it excuses needs
+  `existingPhase !== input.phase`, and here `input.phase` is `'verification'`, so a mirror would
+  be dead code. The live case is reopening a completed V, which gets its own audit line (it is
+  the transition #15's exception leans on), emitted after the write so a locked or failed write
+  never leaves the log claiming a transition that did not land.
+- **HEAD is read at the start (#75 Part C)**, one git spawn, full sha, so the record says what
+  HEAD was when the findings were produced. Outside a repository the field is absent, not `null`
+  (`exactOptionalPropertyTypes`).
+
 ### `lib/plan-authorization.ts`, `lib/plan.ts` (migrated in the 2.17.0 REVIEW)
 
 - The token functions are pure: they never throw and never touch the file system; the tools own
@@ -4208,6 +4317,35 @@ those files. Keyed by module and symbol; restatements of what the code says were
   text. The earlier "git was never invoked" assertion was vacuous, measured by deleting
   `isSafeRevisionToken` with the test still green: the real reader runs through another seam. The
   exec-side barrier is pinned against a real repository in `git.test.ts`.
+- `tests/setup.ts` (migrated in the 2.24.1 REVIEW) turns the update check off with the switch
+  shipped to users (`RSCT_UPDATE_CHECK=off`). The check consults by default (#38) and
+  `statusHandler` reaches it through `getUpdateNotice()`, which resolves `$HOME` and a real `fetch`
+  when nothing is injected: sixteen call sites in the status, load-context, topology and universe
+  tests would call api.github.com (six CI cells against the 60-per-hour anonymous limit) and
+  rewrite the contributor's real `~/.rsct/update-check.json`, consent included. Tests that exercise
+  the check pass `env: {}` to opt back in against a temporary `$HOME`. The same file points git at
+  the committed fixture config (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, an absent
+  `XDG_CONFIG_HOME`): the programs list read the machine's own `filter.lfs` and
+  `credential.helper`, and a per-process temporary config leaked folders because vitest workers end
+  without an `exit` event.
+- `tests/bash/lib/block-harness.ts` (migrated in the 2.24.1 REVIEW) finds a prompt block by a
+  substring of its `CHECKPOINT:` line, so a test always runs the shipped block. Blocks run without
+  `set -e`, as the agent runs them, and assertions read file state, not the exit code. A test that
+  needs node fails instead of skipping when node is missing. The bash path is resolved and
+  classified, not thrown (#78): the catch would turn a throw into a result whose assertions fail on
+  missing files. `HOME` is the temporary folder unless the test overrides it. `execFileSync` blocks
+  the worker thread, so vitest's per-test timeout cannot fire on a block that never exits; the
+  harness bound is the only one. It is 120 s per block and 600 s per test (`bash-bounds.ts`) since
+  2.24.1: the old 30 s bound tripped `conduct-rules` with `ETIMEDOUT` on a loaded machine, against
+  blocks that normally take 1–3 s.
+- `request-commit-free.test.ts` (migrated in the 2.24.1 REVIEW): an empty `.rsct/scripts` reads as
+  install drift at the `security` tier, so a healthy install needs the scripts present; under
+  vitest the shipped reference does not resolve, so they read `unreadable`, which escalates on
+  neither axis. Drift at `security` does not refuse: it costs one dialog, the out-of-band channel
+  that carries the warning where hints cannot. The baseline is appended like the real SessionStart
+  writer, because `healthyProject()` rewrites the audit log and an overwrite would make the result
+  depend on call order. An auto-appended, unstaged settings file (#17) is reported, never blocked;
+  a project whose SessionStart hook never ran is unmeasured, not drifting.
 
 ### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
 

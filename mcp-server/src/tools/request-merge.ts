@@ -56,6 +56,7 @@ import {
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import {
   ackDialogLines,
   driftRefusal,
@@ -125,6 +126,8 @@ export type RequestMergeRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'target_moved'
+  | 'programs_unreadable'
+  | 'programs_moved'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
@@ -171,7 +174,7 @@ export interface RequestMergeInternal {
 export const requestMergeTool: Tool = {
   name: 'rsct_request_merge',
   description:
-    "§C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated).",
+    "§C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the source brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -363,6 +366,11 @@ export async function requestMergeHandler(
     })
   }
 
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: pinned })
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed — nothing was merged and no dialog was shown.`, { protected: targetProtected })
+  }
+
   const ack = ackDialogLines(input.pre_merge_ack)
   const facts = [
     `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
@@ -372,6 +380,7 @@ export async function requestMergeHandler(
     ...(allow_unrelated_histories ? ['⚠ --allow-unrelated-histories joins two histories with no common commit; it needs your exception.'] : []),
     ...(findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
     ...secretFindingLines(projectRoot, 'merge', findings),
+    ...programsDialogLines(projectRoot, 'merge', 'merge', programs.read, programs.fresh),
     ...ack.facts,
   ]
   const reasons = [
@@ -463,6 +472,10 @@ export async function requestMergeHandler(
       protected: targetProtected,
     })
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned })
+  if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected })
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories }
   const merge = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor)

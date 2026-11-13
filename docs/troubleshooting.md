@@ -160,6 +160,23 @@ and a fault inside the guard (`guard_failed` — the edit did not run; make it
 yourself, and if every edit is refused see "Every terminal command, or every
 edit, is refused" below).
 
+Since 2.24.1 more refusals hold everywhere, and a malformed `.rsct.json` no longer turns them off, for `Write`, `Edit`, `MultiEdit` and `NotebookEdit`:
+
+- `protected_path` — a file in a git folder (`.git/` in any letter case, or a folder git uses as
+  its repository wherever it is, such as one `git init --separate-git-dir` made), a git
+  configuration file (`.gitconfig`, `git/config`, `git/attributes`, `etc/gitconfig`), anything under
+  a project's `.rsct/`, and a configured audit log;
+- `rsct_config` — a write that leaves a `.rsct.json` the server rejects (unparseable, or outside its schema), or unparseable where it parsed before, or that changes its `audit` key;
+- `claude_settings` — `.mcp.json`, `.claude.json`, managed settings and plugin files, whole; any hook
+  entry, or a key that runs a command or loads servers or plugins (`statusLine`, `apiKeyHelper`,
+  `enabledPlugins`, `enableAllProjectMcpServers` and the rest), in `.claude/settings.json` and
+  `.claude/settings.local.json`; hooks or `` !`command` `` lines in a skill, command or agent file,
+  and an agent's `mcpServers`. A front matter change that holds a backslash, or a front matter with
+  no closing `---` line, is refused the same way; edit it yourself.
+
+Make those edits yourself: adding an MCP server, a plugin, a hook or a status line is the
+developer's own edit.
+
 One refusal can surprise on Windows: a network-style path (`\\server\share\…`)
 on a different host than the project is refused while a list is active, because
 the guard cannot tell it apart from a path that points back into the project.
@@ -303,6 +320,13 @@ tell it apart from one registered for a different project, so it reports the
 hook as not found here. Moving the entry into the project is the fix; it is also
 what lets your teammates get the same enforcement.
 
+**`git config`, `git init`, `git clone` or `git remote` is refused (since 2.24.1).** The guard
+refuses `git config` writes — set, add, replace, unset, rename or remove a section, `--edit` — in
+the sections whose keys can make git run programs inside RSCT's approved calls (`core`, `filter`, `credential`, `remote` and the like);
+`git init` or `git clone` with `--template`, `--separate-git-dir` or such a key in `-c`/`--config`, or in a command that sets git's template or configuration variables or a home folder (`HOME`, `XDG_CONFIG_HOME`, `USERPROFILE`); and `git remote add`/`set-url` with a URL that runs
+a transport helper (`<x>::…`, or a scheme git does not handle itself). Reads pass (`git config
+<key>`, `--get`, `--list`). Run the change yourself, in your own terminal.
+
 ## "This project's RSCT enforcement scripts are not the ones rsct-mcp vX ships"
 
 Lower-key than the message above, and usually harmless: the scripts are present,
@@ -445,6 +469,32 @@ on that commit. `source_moved`: it moved after the dialog (another session, an I
 `target_moved`: HEAD is on another branch or commit than at the dialog. `push_url_changed`: where
 the remote pushes changed after the dialog. In each case the operation would not be the one you
 approved — ask again. `source_unreadable`: git could not resolve the name to a commit; check it.
+
+## The dialog lists "Programs git runs inside this …", or a call is refused with `programs_unreadable`, `programs_changed` or `programs_moved`
+
+Since 2.24.1 commit, push, merge and rebase list every file in the hooks folder git runs and every
+configured key that runs a program (ssh command, credential helper, filters, merge drivers,
+signing, remote programs, transport helpers, the gc hook), with where each comes from, and for a push to a
+local path that repository's own. A merge, rebase or squash also lists the hooks it brings into a
+hooks folder kept in the work tree (husky and the like), in the version git will run. `NEW OR CHANGED` marks what your last approved call did not
+list; the first call after the upgrade marks everything. If you did not add an entry, find out who
+did before you approve.
+
+- `programs_moved` — the list changed between the dialog and git; ask again.
+- `programs_unreadable` — git could not read the repository or its configuration (for example a
+  `dubious ownership` refusal), or a file in the hooks folder could not be read, or a push URL names a local path git cannot read as a repository (or another user's home, `~name/…`, or a relative `file://` URL, which RSCT does not resolve). Fix that, or run
+  the operation by hand.
+- `programs_changed` — a plan token never covers a new or changed entry: commit with a per-action
+  `dev_approval` once, so the dialog shows the list. A protected push whose remote-tracking ref is
+  missing is also refused with it when its coverage dry run would run a program the list marks new;
+  an approved commit, push, merge or rebase records the list, or push by hand.
+
+## A plan-token commit is refused with `universe_changed`
+
+Since 2.24.1 the contract gate compares what it reads with the last approved commit: the
+universe folders, the gate mode, the app name, each universe's history and its contracts. A
+change, or a first read in a multi-repo project, needs one commit with a per-action
+`dev_approval`, whose dialog shows what changed.
 
 ## The first commit of a new repository is refused with `protected_branch`
 
@@ -710,6 +760,12 @@ So:
   Do your `surface` globs actually match the staged paths (remember `{a,b}` /
   `[abc]` are literal, not patterns — see
   [surface glob syntax](multi-repo.md#surface-glob-syntax))?
+- **Since 2.24.1 the gate reads every source.** Every `.rsct.json` from the project folder up to
+  the repository top, in the working tree and at HEAD, at their strictest; the universe they name
+  plus the one read at the last approved commit; and in each universe its working tree, its HEAD
+  and its fetched upstream. A contract fires when any of them matches, so emptying the universe's
+  working-tree `contracts.json` does not switch it off. The dialog says when those `.rsct.json`
+  files disagree, when a universe has no upstream or is not a git repository, and what changed.
 - **Gate fires and I want to proceed.** Approve the commit with a per-action
   override that includes a reason. A batch plan-authorization token will **not**
   bypass the gate — that's a hard block; give the explicit per-action override.

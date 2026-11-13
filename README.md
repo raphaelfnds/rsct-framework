@@ -529,7 +529,13 @@ step doesn't behave as described, that's a bug worth filing.
      commit is refused — unless the dev has minted a plan-scoped batch token
      (`rsct_plan_authorize`) for a plan with two or more phases, valid 8 hours at
      most from that approval. Push, merge and rebase always show their own
-     dialog. Audit trail goes to `.rsct/audit.log`.
+     dialog. Each dialog lists the hooks and configured programs git will run
+     inside the operation, marking what is new since your last approval.
+     Audit trail goes to `.rsct/audit.log`.
+   - Claude's editor tools cannot change git folders, git configuration,
+     `.rsct/`, `.mcp.json`, `.claude.json`, hooks or keys that run commands in
+     `.claude/settings*.json`, hooks and `!` lines in skills, commands and
+     agents, or an agent's MCP servers: those are your own edits.
 5. **Reverse it.** `/rsct-uninstall` removes what the framework added to
    *this project* and lists what it keeps (markers find the framework text; SHA256
    finds your edits to documentation and memory files). Then

@@ -1291,7 +1291,7 @@ if [ -f "$SETTINGS_PATH" ]; then
       if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
       settings = JSON.parse(raw);
     } catch (e) {
-      console.error("WARN: " + target + " is malformed JSON — SessionStart hook scrub skipped. Fix manually.");
+      console.error("WARN: " + target + " is malformed JSON — SessionStart hook scrub skipped. The developer fixes it in their own editor.");
       process.exit(0);
     }
     if (!settings.hooks || !Array.isArray(settings.hooks.SessionStart)) {
@@ -1373,7 +1373,7 @@ for SETTINGS_PATH in "$(pwd)/.claude/settings.json" "$(pwd)/.claude/settings.loc
       if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
       settings = JSON.parse(raw);
     } catch (e) {
-      console.error("WARN: " + target + " is malformed JSON — PreToolUse guard scrub skipped. Fix manually.");
+      console.error("WARN: " + target + " is malformed JSON — PreToolUse guard scrub skipped. The developer fixes it in their own editor.");
       process.exit(0);
     }
     if (!settings.hooks || !Array.isArray(settings.hooks.PreToolUse)) {
@@ -1448,7 +1448,7 @@ if [ -f "$MCP_JSON" ]; then
       if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
       cfg = JSON.parse(raw);
     }
-    catch (e) { console.error("WARN: " + target + " is malformed JSON — .mcp.json scrub skipped. Fix manually."); process.exit(0); }
+    catch (e) { console.error("WARN: " + target + " is malformed JSON — .mcp.json scrub skipped. The developer fixes it in their own editor."); process.exit(0); }
     if (!cfg.mcpServers || !cfg.mcpServers.rsct) {
       console.log("No rsct entry in .mcp.json — nothing to scrub.");
       process.exit(0);
@@ -1500,11 +1500,11 @@ if [ -f "$SETTINGS_LOCAL" ]; then
       if (raw.charCodeAt(0) === 65279) raw = raw.slice(1);
       cfg = raw.trim() ? JSON.parse(raw) : {};
     }
-    catch (e) { console.error("WARN: " + target + " is malformed JSON — approval scrub skipped. Fix manually."); process.exit(0); }
+    catch (e) { console.error("WARN: " + target + " is malformed JSON — approval scrub skipped. The developer fixes it in their own editor."); process.exit(0); }
     // Valid JSON that is not an object (null, [], "x", 42) — leave it alone and
     // say so, rather than throwing a raw TypeError on the property access.
     if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
-      console.error("WARN: " + target + " is not a JSON object — approval scrub skipped. Fix manually.");
+      console.error("WARN: " + target + " is not a JSON object — approval scrub skipped. The developer fixes it in their own editor.");
       process.exit(0);
     }
     const enabled = Array.isArray(cfg.enabledMcpjsonServers) ? cfg.enabledMcpjsonServers : null;

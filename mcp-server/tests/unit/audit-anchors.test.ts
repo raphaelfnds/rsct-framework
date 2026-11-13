@@ -50,6 +50,7 @@ describe('audit-log readers and the retention rule name the same events (#93)', 
     expect([...compared.keys()].sort()).toEqual([
       'approval.consumed',
       'classify.verdict',
+      'git_programs.baseline',
       'plan_authorize.authorized',
       'plan_revoke.revoked',
       'review.dead_code_kept',
@@ -57,6 +58,7 @@ describe('audit-log readers and the retention rule name the same events (#93)', 
       'review.unverified_decision',
       'settings.baseline',
       'tutor.step',
+      'universe.baseline',
     ])
   })
 

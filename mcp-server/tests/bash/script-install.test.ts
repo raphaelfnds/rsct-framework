@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, chmodSync, readFileSync, readdirSync, statSync, symlinkSync, lstatSync, copyFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, delimiter } from 'node:path'
+import { dirname, join, resolve, delimiter } from 'node:path'
 import { bashAvailable, repoRoot } from './lib/bash-lint.js'
 import { bashBin } from './lib/resolve-bash.js'
 
@@ -1479,9 +1479,54 @@ describe('architectural boundary — rsct-mcp does not know the host config (#73
     return hits
   }
 
-  it('mcp-server/src/ holds zero host-config references', () => {
-    const hits = scanSrc(SRC)
+  const REFUSAL_LIST = 'lib/settings-write-guard.ts'
+  const REFUSAL_LINES: ReadonlyArray<{ token: string; line: string }> = [
+    { token: 'enabledMcpjsonServers', line: "'enabledMcpjsonServers'," },
+    { token: 'disabledMcpjsonServers', line: "'disabledMcpjsonServers'," },
+    { token: '.claude.json', line: `['.claude.json', "Claude Code's MCP servers, approvals and folder trust"],` },
+  ]
+
+  function beyondRefusalList(hits: string[]): string[] {
+    return hits.filter((hit) => {
+      const m = /^(.+?):\d+ \[(.+?)\] (.*)$/.exec(hit)
+      if (!m) return true
+      const [, rel, token, text] = m
+      return !(rel!.replace(/\\/g, '/') === REFUSAL_LIST && REFUSAL_LINES.some((r) => r.token === token && r.line === text))
+    })
+  }
+
+  it('mcp-server/src/ holds no host-config reference beyond the edit guard\'s refusal list (ADR-044)', () => {
+    const hits = beyondRefusalList(scanSrc(SRC))
     expect(hits, `host-config knowledge leaked into the MCP server:\n${hits.join('\n')}`).toEqual([])
+  })
+
+  it('the edit guard knows those names only to refuse an edit: it reads no home folder, no environment, writes nothing', () => {
+    const text = readFileSync(join(SRC, REFUSAL_LIST), 'utf8')
+    for (const banned of ['node:os', 'homedir', 'process.env', 'USERPROFILE', 'writeFileSync', 'mcpServers', 'mcp-scope', 'CLAUDE_CONFIG_DIR']) {
+      expect(text.includes(banned), banned).toBe(false)
+    }
+  })
+
+  it('the server itself never loads the edit guard: src/index.ts does not import it, directly or not', () => {
+    const seen = new Set<string>()
+    const queue = [join(SRC, 'index.ts')]
+    while (queue.length > 0) {
+      const file = queue.pop()!
+      if (seen.has(file) || !existsSync(file)) continue
+      seen.add(file)
+      for (const m of readFileSync(file, 'utf8').matchAll(/from '(\.{1,2}\/[^']+)\.js'/g)) queue.push(join(dirname(file), `${m[1]}.ts`))
+    }
+    expect([...seen].some((f) => f.replace(/\\/g, '/').endsWith(REFUSAL_LIST)), 'settings-write-guard.ts reached from index.ts').toBe(false)
+    expect(seen.size, 'the walk must reach the tools').toBeGreaterThan(20)
+  })
+
+  it('positive control — a new host-config line in the refusal-list file is still reported', () => {
+    const fixture = newSandbox()
+    mkdirSync(join(fixture, 'lib'), { recursive: true })
+    writeFileSync(join(fixture, 'lib', 'settings-write-guard.ts'), [...REFUSAL_LINES.map((r) => r.line), "const file = join(home, '.claude.json')"].join('\n'))
+    const hits = beyondRefusalList(scanSrc(fixture))
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toContain("join(home, '.claude.json')")
   })
 
   it('positive control — scanSrc itself finds every token in a seeded tree', () => {

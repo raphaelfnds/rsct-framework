@@ -12,6 +12,7 @@ import {
 } from '../../src/lib/phase-scope.js'
 import type { GitExecResult, GitState } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { emptyProgramsRead } from './fake-git-programs.js'
 
 let root: string
 const CORRUPT = '{ "spec_slug": "feat-foo", "review_sweep": {'
@@ -86,6 +87,8 @@ async function commitDocs(): Promise<CommitRun> {
     {
       gitStateOverride: branchState('feat/foo'),
       gitExecutor: (_cwd, args) => {
+        const programs = emptyProgramsRead(args)
+        if (programs) return programs
         gitCalls.push(args.join(' '))
         return answer
       },

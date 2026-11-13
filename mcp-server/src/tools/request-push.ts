@@ -67,6 +67,7 @@ import {
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import { ackDialogLines, driftRefusal, readDriftLock, resolvePinned } from '../lib/integration-gate.js'
 import { maskUrl, readFetchUrl, readPushOptions, readPushUrls, readSubmoduleMode, sameRepository } from '../lib/push-target.js'
 import { scanCommits } from '../lib/staged-scan.js'
@@ -131,6 +132,9 @@ export type RequestPushRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'push_url_changed'
+  | 'programs_unreadable'
+  | 'programs_changed'
+  | 'programs_moved'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -218,7 +222,7 @@ function shownList(label: string, items: readonly string[]): string[] {
 export const requestPushTool: Tool = {
   name: 'rsct_request_push',
   description:
-    "§C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/…', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. On rejection the approval is NOT consumed.",
+    "§C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/…', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A push to a local path lists that repository's own too, and the coverage dry run of a protected push runs only when nothing in the list is new (programs_changed). On rejection the approval is NOT consumed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -408,6 +412,15 @@ export async function requestPushHandler(
         : { status: 'unavailable' }
     let probeParsed = false
     if (range.status === 'unavailable' && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
+      const probeUrls = readPushUrls(projectRoot, remote, gitExecutor)
+      const beforeProbe = probeUrls.ok ? checkGitPrograms(projectRoot, gitExecutor, config?.audit, { urls: probeUrls.value }) : null
+      if (beforeProbe === null || !beforeProbe.ok || beforeProbe.fresh.length > 0) {
+        return reject(
+          beforeProbe !== null && beforeProbe.ok ? 'programs_changed' : 'programs_unreadable',
+          "the coverage check needs a dry run of this push, because the remote-tracking ref is missing here, and that dry run would run hooks or configured programs that are new since the developer's last approved call, or that could not be listed — nothing ran. An approved commit, push, merge or rebase records the current list; or the developer pushes by hand in their own terminal.",
+          { protected: true, audit: { programs_new: beforeProbe?.ok === true ? beforeProbe.fresh.length : null } },
+        )
+      }
       const carried = carriedByProbe({
         projectRoot,
         destinationRef,
@@ -490,6 +503,10 @@ export async function requestPushHandler(
   const urls = readPushUrls(projectRoot, remote, gitExecutor)
   if (!urls.ok) return reject('push_url_unreadable', `${urls.reason}, so the dialog cannot show where this push goes — nothing was pushed.`, { protected: branchProtected })
   pushUrls = urls.value
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { urls: pushUrls })
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this push cannot be listed — nothing was pushed and no dialog was shown.`, { protected: branchProtected })
+  }
 
   const raw = DevApprovalSchema.safeParse(input.dev_approval)
   const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check } : {}
@@ -550,6 +567,7 @@ export async function requestPushHandler(
     ...secretFindingLines(projectRoot, 'push', findings),
     ...ack.facts,
     ...shownList('Push option sent', options.value),
+    ...programsDialogLines(projectRoot, 'push', 'push', programs.read, programs.fresh),
     ...(submodules === 'check' ? ['Submodules: checked, never pushed.'] : []),
     ...(branchProtected && crossCheck === 'degraded'
       ? [
@@ -652,6 +670,12 @@ export async function requestPushHandler(
       { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel, ...(urlsNow.ok && { push_urls_now: urlsNow.value.map(maskUrl) }) } },
     )
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { urls: pushUrls })
+  if (!programsNow.ok) {
+    return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel } })
+  }
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const secretsCheck = { commits_scanned: commitsScanned, findings_count: findings.length, findings, override_used: findings.length > 0 }
   const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor, { submodules, pushOptions: options.value })

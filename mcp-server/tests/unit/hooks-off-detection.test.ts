@@ -14,6 +14,7 @@ import {
 } from '../../src/lib/version-drift.js'
 import { planAuthorizeHandler, type PlanAuthorizeOutput } from '../../src/tools/plan-authorize.js'
 import { requestRebaseHandler, type RequestRebaseOutput } from '../../src/tools/request-rebase.js'
+import { withEmptyPrograms } from './fake-git-programs.js'
 
 const DIST = resolve(__dirname, '..', '..', 'dist', 'scripts')
 const WARNING = '⚠ RSCT enforcement is NOT running in this project (see hints).'
@@ -157,7 +158,7 @@ const branch = (b: string): GitState => {
   headBranch = b
   return { available: true, branch: b, head_sha: 'aaaa111', is_clean: false }
 }
-const okExec: GitExecutor = (_r, args) => ({
+const okExec: GitExecutor = withEmptyPrograms((_r, args) => ({
   ok: true,
   stdout:
     args[0] === 'rev-parse'
@@ -165,7 +166,7 @@ const okExec: GitExecutor = (_r, args) => ({
       : args[0] === 'symbolic-ref' ? `refs/heads/${headBranch}\n` : '',
   stderr: '',
   exitCode: 0,
-})
+}))
 
 async function rebaseDialog(root: string): Promise<string[]> {
   const dialogs: string[] = []

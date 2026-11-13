@@ -1,5 +1,8 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { bareName, pathComponents } from './protected-paths.js'
+import { parseRsctConfigText } from './project-root.js'
+import { canonicalPath } from './repo-anchor.js'
 import { decodeUnicodeEscapes } from './terminal-guard.js'
 
 export const RSCT_HOOK_MARKERS: readonly string[] = [
@@ -14,6 +17,46 @@ type Reader = (path: string) => string | null
 
 const PASS: SettingsWriteVerdict = { block: false }
 
+const EDITOR_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+export const COMMAND_KEYS: readonly string[] = [
+  'statusLine',
+  'apiKeyHelper',
+  'awsAuthRefresh',
+  'awsCredentialExport',
+  'gcpAuthRefresh',
+  'otelHeadersHelper',
+  'fileSuggestion',
+  'policyHelper',
+  'processWrapper',
+  'sshHostCommands',
+  'spellcheck',
+  'sandbox',
+  'enabledPlugins',
+  'extraKnownMarketplaces',
+  'pluginConfigs',
+  'appendPlugins',
+  'prependPlugins',
+  'enableAllProjectMcpServers',
+  'enabledMcpjsonServers',
+  'disabledMcpjsonServers',
+  'allowedMcpServers',
+  'deniedMcpServers',
+  'managedMcpServers',
+  'allowManagedHooksOnly',
+  'allowedChannelPlugins',
+  'disableCommandPluginSources',
+]
+
+const NAMED_KEYS = new RegExp(`\\b(hooks|${COMMAND_KEYS.join('|')})\\b`, 'i')
+
+const WHOLE_FILES: ReadonlyMap<string, string> = new Map([
+  ['.mcp.json', 'the project MCP server registrations'],
+  ['.claude.json', "Claude Code's MCP servers, approvals and folder trust"],
+  ['managed-settings.json', 'managed Claude Code settings'],
+  ['managed-mcp.json', 'managed MCP servers'],
+])
+
 function readOrNull(path: string): string | null {
   try {
     return readFileSync(path, 'utf8')
@@ -23,7 +66,7 @@ function readOrNull(path: string): string | null {
 }
 
 function bare(name: string): string {
-  return name.replace(/::\$data$/i, '').replace(/[. ]+$/, '').toLowerCase()
+  return bareName(name)
 }
 
 function realOrNull(path: string): string | null {
@@ -43,11 +86,102 @@ function namesRsctConfig(path: string): boolean {
   return bare(basename(path)) === '.rsct.json'
 }
 
-function anySpellingNames(filePath: string, names: (path: string) => boolean): boolean {
+function spellings(filePath: string): string[] {
   const lexical = resolve(filePath)
   const realDir = realOrNull(dirname(lexical))
-  const candidates = [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))]
-  return candidates.some((c) => c !== null && names(c))
+  return [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+}
+
+function anySpellingNames(filePath: string, names: (path: string) => boolean): boolean {
+  return spellings(filePath).some(names)
+}
+
+function firstSpelling<T>(filePath: string, judge: (path: string) => T | null): T | null {
+  for (const candidate of spellings(filePath)) {
+    const found = judge(candidate)
+    if (found !== null) return found
+  }
+  return null
+}
+
+function bareParts(path: string): string[] {
+  return pathComponents(path)
+}
+
+function wholeFileKind(path: string): string | null {
+  const parts = bareParts(path)
+  const name = parts[parts.length - 1] ?? ''
+  const named = WHOLE_FILES.get(name)
+  if (named !== undefined) return named
+  if (parts.includes('managed-settings.d')) return 'managed Claude Code settings'
+  if (parts.includes('.claude-plugin')) return 'a Claude Code plugin definition'
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parts[i] !== '.claude') continue
+    if (parts[i + 1] === 'plugins') return 'an installed Claude Code plugin'
+    if (name === 'hooks.json') return 'Claude Code hooks'
+  }
+  return null
+}
+
+export function judgeClaudeConfigFile(toolName: string, filePath: string): SettingsWriteVerdict {
+  if (!EDITOR_TOOLS.has(toolName)) return PASS
+  const kind = firstSpelling(filePath, wholeFileKind)
+  if (kind === null) return PASS
+  return { block: true, reason: `this write would change ${kind}, which Claude Code runs or loads; that is the developer's own edit` }
+}
+
+type AssetKind = 'skill' | 'command' | 'agent'
+
+function assetKind(path: string): AssetKind | null {
+  const parts = bareParts(path)
+  const name = parts[parts.length - 1] ?? ''
+  for (let i = 0; i < parts.length - 2; i++) {
+    if (parts[i] !== '.claude') continue
+    const area = parts[i + 1]
+    if (area === 'skills' && name === 'skill.md') return 'skill'
+    if (area === 'commands' && name.endsWith('.md')) return 'command'
+    if (area === 'agents' && name.endsWith('.md')) return 'agent'
+  }
+  return null
+}
+
+function frontmatter(text: string): string {
+  const body = lf(text).replace(/^﻿/, '')
+  if (!body.startsWith('---')) return ''
+  const rest = body.slice(body.indexOf('\n') === -1 ? body.length : body.indexOf('\n') + 1)
+  const close = /^---[ \t]*$/m.exec(rest)
+  return close ? rest.slice(0, close.index) : rest
+}
+
+function shellLines(text: string): string {
+  const inline = lf(text).match(/!`[^`]*`/g) ?? []
+  const fenced = text.match(/^```!.*$[\s\S]*?^```/gm) ?? []
+  return JSON.stringify([...inline, ...fenced].sort())
+}
+
+export function judgeClaudeAssetWrite(
+  toolName: string,
+  input: Record<string, unknown>,
+  filePath: string,
+  read: Reader = readOrNull,
+): SettingsWriteVerdict {
+  if (!EDITOR_TOOLS.has(toolName)) return PASS
+  const kind = firstSpelling(filePath, assetKind)
+  if (kind === null) return PASS
+  if (toolName === 'NotebookEdit') return { block: true, reason: `a Claude Code ${kind} file cannot be edited as a notebook` }
+  const current = lf(read(filePath) ?? '')
+  const applied = resultingText(toolName, input, current)
+  if (applied === null) return PASS
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT }
+  const before = frontmatter(current)
+  const after = frontmatter(applied.text)
+  if (before !== after && [before, after].some((part) => /hooks|mcpservers|\\/i.test(part))) {
+    return { block: true, reason: `this write would change the front matter of a Claude Code ${kind} where it names hooks or MCP servers, which run commands, or holds an escape that could spell them; that is the developer's own edit` }
+  }
+  if (shellLines(current) !== shellLines(applied.text)) {
+    return { block: true, reason: `this write would add, change or remove a !\`command\` line in a Claude Code ${kind}, which runs before its text reaches the model; that is the developer's own edit` }
+  }
+  return PASS
 }
 
 export function isClaudeSettingsFile(filePath: string): boolean {
@@ -142,6 +276,21 @@ function rsctEntries(json: Record<string, unknown>): Array<{ key: string; marker
   return found
 }
 
+function hooksShape(hooks: unknown): string {
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return stable(hooks)
+  const shaped: Record<string, unknown> = {}
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    shaped[event] = Array.isArray(groups)
+      ? groups.map((group) => {
+          if (!group || typeof group !== 'object' || Array.isArray(group)) return group
+          const { matcher, ...rest } = group as Record<string, unknown>
+          return matcher === undefined || matcher === '' ? rest : { matcher, ...rest }
+        })
+      : groups
+  }
+  return stable(shaped)
+}
+
 function changedRsctEntry(before: Record<string, unknown>, after: Record<string, unknown>): string | null {
   const remaining = rsctEntries(after).map((e) => e.key)
   for (const entry of rsctEntries(before)) {
@@ -160,8 +309,9 @@ export function judgeRsctConfigWrite(
   filePath: string,
   read: Reader = readOrNull,
 ): SettingsWriteVerdict {
-  if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'MultiEdit') return PASS
+  if (!EDITOR_TOOLS.has(toolName)) return PASS
   if (!anySpellingNames(filePath, namesRsctConfig)) return PASS
+  if (toolName === 'NotebookEdit') return { block: true, reason: '.rsct.json cannot be edited as a notebook' }
   const current = lf(read(filePath) ?? '')
   const applied = resultingText(toolName, input, current)
   if (applied === null) return PASS
@@ -169,6 +319,12 @@ export function judgeRsctConfigWrite(
   const after = applied.text
   const afterJson = parseObject(after)
   const beforeJson = parseObject(current)
+  if ((beforeJson !== null && afterJson === null) || (parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok)) {
+    return { block: true, reason: "this write would leave a .rsct.json RSCT rejects (unparseable, or outside its schema), which switches every RSCT edit check off; that is the developer's own edit" }
+  }
+  if (afterJson !== null && stable((beforeJson ?? {}).audit) !== stable(afterJson.audit)) {
+    return { block: true, reason: "this write would change where or whether RSCT keeps its audit log (\"audit\" in .rsct.json); that is the developer's own edit" }
+  }
   for (const key of DATABASE_SWITCH_KEYS) {
     const offAfter = afterJson ? afterJson[key] === false : new RegExp(`"${key}"\\s*:\\s*false`, 'i').test(decodeUnicodeEscapes(after))
     const offBefore = beforeJson !== null && beforeJson[key] === false
@@ -185,8 +341,9 @@ export function judgeSettingsWrite(
   filePath: string,
   read: Reader = readOrNull,
 ): SettingsWriteVerdict {
-  if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'MultiEdit') return PASS
+  if (!EDITOR_TOOLS.has(toolName)) return PASS
   if (!isClaudeSettingsFile(filePath)) return PASS
+  if (toolName === 'NotebookEdit') return { block: true, reason: 'a Claude Code settings file cannot be edited as a notebook' }
   const current = lf(read(filePath) ?? '')
   const applied = resultingText(toolName, input, current)
   if (applied === null) return PASS
@@ -233,11 +390,23 @@ export function judgeSettingsWrite(
     if (/"env"\s*:/i.test(decodedAfter)) {
       return { block: true, reason: 'this write would leave a Claude Code settings file unreadable with an env block in it; every env entry is the developer\'s own edit' }
     }
+    const held = beforeJson !== null && ['hooks', ...COMMAND_KEYS].some((k) => Object.hasOwn(beforeJson, k))
+    if (held || NAMED_KEYS.test(decodedAfter)) {
+      return { block: true, reason: "this write would leave a Claude Code settings file unreadable where it holds or names hooks or a key that runs a command; that is the developer's own edit" }
+    }
     return PASS
   }
   const envKey = changedEnvKey(beforeJson, afterJson)
   if (envKey !== null) {
     return { block: true, reason: `this write would add, change or remove env.${envKey} in a Claude Code settings file; every env entry is the developer's own edit` }
+  }
+  const was = beforeJson ?? {}
+  if (hooksShape(was.hooks) !== hooksShape(afterJson.hooks)) {
+    return { block: true, reason: "this write would add, change or remove a hook entry in a Claude Code settings file; hooks run commands, so that is the developer's own edit" }
+  }
+  const key = COMMAND_KEYS.find((k) => stable(was[k]) !== stable(afterJson[k]))
+  if (key !== undefined) {
+    return { block: true, reason: `this write would add, change or remove ${key} in a Claude Code settings file; it runs a command or loads code, so that is the developer's own edit` }
   }
   return PASS
 }

@@ -102,12 +102,7 @@ import {
   type TokenInvalidReason,
 } from '../lib/plan-authorization.js'
 import { confirmedTopologyMode } from '../lib/topology.js'
-import { resolveUniverseRoot } from '../lib/universe.js'
-import {
-  readContracts,
-  contractsTouchingPaths,
-  affectedConsumers,
-} from '../lib/contracts.js'
+import { gatherContractFacts, universeFactsChanged } from '../lib/contract-facts.js'
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, commitMessageView, specLabel } from '../lib/dialog-text.js'
 import {
@@ -119,6 +114,7 @@ import {
   shownLimit,
   writeListReport,
 } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 
 const STAGED_PATHS_UNREADABLE =
   'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
@@ -135,33 +131,11 @@ interface CommitOverrides {
   contract?: { reason: string } | undefined
 }
 
-interface ContractFacts {
+interface CommitContractFacts {
   mode: ContractCheckResult['mode']
   ids: string[]
   consumers: string[]
   inactive: boolean
-}
-
-function readContractFacts(
-  projectRoot: string,
-  config: RsctConfig | null | undefined,
-  readCommitPaths: () => string[] | null,
-): ContractFacts | null {
-  const mode = confirmedTopologyMode(config ?? null)
-  if (mode !== 'multi-repo') return { mode, ids: [], consumers: [], inactive: false }
-  let universeRoot: string | null = null
-  try {
-    const r = resolveUniverseRoot(config ?? null, projectRoot)
-    universeRoot = r.kind === 'found' ? r.path : null
-  } catch {
-    universeRoot = null
-  }
-  const graph = readContracts(universeRoot)
-  const stagedPaths = readCommitPaths()
-  if (stagedPaths === null) return null
-  const appName = config?.app?.name ?? null
-  const hits = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : []
-  return { mode, ids: hits.map((h) => h.id), consumers: affectedConsumers(hits), inactive: !graph.available }
 }
 
 function commitExceptionLines(
@@ -170,7 +144,7 @@ function commitExceptionLines(
     branchLabel: string
     branchProtected: boolean
     findings: readonly SecretFinding[]
-    contract: ContractFacts
+    contract: CommitContractFacts
     overrides: CommitOverrides
   },
 ): { facts: string[]; reasons: string[] } {
@@ -242,6 +216,10 @@ export type RequestCommitRejectKind =
   | 'review_unreadable'
   | 'dead_code_staged'
   | 'run_alone_pending'
+  | 'programs_unreadable'
+  | 'programs_changed'
+  | 'programs_moved'
+  | 'universe_changed'
 
 export type CommitAuthVia = 'dev_approval' | 'plan_token'
 
@@ -320,7 +298,7 @@ function runRetention(
 export const requestCommitTool: Tool = {
   name: 'rsct_request_commit',
   description:
-    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog — trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused — OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
+    "§C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index — never the working tree — for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog — trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused — OR — when dev_approval is omitted — an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git commit runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A plan token never covers a new or changed entry (programs_changed). The contract gate reads every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest), the universe they name plus the one read at the last approved commit, and in each its working tree, HEAD and fetched upstream; the dialog shows disagreements and what changed since the last approved commit, and a plan token never covers such a change (universe_changed). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed — dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down — a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -688,14 +666,30 @@ export async function requestCommitHandler(
     )
   }
   const findings = scan.findings
-  const contractFacts = readContractFacts(
+  const universe = gatherContractFacts({
     projectRoot,
-    config,
-    () =>
+    config: config ?? null,
+    readPaths: () =>
       internal.stagedPathsOverride ??
       (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree)),
-  )
-  if (contractFacts === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+    executor: gitExecutor,
+    ...(config?.audit !== undefined && { auditConfig: config.audit }),
+  })
+  if (universe === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+  const contractFacts: CommitContractFacts = {
+    mode: universe.multiRepo ? 'multi-repo' : confirmedTopologyMode(config ?? null),
+    ids: universe.ids,
+    consumers: universe.consumers,
+    inactive: universe.multiRepo && universe.inactive,
+  }
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit)
+  if (!programs.ok) {
+    return earlyReject(
+      'programs_unreadable',
+      `${programs.reason}, so the hooks and programs git would run inside this commit cannot be listed for the developer — the commit is refused; the developer commits this by hand in their own terminal`,
+    )
+  }
+  const freshPrograms = programs.fresh
 
   const uncovered = (
     overrides: CommitOverrides,
@@ -755,6 +749,28 @@ export async function requestCommitHandler(
         },
       )
     }
+    if (tokenPath && universeFactsChanged(universe)) {
+      return refuse(
+        'universe_changed',
+        'what the contract gate reads (the universe and the .rsct.json files) changed since the last approved commit, or is read for the first time. A plan authorization never covers that; commit with a per-action dev_approval so the developer sees it in the dialog.',
+        {},
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        },
+      )
+    }
+    if (tokenPath && freshPrograms.length > 0) {
+      return refuse(
+        'programs_changed',
+        `${freshPrograms.length} hook(s) or configured program(s) git would run inside this commit are new or changed since the developer's last approved call. A plan authorization never covers them; commit with a per-action dev_approval so the developer sees the list in the dialog.`,
+        { programs_new: freshPrograms.length },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        },
+      )
+    }
     return null
   }
 
@@ -796,6 +812,8 @@ export async function requestCommitHandler(
             ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
             ...(retentionLine ? [retentionLine] : []),
             ...exceptions.facts,
+            ...programsDialogLines(projectRoot, 'commit', 'commit', programs.read, freshPrograms),
+            ...universe.lines,
           ].join('\n') +
           gateDialogFooter(projectRoot, config) +
           (exceptions.reasons.length > 0 ? `\n\n${exceptions.reasons.join('\n')}` : '') +
@@ -985,6 +1003,22 @@ export async function requestCommitHandler(
       },
     )
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor)
+  if (!programsNow.ok) {
+    return rejectWith(programsNow.kind, programsNow.reason, {
+      via: authorizedVia,
+      channel,
+      signals: fabricationSignals,
+      shape: {
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        contract_check: contractResult,
+      },
+    })
+  }
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
+  if (universe.recordBaseline) appendAudit(projectRoot, universe.baseline, config?.audit)
 
   let reservedToken: PlanAuthorizationBlock | null = null
   if (tokenCtx) {
@@ -1324,6 +1358,7 @@ export async function requestCommitHandler(
       sha_before: commit.sha_before,
       sha_after: commit.sha_after,
       fabrication_signals: fabricationSignals,
+      ...(universe.multiRepo && { universe: universe.record }),
       ...(tokenSummary !== null && {
         plan_slug: tokenSummary.plan_slug,
         plan_token_actions_used: tokenSummary.actions_used,

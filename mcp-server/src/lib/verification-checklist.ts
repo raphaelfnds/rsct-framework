@@ -108,6 +108,7 @@ export interface ChecklistInput {
   existingProjectFiles?: string[]
   contractGraph?: ContractGraph
   appName?: string | null
+  appNames?: string[]
   universeLinked?: boolean
 }
 
@@ -345,7 +346,16 @@ export function runVerificationChecklist(
   stats.contracts_scanned = graph.contracts.length
 
   if (graph.available) {
-    const touched = contractsTouchingPaths(graph, input.appName ?? null, input.declaredPaths)
+    const names = input.appNames ?? (input.appName ? [input.appName] : [])
+    const seen = new Set<string>()
+    const touched = names
+      .flatMap((name) => contractsTouchingPaths(graph, name, input.declaredPaths))
+      .filter((c) => {
+        const key = JSON.stringify([c.id, c.producer, c.surface, c.consumers])
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
     for (const contract of touched) {
       const consumers = affectedConsumers([contract])
       if (consumers.length === 0) continue
