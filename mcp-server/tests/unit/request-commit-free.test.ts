@@ -23,10 +23,6 @@ beforeEach(() => {
     'utf8',
   )
   mkdirSync(join(tmpRoot, '.rsct'), { recursive: true })
-  // An EMPTY `.rsct/scripts` reads as install drift at the `security` tier, so a
-  // healthy install needs the scripts present. Their bodies are irrelevant here:
-  // under vitest the shipped reference does not resolve, so they read
-  // `unreadable`, which escalates on neither axis.
   mkdirSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true })
   for (const name of ['sanitize-permissions.js', 'edit-scope-guard.js']) {
     writeFileSync(join(tmpRoot, '.rsct', 'scripts', name), '// present\n', 'utf8')
@@ -40,7 +36,6 @@ function gitState(branch: string | null): GitState {
   return { available: branch !== null, branch, head_sha: branch ? 'aaaa111' : null, is_clean: false }
 }
 
-/** A git executor where commit + rev-parse succeed. */
 const okExec: GitExecutor = (_root, args) => {
   const programs = emptyProgramsRead(args)
   if (programs) return programs
@@ -78,14 +73,13 @@ function internal(over: Partial<RequestCommitInternal> = {}): RequestCommitInter
   return {
     gitStateOverride: gitState('feat/x'),
     gitExecutor: okExec,
-    stagedDiffOverride: '', // no secrets
+    stagedDiffOverride: '',
     promptFn: yesPrompt,
     now: FIXED_NOW,
     ...over,
   }
 }
 
-/** A healthy, classified project with an active plan. */
 function healthyProject(): void {
   writePlan('p')
   writeAudit([{ event: 'classify.verdict', tier: 'small' }])
@@ -93,15 +87,11 @@ function healthyProject(): void {
 }
 
 describe('rsct_request_commit — a per-action approval carries the security notice while enforcement is down (#25)', () => {
-  /** Remove the scripts beforeEach seeded → install drift goes `security`. */
   function breakEnforcement(): void {
     rmSync(join(tmpRoot, '.rsct', 'scripts'), { recursive: true, force: true })
   }
 
   it('a per-action approval still lands the commit while enforcement is down', async () => {
-    // Install drift at the `security` tier does not gate: the dev keeps a way
-    // through — it just costs one dialog, which IS the point: the dialog is the
-    // out-of-band channel that carries the warning where hints[] cannot.
     breakEnforcement()
     healthyProject()
     const out = (await requestCommitHandler(
@@ -124,12 +114,6 @@ describe('rsct_request_commit — a per-action approval carries the security not
 })
 
 describe('rsct_request_commit — settings.json drift is reported, never gated (#17)', () => {
-  /**
-   * Record a baseline as the SessionStart sanitizer would have — APPENDED, like
-   * the real writer. `healthyProject()` rewrites the audit log wholesale, so a
-   * seed that overwrote would either lose the classify evidence or be lost by it,
-   * depending on call order. Appending makes the order irrelevant.
-   */
   function seedBaseline(hash: string): void {
     const line = JSON.stringify({ event: 'settings.baseline', hash, ts: FIXED_NOW.toISOString() })
     appendFileSync(join(tmpRoot, '.rsct', 'audit.log'), line + '\n', 'utf8')
@@ -145,9 +129,6 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
   }
 
   it('reports the harness-appended entries and still lets the commit land', async () => {
-    // The field case: the harness auto-appends approved permissions to the
-    // VERSIONED file, the agent truthfully says it did not modify it, and nobody
-    // stages it. Before #17 no gate had anything to say about that.
     writeSettingsJson(['Bash(mvn -version)', 'Bash(echo "exit=$?")'])
     healthyProject()
     seedBaseline('a-different-hash')
@@ -157,8 +138,6 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
       internal(),
     )) as RequestCommitOutput
 
-    // Reported, not blocked — an unrelated dirty settings file must never stop a
-    // legitimate commit.
     expect(out.status).toBe('committed')
     const hint = out.hints.join('\n')
     expect(hint).toContain('.claude/settings.json has changed')
@@ -196,8 +175,6 @@ describe('rsct_request_commit — settings.json drift is reported, never gated (
   })
 
   it('degrades silently when no baseline was ever recorded', async () => {
-    // A project whose SessionStart hook never ran is not drifting — it is
-    // unmeasured, and the check must not invent a finding from that.
     writeSettingsJson(['Bash(anything)'])
     healthyProject()
 

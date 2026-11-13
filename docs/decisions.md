@@ -3965,6 +3965,50 @@ those files. Keyed by module and symbol; restatements of what the code says were
 - **The premise-check findings show `score N, shared: …` (#79)** — the match carries them and the
   developer needs them to triage by strength; display-only, the gate baseline never reads `detail`.
 
+### `lib/contracts.ts`, `tools/phase-verification-start.ts` (migrated in the 2.24.1 REVIEW)
+
+- **`contracts.json` is hand-written at the universe root and the server only reads it.** No
+  installer writes it, so the no-reformat rule for managed files does not apply to it. Surface
+  matching reuses the phase-scope glob matcher (`*`, `**`, `?`, `\` read as `/`). A missing,
+  malformed or oversize file reads as the empty graph and never throws; the size cap keeps a
+  multi-MB file out of memory for a small graph. A contract whose surface normalizes to an empty
+  list can never match a path, so it is counted in `note` (RV4) instead of silently never gating.
+- **Matching is producer-side only (V FV8)**: a consumer touching the producer's surface does not
+  match. The gate compares `c.producer === app` exactly — case-sensitive, no trim — so
+  `unregisteredNames` reports `unregistered` (no registered app matches in any case) and
+  `case_mismatch` (only the case differs; the suggestion is the registered spelling). A name with
+  stray whitespace is really unregistered and warns (§9.C); an empty registered set makes every
+  name unregistered (§9.D, callers cap the list); on a case-insensitive collision the first
+  registered name in input order wins (§9.B); the output keeps input order without duplicates.
+- **`findings_run_id` (#40)** identifies the set of findings; `rsct_phase_verification_complete`
+  echoes it back, so an answer set prepared before a re-run is refused as stale. It is `null` when
+  nothing was stored (a skipped tier or a failed write): a run id for a baseline that does not
+  exist would have the agent answer against nothing. On a trivial or small tier the audit record
+  is the only thing the run leaves.
+- **`walk_coverage` (#54)** says how much of `declared_paths` the reverse-dep walk could look at
+  and travels on every return path, as `walk_stats` does, unlike `discovered_importers`, which is
+  zeroed where no phase started. Hints are not audited, so the audit record carries the numbers
+  that tell an empty, unavailable and incomplete graph apart (`discovered_count: 0` reads the same
+  for all three, and the seed counts miss a resolver that dropped every edge), the contract-graph
+  state the run saw (#75 Part B: "no adjacent app depends on this" and "nobody wrote the manifest"
+  look the same as a finding count), and each finding's evidence class (#75). The coverage
+  advisory goes before the walk's and the checklist's hints: it qualifies the checklist's "no
+  findings" sentence and would be read after it if appended. It is emitted only on non-skipped
+  paths.
+- **This tool refuses to overwrite a different active phase (#27).** It owns its plumbing (the
+  checklist and the walk differ from `startPhaseGeneric`) and used to write
+  `phase: 'verification'` over any label with no gate, approval or audit, so an agent mid-Code
+  could reach Test without `code_complete`. The check sits after the `skipped_tier` return, so
+  that path still writes no state. `startPhaseGeneric`'s stale-label exception is not mirrored: it
+  needs `existingPhase === 'verification'` while the guard it excuses needs
+  `existingPhase !== input.phase`, and here `input.phase` is `'verification'`, so a mirror would
+  be dead code. The live case is reopening a completed V, which gets its own audit line (it is
+  the transition #15's exception leans on), emitted after the write so a locked or failed write
+  never leaves the log claiming a transition that did not land.
+- **HEAD is read at the start (#75 Part C)**, one git spawn, full sha, so the record says what
+  HEAD was when the findings were produced. Outside a repository the field is absent, not `null`
+  (`exactOptionalPropertyTypes`).
+
 ### `lib/plan-authorization.ts`, `lib/plan.ts` (migrated in the 2.17.0 REVIEW)
 
 - The token functions are pure: they never throw and never touch the file system; the tools own
@@ -4270,6 +4314,35 @@ those files. Keyed by module and symbol; restatements of what the code says were
   text. The earlier "git was never invoked" assertion was vacuous, measured by deleting
   `isSafeRevisionToken` with the test still green: the real reader runs through another seam. The
   exec-side barrier is pinned against a real repository in `git.test.ts`.
+- `tests/setup.ts` (migrated in the 2.24.1 REVIEW) turns the update check off with the switch
+  shipped to users (`RSCT_UPDATE_CHECK=off`). The check consults by default (#38) and
+  `statusHandler` reaches it through `getUpdateNotice()`, which resolves `$HOME` and a real `fetch`
+  when nothing is injected: sixteen call sites in the status, load-context, topology and universe
+  tests would call api.github.com (six CI cells against the 60-per-hour anonymous limit) and
+  rewrite the contributor's real `~/.rsct/update-check.json`, consent included. Tests that exercise
+  the check pass `env: {}` to opt back in against a temporary `$HOME`. The same file points git at
+  the committed fixture config (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, an absent
+  `XDG_CONFIG_HOME`): the programs list read the machine's own `filter.lfs` and
+  `credential.helper`, and a per-process temporary config leaked folders because vitest workers end
+  without an `exit` event.
+- `tests/bash/lib/block-harness.ts` (migrated in the 2.24.1 REVIEW) finds a prompt block by a
+  substring of its `CHECKPOINT:` line, so a test always runs the shipped block. Blocks run without
+  `set -e`, as the agent runs them, and assertions read file state, not the exit code. A test that
+  needs node fails instead of skipping when node is missing. The bash path is resolved and
+  classified, not thrown (#78): the catch would turn a throw into a result whose assertions fail on
+  missing files. `HOME` is the temporary folder unless the test overrides it. `execFileSync` blocks
+  the worker thread, so vitest's per-test timeout cannot fire on a block that never exits; the
+  harness bound is the only one. It is 120 s per block and 600 s per test (`bash-bounds.ts`) since
+  2.24.1: the old 30 s bound tripped `conduct-rules` with `ETIMEDOUT` on a loaded machine, against
+  blocks that normally take 1–3 s.
+- `request-commit-free.test.ts` (migrated in the 2.24.1 REVIEW): an empty `.rsct/scripts` reads as
+  install drift at the `security` tier, so a healthy install needs the scripts present; under
+  vitest the shipped reference does not resolve, so they read `unreadable`, which escalates on
+  neither axis. Drift at `security` does not refuse: it costs one dialog, the out-of-band channel
+  that carries the warning where hints cannot. The baseline is appended like the real SessionStart
+  writer, because `healthyProject()` rewrites the audit log and an overwrite would make the result
+  depend on call order. An auto-appended, unstaged settings file (#17) is reported, never blocked;
+  a project whose SessionStart hook never ran is unmeasured, not drifting.
 
 ### `tests/bash/script-install.test.ts` (migrated in the #74 REVIEW)
 
