@@ -458,3 +458,40 @@ describe('judgeRsctConfigWrite — a .rsct.json the server rejects is refused li
     expect(judgeRsctConfigWrite('Write', { content: config }, join('p', '.rsct.json'), read('{')).block).toBe(false)
   })
 })
+
+describe('front matter the guard cannot read word by word, and a .rsct.json left unparseable (REVIEW round 2)', () => {
+  const read = (text: string) => () => text
+  const skill = '---\nname: s\ndescription: d\n---\n\nBody text.\n'
+  const file = join('p', '.claude', 'skills', 's', 'SKILL.md')
+
+  it('refuses a front matter change that holds a YAML escape, which can spell hooks', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"hook\\x73": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\n"ho\\\n  oks": {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\nx: {"hook\\u0073": []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+  })
+
+  it('reads a front matter with no closing line, or opened with a language word, to the end', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: '---\nname: s\nhooks: {Stop: []}\n#---\nx\n' }, file, read(skill)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: '---yaml\nname: s\nhooks: {Stop: []}\n---\nx\n' }, file, read(skill)).block).toBe(true)
+  })
+
+  it('refuses adding or changing the MCP servers of an agent, which Claude Code starts with the agent', () => {
+    const agent = join('p', '.claude', 'agents', 'helper.md')
+    const plain = '---\nname: a\ndescription: d\n---\nx\n'
+    const inline = '---\nname: a\ndescription: d\nmcpServers:\n  - evil:\n      type: stdio\n      command: sh\n---\nx\n'
+    expect(judgeClaudeAssetWrite('Write', { content: inline }, agent, read(plain)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: inline.replace('command: sh', 'command: node') }, agent, read(inline)).block).toBe(true)
+    expect(judgeClaudeAssetWrite('Write', { content: plain.replace('description: d', 'description: e') }, agent, read(plain)).block).toBe(false)
+  })
+
+  it('still allows a description edit and a body edit beside a front matter with a backslash', () => {
+    expect(judgeClaudeAssetWrite('Write', { content: skill.replace('description: d', 'description: better') }, file, read(skill)).block).toBe(false)
+    const withPath = '---\nname: s\ndescription: reads C:\\data\n---\n\nBody text.\n'
+    expect(judgeClaudeAssetWrite('Write', { content: withPath.replace('Body text.', 'More body.') }, file, read(withPath)).block).toBe(false)
+  })
+
+  it('refuses a write that leaves unparseable a .rsct.json that parsed, even one outside the schema', () => {
+    const outside = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: '' }, audit: { path: 'x.log' } })
+    expect(judgeRsctConfigWrite('Write', { content: '{' }, join('p', '.rsct.json'), read(outside)).block).toBe(true)
+  })
+})
