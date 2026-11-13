@@ -66,6 +66,8 @@ export interface ContractFacts {
 }
 
 const PIECE = 120
+const ID_SHOWN = 12
+const IDS_SHOWN = 400
 
 function shortPath(path: string): string {
   return specLabel(path.replace(/\\/g, '/'), PIECE)
@@ -123,13 +125,13 @@ function commitOf(executor: GitExecutor, cwd: string, rev: string): string | nul
 
 function readConfigSources(projectRoot: string, config: RsctConfig | null, executor: GitExecutor): ConfigFacts[] {
   const top = git(executor, projectRoot, ['rev-parse', '--show-toplevel'])?.trim() || null
-  const root = resolve(projectRoot)
-  const topDir = top !== null ? resolve(top) : root
+  const root = canonicalPath(resolve(projectRoot))
+  const topDir = top !== null ? canonicalPath(resolve(top)) : root
   const dirs: string[] = []
   let current = root
   for (;;) {
     dirs.push(current)
-    if (canonicalPath(current).toLowerCase() === canonicalPath(topDir).toLowerCase()) break
+    if (rootKey(current) === rootKey(topDir)) break
     const up = dirname(current)
     if (up === current) break
     current = up
@@ -171,12 +173,13 @@ function readConfigSources(projectRoot: string, config: RsctConfig | null, execu
 function readRoot(path: string, executor: GitExecutor): RootFacts {
   const facts: RootFacts = { path, branch: null, head: null, upstreamRef: null, upstream: null, notes: [], graphs: [] }
   facts.graphs.push({ source: 'working tree', graph: readContracts(path) })
-  const located = git(executor, path, ['rev-parse', '--show-toplevel', '--show-prefix'])
-  if (located === null) {
-    facts.notes.push('not a git repository, so only its working tree is read')
+  const locate = executor(path, ['rev-parse', '--show-toplevel', '--show-prefix'])
+  if (!locate.ok) {
+    const why = (locate.stderr || locate.error || '').trim().split(/\r?\n/)[0] ?? ''
+    facts.notes.push(`not a git repository, or git refused to read it${why.length > 0 ? ` (${specLabel(why, PIECE)})` : ''}, so only its working tree is read`)
     return facts
   }
-  const [top, prefix = ''] = located.split(/\r?\n/)
+  const [top, prefix = ''] = locate.stdout.split(/\r?\n/)
   const gitTop = top && top.length > 0 ? top : path
   const file = `${prefix}contracts.json`
   const symbolic = git(executor, path, ['symbolic-ref', '-q', 'HEAD'])?.trim() ?? ''
@@ -204,8 +207,27 @@ function readRoot(path: string, executor: GitExecutor): RootFacts {
   return facts
 }
 
+const CASE_BLIND = process.platform === 'win32' || process.platform === 'darwin'
+
 function rootKey(path: string): string {
-  return canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
+  return CASE_BLIND ? key.toLowerCase() : key
+}
+
+function scopeRecord(value: unknown): ScopeRecord | null {
+  const o = asObject(value)
+  if (typeof o.mode !== 'boolean' || !Array.isArray(o.apps) || !Array.isArray(o.roots)) return null
+  const apps = o.apps.filter((a): a is string => typeof a === 'string')
+  const roots: RootRecord[] = []
+  for (const r of o.roots) {
+    const root = asObject(r)
+    if (typeof root.path !== 'string') return null
+    const id = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+    const contracts: Record<string, string> = {}
+    for (const [k, v] of Object.entries(asObject(root.contracts))) if (typeof v === 'string') contracts[k] = v
+    roots.push({ path: root.path, branch: id(root.branch), head: id(root.head), upstream_ref: id(root.upstream_ref), upstream: id(root.upstream), contracts })
+  }
+  return { mode: o.mode, apps, roots }
 }
 
 function contentHash(contract: Contract): string {
@@ -226,8 +248,13 @@ function readBaseline(projectRoot: string, auditConfig?: RsctAuditConfig): { sco
     if (!line.includes(UNIVERSE_BASELINE_EVENT)) continue
     try {
       const entry = JSON.parse(line.replace(/\r$/, '')) as Record<string, unknown>
-      if (entry.event !== UNIVERSE_BASELINE_EVENT || !entry.scopes || typeof entry.scopes !== 'object') continue
-      newest = { scopes: entry.scopes as Record<string, ScopeRecord>, at: typeof entry.ts === 'string' ? entry.ts : null }
+      if (entry.event !== UNIVERSE_BASELINE_EVENT) continue
+      const scopes: Record<string, ScopeRecord> = {}
+      for (const [key, value] of Object.entries(asObject(entry.scopes))) {
+        const scope = scopeRecord(value)
+        if (scope !== null) scopes[key] = scope
+      }
+      newest = { scopes, at: typeof entry.ts === 'string' ? entry.ts : null }
     } catch {
       continue
     }
@@ -346,11 +373,18 @@ export function gatherContractFacts(args: {
     }
     const old = recorded?.roots.find((r) => rootKey(r.path) === rootKey(root.path))
     if (old !== undefined) {
+      if (old.branch !== root.branch) {
+        change(`⚠ The universe at ${shortPath(root.path)} is on another branch${since}: ${specLabel(old.branch ?? '(none)', PIECE)} → ${specLabel(root.branch ?? '(none)', PIECE)}.`)
+      }
       for (const [label, was, now] of [['HEAD', old.head, root.head], ['upstream', old.upstream, root.upstream]] as const) {
-        if (was === null || now === null || was === now) continue
+        if (was === null || was === now) continue
+        if (now === null) {
+          change(`⚠ The universe ${label} at ${shortPath(root.path)} no longer resolves${since} (it was ${was.slice(0, ID_SHOWN)}).`)
+          continue
+        }
         const verdict = isAncestor(executor, root.path, was, now)
         if (verdict !== 'yes') {
-          change(`⚠ The universe ${label} at ${shortPath(root.path)} moved backwards or to an unknown commit${since} (${was.slice(0, 12)} → ${now.slice(0, 12)}).`)
+          change(`⚠ The universe ${label} at ${shortPath(root.path)} moved backwards or to an unknown commit${since} (${was.slice(0, ID_SHOWN)} → ${now.slice(0, ID_SHOWN)}).`)
         }
       }
       const nowIds = new Map<string, Set<string>>()
@@ -362,8 +396,10 @@ export function gatherContractFacts(args: {
       if (anyReadable) {
         const gone = Object.keys(old.contracts).filter((id) => !nowIds.has(id)).sort()
         const changed = Object.entries(old.contracts).filter(([id, hash]) => nowIds.has(id) && !nowIds.get(id)!.has(hash)).map(([id]) => id).sort()
-        if (gone.length > 0) change(`⚠ Contracts gone from the universe at ${shortPath(root.path)}${since}: ${specLabel(gone.join(', '), 400)}.`)
-        if (changed.length > 0) change(`⚠ Contracts changed in the universe at ${shortPath(root.path)}${since}: ${specLabel(changed.join(', '), 400)}.`)
+        if (gone.length > 0) change(`⚠ Contracts gone from the universe at ${shortPath(root.path)}${since}: ${specLabel(gone.join(', '), IDS_SHOWN)}.`)
+        if (changed.length > 0) change(`⚠ Contracts changed in the universe at ${shortPath(root.path)}${since}: ${specLabel(changed.join(', '), IDS_SHOWN)}.`)
+      } else if (Object.keys(old.contracts).length > 0) {
+        change(`⚠ No contracts.json of the universe at ${shortPath(root.path)} can be read now; it held ${specLabel(Object.keys(old.contracts).sort().join(', '), IDS_SHOWN)}${since}.`)
       }
     }
   }
