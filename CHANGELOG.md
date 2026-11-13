@@ -12,6 +12,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-11-13
+
+### Security
+
+- **Commit, push, merge and rebase dialogs list the programs git runs inside them** (ADR-044).
+  - Every file in the hooks folder git runs (`.sample` files excluded, `.exe` hooks on Windows included)
+    and every configured key that runs a program — ssh command, credential helper, filters, merge
+    drivers, signing, remote programs, transport helpers — with where each comes from; for a push to a
+    local path, that repository's own. Credentials are masked.
+  - What is new or changed since your last approved call is marked. The first call after the upgrade
+    marks everything.
+  - The list is read again right before git runs; a change refuses (`programs_moved`), and a list that
+    cannot be read refuses (`programs_unreadable`).
+  - A plan token never covers a new or changed entry (`programs_changed`); commit with a per-action
+    approval to see the list.
+  - The coverage dry run of a protected push runs only when nothing in the list is new.
+- **The contract gate reads every source of the universe** (ADR-044).
+  - Commit and V read every `.rsct.json` from the project folder up to the repository top, in the
+    working tree and at HEAD, at their strictest; the universe they name plus the one read at the last
+    approved commit; and in each universe its working tree, its HEAD and its fetched upstream. A
+    contract fires when any of them matches.
+  - The dialog says when those `.rsct.json` files disagree, when a universe has no upstream or is not a
+    git repository, and what changed since the last approved commit: a universe added or gone, the gate
+    mode or app name, history that moved backwards, contracts gone or changed. A plan token never covers
+    such a change (`universe_changed`).
+- **The agent's editor tools no longer reach what git or Claude Code runs** (ADR-044). The edit guard
+  refuses, before it reads the project — a malformed `.rsct.json` no longer turns it off:
+  - files in a git folder, also one moved by `git init --separate-git-dir`, git configuration files,
+    RSCT's `.rsct/` folder and a configured audit log, and a `.rsct.json` left unreadable or with a
+    changed `audit` key;
+  - `.mcp.json`, `.claude.json`, managed settings and plugin files, whole;
+  - any hook entry, and any key that runs a command or loads servers or plugins, in
+    `.claude/settings.json` and `.claude/settings.local.json`;
+  - hooks and `` !`command` `` lines in skills, commands and agents.
+  Names are compared without regard to case on every system.
+- **The terminal guard refuses** `git config` writes in sections whose keys run programs, `git init` and
+  `git clone` that plant hooks or configuration, and remotes that name a transport helper.
+
+### Changed
+
+- `/rsct-setup` writes the contract handoff's scratch files outside the project, and the malformed-JSON
+  messages of `/rsct-setup` and `/rsct-uninstall` say you repair the file in your own editor.
+- Adding an MCP server, a plugin, a hook or a command key is your own edit: the agent's editor tools are
+  refused there.
+
+### Tests
+
+- The suite reads its own git configuration (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`,
+  `XDG_CONFIG_HOME`), and slow setup blocks have room under load (#78).
+
+### Upgrading
+
+1. Run the installer from an updated clone and restart the IDE.
+2. Run `/rsct-setup` in every project: the guards are hook scripts each project keeps its own copy of.
+3. The first plan-token commit after the upgrade asks for a dialog once (and once more in a multi-repo
+   project): the programs list and the universe read are recorded at an approved call.
+
 ## [2.24.0] - 2026-11-09
 
 ### Security
