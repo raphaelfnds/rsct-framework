@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { canonicalPath } from '../../../src/lib/repo-anchor.js'
 import { extractBlockByAnchor } from './block-harness.js'
 import { bashBin } from './resolve-bash.js'
+import { BASH_BLOCK_TIMEOUT_MS } from './bash-bounds.js'
 
 export interface BlockStep {
   prompt: string
@@ -59,7 +60,7 @@ export function runBlockIn(root: string, dir: string, step: BlockStep, env: Reco
       env: fullEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 30_000,
+      timeout: BASH_BLOCK_TIMEOUT_MS,
       killSignal: 'SIGKILL',
     })
     return { anchor: step.anchor, exit: 0, out }
