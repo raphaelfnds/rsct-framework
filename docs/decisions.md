@@ -3023,6 +3023,67 @@ patched v4 core).
 **Consequences**: a zod release that drops `zod/v3` fails the typecheck and the build, not at run
 time.
 
+### ADR-044 — Integration dialogs list the programs git runs; the contract gate reads every source; the agent plants nothing that runs (2.24.1)
+**Status**: active. Narrows ADR-028's named limits "hooks the agent writes" and "a settings change made
+other than through the editor tools" for the editor tools, and the #73 boundary pin (see Decision 5).
+**Tags**: gates, hooks, terminal, universe, contracts, settings, cross-os
+
+**Context**: MEASURED on git 2.45.1 (Windows), 2.43.0 (WSL) with RSCT's own git calls in throwaway repos:
+- `git commit -m` runs pre-commit, prepare-commit-msg, commit-msg, post-commit, post-index-change and
+  reference-transaction; a merge runs pre-merge-commit and post-merge; a rebase runs pre-rebase,
+  post-checkout, post-commit and post-rewrite (the apply backend also the applypatch hooks); a push runs
+  pre-push, and for a remote that is a local path that repository's own receive hooks run on this machine.
+  On Windows git also runs `<hook>.exe`; `core.hooksPath` moves the folder.
+- Configured programs ran inside those calls: clean/smudge filters (also on `commit -m`), merge drivers,
+  `gpg.program`, `remote.<name>.receivepack`, `core.sshCommand`, a `<scheme>::` or unknown-scheme
+  transport helper; the push coverage dry run ran transport programs before any dialog.
+- Claude Code 2.1.173 (docs and `claude mcp list` with an isolated config): MCP precedence on one name is
+  local → project → user; `enableAllProjectMcpServers` starts an unapproved `.mcp.json` server; approval is
+  by name; hooks, `statusLine`, `apiKeyHelper` and other keys run commands; skills, commands and agents can
+  carry hooks, and skills/commands run `` !`…` `` lines before their text reaches the model.
+- The contract gate read the universe working tree only, through the first candidate folder found, and the
+  `.rsct.json` fields of the folder passed as `project_root`.
+
+**Decision**:
+1. Commit, push, merge, rebase and squash list, before the dialog, every file in the hooks folder git runs
+   (`.sample` excluded) and every configured key that runs a program, with origins, and for a push to a
+   local path that repository's own; values are masked. An audit baseline per git folder (identities are
+   hashes of name and value or content) marks what is new or changed since the last approved call; a
+   missing baseline makes everything new. The list is read again right before git runs (`programs_moved`);
+   a read that fails refuses (`programs_unreadable`); a plan token never covers a new entry
+   (`programs_changed`); the push coverage dry run runs only when nothing listed is new.
+2. The contract gate (commit and V, one function) reads every `.rsct.json` from the project root to the
+   repository top, in the working tree and at HEAD, at their strictest; the resolved universe and the one
+   recorded at the last approved commit; and in each its working tree, HEAD and fetched upstream. A
+   contract fires when any source matches. The dialog lists disagreements and what changed since the last
+   approved commit (`universe.baseline`); a plan token never covers a change (`universe_changed`).
+3. The edit guard, before the project is read (a malformed `.rsct.json` no longer turns it off), refuses
+   the editor tools on git folders (by name and by content, so a folder moved by `--separate-git-dir` is
+   covered), git configuration files, RSCT's `.rsct/` state and its configured audit log, a `.rsct.json`
+   left unreadable or with a changed `audit` key; whole files that register or approve MCP servers or carry
+   managed settings or plugins; any hook entry or command key in `.claude/settings*.json`; hooks and `!`
+   lines in skills, commands and agents. Names are compared case-folded on every OS, NTFS suffixes removed.
+4. The terminal guard refuses `git config` writes in sections whose keys run programs, `git init`/`clone`
+   that plant hooks or configuration, and remotes that name a transport helper.
+5. The #73 boundary keeps its purpose: the server never reads, resolves or writes Claude Code's host
+   configuration — the installer and the `claude` CLI own it, and a host-config reference reachable from a
+   tool call would be a machine-wide side effect. The edit guard names `.claude.json` and the two approval
+   keys only to refuse agent edits; the pin allows exactly those lines and still forbids every other
+   reference. The pin
+   (`tests/bash/script-install.test.ts`) also checks that the guard reads no home folder or environment
+   and writes nothing, and that `src/index.ts` never loads it.
+
+**Direction**: stricter everywhere. New refusals: the reject kinds above; edits and git commands listed.
+
+**What is given up, by name**: a script the agent runs and a shell write stay given up (ADR-028); what a
+listed program reads or runs in turn is not followed; keys Claude Code adds later are not on the list until
+a release adds them; the first read of the programs list and of the universe trusts what it sees and asks
+the developer in a dialog.
+
+**Consequences**: the first plan-token commit after the upgrade asks for a dialog once, in every project
+(and once more in a multi-repo project); the developer adds MCP servers, plugins, hooks and command keys
+in their own editor; the guards are hook scripts, so they reach a project through `/rsct-setup`.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic
