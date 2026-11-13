@@ -166,11 +166,13 @@ Since 2.24.1 more refusals hold everywhere, and a malformed `.rsct.json` no long
   its repository wherever it is, such as one `git init --separate-git-dir` made), a git
   configuration file (`.gitconfig`, `git/config`, `git/attributes`, `etc/gitconfig`), anything under
   a project's `.rsct/`, and a configured audit log;
-- `rsct_config` — a write that leaves a `.rsct.json` the server rejects (unparseable, or outside its schema), or that changes its `audit` key;
+- `rsct_config` — a write that leaves a `.rsct.json` the server rejects (unparseable, or outside its schema), or unparseable where it parsed before, or that changes its `audit` key;
 - `claude_settings` — `.mcp.json`, `.claude.json`, managed settings and plugin files, whole; any hook
   entry, or a key that runs a command or loads servers or plugins (`statusLine`, `apiKeyHelper`,
   `enabledPlugins`, `enableAllProjectMcpServers` and the rest), in `.claude/settings.json` and
-  `.claude/settings.local.json`; hooks or `` !`command` `` lines in a skill, command or agent file.
+  `.claude/settings.local.json`; hooks or `` !`command` `` lines in a skill, command or agent file,
+  and an agent's `mcpServers`. A front matter change that holds a backslash, or a front matter with
+  no closing `---` line, is refused the same way; edit it yourself.
 
 Make those edits yourself: adding an MCP server, a plugin, a hook or a status line is the
 developer's own edit.
@@ -321,7 +323,7 @@ what lets your teammates get the same enforcement.
 **`git config`, `git init`, `git clone` or `git remote` is refused (since 2.24.1).** The guard
 refuses `git config` writes — set, add, replace, unset, rename or remove a section, `--edit` — in
 the sections whose keys can make git run programs inside RSCT's approved calls (`core`, `filter`, `credential`, `remote` and the like);
-`git init` or `git clone` with `--template`, `--separate-git-dir` or such a key in `-c`/`--config`, or in a command that sets git's template or configuration variables; and `git remote add`/`set-url` with a URL that runs
+`git init` or `git clone` with `--template`, `--separate-git-dir` or such a key in `-c`/`--config`, or in a command that sets git's template or configuration variables or a home folder (`HOME`, `XDG_CONFIG_HOME`, `USERPROFILE`); and `git remote add`/`set-url` with a URL that runs
 a transport helper (`<x>::…`, or a scheme git does not handle itself). Reads pass (`git config
 <key>`, `--get`, `--list`). Run the change yourself, in your own terminal.
 
@@ -479,7 +481,7 @@ did before you approve.
 
 - `programs_moved` — the list changed between the dialog and git; ask again.
 - `programs_unreadable` — git could not read the repository or its configuration (for example a
-  `dubious ownership` refusal), or a file in the hooks folder could not be read, or a push URL names a local path git cannot read as a repository. Fix that, or run
+  `dubious ownership` refusal), or a file in the hooks folder could not be read, or a push URL names a local path git cannot read as a repository (or another user's home, `~name/…`, or a relative `file://` URL, which RSCT does not resolve). Fix that, or run
   the operation by hand.
 - `programs_changed` — a plan token never covers a new or changed entry: commit with a per-action
   `dev_approval` once, so the dialog shows the list. A protected push whose remote-tracking ref is

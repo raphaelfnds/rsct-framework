@@ -3046,7 +3046,10 @@ time.
 **Decision**:
 1. Commit, push, merge, rebase and squash list, before the dialog, every file in the hooks folder git runs
    (`.sample` excluded) and every configured key that runs a program, with origins, and for a push to a
-   local path that repository's own (each under its own git folder); credentials in URLs are masked and a shell credential helper is shown by its length. An audit baseline per git folder (identities are
+   local path that repository's own (each under its own git folder, found in git's order, where the
+   first regular file is read as a gitfile whatever its name, with a relative `core.hooksPath` read
+   from the remote's git folder, where push hooks run; another user's home `~name` or a relative
+   `file://` URL is refused); credentials in URLs are masked and a shell credential helper is shown by its length. An audit baseline per git folder (identities are
    hashes of name and value or content) marks what is new or changed since the last approved call; a
    missing baseline makes everything new. The list is read again right before git runs (`programs_moved`);
    a read that fails refuses (`programs_unreadable`); a plan token never covers a new entry
@@ -3060,7 +3063,10 @@ time.
    the editor tools on git folders (by name and by content, so a folder moved by `--separate-git-dir` is
    covered), git configuration files, RSCT's `.rsct/` state and its configured audit log, a write that leaves a `.rsct.json` the server rejects or changes its `audit` key; whole files that register or approve MCP servers or carry
    managed settings or plugins; any hook entry or command key in `.claude/settings*.json`; hooks and `!`
-   lines in skills, commands and agents. Names are compared case-folded on every OS, NTFS suffixes removed.
+   lines in skills, commands and agents, and an agent's `mcpServers` (Claude Code starts inline servers
+   with the agent). A front matter change that holds a backslash (a YAML escape can spell a key) or a
+   front matter with no closing line counts as one that names them. Names are compared case-folded on
+   every OS, NTFS suffixes removed.
 4. The terminal guard refuses `git config` writes in sections whose keys run programs, `git init`/`clone`
    that plant hooks or configuration, and remotes that name a transport helper.
 5. The #73 boundary keeps its purpose: the server never reads, resolves or writes Claude Code's host
