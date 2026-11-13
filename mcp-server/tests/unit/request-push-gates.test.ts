@@ -424,3 +424,14 @@ describe.skipIf(!GIT)('rsct_request_push lists the programs git runs inside it',
     expect(line).toBeLessThan(footerAt(text))
   })
 })
+
+describe.skipIf(!GIT)('rsct_request_push — the coverage dry run when the programs list cannot be read (REVIEW round 1)', () => {
+  it('refuses with programs_unreadable when the push URL names a local path git cannot read', async () => {
+    writeFileSync(join(work, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 't', org: 't' }, protected_branches: ['release'] }))
+    git(work, 'checkout', '-q', '-b', 'release')
+    commitFile('r.txt', 'r\n', 'release note')
+    git(work, 'remote', 'set-url', '--push', 'origin', join(base, 'missing.git'))
+    const { out, seen } = await push({ branch: 'release', dev_approval: approval({ override_protected_branch: { reason: 'first release push' } }), pre_merge_ack: { ...ACK, files_swept: ['r.txt'] } }, { pushProbe: () => ({ status: 'unavailable' }) })
+    expect([out.reject_kind, seen.length]).toEqual(['programs_unreadable', 0])
+  })
+})

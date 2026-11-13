@@ -416,7 +416,7 @@ export async function requestPushHandler(
       const beforeProbe = probeUrls.ok ? checkGitPrograms(projectRoot, gitExecutor, config?.audit, { urls: probeUrls.value }) : null
       if (beforeProbe === null || !beforeProbe.ok || beforeProbe.fresh.length > 0) {
         return reject(
-          'programs_changed',
+          beforeProbe !== null && beforeProbe.ok ? 'programs_changed' : 'programs_unreadable',
           "the coverage check needs a dry run of this push, because the remote-tracking ref is missing here, and that dry run would run hooks or configured programs that are new since the developer's last approved call, or that could not be listed — nothing ran. Any approved RSCT call records the current list; or the developer pushes by hand in their own terminal.",
           { protected: true, audit: { programs_new: beforeProbe?.ok === true ? beforeProbe.fresh.length : null } },
         )

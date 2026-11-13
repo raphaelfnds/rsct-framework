@@ -30,7 +30,7 @@ function exists(path: string, kind: 'file' | 'dir'): boolean {
   }
 }
 
-function holdsGitRepository(dir: string): boolean {
+export function holdsGitRepository(dir: string): boolean {
   return exists(join(dir, 'HEAD'), 'file') && exists(join(dir, 'objects'), 'dir') && exists(join(dir, 'refs'), 'dir')
 }
 
