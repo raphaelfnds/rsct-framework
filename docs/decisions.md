@@ -3024,8 +3024,7 @@ patched v4 core).
 time.
 
 ### ADR-044 — Integration dialogs list the programs git runs; the contract gate reads every source; the agent plants nothing that runs (2.24.1)
-**Status**: active. Narrows ADR-028's named limits "hooks the agent writes" and "a settings change made
-other than through the editor tools" for the editor tools, and the #73 boundary pin (see Decision 5).
+**Status**: active. Narrows ADR-030's named limit "hooks the agent writes" for the editor tools and the terminal guard's git commands, and the #73 boundary pin (Decision 5).
 **Tags**: gates, hooks, terminal, universe, contracts, settings, cross-os
 
 **Context**: MEASURED on git 2.45.1 (Windows), 2.43.0 (WSL) with RSCT's own git calls in throwaway repos:
@@ -3047,7 +3046,7 @@ other than through the editor tools" for the editor tools, and the #73 boundary 
 **Decision**:
 1. Commit, push, merge, rebase and squash list, before the dialog, every file in the hooks folder git runs
    (`.sample` excluded) and every configured key that runs a program, with origins, and for a push to a
-   local path that repository's own; values are masked. An audit baseline per git folder (identities are
+   local path that repository's own (each under its own git folder); credentials in URLs are masked and a shell credential helper is shown by its length. An audit baseline per git folder (identities are
    hashes of name and value or content) marks what is new or changed since the last approved call; a
    missing baseline makes everything new. The list is read again right before git runs (`programs_moved`);
    a read that fails refuses (`programs_unreadable`); a plan token never covers a new entry
@@ -3056,11 +3055,10 @@ other than through the editor tools" for the editor tools, and the #73 boundary 
    repository top, in the working tree and at HEAD, at their strictest; the resolved universe and the one
    recorded at the last approved commit; and in each its working tree, HEAD and fetched upstream. A
    contract fires when any source matches. The dialog lists disagreements and what changed since the last
-   approved commit (`universe.baseline`); a plan token never covers a change (`universe_changed`).
+   approved commit (`universe.baseline`): roots, gate mode, app names, history that moved backwards or no longer resolves, a branch switch, contracts gone, changed or no longer readable; a plan token never covers a change (`universe_changed`).
 3. The edit guard, before the project is read (a malformed `.rsct.json` no longer turns it off), refuses
    the editor tools on git folders (by name and by content, so a folder moved by `--separate-git-dir` is
-   covered), git configuration files, RSCT's `.rsct/` state and its configured audit log, a `.rsct.json`
-   left unreadable or with a changed `audit` key; whole files that register or approve MCP servers or carry
+   covered), git configuration files, RSCT's `.rsct/` state and its configured audit log, a write that leaves a `.rsct.json` the server rejects or changes its `audit` key; whole files that register or approve MCP servers or carry
    managed settings or plugins; any hook entry or command key in `.claude/settings*.json`; hooks and `!`
    lines in skills, commands and agents. Names are compared case-folded on every OS, NTFS suffixes removed.
 4. The terminal guard refuses `git config` writes in sections whose keys run programs, `git init`/`clone`
@@ -3070,18 +3068,15 @@ other than through the editor tools" for the editor tools, and the #73 boundary 
    tool call would be a machine-wide side effect. The edit guard names `.claude.json` and the two approval
    keys only to refuse agent edits; the pin allows exactly those lines and still forbids every other
    reference. The pin
-   (`tests/bash/script-install.test.ts`) also checks that the guard reads no home folder or environment
-   and writes nothing, and that `src/index.ts` never loads it.
+   (`tests/bash/script-install.test.ts`) also checks that the file holding that refusal list (`settings-write-guard.ts`) reads no home folder or environment and writes nothing, and that `src/index.ts` never loads it.
 
 **Direction**: stricter everywhere. New refusals: the reject kinds above; edits and git commands listed.
 
-**What is given up, by name**: a script the agent runs and a shell write stay given up (ADR-028); what a
-listed program reads or runs in turn is not followed; keys Claude Code adds later are not on the list until
+**What is given up, by name**: a script the agent runs and a shell write stay given up (ADR-028); keys Claude Code adds later are not on the list until
 a release adds them; the first read of the programs list and of the universe trusts what it sees and asks
 the developer in a dialog.
 
-**Consequences**: the first plan-token commit after the upgrade asks for a dialog once, in every project
-(and once more in a multi-repo project); the developer adds MCP servers, plugins, hooks and command keys
+**Consequences**: the first plan-token commit after the upgrade is refused once (`programs_changed`, and `universe_changed` in a multi-repo project) until one commit with a per-action approval records both; the developer adds MCP servers, plugins, hooks and command keys
 in their own editor; the guards are hook scripts, so they reach a project through `/rsct-setup`.
 
 ## Anti-decisions (tried, rejected, do not retry)

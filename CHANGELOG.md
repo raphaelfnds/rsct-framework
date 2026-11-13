@@ -20,7 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Every file in the hooks folder git runs (`.sample` files excluded, `.exe` hooks on Windows included)
     and every configured key that runs a program — ssh command, credential helper, filters, merge
     drivers, signing, remote programs, transport helpers — with where each comes from; for a push to a
-    local path, that repository's own. Credentials are masked.
+    local path, that repository's own. Credentials in URLs are masked; a shell credential helper is shown by its length.
   - What is new or changed since your last approved call is marked. The first call after the upgrade
     marks everything.
   - The list is read again right before git runs; a change refuses (`programs_moved`), and a list that
@@ -35,13 +35,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     contract fires when any of them matches.
   - The dialog says when those `.rsct.json` files disagree, when a universe has no upstream or is not a
     git repository, and what changed since the last approved commit: a universe added or gone, the gate
-    mode or app name, history that moved backwards, contracts gone or changed. A plan token never covers
+    mode or app name, history that moved backwards or no longer resolves, a switch to another branch, contracts gone, changed or no longer readable. A plan token never covers
     such a change (`universe_changed`).
 - **The agent's editor tools no longer reach what git or Claude Code runs** (ADR-044). The edit guard
-  refuses, before it reads the project — a malformed `.rsct.json` no longer turns it off:
+  refuses the following, and a malformed `.rsct.json` no longer turns it off:
   - files in a git folder, also one moved by `git init --separate-git-dir`, git configuration files,
-    RSCT's `.rsct/` folder and a configured audit log, and a `.rsct.json` left unreadable or with a
-    changed `audit` key;
+    RSCT's `.rsct/` folder and a configured audit log, and a write that leaves a `.rsct.json` the server rejects or changes its `audit` key;
   - `.mcp.json`, `.claude.json`, managed settings and plugin files, whole;
   - any hook entry, and any key that runs a command or loads servers or plugins, in
     `.claude/settings.json` and `.claude/settings.local.json`;
@@ -66,8 +65,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 1. Run the installer from an updated clone and restart the IDE.
 2. Run `/rsct-setup` in every project: the guards are hook scripts each project keeps its own copy of.
-3. The first plan-token commit after the upgrade asks for a dialog once (and once more in a multi-repo
-   project): the programs list and the universe read are recorded at an approved call.
+3. The first plan-token commit after the upgrade is refused once (`programs_changed` when git runs any hook or configured program, `universe_changed` in a multi-repo project); one commit with a per-action approval records both.
 
 ## [2.24.0] - 2026-11-09
 

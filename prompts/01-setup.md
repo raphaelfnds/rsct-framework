@@ -3925,8 +3925,7 @@ PREVIEW the assembled entry as JSON and require an **explicit approval** before 
 **Safe value handoff (BINDING — injection safety).** The answers are dev free text. To keep them out of
 the shell AND the `node -e` source, WRITE each answer **verbatim** to a scratch file using your
 file-write tool (NOT a shell heredoc/echo — zero shell quoting) under a fresh dir `$CONTRACT_SCRATCH`
-OUTSIDE the project, such as one `mktemp -d` prints (never under `.rsct/` or `.git/`: the edit guard
-refuses writes there):
+OUTSIDE the project, such as one `mktemp -d` prints (in Git Bash, give your file-write tool the Windows form `cygpath -w` prints; never under `.rsct/` or `.git/`: the edit guard refuses writes there):
 - `$CONTRACT_SCRATCH/id`, `/producer`, `/description` (one scalar file each; omit `description` if empty),
 - `$CONTRACT_SCRATCH/surface/1`, `/2`, … (one file per glob),
 - `$CONTRACT_SCRATCH/consumers/1`, `/2`, … (one file per app).
