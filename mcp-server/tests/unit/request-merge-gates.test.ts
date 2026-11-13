@@ -341,4 +341,29 @@ describe.skipIf(!GIT)('merge and rebase list the programs git runs inside them',
     expect(out.reject_kind).toBe('programs_moved')
     expect(git('rev-parse', 'HEAD')).toBe(head)
   })
+
+  it('a merge lists the hook its source brings into a tracked hooks folder, in the version git runs (REVIEW round 3)', async () => {
+    mkdirSync(join(root, '.husky'))
+    const source = commitFile('.husky/post-merge', '#!/bin/sh\nexit 0\n', 'hook')
+    git('checkout', '-q', 'integ')
+    git('config', 'core.hooksPath', '.husky')
+    const { out, text } = await merge({ source_branch: 'feat/x', no_ff: true, pre_merge_ack: { ...ACK, files_swept: [...swept(), '.husky/post-merge'] }, dev_approval: approval() })
+    expect(out.status).toBe('merged')
+    const line = text.indexOf(`NEW OR CHANGED: hook "post-merge" as this operation brings it (.husky/post-merge at ${source.slice(0, 12)}`)
+    expect(line, 'present').toBeGreaterThanOrEqual(0)
+    expect(line).toBeLessThan(footerAt(text))
+  })
+
+  it('a rebase lists the hook its upstream brings into a tracked hooks folder (REVIEW round 3)', async () => {
+    commitFile('b.txt', 'b\n', 'b')
+    git('checkout', '-q', 'integ')
+    mkdirSync(join(root, '.husky'))
+    commitFile('.husky/post-rewrite', '#!/bin/sh\nexit 0\n', 'hook')
+    git('checkout', '-q', 'feat/x')
+    git('config', 'core.hooksPath', '.husky')
+    const d = dialogs('yes')
+    const out = (await requestRebaseHandler({ project_root: root, ref: 'integ', pre_merge_ack: { ...ACK, files_swept: [...swept(), '.husky/post-rewrite'] }, dev_approval: approval() }, { promptFn: d.fn, now: NOW })) as RequestRebaseOutput
+    expect(out.status).toBe('rebased')
+    expect(d.seen[0]?.message ?? '').toContain('NEW OR CHANGED: hook "post-rewrite" as this operation brings it')
+  })
 })

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { decideAuditPath, type AuditEntry } from './audit-log.js'
 import { DIALOG_LIST_SHOWN, writeListReport } from './gate-exceptions.js'
 import { dialogList, specLabel } from './dialog-text.js'
@@ -114,6 +114,8 @@ export function isProgramKey(key: string, value: string | null, scope: ProgramSc
       return REMOTE_PROGRAM_KEYS.has(name) || ((name === 'url' || name === 'pushurl') && helperUrl(v))
     case 'hook':
       return true
+    case 'gc':
+      return name === 'recentobjectshook'
     default:
       return false
   }
@@ -175,7 +177,7 @@ function scopeKeyOf(gitDir: string): string {
   return CASE_BLIND ? canonical.toLowerCase() : canonical
 }
 
-type RepositoryRead = { ok: true; scopeKey: string; entries: ProgramEntry[] } | { ok: false; reason: string }
+type RepositoryRead = { ok: true; scopeKey: string; gitFolder: string; hooksDir: string; entries: ProgramEntry[] } | { ok: false; reason: string }
 
 function readRepository(cwd: string, executor: GitExecutor, scope: ProgramScope, gitDir?: string): RepositoryRead {
   const where = specLabel(posix(gitDir ?? cwd))
@@ -185,9 +187,10 @@ function readRepository(cwd: string, executor: GitExecutor, scope: ProgramScope,
   if (!rev.ok || lines.length !== 2) return { ok: false, reason: `git could not read the repository at ${where} (${(rev.stderr || rev.error || 'no answer').trim().slice(0, VALUE_SHOWN)})` }
   const config = executor(cwd, [...pin, 'config', '--show-origin', '-z', '--list'])
   if (!config.ok) return { ok: false, reason: `git could not read the configuration at ${where}` }
-  const gitFolder = isAbsolute(lines[0]!) ? lines[0]! : resolve(cwd, lines[0]!)
+  const realCwd = canonicalPath(cwd)
+  const gitFolder = isAbsolute(lines[0]!) ? lines[0]! : resolve(realCwd, lines[0]!)
   const scopeKey = scopeKeyOf(gitFolder)
-  const hooksDir = isAbsolute(lines[1]!) ? lines[1]! : resolve(scope === 'remote' ? gitFolder : cwd, lines[1]!)
+  const hooksDir = isAbsolute(lines[1]!) ? lines[1]! : resolve(scope === 'remote' ? gitFolder : realCwd, lines[1]!)
   const hooks = hookEntries(hooksDir, scope, scopeKey)
   if (hooks === null) return { ok: false, reason: `the hooks folder ${specLabel(posix(hooksDir))} or a file in it could not be read` }
   const entries = [
@@ -196,7 +199,7 @@ function readRepository(cwd: string, executor: GitExecutor, scope: ProgramScope,
       .filter((e) => isProgramKey(e.key, e.value, scope))
       .map((e) => configEntry(e, scope, scopeKey)),
   ]
-  return { ok: true, scopeKey, entries }
+  return { ok: true, scopeKey, gitFolder, hooksDir, entries }
 }
 
 export function localPathRemote(url: string, cwd: string, home: string = homedir()): string | null {
@@ -237,16 +240,70 @@ function unresolvedLocal(url: string): boolean {
   return /^~[^/\\]/.test(url)
 }
 
+export interface GitCallTargets {
+  urls?: readonly string[]
+  incoming?: string
+}
+
+function within(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+function treeHooks(executor: GitExecutor, top: string, rev: string, rel: string): Map<string, string> | null {
+  const listed = executor(top, ['ls-tree', '-z', rev, ...(rel === '' ? [] : ['--', `:(literal)${rel}/`])])
+  if (!listed.ok) return null
+  const hooks = new Map<string, string>()
+  for (const record of listed.stdout.split('\0')) {
+    const tab = record.indexOf('\t')
+    if (tab === -1) continue
+    const [mode, type, oid] = record.slice(0, tab).split(' ')
+    const name = record.slice(tab + 1).split('/').pop() ?? ''
+    if (type !== 'blob' || name.endsWith('.sample')) continue
+    hooks.set(name, `${mode} ${oid}`)
+  }
+  return hooks
+}
+
+function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract<RepositoryRead, { ok: true }>, tip: string): ProgramEntry[] | null {
+  const hooksDir = canonicalPath(repo.hooksDir)
+  if (within(canonicalPath(repo.gitFolder), hooksDir)) return []
+  const toplevel = executor(projectRoot, ['rev-parse', '--show-toplevel'])
+  if (!toplevel.ok) return null
+  const top = canonicalPath(toplevel.stdout.trim())
+  if (!within(top, hooksDir)) return []
+  const rel = posix(relative(top, hooksDir))
+  const now = treeHooks(executor, top, 'HEAD', rel)
+  const then = treeHooks(executor, top, tip, rel)
+  if (now === null || then === null) return null
+  const entries: ProgramEntry[] = []
+  for (const [name, blob] of [...then].sort(([a], [b]) => a.localeCompare(b))) {
+    if (now.get(name) === blob) continue
+    const where = rel === '' ? name : `${rel}/${name}`
+    entries.push({
+      scopeKey: repo.scopeKey,
+      identity: digest('incoming-hook', name, blob),
+      label: `hook ${specLabel(`"${name}"`)} as this operation brings it (${specLabel(where)} at ${tip.slice(0, HASH_SHOWN)}, blob ${blob.split(' ')[1]!.slice(0, HASH_SHOWN)})`,
+    })
+  }
+  return entries
+}
+
 export function readGitPrograms(
   projectRoot: string,
   executor: GitExecutor,
-  push?: { urls: readonly string[] },
+  targets?: GitCallTargets,
 ): ProgramsRead {
   const repo = readRepository(projectRoot, executor, 'repository')
   if (!repo.ok) return repo
   const entries = [...repo.entries]
+  if (targets?.incoming !== undefined) {
+    const brought = incomingHooks(executor, projectRoot, repo, targets.incoming)
+    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.slice(0, HASH_SHOWN))}` }
+    entries.push(...brought)
+  }
   const scopeKeys = new Set([repo.scopeKey])
-  for (const url of push?.urls ?? []) {
+  for (const url of targets?.urls ?? []) {
     if (helperUrl(url)) {
       entries.push({ scopeKey: repo.scopeKey, identity: digest('push-url', url), label: `push URL run by a transport helper ${specLabel(`"${shown(url)}"`)}` })
     }
@@ -340,9 +397,9 @@ export function checkGitPrograms(
   projectRoot: string,
   executor: GitExecutor,
   auditConfig?: RsctAuditConfig,
-  push?: { urls: readonly string[] },
+  targets?: GitCallTargets,
 ): ProgramsCheck {
-  const read = readGitPrograms(projectRoot, executor, push)
+  const read = readGitPrograms(projectRoot, executor, targets)
   if (!read.ok) return read
   const baseline = readProgramsBaseline(projectRoot, auditConfig)
   return { ok: true, read, baseline, fresh: newProgramEntries(read, baseline) }
@@ -352,9 +409,9 @@ export function programsStillSame(
   check: Extract<ProgramsCheck, { ok: true }>,
   projectRoot: string,
   executor: GitExecutor,
-  push?: { urls: readonly string[] },
+  targets?: GitCallTargets,
 ): { ok: true } | { ok: false; kind: 'programs_moved' | 'programs_unreadable'; reason: string } {
-  const now = readGitPrograms(projectRoot, executor, push)
+  const now = readGitPrograms(projectRoot, executor, targets)
   if (!now.ok) return { ok: false, kind: 'programs_unreadable', reason: now.reason }
   return sameProgramList(check.read, now) ? { ok: true } : { ok: false, kind: 'programs_moved', reason: PROGRAMS_MOVED_REASON }
 }
