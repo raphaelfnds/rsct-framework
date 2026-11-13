@@ -16,6 +16,7 @@ import { loadPromptBlocks, type BashBlock } from './bash-lint.js'
 // throw into a normal-looking result whose assertions then fail on missing files —
 // exactly the symptom this fixes — so the resolver classifies instead of throwing.
 import { bashBin } from './resolve-bash.js'
+import { BASH_BLOCK_TIMEOUT_MS } from './bash-bounds.js'
 
 // --- node availability (blocks 2 & 3 call `node -e`) ---
 let _nodeChecked = false
@@ -107,7 +108,7 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
       // suite hangs indefinitely rather than failing. This is the only bound
       // that exists. Generous against runs that normally take 1-3s so CPU
       // contention cannot trip it.
-      timeout: 30_000,
+      timeout: BASH_BLOCK_TIMEOUT_MS,
       killSignal: 'SIGKILL',
     })
     return { exit: 0, out, dir }
