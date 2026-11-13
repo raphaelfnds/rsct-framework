@@ -10,6 +10,7 @@ import {
 import type { GitExecutor, GitState } from '../../src/lib/git.js'
 import type { PhaseState } from '../../src/lib/phase-scope.js'
 import { hashSettingsContent } from '../../src/lib/settings-drift.js'
+import { emptyProgramsRead } from './fake-git-programs.js'
 
 let tmpRoot: string
 const FIXED_NOW = new Date('2026-07-11T12:00:00.000Z')
@@ -41,6 +42,8 @@ function gitState(branch: string | null): GitState {
 
 /** A git executor where commit + rev-parse succeed. */
 const okExec: GitExecutor = (_root, args) => {
+  const programs = emptyProgramsRead(args)
+  if (programs) return programs
   const key = args.join(' ')
   const stdout = key.startsWith('rev-parse') ? 'bbbb222' : ''
   return { ok: true, stdout, stderr: '', exitCode: 0 }

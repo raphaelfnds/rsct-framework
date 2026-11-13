@@ -147,6 +147,7 @@ const EXPECTED_NEWEST_ONLY = [
   'sanitize.malformed',
   'sanitize.migration_skipped',
   'settings.drift_detected',
+  'git_programs.baseline',
   'audit.pruned',
 ]
 

@@ -16,6 +16,7 @@ import type {
 } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
+import { emptyProgramsRead } from './fake-git-programs.js'
 
 let tmpRoot: string
 
@@ -82,6 +83,8 @@ function mergeKey(flags: string, target = 'feat/integration'): string {
 }
 
 function standardRead(args: string[]): GitExecResult | null {
+  const programs = emptyProgramsRead(args)
+  if (programs) return programs
   if (args[0] === 'rev-parse' && args[1] === '--verify' && args[3]?.endsWith('^{commit}')) return { ok: true, stdout: `${PINNED}\n`, stderr: '', exitCode: 0 }
   if (args[0] === 'rev-list') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   if (args.join(' ') === 'symbolic-ref -q HEAD') return headBranch === null ? { ok: false, stdout: '', stderr: '', exitCode: 1 } : { ok: true, stdout: `refs/heads/${headBranch}\n`, stderr: '', exitCode: 0 }

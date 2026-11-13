@@ -56,6 +56,7 @@ import {
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import {
   ackDialogLines,
   driftRefusal,
@@ -125,6 +126,8 @@ export type RequestMergeRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'target_moved'
+  | 'programs_unreadable'
+  | 'programs_moved'
 
 export interface RequestMergeOutput {
   status: RequestMergeStatus
@@ -363,6 +366,11 @@ export async function requestMergeHandler(
     })
   }
 
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit)
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed — nothing was merged and no dialog was shown.`, { protected: targetProtected })
+  }
+
   const ack = ackDialogLines(input.pre_merge_ack)
   const facts = [
     `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? ' (--no-ff)' : ''}${allow_unrelated_histories ? ' (--allow-unrelated-histories)' : ''}?`,
@@ -372,6 +380,7 @@ export async function requestMergeHandler(
     ...(allow_unrelated_histories ? ['⚠ --allow-unrelated-histories joins two histories with no common commit; it needs your exception.'] : []),
     ...(findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : []),
     ...secretFindingLines(projectRoot, 'merge', findings),
+    ...programsDialogLines(projectRoot, 'merge', 'merge', programs.read, programs.fresh),
     ...ack.facts,
   ]
   const reasons = [
@@ -463,6 +472,10 @@ export async function requestMergeHandler(
       protected: targetProtected,
     })
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor)
+  if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected })
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories }
   const merge = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor)

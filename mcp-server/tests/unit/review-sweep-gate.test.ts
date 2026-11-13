@@ -8,6 +8,8 @@ import { appendAuditEntry } from '../../src/lib/audit-log.js'
 import { stampLedger, sweepEntry } from '../../src/lib/comment-sweep/review.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
+import { defaultGitExecutor } from '../../src/lib/git.js'
+import { baselineEntry, checkGitPrograms } from '../../src/lib/git-programs.js'
 
 let root: string
 let tick = 0
@@ -617,6 +619,9 @@ describe('rsct_request_commit — REVIEW gate on the other authorization paths',
 
     git(root, 'add', 'src/a.ts')
     installHook('printf "export const a = 1 // hook\\n" > src/a.ts\ngit add src/a.ts\n')
+    const seen = checkGitPrograms(root, defaultGitExecutor)
+    if (!seen.ok) throw new Error(seen.reason)
+    appendAuditEntry(root, baselineEntry(seen.read, null))
     const out = await requestCommitHandler({ project_root: root, message: 'token commit' }, {})
     expect(out.authorized_via).toBe('plan_token')
     expect(out.status).toBe('committed_with_drift')

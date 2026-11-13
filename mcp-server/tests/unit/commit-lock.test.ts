@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -15,6 +15,8 @@ import { planRevokeHandler } from '../../src/tools/plan-revoke.js'
 import { resolveProjectRoot } from '../../src/lib/project-root.js'
 import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
 import { recordMint } from '../plan-token-fixture.js'
+import { appendAuditEntry } from '../../src/lib/audit-log.js'
+import { baselineEntry, checkGitPrograms } from '../../src/lib/git-programs.js'
 
 const NOW = new Date('2026-06-22T12:00:00.000Z')
 const HOUR = 60 * 60_000
@@ -279,6 +281,24 @@ describe('rsct_request_commit — the token path', () => {
     const out = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
     expect(out.status).toBe('committed')
     expect(out.authorized_via).toBe('plan_token')
+  })
+
+  it('refuses the token while git would run a hook no approved call has shown, and commits once one has', async () => {
+    repo()
+    writePlan('p', TWO)
+    seed(token())
+    mkdirSync(join(tmpRoot, '.no-hooks'), { recursive: true })
+    writeFileSync(join(tmpRoot, '.no-hooks', 'post-commit'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(tmpRoot, '.no-hooks', 'post-commit'), 0o755)
+    const commitsBefore = git(tmpRoot, 'rev-list', '--count', 'HEAD').trim()
+    const refused = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
+    expect(refused.reject_kind).toBe('programs_changed')
+    expect(git(tmpRoot, 'rev-list', '--count', 'HEAD').trim()).toBe(commitsBefore)
+    const seen = checkGitPrograms(tmpRoot, defaultGitExecutor)
+    if (!seen.ok) throw new Error(seen.reason)
+    appendAuditEntry(tmpRoot, baselineEntry(seen.read, null))
+    const out = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
+    expect(out.status).toBe('committed')
   })
 
   it('refuses a token the audit log does not show as minted', async () => {

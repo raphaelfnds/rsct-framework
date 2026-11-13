@@ -119,6 +119,7 @@ import {
   shownLimit,
   writeListReport,
 } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 
 const STAGED_PATHS_UNREADABLE =
   'git could not list the files this commit carries, so the commit is refused rather than let through unchecked — retry, or the developer commits this by hand in their own terminal'
@@ -242,6 +243,9 @@ export type RequestCommitRejectKind =
   | 'review_unreadable'
   | 'dead_code_staged'
   | 'run_alone_pending'
+  | 'programs_unreadable'
+  | 'programs_changed'
+  | 'programs_moved'
 
 export type CommitAuthVia = 'dev_approval' | 'plan_token'
 
@@ -696,6 +700,14 @@ export async function requestCommitHandler(
       (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree)),
   )
   if (contractFacts === null) return earlyReject('staged_paths_unreadable', STAGED_PATHS_UNREADABLE)
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit)
+  if (!programs.ok) {
+    return earlyReject(
+      'programs_unreadable',
+      `${programs.reason}, so the hooks and programs git would run inside this commit cannot be listed for the developer — the commit is refused; the developer commits this by hand in their own terminal`,
+    )
+  }
+  const freshPrograms = programs.fresh
 
   const uncovered = (
     overrides: CommitOverrides,
@@ -755,6 +767,17 @@ export async function requestCommitHandler(
         },
       )
     }
+    if (tokenPath && freshPrograms.length > 0) {
+      return refuse(
+        'programs_changed',
+        `${freshPrograms.length} hook(s) or configured program(s) git would run inside this commit are new or changed since the developer's last approved call. A plan authorization never covers them; commit with a per-action dev_approval so the developer sees the list in the dialog.`,
+        { programs_new: freshPrograms.length },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        },
+      )
+    }
     return null
   }
 
@@ -796,6 +819,7 @@ export async function requestCommitHandler(
             ...(installAdvisory.dialogLine ? [installAdvisory.dialogLine] : []),
             ...(retentionLine ? [retentionLine] : []),
             ...exceptions.facts,
+            ...programsDialogLines(projectRoot, 'commit', 'commit', programs.read, freshPrograms),
           ].join('\n') +
           gateDialogFooter(projectRoot, config) +
           (exceptions.reasons.length > 0 ? `\n\n${exceptions.reasons.join('\n')}` : '') +
@@ -985,6 +1009,21 @@ export async function requestCommitHandler(
       },
     )
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor)
+  if (!programsNow.ok) {
+    return rejectWith(programsNow.kind, programsNow.reason, {
+      via: authorizedVia,
+      channel,
+      signals: fabricationSignals,
+      shape: {
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        contract_check: contractResult,
+      },
+    })
+  }
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   let reservedToken: PlanAuthorizationBlock | null = null
   if (tokenCtx) {

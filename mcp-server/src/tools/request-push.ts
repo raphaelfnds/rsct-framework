@@ -67,6 +67,7 @@ import {
 import { gateDialogFooter, anchorHints } from '../lib/gate-dialog.js'
 import { DIALOG_PATH_LIMIT, DIALOG_UNCUT, dialogList, specLabel } from '../lib/dialog-text.js'
 import { agentReasonLine, protectedBranchLine, secretFindingLines } from '../lib/gate-exceptions.js'
+import { baselineEntry, checkGitPrograms, programsDialogLines, programsStillSame } from '../lib/git-programs.js'
 import { ackDialogLines, driftRefusal, readDriftLock, resolvePinned } from '../lib/integration-gate.js'
 import { maskUrl, readFetchUrl, readPushOptions, readPushUrls, readSubmoduleMode, sameRepository } from '../lib/push-target.js'
 import { scanCommits } from '../lib/staged-scan.js'
@@ -131,6 +132,9 @@ export type RequestPushRejectKind =
   | 'secrets'
   | 'secrets_unreadable'
   | 'push_url_changed'
+  | 'programs_unreadable'
+  | 'programs_changed'
+  | 'programs_moved'
 
 export interface RequestPushOutput {
   status: RequestPushStatus
@@ -408,6 +412,15 @@ export async function requestPushHandler(
         : { status: 'unavailable' }
     let probeParsed = false
     if (range.status === 'unavailable' && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
+      const probeUrls = readPushUrls(projectRoot, remote, gitExecutor)
+      const beforeProbe = probeUrls.ok ? checkGitPrograms(projectRoot, gitExecutor, config?.audit, { urls: probeUrls.value }) : null
+      if (beforeProbe === null || !beforeProbe.ok || beforeProbe.fresh.length > 0) {
+        return reject(
+          'programs_changed',
+          "the coverage check needs a dry run of this push, because the remote-tracking ref is missing here, and that dry run would run hooks or configured programs that are new since the developer's last approved call, or that could not be listed — nothing ran. Any approved RSCT call records the current list; or the developer pushes by hand in their own terminal.",
+          { protected: true, audit: { programs_new: beforeProbe?.ok === true ? beforeProbe.fresh.length : null } },
+        )
+      }
       const carried = carriedByProbe({
         projectRoot,
         destinationRef,
@@ -490,6 +503,10 @@ export async function requestPushHandler(
   const urls = readPushUrls(projectRoot, remote, gitExecutor)
   if (!urls.ok) return reject('push_url_unreadable', `${urls.reason}, so the dialog cannot show where this push goes — nothing was pushed.`, { protected: branchProtected })
   pushUrls = urls.value
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { urls: pushUrls })
+  if (!programs.ok) {
+    return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this push cannot be listed — nothing was pushed and no dialog was shown.`, { protected: branchProtected })
+  }
 
   const raw = DevApprovalSchema.safeParse(input.dev_approval)
   const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check } : {}
@@ -550,6 +567,7 @@ export async function requestPushHandler(
     ...secretFindingLines(projectRoot, 'push', findings),
     ...ack.facts,
     ...shownList('Push option sent', options.value),
+    ...programsDialogLines(projectRoot, 'push', 'push', programs.read, programs.fresh),
     ...(submodules === 'check' ? ['Submodules: checked, never pushed.'] : []),
     ...(branchProtected && crossCheck === 'degraded'
       ? [
@@ -652,6 +670,12 @@ export async function requestPushHandler(
       { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel, ...(urlsNow.ok && { push_urls_now: urlsNow.value.map(maskUrl) }) } },
     )
   }
+
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { urls: pushUrls })
+  if (!programsNow.ok) {
+    return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel } })
+  }
+  appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 
   const secretsCheck = { commits_scanned: commitsScanned, findings_count: findings.length, findings, override_used: findings.length > 0 }
   const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor, { submodules, pushOptions: options.value })

@@ -25,6 +25,7 @@ import type {
 } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
 import { recordConsumedApproval } from '../../src/lib/dev-approval.js'
+import { emptyProgramsRead } from './fake-git-programs.js'
 
 let tmpRoot: string
 
@@ -63,6 +64,8 @@ function gitExecutorMock(
   return (_root, args) => {
     const key = args.join(' ')
     if (key in spec) return spec[key]!
+    const programs = emptyProgramsRead(args)
+    if (programs) return programs
     if (fallback) return fallback
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   }

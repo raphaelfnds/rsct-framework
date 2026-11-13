@@ -11,6 +11,7 @@ import {
 import { preMergeAckSchema } from '../../src/lib/pre-merge-ack.js'
 import type { GitExecutor, GitState, RangePathsResult } from '../../src/lib/git.js'
 import type { DialogOptions, DialogResult } from '../../src/lib/os-dialog.js'
+import { withEmptyPrograms } from './fake-git-programs.js'
 
 let tmpRoot: string
 const FIXED_NOW = new Date('2026-07-11T12:00:00.000Z')
@@ -30,7 +31,7 @@ function gitState(branch: string | null): GitState {
   return { available: branch !== null, branch, head_sha: branch ? 'aaaa111' : null, is_clean: false }
 }
 const PINNED = 'c'.repeat(40)
-const okExec: GitExecutor = (_r, args) => ({
+const okExec: GitExecutor = withEmptyPrograms((_r, args) => ({
   ok: true,
   stdout:
     args[0] === 'rev-parse'
@@ -38,7 +39,7 @@ const okExec: GitExecutor = (_r, args) => ({
       : args[0] === 'symbolic-ref' ? `refs/heads/${headBranch}\n` : '',
   stderr: '',
   exitCode: 0,
-})
+}))
 function alwaysYes(): (o: DialogOptions) => Promise<DialogResult> {
   return async () => ({ response: 'yes', channel: 'windows' })
 }
