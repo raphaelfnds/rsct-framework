@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { decideAuditPath, type AuditEntry } from './audit-log.js'
 import { DIALOG_LIST_SHOWN, writeListReport } from './gate-exceptions.js'
 import { dialogList, specLabel } from './dialog-text.js'
@@ -185,8 +185,9 @@ function readRepository(cwd: string, executor: GitExecutor, scope: ProgramScope,
   if (!rev.ok || lines.length !== 2) return { ok: false, reason: `git could not read the repository at ${where} (${(rev.stderr || rev.error || 'no answer').trim().slice(0, VALUE_SHOWN)})` }
   const config = executor(cwd, [...pin, 'config', '--show-origin', '-z', '--list'])
   if (!config.ok) return { ok: false, reason: `git could not read the configuration at ${where}` }
-  const scopeKey = scopeKeyOf(isAbsolute(lines[0]!) ? lines[0]! : resolve(cwd, lines[0]!))
-  const hooksDir = isAbsolute(lines[1]!) ? lines[1]! : resolve(cwd, lines[1]!)
+  const gitFolder = isAbsolute(lines[0]!) ? lines[0]! : resolve(cwd, lines[0]!)
+  const scopeKey = scopeKeyOf(gitFolder)
+  const hooksDir = isAbsolute(lines[1]!) ? lines[1]! : resolve(scope === 'remote' ? gitFolder : cwd, lines[1]!)
   const hooks = hookEntries(hooksDir, scope, scopeKey)
   if (hooks === null) return { ok: false, reason: `the hooks folder ${specLabel(posix(hooksDir))} or a file in it could not be read` }
   const entries = [
@@ -211,18 +212,29 @@ export function localPathRemote(url: string, cwd: string, home: string = homedir
 
 function gitDirOfLocal(path: string): string | null {
   for (const candidate of [join(path, '.git'), path, join(`${path}.git`, '.git'), `${path}.git`]) {
+    let st
     try {
-      const st = statSync(candidate)
-      if (st.isDirectory() && holdsGitRepository(candidate)) return resolve(candidate)
-      if (st.isFile() && basename(candidate) === '.git') {
-        const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(candidate, 'utf8'))?.[1]
-        if (pointer !== undefined) return resolve(dirname(candidate), pointer)
-      }
+      st = statSync(candidate)
     } catch {
       continue
     }
+    if (st.isFile()) {
+      try {
+        const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(candidate, 'utf8'))?.[1]
+        return pointer === undefined ? null : resolve(dirname(candidate), pointer)
+      } catch {
+        return null
+      }
+    }
+    if (st.isDirectory() && holdsGitRepository(candidate)) return resolve(candidate)
   }
   return null
+}
+
+function unresolvedLocal(url: string): boolean {
+  const file = /^file:\/\/(.*)$/i.exec(url)
+  if (file) return !/^(\/|[A-Za-z]:)/.test(file[1]!)
+  return /^~[^/\\]/.test(url)
 }
 
 export function readGitPrograms(
@@ -240,6 +252,7 @@ export function readGitPrograms(
     }
     const local = localPathRemote(url, projectRoot)
     if (local === null) continue
+    if (unresolvedLocal(url)) return { ok: false, reason: `the push URL names a local path RSCT does not resolve, another user's home or a relative file:// URL (${specLabel(`"${shown(url)}"`)})` }
     const gitDir = gitDirOfLocal(local)
     if (gitDir === null) return { ok: false, reason: `the push URL names a local path git cannot read as a repository (${specLabel(posix(local))})` }
     const remote = readRepository(projectRoot, executor, 'remote', gitDir)
