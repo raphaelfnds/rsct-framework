@@ -3944,50 +3944,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative8, options, skipNormalization) {
+    function resolveComponent(base, relative9, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative8 = parse4(serialize2(relative8, options), options);
+        relative9 = parse4(serialize2(relative9, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative8.scheme) {
-        target.scheme = relative8.scheme;
-        target.userinfo = relative8.userinfo;
-        target.host = relative8.host;
-        target.port = relative8.port;
-        target.path = removeDotSegments(relative8.path || "");
-        target.query = relative8.query;
+      if (!options.tolerant && relative9.scheme) {
+        target.scheme = relative9.scheme;
+        target.userinfo = relative9.userinfo;
+        target.host = relative9.host;
+        target.port = relative9.port;
+        target.path = removeDotSegments(relative9.path || "");
+        target.query = relative9.query;
       } else {
-        if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
-          target.userinfo = relative8.userinfo;
-          target.host = relative8.host;
-          target.port = relative8.port;
-          target.path = removeDotSegments(relative8.path || "");
-          target.query = relative8.query;
+        if (relative9.userinfo !== void 0 || relative9.host !== void 0 || relative9.port !== void 0) {
+          target.userinfo = relative9.userinfo;
+          target.host = relative9.host;
+          target.port = relative9.port;
+          target.path = removeDotSegments(relative9.path || "");
+          target.query = relative9.query;
         } else {
-          if (!relative8.path) {
+          if (!relative9.path) {
             target.path = base.path;
-            if (relative8.query !== void 0) {
-              target.query = relative8.query;
+            if (relative9.query !== void 0) {
+              target.query = relative9.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative8.path[0] === "/") {
-              target.path = removeDotSegments(relative8.path);
+            if (relative9.path[0] === "/") {
+              target.path = removeDotSegments(relative9.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative8.path;
+                target.path = "/" + relative9.path;
               } else if (!base.path) {
-                target.path = relative8.path;
+                target.path = relative9.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative9.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative8.query;
+            target.query = relative9.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3995,7 +3995,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative8.fragment;
+      target.fragment = relative9.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -9726,7 +9726,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join40, isAbsolute: isAbsolute11, sep: sep4 } = __require("path");
+    var { join: join40, isAbsolute: isAbsolute11, sep: sep5 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9834,7 +9834,7 @@ var require_transport = __commonJS({
         let fixTarget2;
         for (const filePath of callers) {
           try {
-            const context = filePath === "node:repl" ? process.cwd() + sep4 : filePath;
+            const context = filePath === "node:repl" ? process.cwd() + sep5 : filePath;
             fixTarget2 = createRequire(context).resolve(origin);
             break;
           } catch (err2) {
@@ -49966,6 +49966,8 @@ function isProgramKey(key, value, scope) {
       return REMOTE_PROGRAM_KEYS.has(name2) || (name2 === "url" || name2 === "pushurl") && helperUrl(v);
     case "hook":
       return true;
+    case "gc":
+      return name2 === "recentobjectshook";
     default:
       return false;
   }
@@ -50031,16 +50033,17 @@ function readRepository(cwd2, executor, scope, gitDir) {
   if (!rev.ok || lines2.length !== 2) return { ok: false, reason: `git could not read the repository at ${where} (${(rev.stderr || rev.error || "no answer").trim().slice(0, VALUE_SHOWN)})` };
   const config2 = executor(cwd2, [...pin, "config", "--show-origin", "-z", "--list"]);
   if (!config2.ok) return { ok: false, reason: `git could not read the configuration at ${where}` };
-  const gitFolder = isAbsolute(lines2[0]) ? lines2[0] : resolve(cwd2, lines2[0]);
+  const realCwd = canonicalPath(cwd2);
+  const gitFolder = isAbsolute(lines2[0]) ? lines2[0] : resolve(realCwd, lines2[0]);
   const scopeKey = scopeKeyOf(gitFolder);
-  const hooksDir = isAbsolute(lines2[1]) ? lines2[1] : resolve(scope === "remote" ? gitFolder : cwd2, lines2[1]);
+  const hooksDir = isAbsolute(lines2[1]) ? lines2[1] : resolve(scope === "remote" ? gitFolder : realCwd, lines2[1]);
   const hooks = hookEntries2(hooksDir, scope, scopeKey);
   if (hooks === null) return { ok: false, reason: `the hooks folder ${specLabel(posix2(hooksDir))} or a file in it could not be read` };
   const entries = [
     ...hooks,
     ...parseConfigList(config2.stdout).filter((e) => isProgramKey(e.key, e.value, scope)).map((e) => configEntry(e, scope, scopeKey))
   ];
-  return { ok: true, scopeKey, entries };
+  return { ok: true, scopeKey, gitFolder, hooksDir, entries };
 }
 function localPathRemote(url, cwd2, home = homedir()) {
   const file = /^file:\/\/(.*)$/i.exec(url);
@@ -50077,12 +50080,58 @@ function unresolvedLocal(url) {
   if (file) return !/^(\/|[A-Za-z]:)/.test(file[1]);
   return /^~[^/\\]/.test(url);
 }
-function readGitPrograms(projectRoot, executor, push) {
+function within(parent, child) {
+  const rel = relative(parent, child);
+  return rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+function treeHooks(executor, top, rev, rel) {
+  const listed2 = executor(top, ["ls-tree", "-z", rev, ...rel === "" ? [] : ["--", `:(literal)${rel}/`]]);
+  if (!listed2.ok) return null;
+  const hooks = /* @__PURE__ */ new Map();
+  for (const record2 of listed2.stdout.split("\0")) {
+    const tab = record2.indexOf("	");
+    if (tab === -1) continue;
+    const [mode, type, oid] = record2.slice(0, tab).split(" ");
+    const name2 = record2.slice(tab + 1).split("/").pop() ?? "";
+    if (type !== "blob" || name2.endsWith(".sample")) continue;
+    hooks.set(name2, `${mode} ${oid}`);
+  }
+  return hooks;
+}
+function incomingHooks(executor, projectRoot, repo, tip) {
+  const hooksDir = canonicalPath(repo.hooksDir);
+  if (within(canonicalPath(repo.gitFolder), hooksDir)) return [];
+  const toplevel = executor(projectRoot, ["rev-parse", "--show-toplevel"]);
+  if (!toplevel.ok) return null;
+  const top = canonicalPath(toplevel.stdout.trim());
+  if (!within(top, hooksDir)) return [];
+  const rel = posix2(relative(top, hooksDir));
+  const now = treeHooks(executor, top, "HEAD", rel);
+  const then = treeHooks(executor, top, tip, rel);
+  if (now === null || then === null) return null;
+  const entries = [];
+  for (const [name2, blob] of [...then].sort(([a], [b]) => a.localeCompare(b))) {
+    if (now.get(name2) === blob) continue;
+    const where = rel === "" ? name2 : `${rel}/${name2}`;
+    entries.push({
+      scopeKey: repo.scopeKey,
+      identity: digest("incoming-hook", name2, blob),
+      label: `hook ${specLabel(`"${name2}"`)} as this operation brings it (${specLabel(where)} at ${tip.slice(0, HASH_SHOWN)}, blob ${blob.split(" ")[1].slice(0, HASH_SHOWN)})`
+    });
+  }
+  return entries;
+}
+function readGitPrograms(projectRoot, executor, targets) {
   const repo = readRepository(projectRoot, executor, "repository");
   if (!repo.ok) return repo;
   const entries = [...repo.entries];
+  if (targets?.incoming !== void 0) {
+    const brought = incomingHooks(executor, projectRoot, repo, targets.incoming);
+    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.slice(0, HASH_SHOWN))}` };
+    entries.push(...brought);
+  }
   const scopeKeys = /* @__PURE__ */ new Set([repo.scopeKey]);
-  for (const url of push?.urls ?? []) {
+  for (const url of targets?.urls ?? []) {
     if (helperUrl(url)) {
       entries.push({ scopeKey: repo.scopeKey, identity: digest("push-url", url), label: `push URL run by a transport helper ${specLabel(`"${shown(url)}"`)}` });
     }
@@ -50155,14 +50204,14 @@ function programsDialogLines(projectRoot, tool, action, read, fresh) {
   const report = ordered.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "git-programs", `Programs git runs inside one ${tool} call`, ordered) : null;
   return [head, dialogList(ordered, DIALOG_LIST_SHOWN, LABEL_SHOWN), ...report !== null ? [`Full list: ${report}`] : []];
 }
-function checkGitPrograms(projectRoot, executor, auditConfig, push) {
-  const read = readGitPrograms(projectRoot, executor, push);
+function checkGitPrograms(projectRoot, executor, auditConfig, targets) {
+  const read = readGitPrograms(projectRoot, executor, targets);
   if (!read.ok) return read;
   const baseline = readProgramsBaseline(projectRoot, auditConfig);
   return { ok: true, read, baseline, fresh: newProgramEntries(read, baseline) };
 }
-function programsStillSame(check, projectRoot, executor, push) {
-  const now = readGitPrograms(projectRoot, executor, push);
+function programsStillSame(check, projectRoot, executor, targets) {
+  const now = readGitPrograms(projectRoot, executor, targets);
   if (!now.ok) return { ok: false, kind: "programs_unreadable", reason: now.reason };
   return sameProgramList(check.read, now) ? { ok: true } : { ok: false, kind: "programs_moved", reason: PROGRAMS_MOVED_REASON };
 }
@@ -50213,7 +50262,7 @@ function runRetention(prune, projectRoot, config2, now) {
 }
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git commit runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A plan token never covers a new or changed entry (programs_changed). The contract gate reads every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest), the universe they name plus the one read at the last approved commit, and in each its working tree, HEAD and fetched upstream; the dialog shows disagreements and what changed since the last approved commit, and a plan token never covers such a change (universe_changed). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git commit runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A plan token never covers a new or changed entry (programs_changed). The contract gate reads every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest), the universe they name plus the one read at the last approved commit, and in each its working tree, HEAD and fetched upstream; the dialog shows disagreements and what changed since the last approved commit, and a plan token never covers such a change (universe_changed). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -51520,7 +51569,7 @@ function shownList(label, items) {
 }
 var requestPushTool = {
   name: "rsct_request_push",
-  description: "\xA7C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/\u2026', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A push to a local path lists that repository's own too, and the coverage dry run of a protected push runs only when nothing in the list is new (programs_changed). On rejection the approval is NOT consumed.",
+  description: "\xA7C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/\u2026', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A push to a local path lists that repository's own too, and the coverage dry run of a protected push runs only when nothing in the list is new (programs_changed). On rejection the approval is NOT consumed.",
   inputSchema: {
     type: "object",
     properties: {
@@ -52040,7 +52089,7 @@ var requestMergeInputSchema = external_exports.object({
 }).strict();
 var requestMergeTool = {
   name: "rsct_request_merge",
-  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
+  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the source brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -52213,7 +52262,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit);
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: pinned });
   if (!programs.ok) {
     return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed \u2014 nothing was merged and no dialog was shown.`, { protected: targetProtected });
   }
@@ -52315,7 +52364,7 @@ ${reasons.join("\n")}` : "")
       protected: targetProtected
     });
   }
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor);
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned });
   if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected });
   appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories };
@@ -53024,7 +53073,7 @@ var requestRebaseInputSchema = external_exports.object({
 }).strict();
 var requestRebaseTool = {
   name: "rsct_request_rebase",
-  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the ref brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -53174,7 +53223,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit);
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: pinned });
   if (!programs.ok) {
     return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed \u2014 nothing was changed and no dialog was shown.`, { protected: currentProtected });
   }
@@ -53255,7 +53304,7 @@ ${reasons.join("\n")}` : "")
       protected: currentProtected
     });
   }
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor);
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned });
   if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected });
   appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: currentProtected, override_used: currentProtected };
