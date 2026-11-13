@@ -146,8 +146,11 @@ function assetKind(path: string): AssetKind | null {
 }
 
 function frontmatter(text: string): string {
-  const match = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(lf(text).replace(/^﻿/, ''))
-  return match ? match[1]! : ''
+  const body = lf(text).replace(/^﻿/, '')
+  if (!body.startsWith('---')) return ''
+  const rest = body.slice(body.indexOf('\n') === -1 ? body.length : body.indexOf('\n') + 1)
+  const close = /^---[ \t]*$/m.exec(rest)
+  return close ? rest.slice(0, close.index) : rest
 }
 
 function shellLines(text: string): string {
@@ -172,8 +175,8 @@ export function judgeClaudeAssetWrite(
   if (applied.missed) return { block: true, reason: INEXACT_EDIT }
   const before = frontmatter(current)
   const after = frontmatter(applied.text)
-  if (before !== after && (/hooks/i.test(before) || /hooks/i.test(after))) {
-    return { block: true, reason: `this write would add, change or remove the hooks of a Claude Code ${kind}, which run commands; that is the developer's own edit` }
+  if (before !== after && [before, after].some((part) => /hooks|mcpservers|\\/i.test(part))) {
+    return { block: true, reason: `this write would change the front matter of a Claude Code ${kind} where it names hooks or MCP servers, which run commands, or holds an escape that could spell them; that is the developer's own edit` }
   }
   if (shellLines(current) !== shellLines(applied.text)) {
     return { block: true, reason: `this write would add, change or remove a !\`command\` line in a Claude Code ${kind}, which runs before its text reaches the model; that is the developer's own edit` }
@@ -316,7 +319,7 @@ export function judgeRsctConfigWrite(
   const after = applied.text
   const afterJson = parseObject(after)
   const beforeJson = parseObject(current)
-  if (parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok) {
+  if ((beforeJson !== null && afterJson === null) || (parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok)) {
     return { block: true, reason: "this write would leave a .rsct.json RSCT rejects (unparseable, or outside its schema), which switches every RSCT edit check off; that is the developer's own edit" }
   }
   if (afterJson !== null && stable((beforeJson ?? {}).audit) !== stable(afterJson.audit)) {

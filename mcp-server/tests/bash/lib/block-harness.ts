@@ -1,24 +1,11 @@
-// T0.c — Layer 3 harness: run a SELF-CONTAINED prompt mutation block against a
-// throwaway fixture and assert its post-conditions.
-//
-// The block is extracted from the prompt BY ANCHOR (a substring of its
-// `CHECKPOINT:` line) so the test always runs the REAL shipped block — it can
-// never drift from a hand-copied snapshot. Blocks run WITHOUT `set -e` (the way
-// the AI runs them, statement-by-statement); assertions are on file STATE, not
-// exit code. Blocks 2/3 use `node -e`, so a node guard is provided.
-
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { loadPromptBlocks, type BashBlock } from './bash-lint.js'
-// #78: the bash to spawn is RESOLVED, not assumed. The catch below would swallow a
-// throw into a normal-looking result whose assertions then fail on missing files —
-// exactly the symptom this fixes — so the resolver classifies instead of throwing.
 import { bashBin } from './resolve-bash.js'
 import { BASH_BLOCK_TIMEOUT_MS } from './bash-bounds.js'
 
-// --- node availability (blocks 2 & 3 call `node -e`) ---
 let _nodeChecked = false
 let _nodeOk = false
 export function nodeAvailable(): boolean {
@@ -33,7 +20,6 @@ export function nodeAvailable(): boolean {
   return _nodeOk
 }
 
-/** Anti-silent-skip: when node is REQUIRED but absent, fail rather than skip. */
 export function assertNodePolicy(required: boolean, available: boolean): void {
   if (required && !available) {
     throw new Error(
@@ -43,7 +29,6 @@ export function assertNodePolicy(required: boolean, available: boolean): void {
   }
 }
 
-/** Find the single prompt block whose body contains `anchor`. Throws on 0 or >1. */
 export function extractBlockByAnchor(root: string, promptBasename: string, anchor: string): BashBlock {
   const matches = loadPromptBlocks(root).filter(
     (b) => b.source === promptBasename && b.code.includes(anchor),
@@ -59,13 +44,9 @@ export function extractBlockByAnchor(root: string, promptBasename: string, ancho
 export interface RunBlockOpts {
   promptBasename: string
   anchor: string
-  /** Shell lines prepended once before the block (e.g. SENSITIVE_VARS=…). */
   preamble?: string
-  /** Files seeded into the temp working dir: relative path → content. */
   seedFiles?: Record<string, string>
-  /** Run the block N times in the SAME dir (idempotency tests). Default 1. */
   runs?: number
-  /** Extra env for the bash process (merged over a hermetic default). */
   env?: Record<string, string>
 }
 
@@ -75,11 +56,6 @@ export interface RunBlockResult {
   dir: string
 }
 
-/**
- * Run a prompt block in a fresh temp dir. `$(pwd)` inside the block resolves to
- * that dir (cwd of the bash process), so the block reads/writes the seeded
- * fixtures. Returns file state via `dir`; assert on that, not on `exit`.
- */
 export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
   const block = extractBlockByAnchor(root, opts.promptBasename, opts.anchor)
   const dir = mkdtempSync(join(tmpdir(), 'rsct-block-'))
@@ -90,12 +66,9 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
   }
   const runs = opts.runs ?? 1
   const one = `${opts.preamble ?? ''}\n${block.code}\n`
-  // No `set -e` — run as the AI runs it. Repeat in-place for idempotency tests.
   const body = Array.from({ length: runs }, () => one).join('\n# --- rerun ---\n')
   const runnerPath = join(dir, '.rsct_runner.sh')
   writeFileSync(runnerPath, body)
-  // Hermetic by default: HOME points at the temp dir so a block reading
-  // $HOME/.rsct/... never touches the real home (overridable via opts.env).
   const env = { ...process.env, HOME: dir.replace(/\\/g, '/'), ...(opts.env ?? {}) }
   try {
     const out = execFileSync(bashBin(), [runnerPath], {
@@ -103,11 +76,6 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
       env,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      // execFileSync BLOCKS this worker thread, so a block that never exits
-      // stops the event loop and vitest's per-test timeout cannot fire — the
-      // suite hangs indefinitely rather than failing. This is the only bound
-      // that exists. Generous against runs that normally take 1-3s so CPU
-      // contention cannot trip it.
       timeout: BASH_BLOCK_TIMEOUT_MS,
       killSignal: 'SIGKILL',
     })
@@ -118,6 +86,5 @@ export function runBlock(root: string, opts: RunBlockOpts): RunBlockResult {
   }
 }
 
-// --- assertion helpers ---
 export const readIn = (r: RunBlockResult, rel: string): string => readFileSync(join(r.dir, rel), 'utf8')
 export const hasIn = (r: RunBlockResult, rel: string): boolean => existsSync(join(r.dir, rel))

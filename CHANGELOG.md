@@ -44,7 +44,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `.mcp.json`, `.claude.json`, managed settings and plugin files, whole;
   - any hook entry, and any key that runs a command or loads servers or plugins, in
     `.claude/settings.json` and `.claude/settings.local.json`;
-  - hooks and `` !`command` `` lines in skills, commands and agents.
+  - hooks and `` !`command` `` lines in skills, commands and agents, and an agent's MCP servers; a
+    front matter change that holds an escape, or a front matter with no closing line, is read as one
+    that names them.
   Names are compared without regard to case on every system.
 - **The terminal guard refuses** `git config` writes in sections whose keys run programs, `git init` and
   `git clone` that plant hooks or configuration, and remotes that name a transport helper.

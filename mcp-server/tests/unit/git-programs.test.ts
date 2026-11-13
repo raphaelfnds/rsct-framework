@@ -306,6 +306,48 @@ describe('git-programs — REVIEW round 1', () => {
     expect(pushCheck().fresh).toEqual([])
   })
 
+  it('follows a gitfile of any name at the first spot git looks, not a clean decoy beside it (REVIEW round 2)', () => {
+    const r = repo()
+    const evil = join(base, 'evil.git')
+    mkdirSync(evil)
+    git(evil, 'init', '-q', '--bare')
+    hook(join(evil, 'hooks'), 'pre-receive')
+    const decoy = join(base, 'remote.git')
+    mkdirSync(decoy)
+    git(decoy, 'init', '-q', '--bare')
+    writeFileSync(join(base, 'remote'), `gitdir: ${evil}\n`)
+    expect(labels(r, { urls: [join(base, 'remote')] }).some((l) => l.startsWith('local remote hook "pre-receive"'))).toBe(true)
+  })
+
+  it('refuses a file at the first spot git looks that is not a gitfile, even with a repository beside it (REVIEW round 2)', () => {
+    const r = repo()
+    const decoy = join(base, 'remote.git')
+    mkdirSync(decoy)
+    git(decoy, 'init', '-q', '--bare')
+    writeFileSync(join(base, 'remote'), 'not a gitfile\n')
+    expect(readGitPrograms(r, defaultGitExecutor, { urls: [join(base, 'remote')] }).ok).toBe(false)
+  })
+
+  it("resolves a remote's relative core.hooksPath against its git folder, where push hooks run (REVIEW round 2)", () => {
+    const r = repo()
+    mkdirSync(join(r, 'myhooks'))
+    const bare = join(base, 'rel.git')
+    mkdirSync(bare)
+    git(bare, 'init', '-q', '--bare')
+    git(bare, 'config', 'core.hooksPath', 'myhooks')
+    hook(join(bare, 'myhooks'), 'pre-receive')
+    expect(labels(r, { urls: [bare] }).some((l) => l.includes('rel.git/myhooks/pre-receive'))).toBe(true)
+  })
+
+  it("refuses a push URL in another user's home or a relative file:// URL, which RSCT does not resolve (REVIEW round 2)", () => {
+    const r = repo()
+    mkdirSync(join(r, '~bob', 'x.git'), { recursive: true })
+    git(join(r, '~bob', 'x.git'), 'init', '-q', '--bare')
+    expect(readGitPrograms(r, defaultGitExecutor, { urls: ['~bob/x.git'] }).ok).toBe(false)
+    expect(readGitPrograms(r, defaultGitExecutor, { urls: ['file://~bob/x.git'] }).ok).toBe(false)
+    expect(readGitPrograms(r, defaultGitExecutor, { urls: ['file://../x.git'] }).ok).toBe(false)
+  })
+
   it('masks every credential before the last @ of a URL', () => {
     const r = repo()
     git(r, 'config', 'remote.o.url', 'foo::https://user:p@ss@host.invalid/x')

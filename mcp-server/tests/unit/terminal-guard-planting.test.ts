@@ -142,6 +142,67 @@ describe('terminal guard — abbreviations, short clusters and planting variable
   })
 })
 
+describe('terminal guard — short options that take a value (REVIEW round 2)', () => {
+  it.each([
+    'git config -tbool core.hooksPath true',
+    'git config -tcolor core.hooksPath x',
+    'git config -tbool-or-int core.hooksPath 1',
+    'git config -t bool core.hooksPath true',
+    'git config -zt bool core.hooksPath true',
+    'git clone -qc core.sshCommand=evil-ssh proj dst',
+    'git clone -qccore.hooksPath=h src dst',
+    'git clone -nc core.hooksPath=h src dst',
+  ])('refuses %s', (command) => {
+    expect(verdictOf(command)).toBe('deny')
+  })
+
+  it.each([
+    'git config -t bool --get core.bare',
+    'git config -tbool --list',
+    'git clone -qb main src dst',
+    'git clone -ob c src dst',
+    'git clone -j 4 src dst',
+  ])('allows %s', (command) => {
+    expect(verdictOf(command)).toBe('allow')
+  })
+})
+
+describe('terminal guard — git init and clone with a home folder set on the command (REVIEW round 2)', () => {
+  it.each([
+    'HOME=/tmp/fake git init',
+    'XDG_CONFIG_HOME=/x git init',
+    'export HOME=/x; git init',
+    'HOME=/x; git init',
+    'env HOME=/x git clone https://example.invalid/r.git',
+    'env -i HOMEPATH=x git init',
+    'HOME+=/x git init',
+  ])('refuses %s', (command) => {
+    expect(verdictOf(command)).toBe('deny')
+  })
+
+  it('refuses a home folder set in PowerShell before git init or clone', () => {
+    expect(verdictOf("$env:USERPROFILE='C:\\x'; git init", 'powershell')).toBe('deny')
+    expect(verdictOf("$env:HOME = 'C:\\x'; git clone https://example.invalid/r.git", 'powershell')).toBe('deny')
+    expect(verdictOf("Set-Item env:HOMEDRIVE 'D:'; git init", 'powershell')).toBe('deny')
+    expect(verdictOf("[Environment]::SetEnvironmentVariable('HOME', 'C:\\x'); git init", 'powershell')).toBe('deny')
+  })
+
+  it.each([
+    'git clone https://example.invalid/r.git $HOME/src/r',
+    'cd "$HOME/projects" && git init',
+    'git init "${XDG_CONFIG_HOME:-x}/repo"',
+    'HOME=/x git status',
+    'MYHOME=/x git init',
+  ])('allows %s', (command) => {
+    expect(verdictOf(command)).toBe('allow')
+  })
+
+  it('allows a home folder read in PowerShell', () => {
+    expect(verdictOf('git clone https://example.invalid/r.git "$env:USERPROFILE\\src\\r"', 'powershell')).toBe('allow')
+    expect(verdictOf('Set-Location $env:HOME; git init', 'powershell')).toBe('allow')
+  })
+})
+
 describe('terminal guard — a value from a variable is still a value (REVIEW round 1)', () => {
   it('allows a config value built from a variable, refuses a key built from one', () => {
     expect(verdictOf('git config user.email "$EMAIL"')).toBe('allow')
