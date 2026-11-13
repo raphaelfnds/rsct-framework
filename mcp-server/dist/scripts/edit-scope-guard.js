@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
-import { readFileSync, existsSync, statSync, realpathSync, appendFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync, copyFileSync } from 'fs';
-import { isAbsolute, resolve, dirname, sep, relative, basename, join } from 'path';
-import { randomUUID } from 'crypto';
+import { readFileSync, existsSync, statSync, realpathSync, copyFileSync, appendFileSync, mkdirSync, writeFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { isAbsolute, resolve, dirname, sep, relative, join, basename } from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import 'string_decoder';
+import { randomUUID } from 'crypto';
 import { cwd } from 'process';
-import 'os';
+import { homedir } from 'os';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -17,90 +17,6 @@ var __export = (target, all) => {
 };
 function ensureParentDir(filePath) {
   mkdirSync(dirname(filePath), { recursive: true });
-}
-
-// src/lib/phase-scope.ts
-randomUUID();
-var PHASE_STATE_RELATIVE = ".rsct/phase-state.json";
-function phaseStatePath(projectRoot) {
-  return join(projectRoot, PHASE_STATE_RELATIVE);
-}
-function readPhaseState(projectRoot) {
-  const path = phaseStatePath(projectRoot);
-  if (!existsSync(path)) {
-    return { exists: false, state: null };
-  }
-  try {
-    const raw = readFileSync(path, "utf8").replace(/^﻿/, "");
-    if (raw.trim() === "") return { exists: true, state: null };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { exists: true, state: null, parse_error: "top-level value is not an object" };
-    }
-    return { exists: true, state: parsed };
-  } catch (err) {
-    return {
-      exists: true,
-      state: null,
-      parse_error: err instanceof Error ? err.message : String(err)
-    };
-  }
-}
-var globRegexCache = /* @__PURE__ */ new Map();
-function globToRegex(glob) {
-  const cached = globRegexCache.get(glob);
-  if (cached) return cached;
-  let out = "^";
-  let i = 0;
-  while (i < glob.length) {
-    const ch = glob[i];
-    if (ch === "*") {
-      if (glob[i + 1] === "*") {
-        const atSegmentStart = i === 0 || glob[i - 1] === "/";
-        const followedBySlash = glob[i + 2] === "/";
-        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += "(?:[^/]*/)*";
-          i += 3;
-        } else {
-          out += ".*";
-          i += followedBySlash ? 3 : 2;
-        }
-      } else {
-        out += "[^/]*";
-        i++;
-      }
-    } else if (ch === "?") {
-      out += "[^/]";
-      i++;
-    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
-      out += `\\${ch}`;
-      i++;
-    } else {
-      out += ch;
-      i++;
-    }
-  }
-  out += "$";
-  const re = new RegExp(out);
-  globRegexCache.set(glob, re);
-  return re;
-}
-var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
-function pathCarriesLineTerminator(path) {
-  return LINE_TERMINATORS.some((terminator) => path.includes(terminator));
-}
-function toPosix(p) {
-  return p.split("\\").join("/");
-}
-function matchesAnyGlob(path, globs, projectRoot) {
-  const candidates = [toPosix(path)];
-  for (const glob of globs) {
-    const re = globToRegex(glob.replace(/\\/g, "/"));
-    for (const candidate of candidates) {
-      if (re.test(candidate)) return { matched: true, matched_glob: glob };
-    }
-  }
-  return { matched: false };
 }
 var GIT_CHILD_CONFIG = ["-c", "core.fsmonitor="];
 function gitChildArgs(args) {
@@ -247,6 +163,193 @@ function resolveRepositoryAnchor(projectRoot, deps = {}) {
   };
 }
 
+// src/lib/audit-log.ts
+var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
+var WINDOWS_FORBIDDEN = /[<>"|?*]/;
+var PORT_DIGITS = `0-9${String.fromCharCode(185, 178, 179)}`;
+var WINDOWS_RESERVED = new RegExp(`^(?:con|prn|aux|nul|com[${PORT_DIGITS}]|lpt[${PORT_DIGITS}]|conin\\$|conout\\$)(?:\\..*)?$`, "i");
+function unusableTail(base, candidate) {
+  const tail = relative(base, candidate);
+  if (tail === "") return "not_a_file";
+  const windows = process.platform === "win32";
+  if (windows && tail.includes(":")) return "stream";
+  if (new RegExp("\\p{Cc}", "u").test(tail)) return "name";
+  const segments = tail.split(sep);
+  if (windows) {
+    if (WINDOWS_FORBIDDEN.test(tail)) return "name";
+    if (segments.some((s) => WINDOWS_RESERVED.test(s) || /[. ]$/.test(s))) return "name";
+  }
+  for (let i = 1; i < segments.length; i += 1) {
+    if (statSync(join(base, ...segments.slice(0, i)), { throwIfNoEntry: false })?.isDirectory() === false) return "not_a_file";
+  }
+  return statSync(candidate, { throwIfNoEntry: false })?.isFile() === false ? "not_a_file" : null;
+}
+var migrationAttempted = /* @__PURE__ */ new Set();
+function migrateLegacyLog(projectRoot, base, target) {
+  if (sameDirectory(projectRoot, base)) return;
+  const key = resolve(projectRoot);
+  if (migrationAttempted.has(key)) return;
+  migrationAttempted.add(key);
+  const legacy = join(resolve(projectRoot), DEFAULT_RELATIVE_PATH);
+  try {
+    if (!existsSync(legacy) || existsSync(target)) return;
+    ensureParentDir(target);
+    copyFileSync(legacy, target);
+    appendFileSync(
+      target,
+      JSON.stringify({
+        ts: (/* @__PURE__ */ new Date()).toISOString(),
+        event: "audit_log.migrated",
+        from: legacy.replace(/\\/g, "/"),
+        to: target.replace(/\\/g, "/"),
+        reason: "anchor bound to the repository (#92); history carried forward"
+      }) + "\n",
+      "utf8"
+    );
+    protectRelocatedState(projectRoot);
+  } catch {
+  }
+}
+function decideAuditPath(projectRoot, config) {
+  const anchor = anchorFor(projectRoot);
+  const base = anchor.root;
+  const fallback = join(base, DEFAULT_RELATIVE_PATH);
+  migrateLegacyLog(projectRoot, base, fallback);
+  const configured = config?.path;
+  if (configured && configured.length > 0) {
+    const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
+    if (!isInside(base, candidate)) {
+      return { path: fallback, base, escaped: candidate, unusable: null, anchor: anchor.status };
+    }
+    let reason;
+    try {
+      reason = unusableTail(base, candidate);
+    } catch {
+      reason = "not_a_file";
+    }
+    if (reason !== null) {
+      return { path: fallback, base, escaped: null, unusable: { path: configured, reason }, anchor: anchor.status };
+    }
+    return { path: candidate, base, escaped: null, unusable: null, anchor: anchor.status };
+  }
+  return { path: fallback, base, escaped: null, unusable: null, anchor: anchor.status };
+}
+function isInside(base, candidate) {
+  if (sameDirectory(base, candidate)) return true;
+  const b = resolve(base).replace(/\\/g, "/").replace(/\/+$/, "");
+  const c = resolve(candidate).replace(/\\/g, "/");
+  const prefix = process.platform === "win32" ? b.toLowerCase() + "/" : b + "/";
+  const target = process.platform === "win32" ? c.toLowerCase() : c;
+  return target.startsWith(prefix);
+}
+function resolveAuditPath(projectRoot, config) {
+  return decideAuditPath(projectRoot, config).path;
+}
+function appendAuditEntry(projectRoot, entry, config) {
+  if (config?.enabled === false) {
+    return { ok: false, reason: "disabled" };
+  }
+  const path = resolveAuditPath(projectRoot, config);
+  try {
+    ensureParentDir(path);
+    const stamped = { ...entry, ts: (/* @__PURE__ */ new Date()).toISOString() };
+    const line = `${JSON.stringify(stamped)}
+`;
+    appendFileSync(path, line, { encoding: "utf8" });
+    protectRelocatedState(projectRoot);
+    return { ok: true, path };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "write_failed",
+      path,
+      error: err instanceof Error ? err.message : String(err)
+    };
+  }
+}
+randomUUID();
+var PHASE_STATE_RELATIVE = ".rsct/phase-state.json";
+function phaseStatePath(projectRoot) {
+  return join(projectRoot, PHASE_STATE_RELATIVE);
+}
+function readPhaseState(projectRoot) {
+  const path = phaseStatePath(projectRoot);
+  if (!existsSync(path)) {
+    return { exists: false, state: null };
+  }
+  try {
+    const raw = readFileSync(path, "utf8").replace(/^﻿/, "");
+    if (raw.trim() === "") return { exists: true, state: null };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { exists: true, state: null, parse_error: "top-level value is not an object" };
+    }
+    return { exists: true, state: parsed };
+  } catch (err) {
+    return {
+      exists: true,
+      state: null,
+      parse_error: err instanceof Error ? err.message : String(err)
+    };
+  }
+}
+var globRegexCache = /* @__PURE__ */ new Map();
+function globToRegex(glob) {
+  const cached = globRegexCache.get(glob);
+  if (cached) return cached;
+  let out = "^";
+  let i = 0;
+  while (i < glob.length) {
+    const ch = glob[i];
+    if (ch === "*") {
+      if (glob[i + 1] === "*") {
+        const atSegmentStart = i === 0 || glob[i - 1] === "/";
+        const followedBySlash = glob[i + 2] === "/";
+        if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
+          out += "(?:[^/]*/)*";
+          i += 3;
+        } else {
+          out += ".*";
+          i += followedBySlash ? 3 : 2;
+        }
+      } else {
+        out += "[^/]*";
+        i++;
+      }
+    } else if (ch === "?") {
+      out += "[^/]";
+      i++;
+    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
+      out += `\\${ch}`;
+      i++;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  out += "$";
+  const re = new RegExp(out);
+  globRegexCache.set(glob, re);
+  return re;
+}
+var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
+function pathCarriesLineTerminator(path) {
+  return LINE_TERMINATORS.some((terminator) => path.includes(terminator));
+}
+function toPosix(p) {
+  return p.split("\\").join("/");
+}
+function matchesAnyGlob(path, globs, projectRoot) {
+  const candidates = [toPosix(path)];
+  for (const glob of globs) {
+    const re = globToRegex(glob.replace(/\\/g, "/"));
+    for (const candidate of candidates) {
+      if (re.test(candidate)) return { matched: true, matched_glob: glob };
+    }
+  }
+  return { matched: false };
+}
+
 // src/lib/edit-guard.ts
 var PLAN_TRACKING_GLOBS = ["plan_*.md", "progress_*.md", "spec_*.md"];
 function fileIdentity(path) {
@@ -258,10 +361,10 @@ function fileIdentity(path) {
   }
 }
 var nativeScopePaths = {
-  isAbsolute,
-  relative,
+  isAbsolute: isAbsolute,
+  relative: relative,
   resolve: resolve,
-  sep,
+  sep: sep,
   dirname: dirname,
   canonical: canonicalPath,
   identity: fileIdentity
@@ -4471,106 +4574,6 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
-var DEFAULT_RELATIVE_PATH = ".rsct/audit.log";
-var WINDOWS_FORBIDDEN = /[<>"|?*]/;
-var PORT_DIGITS = `0-9${String.fromCharCode(185, 178, 179)}`;
-var WINDOWS_RESERVED = new RegExp(`^(?:con|prn|aux|nul|com[${PORT_DIGITS}]|lpt[${PORT_DIGITS}]|conin\\$|conout\\$)(?:\\..*)?$`, "i");
-function unusableTail(base, candidate) {
-  const tail = relative(base, candidate);
-  if (tail === "") return "not_a_file";
-  const windows = process.platform === "win32";
-  if (windows && tail.includes(":")) return "stream";
-  if (new RegExp("\\p{Cc}", "u").test(tail)) return "name";
-  const segments = tail.split(sep);
-  if (windows) {
-    if (WINDOWS_FORBIDDEN.test(tail)) return "name";
-    if (segments.some((s) => WINDOWS_RESERVED.test(s) || /[. ]$/.test(s))) return "name";
-  }
-  for (let i = 1; i < segments.length; i += 1) {
-    if (statSync(join(base, ...segments.slice(0, i)), { throwIfNoEntry: false })?.isDirectory() === false) return "not_a_file";
-  }
-  return statSync(candidate, { throwIfNoEntry: false })?.isFile() === false ? "not_a_file" : null;
-}
-var migrationAttempted = /* @__PURE__ */ new Set();
-function migrateLegacyLog(projectRoot, base, target) {
-  if (sameDirectory(projectRoot, base)) return;
-  const key = resolve(projectRoot);
-  if (migrationAttempted.has(key)) return;
-  migrationAttempted.add(key);
-  const legacy = join(resolve(projectRoot), DEFAULT_RELATIVE_PATH);
-  try {
-    if (!existsSync(legacy) || existsSync(target)) return;
-    ensureParentDir(target);
-    copyFileSync(legacy, target);
-    appendFileSync(
-      target,
-      JSON.stringify({
-        ts: (/* @__PURE__ */ new Date()).toISOString(),
-        event: "audit_log.migrated",
-        from: legacy.replace(/\\/g, "/"),
-        to: target.replace(/\\/g, "/"),
-        reason: "anchor bound to the repository (#92); history carried forward"
-      }) + "\n",
-      "utf8"
-    );
-    protectRelocatedState(projectRoot);
-  } catch {
-  }
-}
-function decideAuditPath(projectRoot, config) {
-  const anchor = anchorFor(projectRoot);
-  const base = anchor.root;
-  const fallback = join(base, DEFAULT_RELATIVE_PATH);
-  migrateLegacyLog(projectRoot, base, fallback);
-  const configured = config?.path;
-  if (configured && configured.length > 0) {
-    const candidate = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
-    if (!isInside(base, candidate)) {
-      return { path: fallback, base, escaped: candidate, unusable: null, anchor: anchor.status };
-    }
-    let reason;
-    try {
-      reason = unusableTail(base, candidate);
-    } catch {
-      reason = "not_a_file";
-    }
-    if (reason !== null) {
-      return { path: fallback, base, escaped: null, unusable: { path: configured, reason }, anchor: anchor.status };
-    }
-    return { path: candidate, base, escaped: null, unusable: null, anchor: anchor.status };
-  }
-  return { path: fallback, base, escaped: null, unusable: null, anchor: anchor.status };
-}
-function isInside(base, candidate) {
-  if (sameDirectory(base, candidate)) return true;
-  const b = resolve(base).replace(/\\/g, "/").replace(/\/+$/, "");
-  const c = resolve(candidate).replace(/\\/g, "/");
-  const prefix = process.platform === "win32" ? b.toLowerCase() + "/" : b + "/";
-  const target = process.platform === "win32" ? c.toLowerCase() : c;
-  return target.startsWith(prefix);
-}
-function resolveAuditPath(projectRoot, config) {
-  return decideAuditPath(projectRoot, config).path;
-}
-function appendAuditEntry(projectRoot, entry, config) {
-  const path = resolveAuditPath(projectRoot, config);
-  try {
-    ensureParentDir(path);
-    const stamped = { ...entry, ts: (/* @__PURE__ */ new Date()).toISOString() };
-    const line = `${JSON.stringify(stamped)}
-`;
-    appendFileSync(path, line, { encoding: "utf8" });
-    protectRelocatedState(projectRoot);
-    return { ok: true, path };
-  } catch (err) {
-    return {
-      ok: false,
-      reason: "write_failed",
-      path,
-      error: err instanceof Error ? err.message : String(err)
-    };
-  }
-}
 
 // src/lib/project-root.ts
 var TRUST_ALLOWED_TOOL_NAMES = [
@@ -4708,27 +4711,28 @@ function readRsctConfig(projectRoot) {
   } catch {
     return null;
   }
+  const parsed = parseRsctConfigText(raw);
+  if (parsed.ok) return parsed.config;
+  if (parsed.reason === "malformed") emitConfigViolation(projectRoot, "malformed", { error: parsed.error });
+  else emitConfigViolation(projectRoot, "bounds_violation", { validation_errors: parsed.issues });
+  return null;
+}
+function parseRsctConfigText(raw) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    emitConfigViolation(projectRoot, "malformed", {
-      error: err instanceof Error ? err.message : String(err)
-    });
-    return null;
+    return { ok: false, reason: "malformed", error: err instanceof Error ? err.message : String(err) };
   }
   const validation = RsctConfigSchema.safeParse(parsed);
   if (!validation.success) {
-    emitConfigViolation(projectRoot, "bounds_violation", {
-      validation_errors: validation.error.issues.map((issue) => ({
-        path: issue.path.join(".") || "(root)",
-        code: issue.code,
-        message: issue.message
-      }))
-    });
-    return null;
+    return {
+      ok: false,
+      reason: "bounds_violation",
+      issues: validation.error.issues.map((issue) => ({ path: issue.path.join(".") || "(root)", code: issue.code, message: issue.message }))
+    };
   }
-  return validation.data;
+  return { ok: true, config: validation.data };
 }
 var VIOLATION_AUDIT_CONFIG = { enabled: true };
 var VIOLATION_REPEAT_MS = 60 * 60 * 1e3;
@@ -4777,6 +4781,47 @@ function readTail(path, maxBytes) {
     return buffer.toString("utf8", 0, read);
   } finally {
     closeSync(fd);
+  }
+}
+var PASS = { block: false };
+var GIT_FOLDER = "this write would change a file inside a git folder, where hooks, config and refs live; that is the developer's own edit";
+function bareName(name) {
+  const stream = name.indexOf(":");
+  return (stream === -1 ? name : name.slice(0, stream)).replace(/[. ]+$/, "").toLowerCase();
+}
+function pathComponents(path) {
+  return path.split(/[\\/]+/).filter((c) => c.length > 0).map((c, i) => i === 0 && /^[A-Za-z]:$/.test(c) ? c.toLowerCase() : bareName(c));
+}
+function exists(path, kind) {
+  try {
+    const st = statSync(path);
+    return kind === "file" ? st.isFile() : st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+function holdsGitRepository(dir) {
+  return exists(join(dir, "HEAD"), "file") && exists(join(dir, "objects"), "dir") && exists(join(dir, "refs"), "dir");
+}
+function judgeProtectedPath(absolutePath, home = homedir()) {
+  const canonical = canonicalPath(absolutePath);
+  const parts = pathComponents(canonical);
+  const name = parts[parts.length - 1] ?? "";
+  const parent = parts[parts.length - 2] ?? "";
+  if (parts.includes(".git")) return { block: true, reason: GIT_FOLDER };
+  if (name === ".gitconfig" || name === "gitconfig" && parent === "etc" || (name === "config" || name === "attributes") && parent === "git") {
+    return { block: true, reason: "this write would change a git configuration file, which can make git run programs; that is the developer's own edit" };
+  }
+  const rsctAt = parts.indexOf(".rsct");
+  if (rsctAt !== -1 && parts.slice(0, rsctAt + 1).join("/") !== pathComponents(canonicalPath(join(home, ".rsct"))).join("/")) {
+    return { block: true, reason: "this write would change RSCT's own state or guard scripts under .rsct/; that is the developer's own edit, or /rsct-setup" };
+  }
+  let current = dirname(canonical);
+  for (; ; ) {
+    if (holdsGitRepository(current)) return { block: true, reason: GIT_FOLDER };
+    const up = dirname(current);
+    if (up === current) return PASS;
+    current = up;
   }
 }
 
@@ -4841,7 +4886,43 @@ var RSCT_HOOK_MARKERS = [
   ".rsct/scripts/edit-scope-guard.js",
   ".rsct/scripts/terminal-guard.js"
 ];
-var PASS = { block: false };
+var PASS2 = { block: false };
+var EDITOR_TOOLS = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+var COMMAND_KEYS = [
+  "statusLine",
+  "apiKeyHelper",
+  "awsAuthRefresh",
+  "awsCredentialExport",
+  "gcpAuthRefresh",
+  "otelHeadersHelper",
+  "fileSuggestion",
+  "policyHelper",
+  "processWrapper",
+  "sshHostCommands",
+  "spellcheck",
+  "sandbox",
+  "enabledPlugins",
+  "extraKnownMarketplaces",
+  "pluginConfigs",
+  "appendPlugins",
+  "prependPlugins",
+  "enableAllProjectMcpServers",
+  "enabledMcpjsonServers",
+  "disabledMcpjsonServers",
+  "allowedMcpServers",
+  "deniedMcpServers",
+  "managedMcpServers",
+  "allowManagedHooksOnly",
+  "allowedChannelPlugins",
+  "disableCommandPluginSources"
+];
+var NAMED_KEYS = new RegExp(`\\b(hooks|${COMMAND_KEYS.join("|")})\\b`, "i");
+var WHOLE_FILES = /* @__PURE__ */ new Map([
+  [".mcp.json", "the project MCP server registrations"],
+  [".claude.json", "Claude Code's MCP servers, approvals and folder trust"],
+  ["managed-settings.json", "managed Claude Code settings"],
+  ["managed-mcp.json", "managed MCP servers"]
+]);
 function readOrNull(path) {
   try {
     return readFileSync(path, "utf8");
@@ -4850,7 +4931,7 @@ function readOrNull(path) {
   }
 }
 function bare(name) {
-  return name.replace(/::\$data$/i, "").replace(/[. ]+$/, "").toLowerCase();
+  return bareName(name);
 }
 function realOrNull(path) {
   try {
@@ -4866,11 +4947,86 @@ function namesSettingsFile(path) {
 function namesRsctConfig(path) {
   return bare(basename(path)) === ".rsct.json";
 }
-function anySpellingNames(filePath, names) {
+function spellings(filePath) {
   const lexical = resolve(filePath);
   const realDir = realOrNull(dirname(lexical));
-  const candidates = [lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))];
-  return candidates.some((c) => c !== null && names(c));
+  return [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c) => c !== null);
+}
+function anySpellingNames(filePath, names) {
+  return spellings(filePath).some(names);
+}
+function firstSpelling(filePath, judge) {
+  for (const candidate of spellings(filePath)) {
+    const found = judge(candidate);
+    if (found !== null) return found;
+  }
+  return null;
+}
+function bareParts(path) {
+  return pathComponents(path);
+}
+function wholeFileKind(path) {
+  const parts = bareParts(path);
+  const name = parts[parts.length - 1] ?? "";
+  const named = WHOLE_FILES.get(name);
+  if (named !== void 0) return named;
+  if (parts.includes("managed-settings.d")) return "managed Claude Code settings";
+  if (parts.includes(".claude-plugin")) return "a Claude Code plugin definition";
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parts[i] !== ".claude") continue;
+    if (parts[i + 1] === "plugins") return "an installed Claude Code plugin";
+    if (name === "hooks.json") return "Claude Code hooks";
+  }
+  return null;
+}
+function judgeClaudeConfigFile(toolName, filePath) {
+  if (!EDITOR_TOOLS.has(toolName)) return PASS2;
+  const kind = firstSpelling(filePath, wholeFileKind);
+  if (kind === null) return PASS2;
+  return { block: true, reason: `this write would change ${kind}, which Claude Code runs or loads; that is the developer's own edit` };
+}
+function assetKind(path) {
+  const parts = bareParts(path);
+  const name = parts[parts.length - 1] ?? "";
+  for (let i = 0; i < parts.length - 2; i++) {
+    if (parts[i] !== ".claude") continue;
+    const area = parts[i + 1];
+    if (area === "skills" && name === "skill.md") return "skill";
+    if (area === "commands" && name.endsWith(".md")) return "command";
+    if (area === "agents" && name.endsWith(".md")) return "agent";
+  }
+  return null;
+}
+function frontmatter(text) {
+  const body = lf(text).replace(/^﻿/, "");
+  if (!body.startsWith("---")) return "";
+  const rest = body.slice(body.indexOf("\n") === -1 ? body.length : body.indexOf("\n") + 1);
+  const close = /^---[ \t]*$/m.exec(rest);
+  return close ? rest.slice(0, close.index) : rest;
+}
+function shellLines(text) {
+  const inline = lf(text).match(/!`[^`]*`/g) ?? [];
+  const fenced = text.match(/^```!.*$[\s\S]*?^```/gm) ?? [];
+  return JSON.stringify([...inline, ...fenced].sort());
+}
+function judgeClaudeAssetWrite(toolName, input, filePath, read = readOrNull) {
+  if (!EDITOR_TOOLS.has(toolName)) return PASS2;
+  const kind = firstSpelling(filePath, assetKind);
+  if (kind === null) return PASS2;
+  if (toolName === "NotebookEdit") return { block: true, reason: `a Claude Code ${kind} file cannot be edited as a notebook` };
+  const current = lf(read(filePath) ?? "");
+  const applied = resultingText(toolName, input, current);
+  if (applied === null) return PASS2;
+  if (applied.missed) return { block: true, reason: INEXACT_EDIT };
+  const before = frontmatter(current);
+  const after = frontmatter(applied.text);
+  if (before !== after && [before, after].some((part) => /hooks|mcpservers|\\/i.test(part))) {
+    return { block: true, reason: `this write would change the front matter of a Claude Code ${kind} where it names hooks or MCP servers, which run commands, or holds an escape that could spell them; that is the developer's own edit` };
+  }
+  if (shellLines(current) !== shellLines(applied.text)) {
+    return { block: true, reason: `this write would add, change or remove a !\`command\` line in a Claude Code ${kind}, which runs before its text reaches the model; that is the developer's own edit` };
+  }
+  return PASS2;
 }
 function isClaudeSettingsFile(filePath) {
   return anySpellingNames(filePath, namesSettingsFile);
@@ -4950,6 +5106,18 @@ function rsctEntries(json) {
   }
   return found;
 }
+function hooksShape(hooks) {
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return stable(hooks);
+  const shaped = {};
+  for (const [event, groups] of Object.entries(hooks)) {
+    shaped[event] = Array.isArray(groups) ? groups.map((group) => {
+      if (!group || typeof group !== "object" || Array.isArray(group)) return group;
+      const { matcher, ...rest } = group;
+      return matcher === void 0 || matcher === "" ? rest : { matcher, ...rest };
+    }) : groups;
+  }
+  return stable(shaped);
+}
 function changedRsctEntry(before, after) {
   const remaining = rsctEntries(after).map((e) => e.key);
   for (const entry of rsctEntries(before)) {
@@ -4961,15 +5129,22 @@ function changedRsctEntry(before, after) {
 }
 var DATABASE_SWITCH_KEYS = ["database_guard", "database_test_guard"];
 function judgeRsctConfigWrite(toolName, input, filePath, read = readOrNull) {
-  if (toolName !== "Write" && toolName !== "Edit" && toolName !== "MultiEdit") return PASS;
-  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS;
+  if (!EDITOR_TOOLS.has(toolName)) return PASS2;
+  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS2;
+  if (toolName === "NotebookEdit") return { block: true, reason: ".rsct.json cannot be edited as a notebook" };
   const current = lf(read(filePath) ?? "");
   const applied = resultingText(toolName, input, current);
-  if (applied === null) return PASS;
+  if (applied === null) return PASS2;
   if (applied.missed) return { block: true, reason: INEXACT_EDIT };
   const after = applied.text;
   const afterJson = parseObject(after);
   const beforeJson = parseObject(current);
+  if (beforeJson !== null && afterJson === null || parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok) {
+    return { block: true, reason: "this write would leave a .rsct.json RSCT rejects (unparseable, or outside its schema), which switches every RSCT edit check off; that is the developer's own edit" };
+  }
+  if (afterJson !== null && stable((beforeJson ?? {}).audit) !== stable(afterJson.audit)) {
+    return { block: true, reason: `this write would change where or whether RSCT keeps its audit log ("audit" in .rsct.json); that is the developer's own edit` };
+  }
   for (const key of DATABASE_SWITCH_KEYS) {
     const offAfter = afterJson ? afterJson[key] === false : new RegExp(`"${key}"\\s*:\\s*false`, "i").test(decodeUnicodeEscapes(after));
     const offBefore = beforeJson !== null && beforeJson[key] === false;
@@ -4977,14 +5152,15 @@ function judgeRsctConfigWrite(toolName, input, filePath, read = readOrNull) {
       return { block: true, reason: `this write would switch the database guard off ("${key}": false in .rsct.json); that is the developer's own edit` };
     }
   }
-  return PASS;
+  return PASS2;
 }
 function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
-  if (toolName !== "Write" && toolName !== "Edit" && toolName !== "MultiEdit") return PASS;
-  if (!isClaudeSettingsFile(filePath)) return PASS;
+  if (!EDITOR_TOOLS.has(toolName)) return PASS2;
+  if (!isClaudeSettingsFile(filePath)) return PASS2;
+  if (toolName === "NotebookEdit") return { block: true, reason: "a Claude Code settings file cannot be edited as a notebook" };
   const current = lf(read(filePath) ?? "");
   const applied = resultingText(toolName, input, current);
-  if (applied === null) return PASS;
+  if (applied === null) return PASS2;
   if (applied.missed) return { block: true, reason: INEXACT_EDIT };
   const after = applied.text;
   const afterJson = parseObject(after);
@@ -5024,16 +5200,31 @@ function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
     if (/"env"\s*:/i.test(decodedAfter)) {
       return { block: true, reason: "this write would leave a Claude Code settings file unreadable with an env block in it; every env entry is the developer's own edit" };
     }
-    return PASS;
+    const held = beforeJson !== null && ["hooks", ...COMMAND_KEYS].some((k) => Object.hasOwn(beforeJson, k));
+    if (held || NAMED_KEYS.test(decodedAfter)) {
+      return { block: true, reason: "this write would leave a Claude Code settings file unreadable where it holds or names hooks or a key that runs a command; that is the developer's own edit" };
+    }
+    return PASS2;
   }
   const envKey = changedEnvKey(beforeJson, afterJson);
   if (envKey !== null) {
     return { block: true, reason: `this write would add, change or remove env.${envKey} in a Claude Code settings file; every env entry is the developer's own edit` };
   }
-  return PASS;
+  const was = beforeJson ?? {};
+  if (hooksShape(was.hooks) !== hooksShape(afterJson.hooks)) {
+    return { block: true, reason: "this write would add, change or remove a hook entry in a Claude Code settings file; hooks run commands, so that is the developer's own edit" };
+  }
+  const key = COMMAND_KEYS.find((k) => stable(was[k]) !== stable(afterJson[k]));
+  if (key !== void 0) {
+    return { block: true, reason: `this write would add, change or remove ${key} in a Claude Code settings file; it runs a command or loads code, so that is the developer's own edit` };
+  }
+  return PASS2;
 }
 
 // src/lib/edit-scope-hook.ts
+function samePath(a, b) {
+  return pathComponents(canonicalPath(a)).join("/") === pathComponents(canonicalPath(b)).join("/");
+}
 function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
   try {
     const trimmed = rawStdin.trim();
@@ -5053,15 +5244,27 @@ function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
     if (paths.length === 0) return { exitCode: 0, message: null };
     const cwdForResolve = typeof payload.cwd === "string" && payload.cwd.length > 0 ? payload.cwd : cwd2;
     const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
-    for (const filePath of paths) {
-      const absolute = isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath);
+    const absolutes = paths.map((filePath) => isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath));
+    for (const absolute of absolutes) {
+      const guarded = judgeProtectedPath(absolute);
+      if (guarded.block) return { exitCode: 2, message: `[rsct] Edit blocked (protected_path): ${guarded.reason}` };
+      const configFile = judgeClaudeConfigFile(toolName, absolute);
+      if (configFile.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${configFile.reason}` };
       const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute);
       if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` };
       const configWrite = judgeRsctConfigWrite(toolName, toolInput, absolute);
       if (configWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (rsct_config): ${configWrite.reason}` };
+      const asset = judgeClaudeAssetWrite(toolName, toolInput, absolute);
+      if (asset.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${asset.reason}` };
     }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve });
     const resolution = resolveProjectRoot(projectRoot);
+    if (resolution.config?.audit?.path !== void 0) {
+      const auditPath = decideAuditPath(resolution.root, resolution.config.audit).path;
+      if (absolutes.some((absolute) => samePath(absolute, auditPath))) {
+        return { exitCode: 2, message: "[rsct] Edit blocked (protected_path): this write would change RSCT's audit log; that is the developer's own edit" };
+      }
+    }
     for (const filePath of paths) {
       const guard = evaluate({
         projectRoot: resolution.root,

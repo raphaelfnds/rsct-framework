@@ -3,7 +3,7 @@ import { createRequire, builtinModules } from 'module';
 import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, win32, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, fstatSync } from 'fs';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, readlinkSync, fstatSync } from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync, spawn, spawnSync } from 'child_process';
 import { StringDecoder } from 'string_decoder';
@@ -135,7 +135,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str(strs, ...args2) {
+    function str2(strs, ...args2) {
       const expr = [safeStringify(strs[0])];
       let i2 = 0;
       while (i2 < args2.length) {
@@ -146,7 +146,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str;
+    exports.str = str2;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -189,7 +189,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str2`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -1151,22 +1151,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str) {
-      return unescapeJsonPointer(decodeURIComponent(str));
+    function unescapeFragment(str2) {
+      return unescapeJsonPointer(decodeURIComponent(str2));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
+    function escapeFragment(str2) {
+      return encodeURIComponent(escapeJsonPointer(str2));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
-      if (typeof str == "number")
-        return `${str}`;
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str2) {
+      if (typeof str2 == "number")
+        return `${str2}`;
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str) {
-      return str.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str2) {
+      return str2.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -2191,8 +2191,8 @@ var require_json_schema_traverse = __commonJS({
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str) {
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str2) {
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3017,7 +3017,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve10.call(this, root, ref);
+      let _sch = resolve12.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -3044,7 +3044,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve10(root, ref) {
+    function resolve12(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3288,10 +3288,10 @@ var require_utils = __commonJS({
         isIPV6: true
       };
     }
-    function findToken(str, token) {
+    function findToken(str2, token) {
       let ind = 0;
-      for (let i2 = 0; i2 < str.length; i2++) {
-        if (str[i2] === token) ind++;
+      for (let i2 = 0; i2 < str2.length; i2++) {
+        if (str2[i2] === token) ind++;
       }
       return ind;
     }
@@ -3908,7 +3908,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve10(baseURI, relativeURI, options) {
+    function resolve12(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3944,50 +3944,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative7, options, skipNormalization) {
+    function resolveComponent(base, relative8, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative7 = parse4(serialize2(relative7, options), options);
+        relative8 = parse4(serialize2(relative8, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative7.scheme) {
-        target.scheme = relative7.scheme;
-        target.userinfo = relative7.userinfo;
-        target.host = relative7.host;
-        target.port = relative7.port;
-        target.path = removeDotSegments(relative7.path || "");
-        target.query = relative7.query;
+      if (!options.tolerant && relative8.scheme) {
+        target.scheme = relative8.scheme;
+        target.userinfo = relative8.userinfo;
+        target.host = relative8.host;
+        target.port = relative8.port;
+        target.path = removeDotSegments(relative8.path || "");
+        target.query = relative8.query;
       } else {
-        if (relative7.userinfo !== void 0 || relative7.host !== void 0 || relative7.port !== void 0) {
-          target.userinfo = relative7.userinfo;
-          target.host = relative7.host;
-          target.port = relative7.port;
-          target.path = removeDotSegments(relative7.path || "");
-          target.query = relative7.query;
+        if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
+          target.userinfo = relative8.userinfo;
+          target.host = relative8.host;
+          target.port = relative8.port;
+          target.path = removeDotSegments(relative8.path || "");
+          target.query = relative8.query;
         } else {
-          if (!relative7.path) {
+          if (!relative8.path) {
             target.path = base.path;
-            if (relative7.query !== void 0) {
-              target.query = relative7.query;
+            if (relative8.query !== void 0) {
+              target.query = relative8.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative7.path[0] === "/") {
-              target.path = removeDotSegments(relative7.path);
+            if (relative8.path[0] === "/") {
+              target.path = removeDotSegments(relative8.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative7.path;
+                target.path = "/" + relative8.path;
               } else if (!base.path) {
-                target.path = relative7.path;
+                target.path = relative8.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative7.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative7.query;
+            target.query = relative8.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3995,7 +3995,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative7.fragment;
+      target.fragment = relative8.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4299,7 +4299,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve10,
+      resolve: resolve12,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -4361,7 +4361,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str, flags2) => new RegExp(str, flags2);
+    var defaultRegExp = (str2, flags2) => new RegExp(str2, flags2);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -5156,16 +5156,16 @@ var require_ucs2length = __commonJS({
   "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     init_esm_shims();
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str) {
-      const len = str.length;
+    function ucs2length(str2) {
+      const len = str2.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str.charCodeAt(pos++);
+        value = str2.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str.charCodeAt(pos);
+          value = str2.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -7048,8 +7048,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date3(str) {
-      const matches = DATE.exec(str);
+    function date3(str2) {
+      const matches = DATE.exec(str2);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -7068,8 +7068,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str) {
-        const matches = TIME.exec(str);
+      return function time3(str2) {
+        const matches = TIME.exec(str2);
         if (!matches)
           return false;
         const hr = +matches[1];
@@ -7115,8 +7115,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str) {
-        const dateTime = str.split(DATE_TIME_SEPARATOR);
+      return function date_time(str2) {
+        const dateTime = str2.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date3(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -7141,13 +7141,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str) {
-      return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+    function uri(str2) {
+      return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str) {
+    function byte(str2) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str);
+      return BYTE.test(str2);
     }
     var MIN_INT32 = -2147483648;
     var MAX_INT32 = 2 ** 31 - 1;
@@ -7161,11 +7161,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str) {
-      if (Z_ANCHOR.test(str))
+    function regex(str2) {
+      if (Z_ANCHOR.test(str2))
         return false;
       try {
-        new RegExp(str);
+        new RegExp(str2);
         return true;
       } catch (e) {
         return false;
@@ -8203,10 +8203,10 @@ var require_redaction = __commonJS({
     var strict = false;
     function redaction(opts, serialize2) {
       const { paths, censor, remove } = handle2(opts);
-      const shape = paths.reduce((o, str) => {
+      const shape = paths.reduce((o, str2) => {
         rx.lastIndex = 0;
-        const first = rx.exec(str);
-        const next = rx.exec(str);
+        const first = rx.exec(str2);
+        const next = rx.exec(str2);
         let ns = first[1] !== void 0 ? first[1].replace(/^(?:"|'|`)(.*)(?:"|'|`)$/, "$1") : first[0];
         if (ns === "*") {
           ns = wildcardFirstSym;
@@ -8219,7 +8219,7 @@ var require_redaction = __commonJS({
           return o;
         }
         const { index } = next;
-        const nextPath = `${str.substr(index, str.length - 1)}`;
+        const nextPath = `${str2.substr(index, str2.length - 1)}`;
         o[ns] = o[ns] || [];
         if (ns !== wildcardFirstSym && o[ns].length === 0) {
           o[ns].push(...o[wildcardFirstSym] || []);
@@ -8335,7 +8335,7 @@ var require_quick_format_unescaped = __commonJS({
       }
       var argLen = args2.length;
       if (argLen === 0) return f;
-      var str = "";
+      var str2 = "";
       var a = 1 - offset;
       var lastPos = -1;
       var flen = f && f.length || 0;
@@ -8350,8 +8350,8 @@ var require_quick_format_unescaped = __commonJS({
                 break;
               if (args2[a] == null) break;
               if (lastPos < i2)
-                str += f.slice(lastPos, i2);
-              str += Number(args2[a]);
+                str2 += f.slice(lastPos, i2);
+              str2 += Number(args2[a]);
               lastPos = i2 + 2;
               i2++;
               break;
@@ -8360,8 +8360,8 @@ var require_quick_format_unescaped = __commonJS({
                 break;
               if (args2[a] == null) break;
               if (lastPos < i2)
-                str += f.slice(lastPos, i2);
-              str += Math.floor(Number(args2[a]));
+                str2 += f.slice(lastPos, i2);
+              str2 += Math.floor(Number(args2[a]));
               lastPos = i2 + 2;
               i2++;
               break;
@@ -8374,21 +8374,21 @@ var require_quick_format_unescaped = __commonJS({
                 break;
               if (args2[a] === void 0) break;
               if (lastPos < i2)
-                str += f.slice(lastPos, i2);
+                str2 += f.slice(lastPos, i2);
               var type = typeof args2[a];
               if (type === "string") {
-                str += "'" + args2[a] + "'";
+                str2 += "'" + args2[a] + "'";
                 lastPos = i2 + 2;
                 i2++;
                 break;
               }
               if (type === "function") {
-                str += args2[a].name || "<anonymous>";
+                str2 += args2[a].name || "<anonymous>";
                 lastPos = i2 + 2;
                 i2++;
                 break;
               }
-              str += ss(args2[a]);
+              str2 += ss(args2[a]);
               lastPos = i2 + 2;
               i2++;
               break;
@@ -8396,15 +8396,15 @@ var require_quick_format_unescaped = __commonJS({
               if (a >= argLen)
                 break;
               if (lastPos < i2)
-                str += f.slice(lastPos, i2);
-              str += String(args2[a]);
+                str2 += f.slice(lastPos, i2);
+              str2 += String(args2[a]);
               lastPos = i2 + 2;
               i2++;
               break;
             case 37:
               if (lastPos < i2)
-                str += f.slice(lastPos, i2);
-              str += "%";
+                str2 += f.slice(lastPos, i2);
+              str2 += "%";
               lastPos = i2 + 2;
               i2++;
               a--;
@@ -8417,9 +8417,9 @@ var require_quick_format_unescaped = __commonJS({
       if (lastPos === -1)
         return f;
       else if (lastPos < flen) {
-        str += f.slice(lastPos);
+        str2 += f.slice(lastPos);
       }
-      return str;
+      return str2;
     }
   }
 });
@@ -9280,7 +9280,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join37 } = __require("path");
+    var { join: join40 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9323,7 +9323,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join37(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join40(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9726,7 +9726,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join37, isAbsolute: isAbsolute10, sep: sep4 } = __require("path");
+    var { join: join40, isAbsolute: isAbsolute11, sep: sep4 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9789,7 +9789,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join37(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join40(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9807,7 +9807,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join37(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join40(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9825,11 +9825,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute10(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute11(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join37(__dirname$1, "..", "file.js");
+          return join40(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -9928,29 +9928,29 @@ var require_tools = __commonJS({
         }
       }
     }
-    function asString(str) {
+    function asString(str2) {
       let result = "";
       let last = 0;
       let found = false;
       let point = 255;
-      const l = str.length;
+      const l = str2.length;
       if (l > 100) {
-        return JSON.stringify(str);
+        return JSON.stringify(str2);
       }
       for (var i2 = 0; i2 < l && point >= 32; i2++) {
-        point = str.charCodeAt(i2);
+        point = str2.charCodeAt(i2);
         if (point === 34 || point === 92) {
-          result += str.slice(last, i2) + "\\";
+          result += str2.slice(last, i2) + "\\";
           last = i2;
           found = true;
         }
       }
       if (!found) {
-        result = str;
+        result = str2;
       } else {
-        result += str.slice(last);
+        result += str2.slice(last);
       }
-      return point < 32 ? JSON.stringify(str) : '"' + result + '"';
+      return point < 32 ? JSON.stringify(str2) : '"' + result + '"';
     }
     function asJson(obj, msg, num, time3) {
       if (asJsonChan.hasSubscribers === false) {
@@ -10656,11 +10656,11 @@ var require_safe_stable_stringify = __commonJS({
     exports.configure = configure;
     module2.exports = stringify;
     var strEscapeSequencesRegExp = /[\u0000-\u001f\u0022\u005c\ud800-\udfff]/;
-    function strEscape(str) {
-      if (str.length < 5e3 && !strEscapeSequencesRegExp.test(str)) {
-        return `"${str}"`;
+    function strEscape(str2) {
+      if (str2.length < 5e3 && !strEscapeSequencesRegExp.test(str2)) {
+        return `"${str2}"`;
       }
-      return JSON.stringify(str);
+      return JSON.stringify(str2);
     }
     function sort(array2, comparator) {
       if (array2.length > 200 || comparator) {
@@ -10819,7 +10819,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join37 = ",";
+            let join40 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10833,7 +10833,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join37 = `,
+                join40 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10841,13 +10841,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join37;
+                res += join40;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join37}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join40}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10868,7 +10868,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join37 = `,
+              join40 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10882,13 +10882,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join37;
+                separator = join40;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join37;
+              separator = join40;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10929,7 +10929,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join37 = ",";
+            let join40 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10942,7 +10942,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join37 = `,
+                join40 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10950,13 +10950,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join37;
+                res += join40;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join37}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join40}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10969,7 +10969,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join37 = `,
+              join40 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10978,7 +10978,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join37;
+                separator = join40;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -11036,20 +11036,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join38 = `,
+              const join41 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join38;
+                res2 += join41;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join38}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11065,16 +11065,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join37 = `,
+            const join40 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join37, maximumBreadth);
+              res += stringifyTypedArray(value, join40, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join37;
+              separator = join40;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11085,13 +11085,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join37;
+                separator = join40;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join37;
+              separator = join40;
             }
             if (separator !== "") {
               res = `
@@ -15969,14 +15969,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str = "";
+  let str2 = "";
   for (let i2 = 0; i2 < length; i2++) {
-    str += chars[Math.floor(Math.random() * chars.length)];
+    str2 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str;
+  return str2;
 }
-function esc(str) {
-  return JSON.stringify(str);
+function esc(str2) {
+  return JSON.stringify(str2);
 }
 function slugify(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -16090,8 +16090,8 @@ var primitiveTypes = /* @__PURE__ */ new Set([
   "symbol",
   "undefined"
 ]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -16357,13 +16357,13 @@ function getSizableOrigin(input) {
   return "unknown";
 }
 var highSurrogate = /[\uD800-\uDBFF]/;
-function codePointLength(str) {
-  const units = str.length;
-  if (!highSurrogate.test(str))
+function codePointLength(str2) {
+  const units = str2.length;
+  if (!highSurrogate.test(str2))
     return units;
   let count = units;
   for (let i2 = 0; i2 < units - 1; i2++) {
-    if ((str.charCodeAt(i2) & 64512) === 55296 && (str.charCodeAt(i2 + 1) & 64512) === 56320) {
+    if ((str2.charCodeAt(i2) & 64512) === 55296 && (str2.charCodeAt(i2 + 1) & 64512) === 56320) {
       count--;
       i2++;
     }
@@ -19079,7 +19079,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve10) {
+function isRecursive(inst, stack, resolve12) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -24402,7 +24402,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve10) => setTimeout(resolve10, pollInterval));
+        await new Promise((resolve12) => setTimeout(resolve12, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -24419,7 +24419,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve10, reject2) => {
+    return new Promise((resolve12, reject2) => {
       const earlyReject = (error2) => {
         reject2(error2);
       };
@@ -24497,7 +24497,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject2(parseResult.error);
           } else {
-            resolve10(parseResult.data);
+            resolve12(parseResult.data);
           }
         } catch (error2) {
           reject2(error2);
@@ -24759,12 +24759,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve10, reject2) => {
+    return new Promise((resolve12, reject2) => {
       if (signal.aborted) {
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve10, interval);
+      const timeoutId = setTimeout(resolve12, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -25631,12 +25631,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve10) => {
+    return new Promise((resolve12) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve10();
+        resolve12();
       } else {
-        this._stdout.once("drain", resolve10);
+        this._stdout.once("drain", resolve12);
       }
     });
   }
@@ -26109,10 +26109,10 @@ function readHeadBirth(projectRoot, executor = defaultGitExecutor) {
   }
   const ref = symbolic.stdout.trim();
   if (!ref.startsWith("refs/heads/")) return { status: "unknown", detail: `HEAD names ${JSON.stringify(ref)}, not a branch` };
-  const shown = executor(projectRoot, ["show-ref", "--verify", "--quiet", ref]);
-  if (shown.ok) return { status: "born" };
-  if (shown.exitCode === 1) return { status: "unborn", branch: ref.slice("refs/heads/".length) };
-  return { status: "unknown", detail: `git show-ref exited ${shown.exitCode}` };
+  const shown2 = executor(projectRoot, ["show-ref", "--verify", "--quiet", ref]);
+  if (shown2.ok) return { status: "born" };
+  if (shown2.exitCode === 1) return { status: "unborn", branch: ref.slice("refs/heads/".length) };
+  return { status: "unknown", detail: `git show-ref exited ${shown2.exitCode}` };
 }
 function countRepositoryCommits(projectRoot, executor = defaultGitExecutor) {
   const r = executor(projectRoot, ["rev-list", "--all", "--reflog", "--count"]);
@@ -26294,14 +26294,14 @@ function anchorFor(projectRoot, deps = {}) {
 }
 function repositoryDialogLine(projectRoot) {
   const a = anchorFor(projectRoot);
-  const shown = specLabel(a.root.replace(/\\/g, "/"), DIALOG_PATH_LIMIT);
+  const shown2 = specLabel(a.root.replace(/\\/g, "/"), DIALOG_PATH_LIMIT);
   if (a.status === "relocated") {
-    return `Repository: ${shown}
+    return `Repository: ${shown2}
 \u26A0 RSCT state resolves there, NOT at the folder you passed (${specLabel(resolve(projectRoot).replace(/\\/g, "/"), DIALOG_PATH_LIMIT)}).`;
   }
-  if (a.status === "not-applicable") return `Folder: ${shown} (not a git repository)`;
-  if (a.status === "unavailable") return `Folder: ${shown} (git could not confirm the repository)`;
-  return `Repository: ${shown}`;
+  if (a.status === "not-applicable") return `Folder: ${shown2} (not a git repository)`;
+  if (a.status === "unavailable") return `Folder: ${shown2} (git could not confirm the repository)`;
+  return `Repository: ${shown2}`;
 }
 function resolveRepositoryAnchor(projectRoot, deps = {}) {
   const gitRead = deps.gitRead ?? safeGitRead;
@@ -26603,27 +26603,28 @@ function readRsctConfig(projectRoot) {
   } catch {
     return null;
   }
+  const parsed = parseRsctConfigText(raw);
+  if (parsed.ok) return parsed.config;
+  if (parsed.reason === "malformed") emitConfigViolation(projectRoot, "malformed", { error: parsed.error });
+  else emitConfigViolation(projectRoot, "bounds_violation", { validation_errors: parsed.issues });
+  return null;
+}
+function parseRsctConfigText(raw) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (err2) {
-    emitConfigViolation(projectRoot, "malformed", {
-      error: err2 instanceof Error ? err2.message : String(err2)
-    });
-    return null;
+    return { ok: false, reason: "malformed", error: err2 instanceof Error ? err2.message : String(err2) };
   }
   const validation = RsctConfigSchema.safeParse(parsed);
   if (!validation.success) {
-    emitConfigViolation(projectRoot, "bounds_violation", {
-      validation_errors: validation.error.issues.map((issue2) => ({
-        path: issue2.path.join(".") || "(root)",
-        code: issue2.code,
-        message: issue2.message
-      }))
-    });
-    return null;
+    return {
+      ok: false,
+      reason: "bounds_violation",
+      issues: validation.error.issues.map((issue2) => ({ path: issue2.path.join(".") || "(root)", code: issue2.code, message: issue2.message }))
+    };
   }
-  return validation.data;
+  return { ok: true, config: validation.data };
 }
 var VIOLATION_AUDIT_CONFIG = { enabled: true };
 var VIOLATION_REPEAT_MS = 60 * 60 * 1e3;
@@ -27069,7 +27070,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.24.0";
+var RSCT_MCP_VERSION = "2.24.1";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -28028,9 +28029,9 @@ var MCP_VERSION = RSCT_MCP_VERSION;
 async function statusHandler(rawInput, deps = {}) {
   const input = statusInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  const git = readGitState(resolution.root);
+  const git2 = readGitState(resolution.root);
   const bootstrap = resolution.rsct_installed ? readThenStampBootstrap(resolution.root) : null;
-  const hints = buildStatusHints(resolution, git);
+  const hints = buildStatusHints(resolution, git2);
   if (bootstrap) hints.push(...bootstrapHints(bootstrap));
   const worktree = readWorktreeInfo(resolution.root);
   if (worktree.is_worktree) {
@@ -28070,7 +28071,7 @@ async function statusHandler(rawInput, deps = {}) {
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
-    git,
+    git: git2,
     worktree,
     universe: universe.block,
     topology: topology.block,
@@ -28156,7 +28157,7 @@ function bootstrapHints(refresh) {
   if (writeHint) hints.push(writeHint);
   return hints;
 }
-function buildStatusHints(resolution, git) {
+function buildStatusHints(resolution, git2) {
   const hints = [];
   if (!resolution.rsct_installed) {
     hints.push(
@@ -28165,12 +28166,12 @@ function buildStatusHints(resolution, git) {
     return hints;
   }
   const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
-  if (git.available && git.branch && protected_branches.includes(git.branch)) {
+  if (git2.available && git2.branch && protected_branches.includes(git2.branch)) {
     hints.push(
-      `Working on the protected branch '${git.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with the dev before proposing changes.`
+      `Working on the protected branch '${git2.branch}' needs a derived branch (feat/, fix/, chore/, docs/) for any mutating work \u2014 confirm with the dev before proposing changes.`
     );
   }
-  if (git.available && git.is_clean === false) {
+  if (git2.available && git2.is_clean === false) {
     hints.push(
       "Working tree has uncommitted changes \u2014 surface them in the next plan/spec phase so they are not lost."
     );
@@ -28977,7 +28978,7 @@ function buildActivePhase(projectRoot) {
 async function loadContextHandler(rawInput) {
   const input = loadContextInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  const git = readGitState(resolution.root);
+  const git2 = readGitState(resolution.root);
   const active_plan = findActivePlan(resolution.root);
   const active_phase = buildActivePhase(resolution.root);
   const decisionsSnapshot = readDecisions(resolution.root);
@@ -28990,7 +28991,7 @@ async function loadContextHandler(rawInput) {
   const topology = detectTopology(resolution.config, resolution.root, {}, universe);
   const next_action_hints = buildHints({
     resolution,
-    git,
+    git: git2,
     active_plan,
     active_phase,
     knowledge,
@@ -28999,7 +29000,7 @@ async function loadContextHandler(rawInput) {
   if (bootstrap) next_action_hints.push(...bootstrapHints2(bootstrap));
   if (universe.hint) next_action_hints.push(universe.hint);
   if (topology.hint) next_action_hints.push(topology.hint);
-  if (resolution.rsct_installed && active_plan?.branch && git.branch !== active_plan.branch) {
+  if (resolution.rsct_installed && active_plan?.branch && git2.branch !== active_plan.branch) {
     const disposition = readPlanDisposition(
       readPhaseState(resolution.root).state,
       active_plan.slug
@@ -29046,7 +29047,7 @@ async function loadContextHandler(rawInput) {
       protected_branches: resolution.rsct_installed ? effectiveProtectedList(resolution.config ?? void 0).list : [],
       test_framework: resolution.config?.test_framework ?? null
     },
-    git,
+    git: git2,
     active_plan,
     active_phase,
     decisions: {
@@ -29103,7 +29104,7 @@ function bootstrapHints2(refresh) {
 }
 function buildHints({
   resolution,
-  git,
+  git: git2,
   active_plan,
   active_phase,
   knowledge,
@@ -29117,9 +29118,9 @@ function buildHints({
     return hints;
   }
   const protected_branches = effectiveProtectedList(resolution.config ?? void 0).list;
-  if (git.available && git.branch && protected_branches.includes(git.branch)) {
+  if (git2.available && git2.branch && protected_branches.includes(git2.branch)) {
     hints.push(
-      `On the protected branch '${git.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
+      `On the protected branch '${git2.branch}' \u2014 mutating git ops need a per-action OK; suggest deriving a branch before the code phase.`
     );
   }
   const miss = corpusMiss({
@@ -29156,9 +29157,9 @@ function buildHints({
     hints.push(
       `Active plan: ${active_plan.slug} (status: ${status}). Continue from progress file if status is 'approved' or 'in-progress'.`
     );
-    if (active_plan.branch && git.available && (git.branch !== null || git.head_sha !== null) && active_plan.branch !== git.branch) {
+    if (active_plan.branch && git2.available && (git2.branch !== null || git2.head_sha !== null) && active_plan.branch !== git2.branch) {
       hints.push(
-        `Plan branch '${active_plan.branch}' differs from the current ${git.branch === null ? "HEAD, which is not on a branch" : `branch '${git.branch}'`} \u2014 ask the dev which branch to continue in.`
+        `Plan branch '${active_plan.branch}' differs from the current ${git2.branch === null ? "HEAD, which is not on a branch" : `branch '${git2.branch}'`} \u2014 ask the dev which branch to continue in.`
       );
     }
   } else {
@@ -29412,13 +29413,13 @@ var LINE_VALUE_PATTERNS = [
 function compileExtraPatterns(patternStrings) {
   const compiled = [];
   const invalid = [];
-  patternStrings.forEach((str, index) => {
+  patternStrings.forEach((str2, index) => {
     try {
-      compiled.push({ id: `extra-${index}`, pattern: new RegExp(str) });
+      compiled.push({ id: `extra-${index}`, pattern: new RegExp(str2) });
     } catch (err2) {
       invalid.push({
         index,
-        pattern: str,
+        pattern: str2,
         error: err2 instanceof Error ? err2.message : String(err2)
       });
     }
@@ -30224,7 +30225,21 @@ function readContracts(universeRoot) {
     if (statSync(p).size > MAX_CONTRACTS_JSON_BYTES) {
       return { available: false, contracts: [], note: `contracts.json exceeds ${MAX_CONTRACTS_JSON_BYTES} bytes` };
     }
-    const parsed = JSON.parse(readFileSync(p, "utf8"));
+    return parseContracts(readFileSync(p, "utf8"));
+  } catch (e) {
+    return {
+      available: false,
+      contracts: [],
+      note: `contracts.json unreadable/malformed: ${e instanceof Error ? e.message : String(e)}`
+    };
+  }
+}
+function parseContracts(text2) {
+  if (Buffer.byteLength(text2, "utf8") > MAX_CONTRACTS_JSON_BYTES) {
+    return { available: false, contracts: [], note: `contracts.json exceeds ${MAX_CONTRACTS_JSON_BYTES} bytes` };
+  }
+  try {
+    const parsed = JSON.parse(text2);
     const raw = Array.isArray(parsed.contracts) ? parsed.contracts : [];
     const contracts = [];
     let dropped = 0;
@@ -31109,10 +31124,10 @@ var checkBranchTool = {
 async function checkBranchHandler(rawInput) {
   const input = checkBranchInputSchema.parse(rawInput ?? {});
   const resolution = resolveProjectRoot(input.project_root);
-  const git = readGitState(resolution.root);
+  const git2 = readGitState(resolution.root);
   const { list, source } = effectiveProtectedList(resolution.config ?? void 0);
-  const branch = input.branch ?? git.branch;
-  const in_git_repo = git.available;
+  const branch = input.branch ?? git2.branch;
+  const in_git_repo = git2.available;
   const is_protected = isProtectedBranch(branch, list);
   return {
     rsct_installed: resolution.rsct_installed,
@@ -31226,11 +31241,11 @@ async function checkSecretsHandler(rawInput) {
   const input = checkSecretsInputSchema.parse(rawInput ?? {});
   const staged_only = input.staged_only ?? true;
   const resolution = resolveProjectRoot(input.project_root);
-  const git = readGitState(resolution.root);
+  const git2 = readGitState(resolution.root);
   const extras = compileExtraPatterns(resolution.config?.secrets_extra_patterns ?? []);
   let findings = [];
   let readError = null;
-  const diffPresent = input.diff_override !== void 0 || git.available;
+  const diffPresent = input.diff_override !== void 0 || git2.available;
   if (input.diff_override !== void 0) {
     findings = scanDiffForSecrets(input.diff_override, extras.compiled);
   } else {
@@ -31245,7 +31260,7 @@ async function checkSecretsHandler(rawInput) {
   }
   return {
     rsct_installed: resolution.rsct_installed,
-    in_git_repo: git.available,
+    in_git_repo: git2.available,
     staged_only,
     findings,
     read_error: readError,
@@ -31253,7 +31268,7 @@ async function checkSecretsHandler(rawInput) {
     invalid_extra_patterns: extras.invalid,
     hints: buildHints7({
       rsct_installed: resolution.rsct_installed,
-      in_git_repo: git.available,
+      in_git_repo: git2.available,
       diff_present: diffPresent,
       read_error: readError,
       findings_count: findings.length,
@@ -42346,8 +42361,8 @@ var Module2 = (() => {
     var moduleRtn;
     var Module = moduleArg;
     var readyPromiseResolve, readyPromiseReject;
-    var readyPromise = new Promise((resolve10, reject2) => {
-      readyPromiseResolve = resolve10;
+    var readyPromise = new Promise((resolve12, reject2) => {
+      readyPromiseResolve = resolve12;
       readyPromiseReject = reject2;
     });
     var ENVIRONMENT_IS_WEB = typeof window == "object";
@@ -42429,13 +42444,13 @@ var Module2 = (() => {
         }
         readAsync = /* @__PURE__ */ __name(async (url) => {
           if (isFileURI(url)) {
-            return new Promise((resolve10, reject2) => {
+            return new Promise((resolve12, reject2) => {
               var xhr = new XMLHttpRequest();
               xhr.open("GET", url, true);
               xhr.responseType = "arraybuffer";
               xhr.onload = () => {
                 if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                  resolve10(xhr.response);
+                  resolve12(xhr.response);
                   return;
                 }
                 reject2(xhr.status);
@@ -42658,10 +42673,10 @@ var Module2 = (() => {
       __name(receiveInstantiationResult, "receiveInstantiationResult");
       var info2 = getWasmImports();
       if (Module["instantiateWasm"]) {
-        return new Promise((resolve10, reject2) => {
+        return new Promise((resolve12, reject2) => {
           Module["instantiateWasm"](info2, (mod, inst) => {
             receiveInstance(mod, inst);
-            resolve10(mod.exports);
+            resolve12(mod.exports);
           });
         });
       }
@@ -42730,16 +42745,16 @@ var Module2 = (() => {
       if (endPtr - idx > 16 && heapOrArray.buffer && UTF8Decoder) {
         return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));
       }
-      var str = "";
+      var str2 = "";
       while (idx < endPtr) {
         var u0 = heapOrArray[idx++];
         if (!(u0 & 128)) {
-          str += String.fromCharCode(u0);
+          str2 += String.fromCharCode(u0);
           continue;
         }
         var u1 = heapOrArray[idx++] & 63;
         if ((u0 & 224) == 192) {
-          str += String.fromCharCode((u0 & 31) << 6 | u1);
+          str2 += String.fromCharCode((u0 & 31) << 6 | u1);
           continue;
         }
         var u2 = heapOrArray[idx++] & 63;
@@ -42749,13 +42764,13 @@ var Module2 = (() => {
           u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
         }
         if (u0 < 65536) {
-          str += String.fromCharCode(u0);
+          str2 += String.fromCharCode(u0);
         } else {
           var ch = u0 - 65536;
-          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+          str2 += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
         }
       }
-      return str;
+      return str2;
     }, "UTF8ArrayToString");
     var getDylinkMetadata = /* @__PURE__ */ __name((binary2) => {
       var offset = 0;
@@ -43648,10 +43663,10 @@ var Module2 = (() => {
       }
       quit_(1, e);
     }, "handleException");
-    var lengthBytesUTF8 = /* @__PURE__ */ __name((str) => {
+    var lengthBytesUTF8 = /* @__PURE__ */ __name((str2) => {
       var len = 0;
-      for (var i2 = 0; i2 < str.length; ++i2) {
-        var c = str.charCodeAt(i2);
+      for (var i2 = 0; i2 < str2.length; ++i2) {
+        var c = str2.charCodeAt(i2);
         if (c <= 127) {
           len++;
         } else if (c <= 2047) {
@@ -43665,14 +43680,14 @@ var Module2 = (() => {
       }
       return len;
     }, "lengthBytesUTF8");
-    var stringToUTF8Array = /* @__PURE__ */ __name((str, heap, outIdx, maxBytesToWrite) => {
+    var stringToUTF8Array = /* @__PURE__ */ __name((str2, heap, outIdx, maxBytesToWrite) => {
       if (!(maxBytesToWrite > 0)) return 0;
       var startIdx = outIdx;
       var endIdx = outIdx + maxBytesToWrite - 1;
-      for (var i2 = 0; i2 < str.length; ++i2) {
-        var u = str.charCodeAt(i2);
+      for (var i2 = 0; i2 < str2.length; ++i2) {
+        var u = str2.charCodeAt(i2);
         if (u >= 55296 && u <= 57343) {
-          var u1 = str.charCodeAt(++i2);
+          var u1 = str2.charCodeAt(++i2);
           u = 65536 + ((u & 1023) << 10) | u1 & 1023;
         }
         if (u <= 127) {
@@ -43698,30 +43713,30 @@ var Module2 = (() => {
       heap[outIdx] = 0;
       return outIdx - startIdx;
     }, "stringToUTF8Array");
-    var stringToUTF8 = /* @__PURE__ */ __name((str, outPtr, maxBytesToWrite) => stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite), "stringToUTF8");
+    var stringToUTF8 = /* @__PURE__ */ __name((str2, outPtr, maxBytesToWrite) => stringToUTF8Array(str2, HEAPU8, outPtr, maxBytesToWrite), "stringToUTF8");
     var stackAlloc = /* @__PURE__ */ __name((sz) => __emscripten_stack_alloc(sz), "stackAlloc");
-    var stringToUTF8OnStack = /* @__PURE__ */ __name((str) => {
-      var size = lengthBytesUTF8(str) + 1;
+    var stringToUTF8OnStack = /* @__PURE__ */ __name((str2) => {
+      var size = lengthBytesUTF8(str2) + 1;
       var ret = stackAlloc(size);
-      stringToUTF8(str, ret, size);
+      stringToUTF8(str2, ret, size);
       return ret;
     }, "stringToUTF8OnStack");
     var AsciiToString = /* @__PURE__ */ __name((ptr) => {
-      var str = "";
+      var str2 = "";
       while (1) {
         var ch = HEAPU8[ptr++];
-        if (!ch) return str;
-        str += String.fromCharCode(ch);
+        if (!ch) return str2;
+        str2 += String.fromCharCode(ch);
       }
     }, "AsciiToString");
-    var stringToUTF16 = /* @__PURE__ */ __name((str, outPtr, maxBytesToWrite) => {
+    var stringToUTF16 = /* @__PURE__ */ __name((str2, outPtr, maxBytesToWrite) => {
       maxBytesToWrite ??= 2147483647;
       if (maxBytesToWrite < 2) return 0;
       maxBytesToWrite -= 2;
       var startPtr = outPtr;
-      var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+      var numCharsToWrite = maxBytesToWrite < str2.length * 2 ? maxBytesToWrite / 2 : str2.length;
       for (var i2 = 0; i2 < numCharsToWrite; ++i2) {
-        var codeUnit = str.charCodeAt(i2);
+        var codeUnit = str2.charCodeAt(i2);
         LE_HEAP_STORE_I16((outPtr >> 1) * 2, codeUnit);
         outPtr += 2;
       }
@@ -45901,11 +45916,11 @@ function coverageHints(result) {
   const lines2 = [];
   const uncovered = result.uncovered_seeds;
   if (uncovered.length > 0) {
-    const shown = uncovered.slice(0, 10).join(", ");
+    const shown2 = uncovered.slice(0, 10).join(", ");
     const overflow = uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : "";
     const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
     lines2.push(
-      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`
+      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown2}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`
     );
   }
   if (result.stats.files_scanned === 0) {
@@ -46270,7 +46285,7 @@ function createModuleResolver(args2) {
     }
     return [...files];
   };
-  const resolve10 = (fromRel, specifier) => {
+  const resolve12 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
@@ -46356,7 +46371,7 @@ function createModuleResolver(args2) {
     const source = settingsFor(fromRel)?.jsxImportSource;
     return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
   };
-  return { resolve: resolve10, prefixFiles, jsxFactories, jsxRuntimes };
+  return { resolve: resolve12, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -46881,8 +46896,8 @@ async function findDeadSymbols(input) {
   };
 }
 function listed(items) {
-  const shown = items.slice(0, HINT_LIST_LIMIT).join(", ");
-  return items.length > HINT_LIST_LIMIT ? `${shown} and ${items.length - HINT_LIST_LIMIT} more` : shown;
+  const shown2 = items.slice(0, HINT_LIST_LIMIT).join(", ");
+  return items.length > HINT_LIST_LIMIT ? `${shown2} and ${items.length - HINT_LIST_LIMIT} more` : shown2;
 }
 function hintsFor(input, corpus, candidates, dead, unknown2, publicExempted) {
   const hints = [];
@@ -47277,10 +47292,10 @@ async function checkStagedDeadCode(args2) {
       paths: analysis.paths ?? [...args2.stagedPaths]
     };
   }
-  const digest = publicApiDigest(args2.publicApi);
+  const digest2 = publicApiDigest(args2.publicApi);
   const approvals = args2.publicApiApprovals ?? /* @__PURE__ */ new Set();
   const unapproved = analysis.publicExempted.filter(
-    (p) => digest === null || !approvals.has(publicApiApprovalKey(digest, p.path, p.name, p.declaration_sha256))
+    (p) => digest2 === null || !approvals.has(publicApiApprovalKey(digest2, p.path, p.name, p.declaration_sha256))
   );
   const blocking = [...analysis.stale, ...analysis.pending];
   if (blocking.length === 0 && unapproved.length === 0) {
@@ -47335,8 +47350,8 @@ function quoted(text2) {
   return `"${specLabel(text2)}"`;
 }
 function inlineList(items, limit) {
-  const shown = items.slice(0, limit).map(quoted).join(", ");
-  return items.length > limit ? `${shown} \u2026 and ${items.length - limit} more` : shown;
+  const shown2 = items.slice(0, limit).map(quoted).join(", ");
+  return items.length > limit ? `${shown2} \u2026 and ${items.length - limit} more` : shown2;
 }
 function shownLimit(report) {
   return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN;
@@ -47369,10 +47384,10 @@ function findingActionLines(projectRoot, tool, actions, titleOf) {
     return `#${i2 + 1} ${a.finding_id} [${a.action}]${title ? ` ${title}` : ""}${a.note ? ` \u2014 note: ${a.note}` : ""}`;
   };
   const report = actions.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "findings", `Findings and the agent's actions for one ${tool} approval`, actions.map(full)) : null;
-  const shown = report === null ? actions : actions.slice(0, DIALOG_LIST_SHOWN);
-  const facts = [`Findings and the action the agent proposes for each (${actions.length}):`, ...shown.map((a, i2) => `#${i2 + 1} [${a.action}]`)];
-  if (shown.length < actions.length) facts.push(`\u2026 and ${actions.length - shown.length} more \u2014 full list: ${report}`);
-  const agent = shown.map((a, i2) => {
+  const shown2 = report === null ? actions : actions.slice(0, DIALOG_LIST_SHOWN);
+  const facts = [`Findings and the action the agent proposes for each (${actions.length}):`, ...shown2.map((a, i2) => `#${i2 + 1} [${a.action}]`)];
+  if (shown2.length < actions.length) facts.push(`\u2026 and ${actions.length - shown2.length} more \u2014 full list: ${report}`);
+  const agent = shown2.map((a, i2) => {
     const title = titleOf(a.finding_id);
     return `#${i2 + 1} ${specLabel(a.finding_id, 60)}${title ? ` \u2014 ${specLabel(title, 80)}` : ""}${a.note ? ` \u2014 note: ${specLabel(a.note, 80)}` : ""}`;
   });
@@ -47753,6 +47768,8 @@ var NEWEST_ONLY_EVENTS = /* @__PURE__ */ new Set([
   "sanitize.malformed",
   "sanitize.migration_skipped",
   "settings.drift_detected",
+  "git_programs.baseline",
+  "universe.baseline",
   AUDIT_PRUNED_EVENT
 ]);
 var PINNED_NAME_PARTS = ["override", "skip", "degraded", "bypass"];
@@ -49508,27 +49525,652 @@ function resolveMaxActions(input, configDefault) {
   );
 }
 
+// src/lib/contract-facts.ts
+init_esm_shims();
+var UNIVERSE_BASELINE_EVENT = "universe.baseline";
+var PIECE = 120;
+var ID_SHOWN = 12;
+var IDS_SHOWN = 400;
+function shortPath(path2) {
+  return specLabel(path2.replace(/\\/g, "/"), PIECE);
+}
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function str(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+function configFacts(text2, where, dir) {
+  if (text2 === null) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text2.replace(/^﻿/, ""));
+  } catch {
+    return { where, dir, mode: null, app: null, org: null, universeName: null, universeLocal: null };
+  }
+  const o = asObject(parsed);
+  return {
+    where,
+    dir,
+    mode: str(asObject(o.topology).mode),
+    app: str(asObject(o.app).name),
+    org: str(asObject(o.app).org),
+    universeName: str(asObject(o.universe).name),
+    universeLocal: str(asObject(o.universe).local)
+  };
+}
+function git(executor, cwd2, args2) {
+  const r = executor(cwd2, args2);
+  return r.ok ? r.stdout : null;
+}
+function blobAt(executor, cwd2, rev, path2) {
+  const listed2 = executor(cwd2, ["ls-tree", "-z", rev, "--", path2]);
+  if (!listed2.ok) return { state: "failed" };
+  const entry = listed2.stdout.split("\0").find((e) => e.length > 0);
+  if (entry === void 0) return { state: "missing" };
+  const sha = /^\d+ blob ([0-9a-f]{40,64})\t/.exec(entry)?.[1];
+  if (sha === void 0) return { state: "missing" };
+  const blob = executor(cwd2, ["cat-file", "blob", sha]);
+  return blob.ok ? { state: "present", text: blob.stdout } : { state: "failed" };
+}
+function commitOf(executor, cwd2, rev) {
+  const out2 = git(executor, cwd2, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
+  const id = out2?.trim() ?? "";
+  return /^[0-9a-f]{40,64}$/.test(id) ? id : null;
+}
+function readConfigSources(projectRoot, config2, executor) {
+  const top = git(executor, projectRoot, ["rev-parse", "--show-toplevel"])?.trim() || null;
+  const root = canonicalPath(resolve(projectRoot));
+  const topDir = top !== null ? canonicalPath(resolve(top)) : root;
+  const dirs = [];
+  let current = root;
+  for (; ; ) {
+    dirs.push(current);
+    if (rootKey(current) === rootKey(topDir)) break;
+    const up = dirname(current);
+    if (up === current) break;
+    current = up;
+  }
+  const sources = [];
+  for (const dir of dirs) {
+    const file = join(dir, ".rsct.json");
+    let working = null;
+    try {
+      working = existsSync(file) ? readFileSync(file, "utf8") : null;
+    } catch {
+      working = null;
+    }
+    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || ".rsct.json")} (working tree)`, dir);
+    if (fromWorking !== null) sources.push(fromWorking);
+    if (top !== null) {
+      const rel = relative(topDir, file).replace(/\\/g, "/");
+      const blob = blobAt(executor, topDir, "HEAD", rel);
+      if (blob.state === "present") {
+        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir);
+        if (fromHead !== null) sources.push(fromHead);
+      }
+    }
+  }
+  if (sources.length === 0 && config2 !== null) {
+    sources.push({
+      where: ".rsct.json",
+      dir: root,
+      mode: config2.topology?.mode ?? null,
+      app: config2.app?.name ?? null,
+      org: config2.app?.org ?? null,
+      universeName: config2.universe?.name ?? null,
+      universeLocal: config2.universe?.local ?? null
+    });
+  }
+  return sources;
+}
+function readRoot(path2, executor) {
+  const facts = { path: path2, branch: null, head: null, upstreamRef: null, upstream: null, notes: [], graphs: [] };
+  facts.graphs.push({ source: "working tree", graph: readContracts(path2) });
+  const locate2 = executor(path2, ["rev-parse", "--show-toplevel", "--show-prefix"]);
+  if (!locate2.ok) {
+    const why = (locate2.stderr || locate2.error || "").trim().split(/\r?\n/)[0] ?? "";
+    facts.notes.push(`not a git repository, or git refused to read it${why.length > 0 ? ` (${specLabel(why, PIECE)})` : ""}, so only its working tree is read`);
+    return facts;
+  }
+  const [top, prefix = ""] = locate2.stdout.split(/\r?\n/);
+  const gitTop = top && top.length > 0 ? top : path2;
+  const file = `${prefix}contracts.json`;
+  const symbolic = git(executor, path2, ["symbolic-ref", "-q", "HEAD"])?.trim() ?? "";
+  facts.branch = symbolic.startsWith("refs/heads/") ? symbolic : null;
+  if (facts.branch === null) facts.notes.push("detached HEAD");
+  facts.head = commitOf(executor, path2, "HEAD");
+  const head = blobAt(executor, gitTop, "HEAD", file);
+  if (head.state === "present") facts.graphs.push({ source: "HEAD", graph: parseContracts(head.text) });
+  else if (head.state === "failed" && facts.head !== null) facts.notes.push("its HEAD could not be read");
+  if (facts.branch !== null) {
+    const upstream = git(executor, path2, ["for-each-ref", "--format=%(upstream)", facts.branch])?.trim() ?? "";
+    if (upstream.length === 0) {
+      facts.notes.push("no upstream");
+    } else {
+      facts.upstreamRef = upstream;
+      facts.upstream = commitOf(executor, path2, upstream);
+      if (facts.upstream === null) facts.notes.push(`upstream ${shortPath(upstream)} not fetched`);
+      else {
+        const up = blobAt(executor, gitTop, facts.upstream, file);
+        if (up.state === "present") facts.graphs.push({ source: "upstream", graph: parseContracts(up.text) });
+        else if (up.state === "failed") facts.notes.push("its upstream could not be read");
+      }
+    }
+  }
+  return facts;
+}
+var CASE_BLIND2 = process.platform === "win32" || process.platform === "darwin";
+function rootKey(path2) {
+  const key = canonicalPath(path2).replace(/\\/g, "/").replace(/\/+$/, "");
+  return CASE_BLIND2 ? key.toLowerCase() : key;
+}
+function scopeRecord(value) {
+  const o = asObject(value);
+  if (typeof o.mode !== "boolean" || !Array.isArray(o.apps) || !Array.isArray(o.roots)) return null;
+  const apps = o.apps.filter((a) => typeof a === "string");
+  const roots = [];
+  for (const r of o.roots) {
+    const root = asObject(r);
+    if (typeof root.path !== "string") return null;
+    const id = (v) => typeof v === "string" ? v : null;
+    const contracts = {};
+    for (const [k, v] of Object.entries(asObject(root.contracts))) if (typeof v === "string") contracts[k] = v;
+    roots.push({ path: root.path, branch: id(root.branch), head: id(root.head), upstream_ref: id(root.upstream_ref), upstream: id(root.upstream), contracts });
+  }
+  return { mode: o.mode, apps, roots };
+}
+function contentHash(contract) {
+  const ordered = { id: contract.id, producer: contract.producer, surface: [...contract.surface].sort(), consumers: [...contract.consumers].sort() };
+  return createHash("sha256").update(JSON.stringify(ordered)).digest("hex").slice(0, 16);
+}
+function readBaseline(projectRoot, auditConfig) {
+  let raw = "";
+  try {
+    const path2 = decideAuditPath(projectRoot, auditConfig).path;
+    if (existsSync(path2)) raw = readFileSync(path2, "utf8");
+  } catch {
+    raw = "";
+  }
+  let newest = { scopes: {}, at: null };
+  for (const line2 of raw.split("\n")) {
+    if (!line2.includes(UNIVERSE_BASELINE_EVENT)) continue;
+    try {
+      const entry = JSON.parse(line2.replace(/\r$/, ""));
+      if (entry.event !== UNIVERSE_BASELINE_EVENT) continue;
+      const scopes = {};
+      for (const [key, value] of Object.entries(asObject(entry.scopes))) {
+        const scope = scopeRecord(value);
+        if (scope !== null) scopes[key] = scope;
+      }
+      newest = { scopes, at: typeof entry.ts === "string" ? entry.ts : null };
+    } catch {
+      continue;
+    }
+  }
+  return newest;
+}
+function isAncestor(executor, cwd2, older, newer) {
+  const r = executor(cwd2, ["merge-base", "--is-ancestor", older, newer]);
+  if (r.ok) return "yes";
+  return r.exitCode === 1 ? "no" : "unknown";
+}
+function disagreement(sources, field, label) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const s of sources) {
+    const value = s[field] ?? "(not set)";
+    seen.set(value, [...seen.get(value) ?? [], s.where]);
+  }
+  if (seen.size < 2) return null;
+  const parts2 = [...seen.entries()].map(([value, where]) => `${specLabel(value, PIECE)} in ${where.join(", ")}`);
+  return `\u26A0 The .rsct.json files the contract gate reads disagree on ${label}: ${parts2.join("; ")}. The gate uses the strictest reading.`;
+}
+function gatherContractFacts(args2) {
+  const { projectRoot, executor } = args2;
+  const scopeKey = rootKey(projectRoot);
+  const sources = readConfigSources(projectRoot, args2.config, executor);
+  const multiRepo = sources.some((s) => s.mode === "multi-repo");
+  const apps = [...new Set(sources.map((s) => s.app).filter((a) => a !== null))].sort();
+  const baseline = readBaseline(projectRoot, args2.auditConfig);
+  const recorded = baseline.scopes[scopeKey];
+  const since = baseline.at !== null ? ` since ${baseline.at.slice(0, 10)}` : "";
+  const lines2 = [];
+  const changes = [];
+  const change = (line2) => {
+    lines2.push(line2);
+    changes.push(line2);
+  };
+  for (const [field, label] of [["mode", "topology.mode"], ["app", "app.name"], ["universeLocal", "universe.local"]]) {
+    const line2 = disagreement(sources, field, label);
+    if (line2 !== null) lines2.push(line2);
+  }
+  if (recorded !== void 0 && recorded.mode && !multiRepo) change(`\u26A0 The contract gate was on (multi-repo)${since}, and no .rsct.json says multi-repo now.`);
+  if (recorded !== void 0 && recorded.apps.join("\n") !== apps.join("\n")) {
+    change(`\u26A0 The app name the contract gate matches changed${since}: ${specLabel(recorded.apps.join(", ") || "(none)", PIECE)} \u2192 ${specLabel(apps.join(", ") || "(none)", PIECE)}.`);
+  }
+  const empty = () => ({
+    multiRepo,
+    recordBaseline: recorded !== void 0,
+    apps,
+    note: null,
+    ids: [],
+    consumers: [],
+    hits: [],
+    contracts: [],
+    universeLinked: false,
+    inactive: false,
+    lines: lines2,
+    changes,
+    record: [],
+    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: [] })
+  });
+  if (!multiRepo && args2.always !== true) return empty();
+  const paths = args2.readPaths();
+  if (paths === null) return null;
+  const roots = /* @__PURE__ */ new Map();
+  for (const s of sources) {
+    const mini = { app: { name: s.app ?? "", org: s.org ?? "" }, universe: { name: s.universeName ?? void 0, local: s.universeLocal ?? void 0 } };
+    const found = resolveUniverseRoot(mini, s.dir, args2.home !== void 0 ? { home: args2.home } : {});
+    if (found.kind === "found") roots.set(rootKey(found.path), found.path);
+  }
+  for (const r of recorded?.roots ?? []) {
+    if (!roots.has(rootKey(r.path)) && isUniverseDir(r.path)) roots.set(rootKey(r.path), r.path);
+  }
+  for (const r of recorded?.roots ?? []) {
+    if (!roots.has(rootKey(r.path))) change(`\u26A0 The universe at ${shortPath(r.path)}, read by the contract gate${since}, is no longer found.`);
+  }
+  for (const [key, path2] of roots) {
+    if (recorded !== void 0 && !recorded.roots.some((r) => rootKey(r.path) === key)) {
+      change(`\u26A0 The contract gate now also reads the universe at ${shortPath(path2)}, which it did not read${since}.`);
+    }
+  }
+  const facts = [...roots.values()].map((path2) => readRoot(path2, executor));
+  const all = [];
+  const hits2 = [];
+  const hitKeys = /* @__PURE__ */ new Set();
+  let readable = false;
+  for (const root of facts) {
+    for (const note of root.notes) lines2.push(`Universe ${shortPath(root.path)}: ${note}.`);
+    for (const { graph } of root.graphs) {
+      if (!graph.available) continue;
+      readable = true;
+      all.push(...graph.contracts);
+      for (const app of apps) {
+        for (const hit of contractsTouchingPaths(graph, app, paths)) {
+          const k = `${hit.id}\0${contentHash(hit)}`;
+          if (!hitKeys.has(k)) {
+            hitKeys.add(k);
+            hits2.push(hit);
+          }
+        }
+      }
+    }
+    const old = recorded?.roots.find((r) => rootKey(r.path) === rootKey(root.path));
+    if (old !== void 0) {
+      if (old.branch !== root.branch) {
+        change(`\u26A0 The universe at ${shortPath(root.path)} is on another branch${since}: ${specLabel(old.branch ?? "(none)", PIECE)} \u2192 ${specLabel(root.branch ?? "(none)", PIECE)}.`);
+      }
+      for (const [label, was, now] of [["HEAD", old.head, root.head], ["upstream", old.upstream, root.upstream]]) {
+        if (was === null || was === now) continue;
+        if (now === null) {
+          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} no longer resolves${since} (it was ${was.slice(0, ID_SHOWN)}).`);
+          continue;
+        }
+        const verdict = isAncestor(executor, root.path, was, now);
+        if (verdict !== "yes") {
+          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} moved backwards or to an unknown commit${since} (${was.slice(0, ID_SHOWN)} \u2192 ${now.slice(0, ID_SHOWN)}).`);
+        }
+      }
+      const nowIds = /* @__PURE__ */ new Map();
+      for (const { graph } of root.graphs) {
+        if (!graph.available) continue;
+        for (const c of graph.contracts) nowIds.set(c.id, /* @__PURE__ */ new Set([...nowIds.get(c.id) ?? [], contentHash(c)]));
+      }
+      const anyReadable = root.graphs.some((g) => g.graph.available);
+      if (anyReadable) {
+        const gone = Object.keys(old.contracts).filter((id) => !nowIds.has(id)).sort();
+        const changed = Object.entries(old.contracts).filter(([id, hash]) => nowIds.has(id) && !nowIds.get(id).has(hash)).map(([id]) => id).sort();
+        if (gone.length > 0) change(`\u26A0 Contracts gone from the universe at ${shortPath(root.path)}${since}: ${specLabel(gone.join(", "), IDS_SHOWN)}.`);
+        if (changed.length > 0) change(`\u26A0 Contracts changed in the universe at ${shortPath(root.path)}${since}: ${specLabel(changed.join(", "), IDS_SHOWN)}.`);
+      } else if (Object.keys(old.contracts).length > 0) {
+        change(`\u26A0 No contracts.json of the universe at ${shortPath(root.path)} can be read now; it held ${specLabel(Object.keys(old.contracts).sort().join(", "), IDS_SHOWN)}${since}.`);
+      }
+    }
+  }
+  if (recorded === void 0 && multiRepo) change("Universe contracts: first record of what the contract gate reads.");
+  const record2 = facts.map((r) => ({ root: r.path.replace(/\\/g, "/"), head: r.head, upstream: r.upstream }));
+  const rootRecords = facts.map((r) => {
+    const contracts = {};
+    for (const { graph } of r.graphs) if (graph.available) for (const c of graph.contracts) contracts[c.id] ??= contentHash(c);
+    return { path: r.path, branch: r.branch, head: r.head, upstream_ref: r.upstreamRef, upstream: r.upstream, contracts };
+  });
+  return {
+    multiRepo,
+    recordBaseline: multiRepo || recorded !== void 0,
+    apps,
+    note: readable ? null : facts.flatMap((r) => r.graphs.map((g) => g.graph.note)).find((n) => n !== null) ?? null,
+    ids: [...new Set(hits2.map((h) => h.id))].sort(),
+    consumers: affectedConsumers(hits2),
+    hits: hits2,
+    contracts: all,
+    universeLinked: roots.size > 0,
+    inactive: !readable,
+    lines: lines2,
+    changes,
+    record: record2,
+    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: rootRecords })
+  };
+}
+function baselineEntry(scopes, key, scope) {
+  return { event: UNIVERSE_BASELINE_EVENT, scopes: { ...scopes, [key]: scope } };
+}
+function universeFactsChanged(facts) {
+  return facts.changes.length > 0;
+}
+
+// src/lib/git-programs.ts
+init_esm_shims();
+
+// src/lib/git-url.ts
+init_esm_shims();
+var NATIVE_SCHEMES = /* @__PURE__ */ new Set(["ssh", "git", "http", "https", "ftp", "ftps", "file", "git+ssh", "ssh+git"]);
+function helperUrl(value) {
+  if (value.includes("::")) return true;
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(value);
+  return scheme !== null && !NATIVE_SCHEMES.has(scheme[1].toLowerCase());
+}
+
+// src/lib/protected-paths.ts
+init_esm_shims();
+function exists(path2, kind) {
+  try {
+    const st = statSync(path2);
+    return kind === "file" ? st.isFile() : st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+function holdsGitRepository(dir) {
+  return exists(join(dir, "HEAD"), "file") && exists(join(dir, "objects"), "dir") && exists(join(dir, "refs"), "dir");
+}
+
+// src/lib/git-programs.ts
+var GIT_PROGRAMS_BASELINE_EVENT = "git_programs.baseline";
+var VALUE_SHOWN = 200;
+var LABEL_SHOWN = 600;
+var HASH_SHOWN = 12;
+var CORE_PROGRAM_KEYS = /* @__PURE__ */ new Set(["sshcommand", "askpass", "gitproxy", "alternaterefscommand"]);
+var FILTER_KEYS = /* @__PURE__ */ new Set(["clean", "smudge", "process"]);
+var REMOTE_PROGRAM_KEYS = /* @__PURE__ */ new Set(["receivepack", "uploadpack", "vcs"]);
+var TRUE_WORDS = /* @__PURE__ */ new Set(["true", "yes", "on", "1"]);
+var BOOLEAN_WORDS = /* @__PURE__ */ new Set(["true", "false", "yes", "no", "on", "off", "1", "0", ""]);
+var CASE_BLIND3 = process.platform === "win32" || process.platform === "darwin";
+var PROGRAMS_MOVED_REASON = "the hooks or configured programs git would run changed after the approval was asked for, so the developer did not see what would run \u2014 ask again";
+function digest(...parts2) {
+  return createHash("sha256").update(parts2.join("\0")).digest("hex");
+}
+function maskCredentials(text2) {
+  return text2.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/]*@/gi, "$1***@").replace(/^([^\s/@:]+)@([^\s/:]+:)/, "***@$2");
+}
+function shown(text2) {
+  const masked = maskCredentials(text2);
+  return masked.length > VALUE_SHOWN ? `${masked.slice(0, VALUE_SHOWN)}\u2026` : masked;
+}
+function credentialShown(value) {
+  const trimmed = value.trimStart();
+  return trimmed.startsWith("!") ? `!\u2026 (shell code, ${trimmed.length} characters)` : shown(value);
+}
+function posix2(path2) {
+  return path2.replace(/\\/g, "/");
+}
+function parseConfigList(raw) {
+  const fields = raw.split("\0");
+  const entries = [];
+  for (let i2 = 0; i2 + 1 < fields.length; i2 += 2) {
+    const origin = fields[i2];
+    const record2 = fields[i2 + 1];
+    const nl = record2.indexOf("\n");
+    entries.push(nl === -1 ? { origin, key: record2, value: null } : { origin, key: record2.slice(0, nl), value: record2.slice(nl + 1) });
+  }
+  return entries;
+}
+function splitKey(key) {
+  const first = key.indexOf(".");
+  const last = key.lastIndexOf(".");
+  if (first === -1) return { section: key.toLowerCase(), subsection: null, name: "" };
+  return {
+    section: key.slice(0, first).toLowerCase(),
+    subsection: first === last ? null : key.slice(first + 1, last),
+    name: key.slice(last + 1).toLowerCase()
+  };
+}
+function isProgramKey(key, value, scope) {
+  const { section, subsection, name: name2 } = splitKey(key);
+  const v = value ?? "";
+  switch (section) {
+    case "core":
+      if (name2 === "fsmonitor") return scope === "remote" && !BOOLEAN_WORDS.has(v.trim().toLowerCase());
+      return CORE_PROGRAM_KEYS.has(name2);
+    case "filter":
+      return FILTER_KEYS.has(name2);
+    case "merge":
+      return name2 === "driver";
+    case "gpg":
+      return name2 === "program" || subsection?.toLowerCase() === "ssh" && name2 === "defaultkeycommand";
+    case "commit":
+    case "push":
+      return name2 === "gpgsign" && (value === null || TRUE_WORDS.has(v.trim().toLowerCase()));
+    case "credential":
+      return name2 === "helper";
+    case "remote":
+      return REMOTE_PROGRAM_KEYS.has(name2) || (name2 === "url" || name2 === "pushurl") && helperUrl(v);
+    case "hook":
+      return true;
+    default:
+      return false;
+  }
+}
+function configEntry(entry, scope, scopeKey) {
+  const { section } = splitKey(entry.key);
+  const value = entry.value ?? "";
+  const valueShown = section === "credential" ? credentialShown(value) : shown(value);
+  const where = scope === "remote" ? "local remote " : "";
+  return {
+    scopeKey,
+    identity: digest("config", scope, entry.key.toLowerCase(), value),
+    label: `${where}config ${shown(entry.key)} = ${specLabel(`"${valueShown}"`)} (${specLabel(entry.origin)})`
+  };
+}
+function hookEntries2(hooksDir, scope, scopeKey) {
+  let names;
+  try {
+    names = readdirSync(hooksDir);
+  } catch (err2) {
+    const code = err2.code;
+    return code === "ENOENT" || code === "ENOTDIR" ? [] : null;
+  }
+  const where = scope === "remote" ? "local remote " : "";
+  const entries = [];
+  for (const name2 of names.sort()) {
+    if (name2.endsWith(".sample")) continue;
+    const path2 = join(hooksDir, name2);
+    try {
+      if (lstatSync(path2).isSymbolicLink() && !existsSync(path2)) {
+        const target = readlinkSync(path2);
+        entries.push({
+          scopeKey,
+          identity: digest("hook", scope, name2, "dangling", target),
+          label: `${where}hook ${specLabel(`"${name2}"`)} (${specLabel(posix2(path2))}, a link to the missing ${specLabel(posix2(target))})`
+        });
+        continue;
+      }
+      const st = statSync(path2);
+      if (!st.isFile()) continue;
+      const executable = process.platform === "win32" || (st.mode & 73) !== 0;
+      const hash = createHash("sha256").update(readFileSync(path2)).digest("hex");
+      entries.push({
+        scopeKey,
+        identity: digest("hook", scope, name2, hash, executable ? "executable" : "not executable"),
+        label: `${where}hook ${specLabel(`"${name2}"`)} (${specLabel(posix2(path2))}, sha256 ${hash.slice(0, HASH_SHOWN)}${executable ? "" : ", not executable"})`
+      });
+    } catch {
+      return null;
+    }
+  }
+  return entries;
+}
+function scopeKeyOf(gitDir) {
+  const canonical = posix2(canonicalPath(gitDir)).replace(/\/+$/, "");
+  return CASE_BLIND3 ? canonical.toLowerCase() : canonical;
+}
+function readRepository(cwd2, executor, scope, gitDir) {
+  const where = specLabel(posix2(gitDir ?? cwd2));
+  const pin = gitDir !== void 0 ? ["--git-dir", gitDir] : [];
+  const rev = executor(cwd2, [...pin, "rev-parse", "--git-dir", "--git-path", "hooks"]);
+  const lines2 = rev.ok ? rev.stdout.split(/\r?\n/).filter((l) => l.length > 0) : [];
+  if (!rev.ok || lines2.length !== 2) return { ok: false, reason: `git could not read the repository at ${where} (${(rev.stderr || rev.error || "no answer").trim().slice(0, VALUE_SHOWN)})` };
+  const config2 = executor(cwd2, [...pin, "config", "--show-origin", "-z", "--list"]);
+  if (!config2.ok) return { ok: false, reason: `git could not read the configuration at ${where}` };
+  const gitFolder = isAbsolute(lines2[0]) ? lines2[0] : resolve(cwd2, lines2[0]);
+  const scopeKey = scopeKeyOf(gitFolder);
+  const hooksDir = isAbsolute(lines2[1]) ? lines2[1] : resolve(scope === "remote" ? gitFolder : cwd2, lines2[1]);
+  const hooks = hookEntries2(hooksDir, scope, scopeKey);
+  if (hooks === null) return { ok: false, reason: `the hooks folder ${specLabel(posix2(hooksDir))} or a file in it could not be read` };
+  const entries = [
+    ...hooks,
+    ...parseConfigList(config2.stdout).filter((e) => isProgramKey(e.key, e.value, scope)).map((e) => configEntry(e, scope, scopeKey))
+  ];
+  return { ok: true, scopeKey, entries };
+}
+function localPathRemote(url, cwd2, home = homedir()) {
+  const file = /^file:\/\/(.*)$/i.exec(url);
+  if (file) return resolve(file[1].replace(/^\/([A-Za-z]:)/, "$1"));
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(url) || url.includes("::")) return null;
+  if (url === "~" || url.startsWith("~/") || url.startsWith("~\\")) return resolve(home, url.slice(2));
+  if (process.platform === "win32" && /^[A-Za-z]:/.test(url)) return resolve(cwd2, url);
+  if (/^[A-Za-z]:[\\/]/.test(url) || url.startsWith("/") || url.startsWith("\\") || url.startsWith(".")) return resolve(cwd2, url);
+  if (/^[^/\\]*:/.test(url)) return null;
+  return resolve(cwd2, url);
+}
+function gitDirOfLocal(path2) {
+  for (const candidate of [join(path2, ".git"), path2, join(`${path2}.git`, ".git"), `${path2}.git`]) {
+    let st;
+    try {
+      st = statSync(candidate);
+    } catch {
+      continue;
+    }
+    if (st.isFile()) {
+      try {
+        const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(candidate, "utf8"))?.[1];
+        return pointer === void 0 ? null : resolve(dirname(candidate), pointer);
+      } catch {
+        return null;
+      }
+    }
+    if (st.isDirectory() && holdsGitRepository(candidate)) return resolve(candidate);
+  }
+  return null;
+}
+function unresolvedLocal(url) {
+  const file = /^file:\/\/(.*)$/i.exec(url);
+  if (file) return !/^(\/|[A-Za-z]:)/.test(file[1]);
+  return /^~[^/\\]/.test(url);
+}
+function readGitPrograms(projectRoot, executor, push) {
+  const repo = readRepository(projectRoot, executor, "repository");
+  if (!repo.ok) return repo;
+  const entries = [...repo.entries];
+  const scopeKeys = /* @__PURE__ */ new Set([repo.scopeKey]);
+  for (const url of push?.urls ?? []) {
+    if (helperUrl(url)) {
+      entries.push({ scopeKey: repo.scopeKey, identity: digest("push-url", url), label: `push URL run by a transport helper ${specLabel(`"${shown(url)}"`)}` });
+    }
+    const local = localPathRemote(url, projectRoot);
+    if (local === null) continue;
+    if (unresolvedLocal(url)) return { ok: false, reason: `the push URL names a local path RSCT does not resolve, another user's home or a relative file:// URL (${specLabel(`"${shown(url)}"`)})` };
+    const gitDir = gitDirOfLocal(local);
+    if (gitDir === null) return { ok: false, reason: `the push URL names a local path git cannot read as a repository (${specLabel(posix2(local))})` };
+    const remote = readRepository(projectRoot, executor, "remote", gitDir);
+    if (!remote.ok) return remote;
+    scopeKeys.add(remote.scopeKey);
+    entries.push(...remote.entries);
+  }
+  return { ok: true, scopeKey: repo.scopeKey, scopeKeys: [...scopeKeys], entries };
+}
+function readProgramsBaseline(projectRoot, auditConfig) {
+  let raw;
+  try {
+    const path2 = decideAuditPath(projectRoot, auditConfig).path;
+    if (!existsSync(path2)) return null;
+    raw = readFileSync(path2, "utf8");
+  } catch {
+    return null;
+  }
+  let newest = null;
+  for (const line2 of raw.split("\n")) {
+    if (!line2.includes(GIT_PROGRAMS_BASELINE_EVENT)) continue;
+    try {
+      const entry = JSON.parse(line2.replace(/\r$/, ""));
+      if (entry.event !== GIT_PROGRAMS_BASELINE_EVENT) continue;
+      const scopes = entry.scopes;
+      if (!scopes || typeof scopes !== "object" || Array.isArray(scopes)) continue;
+      const map = /* @__PURE__ */ new Map();
+      for (const [key, ids] of Object.entries(scopes)) {
+        if (Array.isArray(ids)) map.set(key, new Set(ids.filter((x) => typeof x === "string")));
+      }
+      newest = map;
+    } catch {
+      continue;
+    }
+  }
+  return newest;
+}
+function newProgramEntries(read, baseline) {
+  return read.entries.filter((e) => !(baseline?.get(e.scopeKey)?.has(e.identity) ?? false));
+}
+function listKey(read) {
+  return [...read.scopeKeys.map((k) => `scope:${k}`), ...read.entries.map((e) => `${e.scopeKey}\0${e.identity}`)].sort();
+}
+function sameProgramList(a, b) {
+  const left = listKey(a);
+  const right = listKey(b);
+  return left.length === right.length && left.every((id, i2) => id === right[i2]);
+}
+function baselineEntry2(read, baseline) {
+  const scopes = {};
+  for (const [key, ids] of baseline ?? /* @__PURE__ */ new Map()) scopes[key] = [...ids].sort();
+  for (const key of read.scopeKeys) scopes[key] = read.entries.filter((e) => e.scopeKey === key).map((e) => e.identity).sort();
+  return { event: GIT_PROGRAMS_BASELINE_EVENT, scopes };
+}
+function programsDialogLines(projectRoot, tool, action, read, fresh) {
+  if (read.entries.length === 0) return [];
+  const freshIds = new Set(fresh.map((e) => `${e.scopeKey}\0${e.identity}`));
+  const isFresh = (e) => freshIds.has(`${e.scopeKey}\0${e.identity}`);
+  const ordered = [
+    ...read.entries.filter(isFresh).map((e) => `NEW OR CHANGED: ${e.label}`),
+    ...read.entries.filter((e) => !isFresh(e)).map((e) => e.label)
+  ];
+  const head = `${fresh.length > 0 ? "\u26A0 " : ""}Programs git runs inside this ${action}: ${read.entries.length} \u2014 ${fresh.length} new or changed since your last approved call (hook entry files only):`;
+  const report = ordered.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "git-programs", `Programs git runs inside one ${tool} call`, ordered) : null;
+  return [head, dialogList(ordered, DIALOG_LIST_SHOWN, LABEL_SHOWN), ...report !== null ? [`Full list: ${report}`] : []];
+}
+function checkGitPrograms(projectRoot, executor, auditConfig, push) {
+  const read = readGitPrograms(projectRoot, executor, push);
+  if (!read.ok) return read;
+  const baseline = readProgramsBaseline(projectRoot, auditConfig);
+  return { ok: true, read, baseline, fresh: newProgramEntries(read, baseline) };
+}
+function programsStillSame(check, projectRoot, executor, push) {
+  const now = readGitPrograms(projectRoot, executor, push);
+  if (!now.ok) return { ok: false, kind: "programs_unreadable", reason: now.reason };
+  return sameProgramList(check.read, now) ? { ok: true } : { ok: false, kind: "programs_moved", reason: PROGRAMS_MOVED_REASON };
+}
+
 // src/tools/request-commit.ts
 var STAGED_PATHS_UNREADABLE = "git could not list the files this commit carries, so the commit is refused rather than let through unchecked \u2014 retry, or the developer commits this by hand in their own terminal";
 var STAGED_STATE_UNREADABLE = "git could not record what is staged for this commit, so it is refused rather than committed unchecked \u2014 retry, or the developer commits this by hand in their own terminal";
 var BRANCH_MOVED = "the branch changed while this commit was being prepared, so the branch checked and shown is not the one git would commit on \u2014 look at git status and ask again";
-function readContractFacts(projectRoot, config2, readCommitPaths2) {
-  const mode = confirmedTopologyMode(config2 ?? null);
-  if (mode !== "multi-repo") return { mode, ids: [], consumers: [], inactive: false };
-  let universeRoot = null;
-  try {
-    const r = resolveUniverseRoot(config2 ?? null, projectRoot);
-    universeRoot = r.kind === "found" ? r.path : null;
-  } catch {
-    universeRoot = null;
-  }
-  const graph = readContracts(universeRoot);
-  const stagedPaths = readCommitPaths2();
-  if (stagedPaths === null) return null;
-  const appName = config2?.app?.name ?? null;
-  const hits2 = appName ? contractsTouchingPaths(graph, appName, stagedPaths) : [];
-  return { mode, ids: hits2.map((h) => h.id), consumers: affectedConsumers(hits2), inactive: !graph.available };
-}
 function commitExceptionLines(projectRoot, facts) {
   const lines2 = [];
   if (facts.branchProtected) lines2.push(protectedBranchLine(facts.branchLabel, "committing here"));
@@ -49571,7 +50213,7 @@ function runRetention(prune, projectRoot, config2, now) {
 }
 var requestCommitTool = {
   name: "rsct_request_commit",
-  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
+  description: "\xA7C-gated commit. REVIEW gate (every tier, every authorization path, checked before any dialog and again right before git commit): each staged code file must match a version stamped by a completed rsct_phase_review_complete and carry no comment (reject_kind review_missing / comments_present / migration_reverted); a pre-commit hook that slips in unreviewed code returns committed_with_drift and blocks further commits (review_drift) until a REVIEW covers it. Dead-code gate at the same two points (JavaScript/TypeScript): the STAGED bytes of each staged code file are scanned against the whole index \u2014 never the working tree \u2014 for a declared symbol nothing references, its own file included; one rejects (dead_code_staged) unless a completed REVIEW recorded the developer keeping it, which counts only when its audit line exists and the declaration bytes are unchanged. A hook that adds a dead symbol lands as committed_with_drift. Symbols the scan cannot settle are reported in hints, never passed silently. RUN ALONE: while a run_alone record exists in .rsct/phase-state.json (the developer chose run alone at rsct_phase_code_start), every commit is refused (run_alone_pending) before any dialog and before a batch token is read, until rsct_phase_review_complete approves each phase that closed on its own and the REVIEW itself. Commits with no code file pass both gates untouched, with two exceptions: an armed review_drift lock blocks them too, and an unreadable .rsct/phase-state.json rejects every commit (review_unreadable) until the file is repaired or deleted, because the REVIEW ledger and the drift record live in it. Authorization is EITHER a per-action dev_approval (validated for schema/skew/anti-reuse/fabrication) answered by the developer in a FORCED OS dialog \u2014 trust_allowed_for does not apply to commits, and with no dialog channel the commit is refused \u2014 OR \u2014 when dev_approval is omitted \u2014 an active plan-scoped batch token minted by rsct_plan_authorize (covers commit only; auto-revokes on branch switch / plan completion / expiry / exhaustion). Both paths run INV-5 branch and INV-6 secrets checks; the token path carries NO overrides, so a protected branch or any secret finding still rejects (fall back to a per-action dev_approval with the override). These checks and the contract gate run BEFORE the dialog: a check that needs an exception the request does not carry is refused before any dialog opens, and the dialog lists each exception it approves (the protected branch, each secret finding as file:line and rule, never the value, the contract surfaces and their declared consumers) before the agent's reasons and the commit message. The secrets scan reads the staged diff as git will commit it (attributes, diff drivers, repository config and git replace refs cannot hide content); the REVIEW sweep reads the staged tree recorded for the approval, not the live index; a commit that lands while git commit reports a failure (a commit made during the attempt) is checked as one that succeeded: what it carries is scanned for secrets, and unreviewed code or findings no dialog showed arm review_drift; a read that fails refuses (secrets_unreadable / staged_paths_unreadable / staged_state_unreadable). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git commit runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A plan token never covers a new or changed entry (programs_changed). The contract gate reads every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest), the universe they name plus the one read at the last approved commit, and in each its working tree, HEAD and fetched upstream; the dialog shows disagreements and what changed since the last approved commit, and a plan token never covers such a change (universe_changed). The staged tree, HEAD and branch are checked again right before git commit (staged_changed), and a commit that a git hook changed after the approval returns committed_with_drift with the changed paths, how many secret findings they carry and how to undo the commit; the code files among them are locked by review_drift as above. The branch is read from HEAD, so the first commit on a protected branch needs override_protected_branch too; a branch switched while the commit is prepared refuses (staged_changed). On rejection nothing is consumed \u2014 dev can add an override and retry with the same payload. Audit log entry written on every outcome. RETENTION: about once a day, a commit that LANDED also removes audit-log lines older than 10 days, from the top of the file down \u2014 a refused or unapproved call removes nothing. Kept whatever their age: the entries a gate can still use, the entries named as an override, skip, degraded check or bypass, and the newest of each repeating state record. The hints report every cut and an audit.pruned entry records it. The approval dialog forecasts the cut only when it reaches entries older than 20 days; a commit under a plan token shows no dialog and so no forecast.",
   inputSchema: {
     type: "object",
     properties: {
@@ -49895,12 +50537,28 @@ async function requestCommitHandler(rawInput, internal = {}) {
     );
   }
   const findings = scan.findings;
-  const contractFacts = readContractFacts(
+  const universe = gatherContractFacts({
     projectRoot,
-    config2,
-    () => internal.stagedPathsOverride ?? (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree))
-  );
-  if (contractFacts === null) return earlyReject("staged_paths_unreadable", STAGED_PATHS_UNREADABLE);
+    config: config2 ?? null,
+    readPaths: () => internal.stagedPathsOverride ?? (approvedState.tree === null || baseTree === null ? [] : getTreeDiffPaths(projectRoot, baseTree, approvedState.tree)),
+    executor: gitExecutor,
+    ...config2?.audit !== void 0 && { auditConfig: config2.audit }
+  });
+  if (universe === null) return earlyReject("staged_paths_unreadable", STAGED_PATHS_UNREADABLE);
+  const contractFacts = {
+    mode: universe.multiRepo ? "multi-repo" : confirmedTopologyMode(config2 ?? null),
+    ids: universe.ids,
+    consumers: universe.consumers,
+    inactive: universe.multiRepo && universe.inactive
+  };
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit);
+  if (!programs.ok) {
+    return earlyReject(
+      "programs_unreadable",
+      `${programs.reason}, so the hooks and programs git would run inside this commit cannot be listed for the developer \u2014 the commit is refused; the developer commits this by hand in their own terminal`
+    );
+  }
+  const freshPrograms = programs.fresh;
   const uncovered = (overrides2, via, ch, signals) => {
     const tokenPath = via === "plan_token";
     const refuse = (reject_kind, reason, auditExtra, shape) => rejectWith(reject_kind, reason, { via, channel: ch, signals, auditExtra, shape });
@@ -49932,6 +50590,28 @@ async function requestCommitHandler(rawInput, internal = {}) {
           branch_check: { protected: branchProtected, override_used: branchProtected },
           secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
           contract_check: { mode: "multi-repo", touched: contractFacts.ids, consumers: contractFacts.consumers, override_used: false }
+        }
+      );
+    }
+    if (tokenPath && universeFactsChanged(universe)) {
+      return refuse(
+        "universe_changed",
+        "what the contract gate reads (the universe and the .rsct.json files) changed since the last approved commit, or is read for the first time. A plan authorization never covers that; commit with a per-action dev_approval so the developer sees it in the dialog.",
+        {},
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 }
+        }
+      );
+    }
+    if (tokenPath && freshPrograms.length > 0) {
+      return refuse(
+        "programs_changed",
+        `${freshPrograms.length} hook(s) or configured program(s) git would run inside this commit are new or changed since the developer's last approved call. A plan authorization never covers them; commit with a per-action dev_approval so the developer sees the list in the dialog.`,
+        { programs_new: freshPrograms.length },
+        {
+          branch_check: { protected: branchProtected, override_used: branchProtected },
+          secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 }
         }
       );
     }
@@ -49968,7 +50648,9 @@ async function requestCommitHandler(rawInput, internal = {}) {
           `Approve commit on '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}'?`,
           ...installAdvisory.dialogLine ? [installAdvisory.dialogLine] : [],
           ...retentionLine ? [retentionLine] : [],
-          ...exceptions.facts
+          ...exceptions.facts,
+          ...programsDialogLines(projectRoot, "commit", "commit", programs.read, freshPrograms),
+          ...universe.lines
         ].join("\n") + gateDialogFooter(projectRoot, config2) + (exceptions.reasons.length > 0 ? `
 
 ${exceptions.reasons.join("\n")}` : "") + `
@@ -50145,6 +50827,21 @@ ${commitMessageView(input.message)}`
       }
     );
   }
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor);
+  if (!programsNow.ok) {
+    return rejectWith(programsNow.kind, programsNow.reason, {
+      via: authorizedVia,
+      channel,
+      signals: fabricationSignals,
+      shape: {
+        branch_check: { protected: branchProtected, override_used: branchProtected },
+        secrets_check: { findings_count: findings.length, findings, override_used: findings.length > 0 },
+        contract_check: contractResult
+      }
+    });
+  }
+  appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
+  if (universe.recordBaseline) appendAudit(projectRoot, universe.baseline, config2?.audit);
   let reservedToken = null;
   if (tokenCtx) {
     reservedToken = consumeTokenAction(tokenCtx.token);
@@ -50432,6 +51129,7 @@ ${commitMessageView(input.message)}`
       sha_before: commit.sha_before,
       sha_after: commit.sha_after,
       fabrication_signals: fabricationSignals,
+      ...universe.multiRepo && { universe: universe.record },
       ...tokenSummary !== null && {
         plan_slug: tokenSummary.plan_slug,
         plan_token_actions_used: tokenSummary.actions_used,
@@ -50677,10 +51375,10 @@ function evaluatePreMergeAck(ack, context = {}) {
     const missing = carriedPaths.map(normalizeSweptPath).filter((p) => p.length > 0 && !swept.has(p));
     if (missing.length > 0) {
       unswept = missing;
-      const shown = missing.slice(0, MAX_UNSWEPT_LISTED).join(", ");
+      const shown2 = missing.slice(0, MAX_UNSWEPT_LISTED).join(", ");
       const rest = missing.length - Math.min(missing.length, MAX_UNSWEPT_LISTED);
       failing.push(
-        `files_swept (${missing.length} path(s) this integration carries were not attested: ${shown}${rest > 0 ? `, and ${rest} more` : ""})`
+        `files_swept (${missing.length} path(s) this integration carries were not attested: ${shown2}${rest > 0 ? `, and ${rest} more` : ""})`
       );
     }
   }
@@ -50822,7 +51520,7 @@ function shownList(label, items) {
 }
 var requestPushTool = {
   name: "rsct_request_push",
-  description: "\xA7C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/\u2026', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. On rejection the approval is NOT consumed.",
+  description: "\xA7C-gated push. Before any dialog: `remote` must be a CONFIGURED remote name (a URL or path is refused) and branch protection compares the RESOLVED push destination, so +main / HEAD:main / refs/heads/main are all recognised as main (a leading '-', a '*' glob refspec and an empty destination reject before git runs); a push with no branch resolved (HEAD not on a branch and no `branch` given) is refused; an armed review_drift lock refuses every push, as it refuses every commit; a protected destination needs pre_merge_ack and dev_approval.override_protected_branch; the push URLs are read (`git remote get-url --push --all`, git 2.7 or newer); and every commit the push carries is scanned for secrets (each commit's own diff, merge commits included; commits on the remote's tracking refs are skipped when every push URL names the same repository as the fetch URL and no other remote is named '<remote>/\u2026', otherwise the whole history is read; what the push sends must be a commit), so a finding needs dev_approval.override_secrets_check. A scan that cannot finish refuses (secrets_unreadable). The forced OS dialog then lists every push URL (credentials masked), the destination and commit, a FORCE or DELETE in words, the protected branch, each secret finding as file:line, rule and commit (never the value), the pre_merge_ack answers and the push options sent, and after the framework footer the agent's reasons and ack note. The push URLs are read again after the dialog (push_url_changed if they moved). The push runs `git push` with an explicit full refspec, --no-follow-tags, --recurse-submodules=check when the repository config would push or check submodules (=no otherwise), and exactly the push options shown. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable). A push to a local path lists that repository's own too, and the coverage dry run of a protected push runs only when nothing in the list is new (programs_changed). On rejection the approval is NOT consumed.",
   inputSchema: {
     type: "object",
     properties: {
@@ -50977,6 +51675,15 @@ async function requestPushHandler(rawInput, internal = {}) {
     let range = rangeBase !== null && rangeHead !== null ? rangeReader(projectRoot, rangeBase, rangeHead) : { status: "unavailable" };
     let probeParsed = false;
     if (range.status === "unavailable" && explicitRefspec !== null && destinationRef !== null && rangeHead !== null) {
+      const probeUrls = readPushUrls(projectRoot, remote, gitExecutor);
+      const beforeProbe = probeUrls.ok ? checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { urls: probeUrls.value }) : null;
+      if (beforeProbe === null || !beforeProbe.ok || beforeProbe.fresh.length > 0) {
+        return reject2(
+          beforeProbe !== null && beforeProbe.ok ? "programs_changed" : "programs_unreadable",
+          "the coverage check needs a dry run of this push, because the remote-tracking ref is missing here, and that dry run would run hooks or configured programs that are new since the developer's last approved call, or that could not be listed \u2014 nothing ran. An approved commit, push, merge or rebase records the current list; or the developer pushes by hand in their own terminal.",
+          { protected: true, audit: { programs_new: beforeProbe?.ok === true ? beforeProbe.fresh.length : null } }
+        );
+      }
       const carried = carriedByProbe({
         projectRoot,
         destinationRef,
@@ -51044,6 +51751,10 @@ async function requestPushHandler(rawInput, internal = {}) {
   const urls = readPushUrls(projectRoot, remote, gitExecutor);
   if (!urls.ok) return reject2("push_url_unreadable", `${urls.reason}, so the dialog cannot show where this push goes \u2014 nothing was pushed.`, { protected: branchProtected });
   pushUrls = urls.value;
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { urls: pushUrls });
+  if (!programs.ok) {
+    return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this push cannot be listed \u2014 nothing was pushed and no dialog was shown.`, { protected: branchProtected });
+  }
   const raw = DevApprovalSchema.safeParse(input.dev_approval);
   const rawOverrides = raw.success ? { branch: raw.data.override_protected_branch, secrets: raw.data.override_secrets_check } : {};
   if (raw.success && branchProtected && !rawOverrides.branch) {
@@ -51098,6 +51809,7 @@ async function requestPushHandler(rawInput, internal = {}) {
     ...secretFindingLines(projectRoot, "push", findings),
     ...ack.facts,
     ...shownList("Push option sent", options.value),
+    ...programsDialogLines(projectRoot, "push", "push", programs.read, programs.fresh),
     ...submodules === "check" ? ["Submodules: checked, never pushed."] : [],
     ...branchProtected && crossCheck === "degraded" ? [
       "\u26A0 files_swept NOT checked: RSCT could not read what this push carries." + (rangeHead !== null ? ` If the remote has no '${specLabel(destinationLabel ?? branchLabel, DIALOG_PATH_LIMIT)}' yet, this push carries the whole branch.` : "")
@@ -51191,6 +51903,11 @@ ${reasons.join("\n")}` : "")
       { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel, ...urlsNow.ok && { push_urls_now: urlsNow.value.map(maskUrl) } } }
     );
   }
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { urls: pushUrls });
+  if (!programsNow.ok) {
+    return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { protected: branchProtected, channel: gate.channel, signals: gate.fabrication_signals, audit: { channel: gate.channel } });
+  }
+  appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const secretsCheck = { commits_scanned: commitsScanned, findings_count: findings.length, findings, override_used: findings.length > 0 };
   const push = gitPush(projectRoot, remote, explicitRefspec ?? branch, gitExecutor, { submodules, pushOptions: options.value });
   if (!push.ok) {
@@ -51323,7 +52040,7 @@ var requestMergeInputSchema = external_exports.object({
 }).strict();
 var requestMergeTool = {
   name: "rsct_request_merge",
-  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated).",
+  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -51496,6 +52213,10 @@ async function requestMergeHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit);
+  if (!programs.ok) {
+    return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed \u2014 nothing was merged and no dialog was shown.`, { protected: targetProtected });
+  }
   const ack = ackDialogLines(input.pre_merge_ack);
   const facts = [
     `Approve merge of '${specLabel(input.source_branch, DIALOG_PATH_LIMIT)}' into '${specLabel(targetLabel, DIALOG_PATH_LIMIT)}'${no_ff ? " (--no-ff)" : ""}${allow_unrelated_histories ? " (--allow-unrelated-histories)" : ""}?`,
@@ -51505,6 +52226,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
     ...allow_unrelated_histories ? ["\u26A0 --allow-unrelated-histories joins two histories with no common commit; it needs your exception."] : [],
     ...findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : [],
     ...secretFindingLines(projectRoot, "merge", findings),
+    ...programsDialogLines(projectRoot, "merge", "merge", programs.read, programs.fresh),
     ...ack.facts
   ];
   const reasons = [
@@ -51593,6 +52315,9 @@ ${reasons.join("\n")}` : "")
       protected: targetProtected
     });
   }
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor);
+  if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected });
+  appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories };
   const merge2 = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor);
   if (!merge2.ok) {
@@ -52299,7 +53024,7 @@ var requestRebaseInputSchema = external_exports.object({
 }).strict();
 var requestRebaseTool = {
   name: "rsct_request_rebase",
-  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed.",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers), with its origin and URL credentials masked, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -52449,6 +53174,10 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit);
+  if (!programs.ok) {
+    return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed \u2014 nothing was changed and no dialog was shown.`, { protected: currentProtected });
+  }
   const ack = ackDialogLines(input.pre_merge_ack);
   const facts = [
     `Approve ${mode} of '${specLabel(currentLabel, DIALOG_PATH_LIMIT)}' ${mode === "rebase" ? "onto" : "from"} '${specLabel(input.ref, DIALOG_PATH_LIMIT)}'? (history-rewriting)`,
@@ -52458,6 +53187,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
     ...mode === "rebase" && findings.length === 0 ? [`Secrets scan: ${commitsScanned} commit(s) read, nothing found.`] : [],
     ...mode === "squash" ? ["Secrets scan: the squashed change is scanned when rsct_request_commit commits it."] : [],
     ...secretFindingLines(projectRoot, "rebase", findings),
+    ...programsDialogLines(projectRoot, "rebase", mode, programs.read, programs.fresh),
     ...ack.facts
   ];
   const reasons = [
@@ -52525,6 +53255,9 @@ ${reasons.join("\n")}` : "")
       protected: currentProtected
     });
   }
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor);
+  if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected });
+  appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: currentProtected, override_used: currentProtected };
   const result = mode === "rebase" ? gitRebase(projectRoot, pinned, gitExecutor) : gitSquash(projectRoot, pinned, gitExecutor);
   if (!result.ok) {
@@ -52862,7 +53595,14 @@ ${head}${overflow}`,
   else stats.contract_graph = "no_manifest";
   stats.contracts_scanned = graph.contracts.length;
   if (graph.available) {
-    const touched = contractsTouchingPaths(graph, input.appName ?? null, input.declaredPaths);
+    const names = input.appNames ?? (input.appName ? [input.appName] : []);
+    const seen = /* @__PURE__ */ new Set();
+    const touched = names.flatMap((name2) => contractsTouchingPaths(graph, name2, input.declaredPaths)).filter((c) => {
+      const key = JSON.stringify([c.id, c.producer, c.surface, c.consumers]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     for (const contract of touched) {
       const consumers = affectedConsumers([contract]);
       if (consumers.length === 0) continue;
@@ -52969,7 +53709,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise.",
+  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints.",
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -53032,16 +53772,23 @@ async function phaseVerificationStartHandler(rawInput) {
     seedPaths: input.declared_paths,
     maxDepth: input.max_depth
   });
-  const topology = detectTopology(config2, projectRoot);
-  const contractGraph = readContracts(topology.universe_root);
+  const universe = gatherContractFacts({
+    projectRoot,
+    config: config2 ?? null,
+    readPaths: () => walk2.declared,
+    executor: defaultGitExecutor,
+    always: true,
+    ...config2?.audit !== void 0 && { auditConfig: config2.audit }
+  });
+  const contractGraph = universe === null || !universe.universeLinked ? EMPTY_CONTRACT_GRAPH : { available: !universe.inactive, contracts: universe.contracts, note: universe.note };
   const checklistArgs = {
     projectRoot,
     declaredPaths: walk2.declared,
     discoveredImporters: walk2.discovered,
     specTier: input.spec_tier,
     contractGraph,
-    appName: config2?.app?.name ?? null,
-    universeLinked: topology.universe_root !== null
+    appNames: universe?.apps ?? (config2?.app?.name ? [config2.app.name] : []),
+    universeLinked: universe?.universeLinked === true
   };
   if (input.spec_claims !== void 0) checklistArgs.specClaims = input.spec_claims;
   if (input.existing_project_files !== void 0) {
@@ -53058,7 +53805,6 @@ async function phaseVerificationStartHandler(rawInput) {
         spec_ref: input.spec_ref,
         spec_tier: input.spec_tier,
         requested_persona: requestedPersona,
-        // Recorded here too: the only artifact a trivial/small run leaves.
         walk_coverage: walk2.coverage
       },
       config2?.audit
@@ -53245,15 +53991,7 @@ async function phaseVerificationStartHandler(rawInput) {
       requested_persona: requestedPersona,
       declared_count: walk2.declared.length,
       discovered_count: walk2.discovered.length,
-      // #54. Hints are not audited, so a V that ran blind used to leave no
-      // queryable trace — `discovered_count: 0` reads identically whether the
-      // graph was empty, unavailable, or merely incomplete. All three of these
-      // are needed to tell them apart: the seed counts do not capture a
-      // resolver that dropped every edge while every seed was analyzable.
       walk_coverage: walk2.coverage,
-      // #75 Part B. Which of the four contract-graph states this run saw — the
-      // difference between "no adjacent app depends on this" and "nobody has ever
-      // written the manifest that would say so" is invisible from a finding count.
       contract_graph: checklist.stats.contract_graph,
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk2.uncovered_seeds.length,
@@ -53276,8 +54014,6 @@ async function phaseVerificationStartHandler(rawInput) {
         severity: finding.severity,
         source: finding.source,
         title: finding.title,
-        // #75. The class, per finding, in the forensic record — so a past run can
-        // be re-read for what it actually knew, not only for what it decided.
         evidence_kind: finding.evidence.kind
       },
       config2?.audit
@@ -53302,13 +54038,12 @@ async function phaseVerificationStartHandler(rawInput) {
   hints.push(...coverageHints(walk2));
   hints.push(...walk2.hints);
   hints.push(...checklist.hints);
+  hints.push(...universe?.lines ?? []);
   if (fields.audit_error !== null) {
     hints.push(`\u26A0 audit log write failed: ${fields.audit_error}.`);
   }
   return {
     status: writeResult.ok ? "verified" : "state_write_failed",
-    // null on a failed write: advertising a run id for a baseline that was never
-    // stored would have the agent answer against nothing.
     findings_run_id: writeResult.ok ? findingsRunId : null,
     rsct_installed: resolution.rsct_installed,
     spec_ref: input.spec_ref,
@@ -55690,8 +56425,8 @@ function processLine(projectRoot, config2, specRef) {
   const state = readPhaseState(projectRoot).state;
   const latest = state?.last_classify?.tier ?? null;
   const highest = readClassifyEvidence(projectRoot, config2).tierMax;
-  const shown = latest ?? highest;
-  const tier = shown === null ? "no classification on record" : `classified '${specLabel(shown, 20)}' by rsct_classify_task${highest !== null && highest !== shown ? ` (highest on record '${specLabel(highest, 20)}')` : ""}`;
+  const shown2 = latest ?? highest;
+  const tier = shown2 === null ? "no classification on record" : `classified '${specLabel(shown2, 20)}' by rsct_classify_task${highest !== null && highest !== shown2 ? ` (highest on record '${specLabel(highest, 20)}')` : ""}`;
   const verification = state?.verification;
   const vDone = verification?.spec_ref === specRef && typeof verification.completed_at === "string";
   return `Process: ${tier}; V phase for this spec: ${vDone ? "completed" : "not run"}.`;

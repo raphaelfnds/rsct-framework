@@ -579,6 +579,14 @@ function spawnGitSync(args, options) {
   return spawnSync("git", gitChildArgs(args), { ...options, env: gitChildEnv(options.env) });
 }
 
+// src/lib/git-url.ts
+var NATIVE_SCHEMES = /* @__PURE__ */ new Set(["ssh", "git", "http", "https", "ftp", "ftps", "file", "git+ssh", "ssh+git"]);
+function helperUrl(value) {
+  if (value.includes("::")) return true;
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(value);
+  return scheme !== null && !NATIVE_SCHEMES.has(scheme[1].toLowerCase());
+}
+
 // src/lib/database-guard.ts
 var OK = { ok: true };
 function refuse(reason) {
@@ -3023,6 +3031,199 @@ function scanGitOptions(args) {
   }
   return { verbIndex: j, gitDir, aliases };
 }
+var PROGRAM_CONFIG_SECTIONS = /* @__PURE__ */ new Set([
+  "core",
+  "include",
+  "includeif",
+  "url",
+  "init",
+  "rebase",
+  "filter",
+  "merge",
+  "diff",
+  "gpg",
+  "commit",
+  "push",
+  "credential",
+  "remote",
+  "protocol",
+  "submodule",
+  "gc",
+  "receive",
+  "uploadpack",
+  "sequence",
+  "hook"
+]);
+var CONFIG_LONG_OPTIONS = [
+  "global",
+  "system",
+  "local",
+  "worktree",
+  "file",
+  "blob",
+  "get",
+  "get-all",
+  "get-regexp",
+  "get-urlmatch",
+  "replace-all",
+  "add",
+  "unset",
+  "unset-all",
+  "rename-section",
+  "remove-section",
+  "list",
+  "fixed-value",
+  "type",
+  "no-type",
+  "bool",
+  "int",
+  "bool-or-int",
+  "path",
+  "expiry-date",
+  "null",
+  "name-only",
+  "includes",
+  "no-includes",
+  "show-origin",
+  "show-scope",
+  "get-color",
+  "get-colorbool",
+  "edit",
+  "default",
+  "comment",
+  "value",
+  "url",
+  "all",
+  "regexp"
+];
+var CONFIG_VALUE_LONG = /* @__PURE__ */ new Set(["file", "blob", "type", "default", "comment", "value", "url"]);
+var CONFIG_WRITE_LONG = /* @__PURE__ */ new Set(["replace-all", "add", "unset", "unset-all", "rename-section", "remove-section"]);
+var CONFIG_READ_LONG = /* @__PURE__ */ new Set(["get", "get-all", "get-regexp", "get-urlmatch", "get-color", "get-colorbool", "list"]);
+var CONFIG_WRITE_SUBCOMMANDS = /* @__PURE__ */ new Set(["set", "unset", "rename-section", "remove-section"]);
+var CONFIG_READ_SUBCOMMANDS = /* @__PURE__ */ new Set(["get", "list"]);
+var PLANTING_OPTIONS = ["template", "separate-git-dir", "config", "config-env"];
+var SHORT_VALUE_FLAGS = /* @__PURE__ */ new Set(["c", "o", "b", "u", "j"]);
+var HOME_NAMES = "HOME|XDG_CONFIG_HOME|USERPROFILE|HOMEDRIVE|HOMEPATH";
+var PLANTING_HOME = new RegExp(
+  `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=|\\$env:(${HOME_NAMES})\\s*=|\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b|(?<!\\$)\\benv:(${HOME_NAMES})\\b|SetEnvironmentVariable\\s*\\(\\s*['"](${HOME_NAMES})['"]`,
+  "i"
+);
+var PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i;
+function sectionOf(key) {
+  return (key.split(".")[0] ?? "").toLowerCase();
+}
+function longOption(word, known) {
+  const body = word.slice(2);
+  const eq = body.indexOf("=");
+  const typed = (eq === -1 ? body : body.slice(0, eq)).toLowerCase();
+  const glued = eq !== -1;
+  if (known.includes(typed)) return { name: typed, glued, matches: [typed] };
+  const matches = known.filter((o) => o.startsWith(typed));
+  return { name: matches.length === 1 ? matches[0] : null, glued, matches };
+}
+function denyConfigWrite(key) {
+  return deny(`\`git config\` would change '${key}', in a section whose keys can make git run programs (hooks, filters, ssh, credential helpers) inside RSCT's approved git calls; that is the developer's own edit, in their own terminal`);
+}
+var DENY_CONFIG_EDIT = "`git config --edit` opens the whole configuration, whose keys can make git run programs inside RSCT's approved git calls; that is the developer's own edit, in their own terminal";
+function judgeConfigWrite(rest, dynamic) {
+  let at = 0;
+  let write = false;
+  let read = false;
+  let sections = false;
+  const head = rest[0]?.toLowerCase();
+  if (head === "edit") return deny(DENY_CONFIG_EDIT);
+  if (head !== void 0 && CONFIG_WRITE_SUBCOMMANDS.has(head)) {
+    write = true;
+    sections = head.endsWith("-section");
+    at = 1;
+  } else if (head !== void 0 && CONFIG_READ_SUBCOMMANDS.has(head)) {
+    return ALLOW;
+  }
+  const positional = [];
+  for (let k = at; k < rest.length; k++) {
+    const a = rest[k];
+    if (a === "--") {
+      for (let m = k + 1; m < rest.length; m++) positional.push({ value: rest[m], dynamic: dynamic[m] === true });
+      break;
+    }
+    if (a.startsWith("--")) {
+      const { name, glued, matches } = longOption(a, CONFIG_LONG_OPTIONS);
+      if (name === "edit") return deny(DENY_CONFIG_EDIT);
+      if (matches.length > 0 && matches.every((m) => CONFIG_WRITE_LONG.has(m))) write = true;
+      if (matches.some((m) => m.endsWith("-section"))) sections = true;
+      if (name !== null && CONFIG_READ_LONG.has(name)) read = true;
+      if (name !== null && CONFIG_VALUE_LONG.has(name) && !glued) k++;
+      continue;
+    }
+    if (a.startsWith("-") && a.length > 1) {
+      const cluster = a.slice(1);
+      for (let c = 0; c < cluster.length; c++) {
+        const flag = cluster[c];
+        if (flag === "e") return deny(DENY_CONFIG_EDIT);
+        if (flag === "l") read = true;
+        if (flag === "f" || flag === "t") {
+          if (c === cluster.length - 1) k++;
+          break;
+        }
+      }
+      continue;
+    }
+    positional.push({ value: a, dynamic: dynamic[k] === true });
+  }
+  if (!write && (read || positional.length < 2)) return ALLOW;
+  for (const p of positional.slice(0, sections ? 2 : 1)) {
+    if (p.dynamic) return deny(`\`git config\` writes a key built from a variable ('${p.value}'), which cannot be read, so the command was refused \u2014 write the key out`);
+  }
+  for (const p of positional) {
+    if (p.dynamic || !sections && !p.value.includes(".")) continue;
+    if (PROGRAM_CONFIG_SECTIONS.has(sectionOf(p.value))) return denyConfigWrite(p.value);
+  }
+  return ALLOW;
+}
+function plantingOption(values) {
+  for (let k = 0; k < values.length; k++) {
+    const a = values[k];
+    if (a.startsWith("--")) {
+      const typed = a.slice(2).split("=")[0].toLowerCase();
+      if (typed.length > 0 && PLANTING_OPTIONS.some((o) => o.startsWith(typed))) {
+        const item2 = a.includes("=") ? a.slice(a.indexOf("=") + 1) : values[k + 1] ?? "";
+        if (!"config".startsWith(typed) && !"config-env".startsWith(typed)) return a;
+        if (PROGRAM_CONFIG_SECTIONS.has(sectionOf(item2.split("=")[0] ?? ""))) return `${a} ${item2}`;
+      }
+      continue;
+    }
+    const item = shortConfigValue(a, values[k + 1]);
+    if (item !== void 0 && PROGRAM_CONFIG_SECTIONS.has(sectionOf(item.split("=")[0] ?? ""))) return `-c ${item}`;
+  }
+  return null;
+}
+function shortConfigValue(word, next) {
+  if (!word.startsWith("-") || word.length < 2) return void 0;
+  for (let c = 1; c < word.length; c++) {
+    const flag = word[c];
+    if (!SHORT_VALUE_FLAGS.has(flag)) continue;
+    if (flag !== "c") return void 0;
+    return c === word.length - 1 ? next : word.slice(c + 1);
+  }
+  return void 0;
+}
+function judgeGitPlanting(verb, globals, rest, dynamic, text) {
+  if (verb === "config") return judgeConfigWrite(rest, dynamic);
+  if (verb === "init" || verb === "clone") {
+    const variable = PLANTING_VARIABLE.exec(text)?.[1] ?? PLANTING_HOME.exec(text)?.slice(1).find((n) => n !== void 0);
+    if (variable !== void 0) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`);
+    const planted = plantingOption([...globals, ...rest]);
+    if (planted !== null) return deny(`\`git ${verb}\` with '${planted}' can plant hooks or configuration, or move the git folder, that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`);
+    return ALLOW;
+  }
+  if (verb === "remote" && (rest[0] === "add" || rest[0] === "set-url")) {
+    const url = rest.slice(1).filter((a) => !a.startsWith("-")).find((a) => helperUrl(a));
+    if (url !== void 0) {
+      return deny(`\`git remote ${rest[0]}\` with '${url}' names a transport helper, a program git runs on every fetch and push; that is the developer's own command, in their own terminal`);
+    }
+  }
+  return ALLOW;
+}
 function judgeGit(args, ctx, inlineAliases, dynamic = []) {
   const flags = args.map((_, k) => dynamic[k] === true);
   const scan = scanGitOptions(args);
@@ -3042,6 +3243,8 @@ function judgeGit(args, ctx, inlineAliases, dynamic = []) {
   }
   if (verb === "submodule" && rest[0] === "foreach") return judgeText(rest.slice(1).filter((r) => !r.startsWith("--")).join(" "), "bash", ctx);
   if (verb === "bisect" && rest[0] === "run") return judgeText(joinWords(rest.slice(1)), "bash", ctx);
+  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.text);
+  if (isDeny(planting)) return planting;
   if (GIT_BUILTINS.has(verb)) return ALLOW;
   if (ctx.aliasDepth >= MAX_ALIAS_DEPTH) return deny(`the git alias '${verbWord}' expands through too many other aliases to be read; run the full git command`);
   let value = aliases[verb];
@@ -3234,7 +3437,8 @@ function judgeCommand(text, options = {}) {
       bytes: Buffer.byteLength(text, "utf8")
     },
     database: options.database ?? false,
-    databaseTestGuard: options.databaseTestGuard ?? true
+    databaseTestGuard: options.databaseTestGuard ?? true,
+    text
   };
   return judgeText(text, options.dialect ?? "bash", ctx);
 }
