@@ -444,3 +444,17 @@ describe('Claude Code files under other spellings of .claude, and front matter i
     expect(judgeClaudeAssetWrite('Write', { content: `${skill}!\`git\npush\`\n` }, file, read(skill)).block).toBe(true)
   })
 })
+
+describe('judgeRsctConfigWrite — a .rsct.json the server rejects is refused like an unreadable one (REVIEW round 1)', () => {
+  const read = (text: string) => () => text
+  const config = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: 'o' } })
+
+  it('refuses a byte-order mark or a value outside the schema, which the server rejects', () => {
+    expect(judgeRsctConfigWrite('Write', { content: `\uFEFF${config}` }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+    expect(judgeRsctConfigWrite('Write', { content: JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: '' } }) }, join('p', '.rsct.json'), read(config)).block).toBe(true)
+  })
+
+  it('allows a write to a .rsct.json the server already rejects (the developer repairs it)', () => {
+    expect(judgeRsctConfigWrite('Write', { content: config }, join('p', '.rsct.json'), read('{')).block).toBe(false)
+  })
+})

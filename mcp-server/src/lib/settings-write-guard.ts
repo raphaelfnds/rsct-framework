@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { bareName, pathComponents } from './protected-paths.js'
+import { parseRsctConfigText } from './project-root.js'
 import { canonicalPath } from './repo-anchor.js'
 import { decodeUnicodeEscapes } from './terminal-guard.js'
 
@@ -315,8 +316,8 @@ export function judgeRsctConfigWrite(
   const after = applied.text
   const afterJson = parseObject(after)
   const beforeJson = parseObject(current)
-  if (afterJson === null && beforeJson !== null) {
-    return { block: true, reason: "this write would leave .rsct.json unreadable, which switches every RSCT edit check off; that is the developer's own edit" }
+  if (parseRsctConfigText(current).ok && !parseRsctConfigText(after).ok) {
+    return { block: true, reason: "this write would leave a .rsct.json RSCT rejects (unparseable, or outside its schema), which switches every RSCT edit check off; that is the developer's own edit" }
   }
   if (afterJson !== null && stable((beforeJson ?? {}).audit) !== stable(afterJson.audit)) {
     return { block: true, reason: "this write would change where or whether RSCT keeps its audit log (\"audit\" in .rsct.json); that is the developer's own edit" }

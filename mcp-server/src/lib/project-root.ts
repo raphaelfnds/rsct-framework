@@ -240,29 +240,34 @@ function readRsctConfig(projectRoot: string): RsctConfig | null {
     return null
   }
 
+  const parsed = parseRsctConfigText(raw)
+  if (parsed.ok) return parsed.config
+  if (parsed.reason === 'malformed') emitConfigViolation(projectRoot, 'malformed', { error: parsed.error })
+  else emitConfigViolation(projectRoot, 'bounds_violation', { validation_errors: parsed.issues })
+  return null
+}
+
+export type RsctConfigParse =
+  | { ok: true; config: RsctConfig }
+  | { ok: false; reason: 'malformed'; error: string }
+  | { ok: false; reason: 'bounds_violation'; issues: Array<{ path: string; code: string; message: string }> }
+
+export function parseRsctConfigText(raw: string): RsctConfigParse {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    emitConfigViolation(projectRoot, 'malformed', {
-      error: err instanceof Error ? err.message : String(err),
-    })
-    return null
+    return { ok: false, reason: 'malformed', error: err instanceof Error ? err.message : String(err) }
   }
-
   const validation = RsctConfigSchema.safeParse(parsed)
   if (!validation.success) {
-    emitConfigViolation(projectRoot, 'bounds_violation', {
-      validation_errors: validation.error.issues.map((issue) => ({
-        path: issue.path.join('.') || '(root)',
-        code: issue.code,
-        message: issue.message,
-      })),
-    })
-    return null
+    return {
+      ok: false,
+      reason: 'bounds_violation',
+      issues: validation.error.issues.map((issue) => ({ path: issue.path.join('.') || '(root)', code: issue.code, message: issue.message })),
+    }
   }
-
-  return validation.data as RsctConfig
+  return { ok: true, config: validation.data as RsctConfig }
 }
 
 type ConfigViolationReason = 'malformed' | 'bounds_violation'
