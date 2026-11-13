@@ -25,9 +25,9 @@ import {
 import { appendAuditEntry, auditFields } from '../lib/audit-log.js'
 import { computeRunId, describeEvidenceMix, summarizeEvidence } from '../lib/findings.js'
 import { isStaleVerificationLabel, leftoverTaskHint, leftoverTaskSlug } from '../lib/phase-machine.js'
-import { getHeadShaFull } from '../lib/git.js'
-import { detectTopology } from '../lib/topology.js'
-import { readContracts } from '../lib/contracts.js'
+import { defaultGitExecutor, getHeadShaFull } from '../lib/git.js'
+import { EMPTY_CONTRACT_GRAPH, type ContractGraph } from '../lib/contracts.js'
+import { gatherContractFacts } from '../lib/contract-facts.js'
 
 const TIER_VALUES = ['trivial', 'small', 'standard', 'complex'] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -195,11 +195,18 @@ export async function phaseVerificationStartHandler(
     maxDepth: input.max_depth,
   })
 
-  // #75 Part B. Read here rather than inside the checklist: `detectTopology`
-  // needs the config, and the checklist deliberately takes a project root and
-  // nothing else. Degrades to the empty graph on every failure path.
-  const topology = detectTopology(config, projectRoot)
-  const contractGraph = readContracts(topology.universe_root)
+  const universe = gatherContractFacts({
+    projectRoot,
+    config: config ?? null,
+    readPaths: () => walk.declared,
+    executor: defaultGitExecutor,
+    always: true,
+    ...(config?.audit !== undefined && { auditConfig: config.audit }),
+  })
+  const contractGraph: ContractGraph =
+    universe === null || !universe.universeLinked
+      ? EMPTY_CONTRACT_GRAPH
+      : { available: !universe.inactive, contracts: universe.contracts, note: universe.note }
 
   const checklistArgs: Parameters<typeof runVerificationChecklist>[0] = {
     projectRoot,
@@ -207,8 +214,8 @@ export async function phaseVerificationStartHandler(
     discoveredImporters: walk.discovered,
     specTier: input.spec_tier,
     contractGraph,
-    appName: config?.app?.name ?? null,
-    universeLinked: topology.universe_root !== null,
+    appNames: universe?.apps ?? (config?.app?.name ? [config.app.name] : []),
+    universeLinked: universe?.universeLinked === true,
   }
   if (input.spec_claims !== undefined) checklistArgs.specClaims = input.spec_claims
   if (input.existing_project_files !== undefined) {
@@ -518,6 +525,7 @@ export async function phaseVerificationStartHandler(
   hints.push(...coverageHints(walk))
   hints.push(...walk.hints)
   hints.push(...checklist.hints)
+  hints.push(...(universe?.lines ?? []))
   if (fields.audit_error !== null) {
     hints.push(`⚠ audit log write failed: ${fields.audit_error}.`)
   }

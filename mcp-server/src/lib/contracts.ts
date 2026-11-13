@@ -54,7 +54,22 @@ export function readContracts(universeRoot: string | null): ContractGraph {
     if (statSync(p).size > MAX_CONTRACTS_JSON_BYTES) {
       return { available: false, contracts: [], note: `contracts.json exceeds ${MAX_CONTRACTS_JSON_BYTES} bytes` }
     }
-    const parsed = JSON.parse(readFileSync(p, 'utf8')) as { contracts?: unknown }
+    return parseContracts(readFileSync(p, 'utf8'))
+  } catch (e) {
+    return {
+      available: false,
+      contracts: [],
+      note: `contracts.json unreadable/malformed: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
+}
+
+export function parseContracts(text: string): ContractGraph {
+  if (Buffer.byteLength(text, 'utf8') > MAX_CONTRACTS_JSON_BYTES) {
+    return { available: false, contracts: [], note: `contracts.json exceeds ${MAX_CONTRACTS_JSON_BYTES} bytes` }
+  }
+  try {
+    const parsed = JSON.parse(text) as { contracts?: unknown }
     const raw = Array.isArray(parsed.contracts) ? parsed.contracts : []
     const contracts: Contract[] = []
     let dropped = 0

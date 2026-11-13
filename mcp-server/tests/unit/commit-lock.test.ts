@@ -17,6 +17,7 @@ import { commitAll, git, initSweepRepo } from '../sweep-repo.js'
 import { recordMint } from '../plan-token-fixture.js'
 import { appendAuditEntry } from '../../src/lib/audit-log.js'
 import { baselineEntry, checkGitPrograms } from '../../src/lib/git-programs.js'
+import { gatherContractFacts } from '../../src/lib/contract-facts.js'
 
 const NOW = new Date('2026-06-22T12:00:00.000Z')
 const HOUR = 60 * 60_000
@@ -281,6 +282,28 @@ describe('rsct_request_commit — the token path', () => {
     const out = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
     expect(out.status).toBe('committed')
     expect(out.authorized_via).toBe('plan_token')
+  })
+
+  it('refuses the token while what the contract gate reads is read for the first time, and commits once a record exists', async () => {
+    repo()
+    writePlan('p', TWO)
+    seed(token())
+    const universe = join(tmpRoot, '..', `${counter}-acme-universe-${Date.now()}`)
+    mkdirSync(universe, { recursive: true })
+    writeFileSync(join(universe, '.universe.json'), JSON.stringify({ name: 'acme', registered_apps: ['api'] }))
+    writeFileSync(join(universe, 'contracts.json'), JSON.stringify({ contracts: [{ id: 'orders', producer: 'api', surface: ['api/**'], consumers: ['web'] }] }))
+    writeFileSync(join(tmpRoot, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', app: { name: 'api', org: 'acme' }, topology: { mode: 'multi-repo' }, universe: { local: universe } }))
+    try {
+      const refused = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
+      expect(refused.reject_kind).toBe('universe_changed')
+      const seen = gatherContractFacts({ projectRoot: tmpRoot, config: null, readPaths: () => ['NOTES.md'], executor: defaultGitExecutor })
+      if (seen === null) throw new Error('paths unreadable')
+      appendAuditEntry(tmpRoot, seen.baseline)
+      const out = await requestCommitHandler({ project_root: tmpRoot, message: 'docs: notes' }, {})
+      expect(out.status).toBe('committed')
+    } finally {
+      rmSync(universe, { recursive: true, force: true })
+    }
   })
 
   it('refuses the token while git would run a hook no approved call has shown, and commits once one has', async () => {
