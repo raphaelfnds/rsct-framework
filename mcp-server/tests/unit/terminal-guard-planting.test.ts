@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { judgeCommand, type AliasResolver, type ShellDialect } from '../../src/lib/terminal-guard.js'
 
 const NO_ALIASES: AliasResolver = () => ({ found: false })
@@ -200,6 +203,95 @@ describe('terminal guard — git init and clone with a home folder set on the co
   it('allows a home folder read in PowerShell', () => {
     expect(verdictOf('git clone https://example.invalid/r.git "$env:USERPROFILE\\src\\r"', 'powershell')).toBe('allow')
     expect(verdictOf('Set-Location $env:HOME; git init', 'powershell')).toBe('allow')
+  })
+})
+
+describe('terminal guard — planting names spelled without the plain name (2.24.2)', () => {
+  it.each([
+    String.raw`export GIT_TEMPLATE""_DIR=/x; git init`,
+    String.raw`export GIT_TEMPLATE\_DIR=/x; git init`,
+    String.raw`env GIT_TEMPLATE""_DIR=/x git init`,
+    String.raw`export GIT_TEMPLATE$''_DIR=/x; git init`,
+    String.raw`export GIT_TEMPLATE$""_DIR=/x; git init`,
+    String.raw`export GIT_TEMPLATE$'\x5f'DIR=/x; git init`,
+    'export GIT_TEMPLATE$(true)_DIR=/x; git init',
+    'export GIT_TEMPLATE`true`_DIR=/x; git init',
+    'V=GIT_TEMPLATE; export $' + '{V}_DIR=/x; git init',
+    'export "$' + '{V}_DIR"=/x; git init',
+    'export GIT_TEMPLATE{,}_DIR=/x; git init',
+    'declare -x "$' + '{V}_DIR=/x"; git clone https://example.invalid/r.git',
+    'eval "$' + '{V}_DIR=/x git init"',
+    String.raw`bash -c 'export GIT_TEMPLATE""_DIR=/x; git init'`,
+    'env "$ASSIGN" git init',
+    'env -i "$ASSIGN" git init',
+    'env -u FOO "$ASSIGN" git init',
+    'env --chdir /tmp "$ASSIGN" git clone https://example.invalid/r.git',
+    'read HOME <<< /x; git init',
+    'printf -v HOME %s /x; git init',
+    'local XDG_CONFIG_HOME; git clone https://example.invalid/r.git',
+  ])('refuses %s', (command) => {
+    expect(verdictOf(command)).toBe('deny')
+  })
+
+  it.each([
+    "$env:GIT_TEMPLATE`_DIR = 'C:\\x'; git init",
+    "Set-Item ('env:GIT_TEMPLATE' + '_DIR') C:\\x; git init",
+    "Set-Item ('env:GIT_TEMPLATE'+'_DIR') C:\\x; git init",
+    "Set-Item (\"env:GIT_TEMPLATE\" + '_DIR') C:\\x; git init",
+    "[Environment]::SetEnvironmentVariable('GIT_' + 'TEMPLATE_DIR', 'C:\\x'); git init",
+    "Set-Item ('env:HO' + 'ME') C:\\x; git clone https://example.invalid/r.git",
+  ])('refuses in PowerShell %s', (command) => {
+    expect(verdictOf(command, 'powershell')).toBe('deny')
+  })
+
+  it.each([
+    'export PATH=$PATH:/x; git clone https://example.invalid/r.git',
+    'export FOO="$BAR"; git init',
+    'export "PATH=$PATH:/x"; git init',
+    'env FOO=1 git clone "$url"',
+    'env -u FOO git init',
+    'env -C /tmp git clone "$url"',
+    'git clone https://example.invalid/HOME.git',
+    'git init && echo "status=ok"',
+    'git init && printf "%s\\n" "$HOME"',
+    'read -r name; git init "$name"',
+    'for d in a b; do git init "$d"; done',
+    'declare -A map=( [k]=v ); git init',
+  ])('allows %s', (command) => {
+    expect(verdictOf(command)).toBe('allow')
+  })
+
+  it.each([
+    "$env:Path += ';C:\\x'; git clone https://example.invalid/r.git",
+    "Set-Item ('env:' + 'FOO') 1; git init",
+    'git clone C:\\HOME\\r C:\\x\\y',
+  ])('allows in PowerShell %s', (command) => {
+    expect(verdictOf(command, 'powershell')).toBe('allow')
+  })
+})
+
+describe('terminal guard — planting names inside the package scripts a command runs (2.24.2)', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rsct-tg-pkg-'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: 'p',
+      scripts: {
+        plant: 'GIT_TEMPLATE_DIR=/t git init',
+        home: 'export HOME=/x; git clone https://example.invalid/r.git',
+        spelled: 'export GIT_TEMPLATE$(true)_DIR=/x; git init',
+        plain: 'git init',
+      },
+    }))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it.each(['npm run plant', 'npm run home', 'npm run spelled', 'pnpm run plant', 'yarn plant'])('refuses %s', (command) => {
+    expect(judgeCommand(command, { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('deny')
+  })
+
+  it('allows a script that runs a plain git init', () => {
+    expect(judgeCommand('npm run plain', { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('allow')
   })
 })
 

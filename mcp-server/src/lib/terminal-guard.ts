@@ -277,7 +277,13 @@ interface Ctx {
   pkg: PackageState
   database: boolean
   databaseTestGuard: boolean
+  units: readonly ShellUnit[]
+}
+
+interface ShellUnit {
   text: string
+  dialect: ShellDialect
+  words: string
 }
 
 const ALLOW: TerminalVerdict = { verdict: 'allow' }
@@ -1579,8 +1585,9 @@ function judgeText(text: string, dialect: ShellDialect, ctx: Ctx, firstPiped = f
   const keys = switchKeyVerdict(text)
   if (isDeny(keys)) return keys
   const here = ctx.folder.current
-  const inner: Ctx = { ...ctx, depth: ctx.depth + 1, folder: { start: here, current: here, stack: [] } }
   const lexed = lex(text, dialect)
+  const words = lexed.tokens.flatMap((t) => (t.kind === 'word' ? [t.value] : [])).join(' ')
+  const inner: Ctx = { ...ctx, depth: ctx.depth + 1, folder: { start: here, current: here, stack: [] }, units: [...ctx.units, { text, dialect, words }] }
   for (const n of lexed.nested) {
     const v = judgeText(n.text, n.dialect, inner, n.piped === true)
     if (isDeny(v)) return v
@@ -2066,6 +2073,60 @@ const PLANTING_HOME = new RegExp(
   'i',
 )
 const PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i
+const HOME_READ = new RegExp(
+  `\\b(?:read|mapfile|readarray|getopts|declare|typeset|local|readonly)\\b[^;&|\\n]*?(?<![\\w$])(${HOME_NAMES})\\b|\\bprintf\\b[^;&|\\n]*?-v\\s*(${HOME_NAMES})\\b`,
+)
+const POWERSHELL_JOIN = /(['"])\s*\+\s*(['"])/g
+const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly'])
+const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir'])
+
+function plantingName(unit: ShellUnit): string | undefined {
+  const spellings = [unit.text, unit.words, ...(unit.dialect === 'powershell' ? [unit.text.replace(POWERSHELL_JOIN, '')] : [])]
+  for (const s of spellings) {
+    const found = PLANTING_VARIABLE.exec(s)?.[1] ?? PLANTING_HOME.exec(s)?.slice(1).find((n) => n !== undefined) ?? (unit.dialect === 'bash' ? HOME_READ.exec(s)?.slice(1).find((n) => n !== undefined) : undefined)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function builtName(token: string): boolean {
+  const name = token.includes('=') ? token.slice(0, token.indexOf('=')) : token
+  return /[A-Za-z_]/.test(name) && /[$`{}()]/.test(name)
+}
+
+function builtAssignment(text: string): string | undefined {
+  for (const command of text.split(/[;&|\n]+/)) {
+    const tokens = command.trim().split(/\s+/).filter((t) => t.length > 0)
+    let k = 0
+    while (k < tokens.length && /^[({!]+$/.test(tokens[k]!)) k++
+    const checked: string[] = []
+    while (k < tokens.length && tokens[k]!.includes('=')) checked.push(tokens[k++]!)
+    const program = tokens[k]?.replace(/^[({!]+/, '')
+    if (program !== undefined && DECLARERS.has(program)) checked.push(...tokens.slice(k + 1).filter((t) => !t.startsWith('-')))
+    if (program === 'env') {
+      for (let m = k + 1; m < tokens.length; m++) {
+        const t = tokens[m]!
+        if (ENV_VALUE_OPTIONS.has(t)) m++
+        if (t.startsWith('-')) continue
+        if (!t.includes('=') && !builtName(t)) break
+        checked.push(t)
+      }
+    }
+    const found = checked.find(builtName)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function judgePlantingNames(verb: string, units: readonly ShellUnit[]): TerminalVerdict {
+  for (const unit of units) {
+    const variable = plantingName(unit)
+    if (variable !== undefined) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
+    const built = unit.dialect === 'bash' ? builtAssignment(unit.text) : undefined
+    if (built !== undefined) return deny(`\`git ${verb}\` in a command that sets a variable whose name is built from a variable, a substitution, quotes or a brace pattern ('${built}') cannot be read, and that variable could plant hooks or configuration; write the name out, or the developer runs it in their own terminal`)
+  }
+  return ALLOW
+}
 
 function sectionOf(key: string): string {
   return (key.split('.')[0] ?? '').toLowerCase()
@@ -2172,11 +2233,11 @@ function shortConfigValue(word: string, next: string | undefined): string | unde
   return undefined
 }
 
-function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], text: string): TerminalVerdict {
+function judgeGitPlanting(verb: string, globals: string[], rest: string[], dynamic: boolean[], units: readonly ShellUnit[]): TerminalVerdict {
   if (verb === 'config') return judgeConfigWrite(rest, dynamic)
   if (verb === 'init' || verb === 'clone') {
-    const variable = PLANTING_VARIABLE.exec(text)?.[1] ?? PLANTING_HOME.exec(text)?.slice(1).find((n) => n !== undefined)
-    if (variable !== undefined) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
+    const named = judgePlantingNames(verb, units)
+    if (isDeny(named)) return named
     const planted = plantingOption([...globals, ...rest])
     if (planted !== null) return deny(`\`git ${verb}\` with '${planted}' can plant hooks or configuration, or move the git folder, that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
     return ALLOW
@@ -2210,7 +2271,7 @@ function judgeGit(args: string[], ctx: Ctx, inlineAliases: Record<string, string
   }
   if (verb === 'submodule' && rest[0] === 'foreach') return judgeText(rest.slice(1).filter((r) => !r.startsWith('--')).join(' '), 'bash', ctx)
   if (verb === 'bisect' && rest[0] === 'run') return judgeText(joinWords(rest.slice(1), 'bash'), 'bash', ctx)
-  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.text)
+  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.units)
   if (isDeny(planting)) return planting
   if (GIT_BUILTINS.has(verb)) return ALLOW
 
@@ -2420,7 +2481,7 @@ export function judgeCommand(text: string, options: JudgeOptions = {}): Terminal
     },
     database: options.database ?? false,
     databaseTestGuard: options.databaseTestGuard ?? true,
-    text,
+    units: [],
   }
   return judgeText(text, options.dialect ?? 'bash', ctx)
 }
