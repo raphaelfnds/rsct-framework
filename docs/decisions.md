@@ -4665,6 +4665,50 @@ those files. Keyed by module and symbol; restatements of what the code says were
 
 ---
 
+### `lib/universe.ts`, `tests/unit/universe.test.ts` (migrated in the 2.24.2 REVIEW)
+
+- **One source for the universe block.** `getUniverse` is what `rsct_status` and `rsct_load_context`
+  both call, so their outputs cannot drift (V #6). Everything in the module is fail-graceful: an
+  error degrades to a sane block and never throws into bootstrap. No `.rsct.json` → no universe
+  block, as before (an identity is needed to test registration against). The governance index
+  (slugs only, content read on demand by `rsct_get_universe`) is computed only on the found and
+  readable path, and a defensive size cap keeps a multi-MB file out of memory.
+- **`.universe.json` and `applications/` disagreeing** is reported as a reconciliation note; the
+  folders are the ground truth, the JSON the index (V #7). `isUniverseDir` never opens the file: a
+  broken universe is claimed and reported unreadable downstream, and discovery must agree — a parse
+  there would be a third definition of "is this a universe", the drift #65 removed.
+- **`normalizeOrg` strips `-\d*$`**, mirroring the prompt's `sed 's/-[0-9]*$//'` exactly (`-\d+$`
+  diverges on a bare trailing dash). It neither trims nor lowercases: the resolver builds folder
+  names from it and must keep the case; callers that need a case-insensitive match key fold
+  themselves.
+- **Candidate order is load-bearing.** `universeCandidates` is the one list (same as
+  `02-canonical-source.md` Phase 1.2): siblings `../<base>-universe`, then the org-blind
+  `../universe`, then the `$HOME` folders. Appending `../universe` instead of placing it between
+  would flip a shipped precedence (a project with both `../universe` and
+  `$HOME/projetos/<org>-universe` resolves to the former). Pinned by a test, since nothing else in
+  the suite covers it.
+- **Resolver and pre-install discovery share the list but differ on purpose** — do not make them
+  symmetric: (1) `universe.local` bypasses the candidates in the resolver only (discovery has no
+  config, and its branch is unreachable when `local` is set); (2) only the resolver has a
+  `universe.name` basename; (3) discovery never probes `../universe` (`includeOrgBlind` false): with
+  an identity only inferred from a git remote, another org's shared folder would be adopted. Both
+  build basenames inferred, then raw — an org `acme-23` may sit beside `acme-universe` or
+  `acme-23-universe`, and an inferred-only discovery misses the second (a fixture pins that tree).
+- **Basenames are case-exact** on every layer (the resolver, the bash probes of `01-setup.md` Phase
+  1.9 and `02-canonical-source.md` Phase 1.2). A lower-cased probe was withdrawn: discovering a
+  universe `02-canonical-source.md` cannot re-find ends in "not found locally — create one?", #65's
+  own failure one prompt later. A case-variant org misses consistently instead.
+- **A basename is untrusted input.** The raw org can come from a git remote (`parseGitRemoteOrg`
+  returns the first URL segment verbatim) and becomes a path component for the first time here: one
+  with `/` or `\` (a separator on Windows), `.` or `..` is dropped, and so is the empty string
+  `normalizeOrg('-9')` returns (it would probe `../-universe`); `orgKey?.trim() || null` stops null,
+  empty and blank keys first. Each guard's test fixture holds the folder the guard would wrongly hit,
+  or the assertion passes with the guard removed.
+- **A repository named `<org>-universe` never discovers itself**; the `is_universe_repo` guard owns
+  that case. Path equality is case-folded on case-insensitive file systems (Windows, default macOS);
+  the flag is declared in this module because importing it from `onboarding-detect.ts` would close an
+  import cycle.
+
 ## How to contribute new decisions
 
 - Firm premise: append under "Firm premises", sequential numbering.

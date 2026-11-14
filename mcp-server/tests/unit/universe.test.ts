@@ -19,7 +19,6 @@ function cfg(partial: Partial<RsctConfig> = {}): RsctConfig {
   return { rsct_version: '1.0.0', app: { name: 'registered-app', org: 'acme' }, ...partial }
 }
 
-// An isolated temp HOME keeps candidate-path probing hermetic (FV3).
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), 'rsct-uni-'))
 }
@@ -55,7 +54,6 @@ describe('lib/universe — resolveUniverseRoot', () => {
     const proj = join(parent, 'apiacme'); mkdirSync(proj)
     const sib = join(parent, 'acme-universe'); mkdirSync(join(sib, 'applications'), { recursive: true })
     writeFileSync(join(sib, '.universe.json'), '{"name":"acme-universe","registered_apps":[]}')
-    // org "acme-23", NO universe.name (unlinked project) — resolves via inference.
     const r = resolveUniverseRoot(cfg({ app: { name: 'apiacme', org: 'acme-23' } }), proj, { home: tmp() })
     expect(r).toEqual({ kind: 'found', path: sib })
   })
@@ -70,9 +68,6 @@ describe('lib/universe — resolveUniverseRoot', () => {
   })
 })
 
-// #65 — pre-install discovery. `getUniverse` early-returns on a null config, so before
-// `/rsct-setup` writes `.rsct.json` the resolver cannot answer "is there a universe here?"
-// at all. These pin the primitive that can, and the parity that keeps it from drifting.
 describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   function mkUni(parent: string, name: string): string {
     const d = join(parent, name)
@@ -87,9 +82,6 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   }
 
   it('T1b — finds `<org>-universe` for an org carrying a `-NN` suffix', () => {
-    // The reason discovery cannot build basenames from normalizeOrg alone: `acme-23`
-    // normalizes to `acme`, and `../acme-universe` does not exist on this tree. An
-    // inferred-only implementation returns null here and the reported bug survives.
     const parent = tmp()
     mkUni(parent, 'acme-23-universe')
     expect(discoverUniverseCandidate(projectIn(parent), 'acme-23', { home: tmp() })).toBe(
@@ -107,22 +99,15 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   })
 
   it('builds candidates case-exact, matching the resolver and the bash probes', () => {
-    // Deliberately NOT case-folded. Discovering a universe that `02-canonical-source.md`
-    // cannot re-find (it probes case-exact in bash and accepts no path from the caller)
-    // ends in "not found locally — create one?", which is #65's own failure one prompt
-    // later. A case-variant org misses here, consistently with every other layer.
     const parent = tmp()
     mkUni(parent, 'acme-universe')
     const root = projectIn(parent)
     expect(discoverUniverseCandidate(root, 'acme', { home: tmp() })).not.toBeNull()
-    // Only meaningful on a case-sensitive filesystem; on Windows/macOS the FS folds for us.
     const variant = discoverUniverseCandidate(root, 'Acme', { home: tmp() })
     expect(variant === null || variant.endsWith('Acme-universe')).toBe(true)
   })
 
   it('never lets an org escape the scanned directory', () => {
-    // `rawSelfOrg` can come from a git remote — untrusted input, and this is the first
-    // place it becomes a path component. On Windows a `\` in it is a separator.
     const parent = tmp()
     mkUni(parent, 'EVIL-universe')
     const nested = join(parent, 'workspace')
@@ -151,10 +136,6 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   })
 
   it('T11 — never probes a bare `-universe` for a blank or digits-only org', () => {
-    // Two distinct guards, and the fixture must contain the directory each would wrongly
-    // hit or the assertions pass with the guard removed:
-    //   - `orgKey?.trim() || null` catches null / '' / '   ' before any basename is built;
-    //   - `!!x` in the filter drops the '' that `normalizeOrg('-9')` returns.
     const parent = tmp()
     mkUni(parent, 'acme-universe')
     mkUni(parent, '-universe')
@@ -171,9 +152,6 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   })
 
   it('T9 — claims a corrupt universe exactly as the resolver does', () => {
-    // `isUniverseDir` never opens the file, so the resolver claims a broken universe and
-    // reports it unreadable downstream. Discovery must agree: adding a parse here would be
-    // a third definition of "is this a universe", which is the drift #65 exists to remove.
     const parent = tmp()
     const d = join(parent, 'acme-universe')
     mkdirSync(d, { recursive: true })
@@ -185,9 +163,6 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   })
 
   it('T4 — agrees with the resolver on the name-derived candidates', () => {
-    // Authored over a tree where a one-basename implementation diverges: with org
-    // `acme-23` and only `acme-23-universe` present, an inferred-only discovery returns
-    // null while the resolver finds it.
     const parent = tmp()
     mkUni(parent, 'acme-23-universe')
     const root = projectIn(parent)
@@ -200,9 +175,6 @@ describe('lib/universe — discoverUniverseCandidate (#65)', () => {
   })
 
   it('T12 — the resolver still prefers `../universe` over the $HOME candidates', () => {
-    // `../universe` is pushed BETWEEN the sibling and $HOME candidates. Extracting the list
-    // and appending the org-blind entry instead of splicing it would silently reorder a
-    // shipped precedence, and nothing else in the suite covers it.
     const parent = tmp()
     const home = tmp()
     mkUni(parent, 'universe')
@@ -219,7 +191,7 @@ describe('lib/universe — readUniverse', () => {
     expect(data).not.toBeNull()
     expect(data!.name).toBe('acme-universe')
     expect(data!.registeredFromJson).toEqual(['registered-app', 'ghost-app'])
-    expect(data!.registeredFromDirs).toEqual(['registered-app']) // ghost-app has no dir
+    expect(data!.registeredFromDirs).toEqual(['registered-app'])
   })
 
   it('returns null (degraded) on a corrupt .universe.json', () => {
@@ -242,7 +214,6 @@ describe('lib/universe — getUniverse (single source)', () => {
     expect(r.block.this_app_registered).toBe(true)
     expect(r.block.note).toBeNull()
     expect(r.hint).toBeNull()
-    // T1.c — governance index folded into the single source (FV2: only here).
     expect(r.block.governance.available).toBe(true)
     expect(r.block.governance.docs).toEqual(['canonical-sources-map', 'document-control', 'naming-standards'])
     expect(r.block.governance.has_index).toBe(true)
@@ -258,7 +229,7 @@ describe('lib/universe — getUniverse (single source)', () => {
 
   it('reconciliation note when the app is in the JSON index but has no dir', () => {
     const r = getUniverse(cfg({ app: { name: 'ghost-app', org: 'acme' }, universe: { local: UNIVERSE } }), tmp())
-    expect(r.block.this_app_registered).toBe(true) // in JSON
+    expect(r.block.this_app_registered).toBe(true)
     expect(r.block.note).toMatch(/no applications\/ghost-app\/ dir/)
   })
 
@@ -303,16 +274,14 @@ describe('status / load_context — universe block parity (FV4 anti-drift)', () 
     expect(s.universe).toEqual(l.universe)
     expect(s.universe.available).toBe(true)
     expect(s.universe.name).toBe('acme-universe')
-    expect(s.universe.this_app_registered).toBe(true) // app = registered-app
-    // FV8 — governance index is part of the single source → present + equal in both.
+    expect(s.universe.this_app_registered).toBe(true)
     expect(s.universe.governance).toEqual(l.universe.governance)
     expect(s.universe.governance.available).toBe(true)
     expect(s.universe.governance.docs).toContain('naming-standards')
   })
 
   it('clean up the phase-state stamp written into the fixture', () => {
-    // status/load_context stamp .rsct/phase-state.json into the fixture (gitignored).
-    try { rmSync(join(SAMPLE_RSCT_UNIVERSE, '.rsct'), { recursive: true, force: true }) } catch { /* ignore */ }
+    try { rmSync(join(SAMPLE_RSCT_UNIVERSE, '.rsct'), { recursive: true, force: true }) } catch { }
     expect(true).toBe(true)
   })
 })
