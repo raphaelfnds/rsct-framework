@@ -880,8 +880,9 @@ Since 2.23.0 (ADR-039, ADR-040):
   and rebase list the same, a push also a local-path remote's own, and a merge, rebase or squash
   also the hooks it brings into a hooks folder kept in the work tree (since 2.24.2, ADR-045): one
   only the incoming side changed in that exact version, and for a rebase each version the replayed
-  commits carry; one changed on both sides, that differs between merge bases, or that a rebase
-  merges, as merged while git runs, its content not known before.
+  commits carry; one changed on both sides, that differs between merge bases, that may receive
+  content moved in from another file or folder, or that a rebase merges, as merged while git runs,
+  its content not known before.
 - **The contract gate reads every source (since 2.24.1, ADR-044):** every `.rsct.json` from the
   project folder to the repository top, working tree and HEAD, at their strictest; the universe
   they name plus the one read at the last approved commit; and in each universe its working tree,
