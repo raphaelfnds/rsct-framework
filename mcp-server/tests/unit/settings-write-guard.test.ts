@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -559,7 +559,17 @@ describe('edit-scope hook — Claude Code files in the folder CLAUDE_CONFIG_DIR 
     const { root } = sandbox()
     const p = join(root, 'p')
     expect(exitOf(join(p, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: '' }, p)).toBe(0)
-    expect(exitOf(join(p, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: '   ' }, p)).toBe(0)
+  })
+
+  it.skipIf(process.platform !== 'win32')('reads a file written through an administrative share of the folder\'s drive', () => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    mkdirSync(cfg)
+    const share = `\\\\localhost\\${cfg[0]}$${cfg.slice(2)}`
+    if (!existsSync(share)) return
+    const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }
+    expect(exitOf(join(share, 'settings.json'), HOOKED, env, p)).toBe(2)
+    expect(exitOf(join(cfg, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: share }, p)).toBe(2)
   })
 
   it('leaves ordinary files in that folder alone', () => {

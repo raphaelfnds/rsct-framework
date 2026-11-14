@@ -86,17 +86,26 @@ function namesRsctConfig(path: string): boolean {
   return bare(basename(path)) === '.rsct.json'
 }
 
+function driveForm(path: string): string | null {
+  const share = /^(?:\\\\\?\\UNC\\|[\\/]{2})[^\\/]+[\\/]([A-Za-z])\$(?:[\\/](.*))?$/.exec(path)
+  return share === null ? null : `${share[1]}:\\${share[2] ?? ''}`
+}
+
 function inClaudeFolder(path: string, configDir: string): string[] {
   const parts = pathComponents(path)
-  const base = pathComponents(canonicalPath(resolve(configDir)))
-  if (base.length === 0 || parts.length <= base.length || !base.every((c, i) => parts[i] === c)) return []
-  return [[...base, '.claude', ...parts.slice(base.length)].join('/')]
+  const real = canonicalPath(resolve(configDir))
+  return [real, driveForm(real)].flatMap((dir) => {
+    const base = dir === null ? [] : pathComponents(dir)
+    if (base.length === 0 || parts.length <= base.length || !base.every((c, i) => parts[i] === c)) return []
+    return [[...base, '.claude', ...parts.slice(base.length)].join('/')]
+  })
 }
 
 function spellings(filePath: string, configDirs: readonly string[]): string[] {
   const lexical = resolve(filePath)
   const realDir = realOrNull(dirname(lexical))
-  const plain = [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+  const found = [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+  const plain = [...found, ...found.map(driveForm).filter((c): c is string => c !== null)]
   return [...plain, ...plain.flatMap((p) => configDirs.flatMap((dir) => inClaudeFolder(p, dir)))]
 }
 

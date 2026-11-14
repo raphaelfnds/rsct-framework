@@ -260,6 +260,7 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     "Set-Item ('env:HO' + 'ME') C:\\x; git clone https://example.invalid/r.git",
     "$env:HOME += '\\evil'; git init",
     'Set-Item Env:\\HOME C:\\x; git init',
+    'Set-Content -Path Env:\\HOME -Value C:\\x; git init',
     'Set-Item -Path Env:/USERPROFILE -Value C:\\x; git init',
     'New-Item -Path Env: -Name XDG_CONFIG_HOME -Value C:\\x; git init',
     'New-Item -Name HOME -Value C:\\x -Path Env:; git init',
@@ -294,6 +295,8 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'git clone "https://example.invalid/r.git?a=b"',
     'printenv HOME; git init',
     'for d in "$HOME"/a "$HOME"/b; do git init "$d"; done',
+    'for d in "$' + '{HOME}/a" "$' + '{HOME}/b"; do git init "$d"; done',
+    'echo read the HOME folder first; git init',
   ])('allows %s', (command) => {
     expect(verdictOf(command)).toBe('allow')
   })
@@ -304,6 +307,8 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'git clone C:\\HOME\\r C:\\x\\y',
     'Copy-Item $env:HOME\\a.txt b.txt; git init',
     'New-Item -ItemType Directory "$env:USERPROFILE\\src"; git init "$env:USERPROFILE\\src"',
+    'Set-Item -Path Env:PROJ -Value "$env:USERPROFILE\\src"; git init',
+    'Set-Item -Value "$env:USERPROFILE\\src" -Path Env:PROJ; git init',
   ])('allows in PowerShell %s', (command) => {
     expect(verdictOf(command, 'powershell')).toBe('allow')
   })

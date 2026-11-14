@@ -14,7 +14,7 @@ function samePath(a: string, b: string): boolean {
 
 function configFolders(env: NodeJS.ProcessEnv, cwd: string): string[] {
   const value = env.CLAUDE_CONFIG_DIR ?? ''
-  if (value.trim() === '') return []
+  if (value === '') return []
   const forms = /^~(?=$|[\\/])/.test(value) ? [value, join(homedir(), value.slice(1))] : [value]
   const bases = [cwd, env.CLAUDE_PROJECT_DIR].filter((b): b is string => typeof b === 'string' && b.length > 0)
   return [...new Set(forms.flatMap((form) => (isAbsolute(form) ? [resolve(form)] : bases.map((b) => resolve(b, form)))))]
