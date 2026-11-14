@@ -279,6 +279,36 @@ describe('push probe — an incomplete dry run is not read as complete', () => {
   })
 })
 
+describe('push probe — the dry run never recurses into submodules (2.24.2)', () => {
+  it('runs no submodule hook before the dialog, even with submodule.recurse set', () => {
+    const subRemote = join(base, 'sub.git')
+    git(base, 'init', '-q', '--bare', '-b', 'main', subRemote)
+    const subSrc = join(base, 'subsrc')
+    mkdirSync(subSrc)
+    git(subSrc, 'init', '-q', '-b', 'main')
+    git(subSrc, '-c', 'user.email=t@test.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 's1')
+    git(subSrc, 'push', '-q', subRemote, 'main')
+    git(work, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', subRemote, 'm')
+    git(work, 'commit', '-qm', 'add submodule')
+    git(work, 'push', '-q', 'origin', 'main')
+    const sub = join(work, 'm')
+    git(sub, '-c', 'user.email=t@test.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 's2')
+    git(work, 'add', 'm')
+    git(work, 'commit', '-qm', 'bump submodule')
+    const hooks = join(base, 'sub-hooks')
+    mkdirSync(hooks)
+    const marker = join(base, 'sub-pre-push-ran').replace(/\\/g, '/')
+    writeFileSync(join(hooks, 'pre-push'), `#!/bin/sh\necho ran > "${marker}"\nexit 0\n`)
+    if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(hooks, 'pre-push')])
+    git(sub, 'config', 'core.hooksPath', hooks.replace(/\\/g, '/'))
+    git(work, 'config', 'submodule.recurse', 'true')
+    git(work, 'config', 'protocol.file.allow', 'always')
+    const out = defaultPushProbe(work, 'origin', 'main:refs/heads/main')
+    expect(out.status).toBe('parsed')
+    expect(existsSync(marker), 'the submodule pre-push hook ran inside the dry run').toBe(false)
+  }, 60_000)
+})
+
 describe('push probe — reading the dry-run answer', () => {
   it('reads every summary form, keeps one block per push URL, and takes the URL as written', () => {
     const out = [
