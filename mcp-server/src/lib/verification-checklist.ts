@@ -124,10 +124,18 @@ export interface ChecklistStats {
   contracts_scanned: number
 }
 
+export interface PremiseAudit {
+  score: number
+  shared_tokens: string[]
+  match_count: number
+  claim_index: number
+}
+
 export interface ChecklistResult {
   findings: VerificationFinding[]
   stats: ChecklistStats
   hints: string[]
+  premise_audit: Record<string, PremiseAudit>
 }
 
 export const CATEGORY_PROMPTS: Record<string, string> = {
@@ -173,6 +181,7 @@ export function runVerificationChecklist(
 ): ChecklistResult {
   const findings: RawFinding[] = []
   const hints: string[] = []
+  const premiseAudit: Record<string, PremiseAudit> = {}
   const nextId = makeIdGenerator('v')
 
   const stats: ChecklistStats = {
@@ -191,7 +200,7 @@ export function runVerificationChecklist(
     hints.push(
       `spec_tier=${input.specTier} — verification checklist skipped per tier table.`,
     )
-    return { findings: [], stats, hints }
+    return { findings: [], stats, hints, premise_audit: premiseAudit }
   }
 
   const decisions = readDecisions(input.projectRoot)
@@ -237,43 +246,52 @@ export function runVerificationChecklist(
   stats.categories_run.push('gap')
   if (input.specClaims && input.specClaims.length > 0) {
     const corpus = [...decisions.premises, ...decisions.adrs]
-    for (const claim of input.specClaims) {
+    for (const [claimIndex, claim] of input.specClaims.entries()) {
       const result = checkPremise(claim, corpus, antiDecisions.entries)
+      const matchCount = result.matches.length + result.anti_decision_matches.length
+      const charged = result.matches.find((m) => m.negation_signal) ?? result.matches[0]
       const antiHit = result.anti_decision_matches[0]
       if (antiHit) {
+        const id = nextId('gap')
+        const alsoCharged = charged
+          ? ` Without this anti-decision the claim would be charged with ${charged.entry.id} (${charged.entry.title}) — score ${charged.score}, shared: ${charged.shared_tokens.join(', ')}.`
+          : ''
         findings.push({
-          id: nextId('gap'),
+          id,
           category: 'gap',
           severity: 'block',
           title: `Anti-decision hit: ${antiHit.entry.id} — ${antiHit.entry.title}`,
-          detail: `Claim "${claim}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(', ')}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
+          detail: `Claim "${claim}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(', ')}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.${alsoCharged}`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
+        premiseAudit[id] = { score: antiHit.score, shared_tokens: [...antiHit.shared_tokens], match_count: matchCount, claim_index: claimIndex }
         continue
       }
-      const topMatch = result.matches[0]
-      if (result.recommendation === 'conflict' && topMatch) {
+      if (!charged) continue
+      const id = nextId('gap')
+      if (result.recommendation === 'conflict') {
         findings.push({
-          id: nextId('gap'),
+          id,
           category: 'gap',
           severity: 'address-now',
-          title: `Conflict with ${topMatch.entry.id}: ${topMatch.entry.title}`,
-          detail: `Claim "${claim}" matches a decision with rollback/rejection language (score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}). Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
+          title: `Conflict with ${charged.entry.id}: ${charged.entry.title}`,
+          detail: `Claim "${claim}" matches a decision with rollback/rejection language (score ${charged.score}, shared: ${charged.shared_tokens.join(', ')}). Surface ${charged.entry.id} to the dev and confirm the revisit is intentional.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
-      } else if (result.recommendation === 'requires_revision' && topMatch) {
+      } else {
         findings.push({
-          id: nextId('gap'),
+          id,
           category: 'gap',
           severity: 'address-now',
-          title: `Requires revision: matches ${topMatch.entry.id}`,
-          detail: `Claim "${claim}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}) — score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(', ')}. Read the entry and align the claim or surface an explicit override.`,
+          title: `Requires revision: matches ${charged.entry.id}`,
+          detail: `Claim "${claim}" shares vocabulary with ${charged.entry.id} (${charged.entry.title}) — score ${charged.score}, shared: ${charged.shared_tokens.join(', ')}. Read the entry and align the claim or surface an explicit override.`,
           affected_paths: [...input.declaredPaths],
           source: 'premise-check',
         })
       }
+      premiseAudit[id] = { score: charged.score, shared_tokens: [...charged.shared_tokens], match_count: matchCount, claim_index: claimIndex }
     }
   } else if (decisions.exists || antiDecisions.exists) {
     hints.push(
@@ -453,5 +471,5 @@ export function runVerificationChecklist(
     evidence: evidenceForSource(f),
   }))
 
-  return { findings: classified, stats, hints }
+  return { findings: classified, stats, hints, premise_audit: premiseAudit }
 }
