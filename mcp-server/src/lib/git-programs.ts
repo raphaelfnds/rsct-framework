@@ -242,8 +242,10 @@ function unresolvedLocal(url: string): boolean {
 
 export interface GitCallTargets {
   urls?: readonly string[]
-  incoming?: string
+  incoming?: { tip: string; operation: 'merge' | 'rebase' }
 }
+
+const ABSENT = '-'
 
 function within(parent: string, child: string): boolean {
   const rel = relative(parent, child)
@@ -265,7 +267,37 @@ function treeHooks(executor: GitExecutor, top: string, rev: string, rel: string)
   return hooks
 }
 
-function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract<RepositoryRead, { ok: true }>, tip: string): ProgramEntry[] | null {
+function mergeBases(executor: GitExecutor, top: string, tip: string): string[] | null {
+  const r = executor(top, ['merge-base', '--all', 'HEAD', tip])
+  if (r.ok) return r.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
+  return r.exitCode === 1 ? [] : null
+}
+
+function revList(executor: GitExecutor, top: string, args: string[]): string[] | null {
+  const r = executor(top, ['rev-list', ...args])
+  return r.ok ? r.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0) : null
+}
+
+function folderNotTree(executor: GitExecutor, top: string, rel: string, revs: readonly string[]): string | null | undefined {
+  const parts = rel.split('/')
+  const prefixes = parts.map((_, i) => `:(literal)${parts.slice(0, i + 1).join('/')}`)
+  for (const rev of revs) {
+    const listed = executor(top, ['ls-tree', '-z', rev, '--', ...prefixes])
+    if (!listed.ok) return null
+    for (const record of listed.stdout.split('\0')) {
+      const type = record.split(' ')[1]
+      if (record.includes('\t') && type !== 'tree') return rev
+    }
+  }
+  return undefined
+}
+
+function blobShown(blob: string): string {
+  return blob === ABSENT ? 'none' : blob.split(' ')[1]!.slice(0, HASH_SHOWN)
+}
+
+function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract<RepositoryRead, { ok: true }>, incoming: NonNullable<GitCallTargets['incoming']>): ProgramEntry[] | null {
+  const { tip, operation } = incoming
   const hooksDir = canonicalPath(repo.hooksDir)
   if (within(canonicalPath(repo.gitFolder), hooksDir)) return []
   const toplevel = executor(projectRoot, ['rev-parse', '--show-toplevel'])
@@ -273,18 +305,77 @@ function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract
   const top = canonicalPath(toplevel.stdout.trim())
   if (!within(top, hooksDir)) return []
   const rel = posix(relative(top, hooksDir))
+  const bases = mergeBases(executor, top, tip)
+  if (bases === null) return null
+  const replayed = operation === 'rebase' ? revList(executor, top, ['--full-history', `${tip}..HEAD`, '--', `:(literal)${rel === '' ? '.' : rel}`]) : []
+  const merges = operation === 'rebase' ? revList(executor, top, ['--merges', '--max-count=1', `${tip}..HEAD`]) : []
+  if (replayed === null || merges === null) return null
   const now = treeHooks(executor, top, 'HEAD', rel)
   const then = treeHooks(executor, top, tip, rel)
-  if (now === null || then === null) return null
+  const baseHooks = bases.map((b) => treeHooks(executor, top, b, rel))
+  const replayedHooks = replayed.map((c) => ({ commit: c, hooks: treeHooks(executor, top, c, rel) }))
+  if (now === null || then === null || baseHooks.some((h) => h === null) || replayedHooks.some((h) => h.hooks === null)) return null
+
   const entries: ProgramEntry[] = []
-  for (const [name, blob] of [...then].sort(([a], [b]) => a.localeCompare(b))) {
-    if (now.get(name) === blob) continue
-    const where = rel === '' ? name : `${rel}/${name}`
-    entries.push({
-      scopeKey: repo.scopeKey,
-      identity: digest('incoming-hook', name, blob),
-      label: `hook ${specLabel(`"${name}"`)} as this operation brings it (${specLabel(where)} at ${tip.slice(0, HASH_SHOWN)}, blob ${blob.split(' ')[1]!.slice(0, HASH_SHOWN)})`,
-    })
+  if (rel !== '') {
+    const broken = folderNotTree(executor, top, rel, [...bases, 'HEAD', tip, ...replayed])
+    if (broken === null) return null
+    if (broken !== undefined) {
+      entries.push({
+        scopeKey: repo.scopeKey,
+        identity: digest('hooks-folder', rel, broken),
+        label: `the hooks folder ${specLabel(`"${rel}"`)} is not a folder at ${broken.slice(0, HASH_SHOWN)}: git may run hooks from a place this list cannot read`,
+      })
+    }
+  }
+
+  const names = new Set([...then.keys(), ...now.keys(), ...baseHooks.flatMap((h) => [...h!.keys()]), ...replayedHooks.flatMap((r) => [...r.hooks!.keys()])])
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const where = specLabel(rel === '' ? name : `${rel}/${name}`)
+    const tipBlob = then.get(name) ?? ABSENT
+    const headBlob = now.get(name) ?? ABSENT
+    const baseBlobs = bases.length === 0 ? [ABSENT] : baseHooks.map((h) => h!.get(name) ?? ABSENT)
+    const distinctBases = [...new Set(baseBlobs)].sort()
+    const base = distinctBases[0]!
+    const merged = (why: string): void => {
+      entries.push({
+        scopeKey: repo.scopeKey,
+        identity: digest('merged-hook', operation, name, ...distinctBases, headBlob, tipBlob),
+        label: `hook ${specLabel(`"${name}"`)} ${why}, so the content git runs is not known before it runs (${where}: HEAD blob ${blobShown(headBlob)}, ${tip.slice(0, HASH_SHOWN)} blob ${blobShown(tipBlob)})`,
+      })
+    }
+    const exact = (blob: string, at: string, how: string): void => {
+      entries.push({
+        scopeKey: repo.scopeKey,
+        identity: digest('incoming-hook', name, blob),
+        label: `hook ${specLabel(`"${name}"`)} as ${how} (${where} at ${at.slice(0, HASH_SHOWN)}, blob ${blobShown(blob)})`,
+      })
+    }
+
+    if (operation === 'merge') {
+      if (tipBlob === headBlob) continue
+      if (distinctBases.length > 1) merged('differs between the merge bases: git merges the versions while it runs')
+      else if (tipBlob === base) continue
+      else if (headBlob === base) {
+        if (tipBlob !== ABSENT) exact(tipBlob, tip, 'this operation brings it')
+      } else merged('changed on both sides: git merges the two versions while it runs')
+      continue
+    }
+
+    if (tipBlob !== ABSENT && tipBlob !== headBlob) exact(tipBlob, tip, 'this operation brings it')
+    const carried = replayedHooks.filter((r) => (r.hooks!.get(name) ?? ABSENT) !== base)
+    const touched = carried.length > 0
+    if (distinctBases.length > 1 || (touched && (merges.length > 0 || tipBlob !== base))) {
+      merged('is merged during the rebase')
+      continue
+    }
+    const seen = new Set([headBlob, tipBlob, ABSENT])
+    for (const r of carried) {
+      const blob = r.hooks!.get(name) ?? ABSENT
+      if (seen.has(blob)) continue
+      seen.add(blob)
+      exact(blob, r.commit, 'a replayed commit brings it')
+    }
   }
   return entries
 }
@@ -299,7 +390,7 @@ export function readGitPrograms(
   const entries = [...repo.entries]
   if (targets?.incoming !== undefined) {
     const brought = incomingHooks(executor, projectRoot, repo, targets.incoming)
-    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.slice(0, HASH_SHOWN))}` }
+    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.tip.slice(0, HASH_SHOWN))}` }
     entries.push(...brought)
   }
   const scopeKeys = new Set([repo.scopeKey])
