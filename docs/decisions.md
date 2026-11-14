@@ -3178,12 +3178,14 @@ project through `/rsct-setup`.
   ext4, so the order of the `forgotten` prompts was stable by accident, not by code.
 
 **Decision**:
-1. Both parsers skip a block that is the shipped anti-decision example (matched byte for byte after
-   removing CR; the block is identical in every shipped template version), or whose title starts
-   with `<TODO:` and whose body holds only placeholders, placeholder fields, a status line, blank
-   lines or comments. A real body under a `<TODO:` title stays an entry; an edited example is an
-   entry. The id counters behind the "ids present, none parsed" warning ignore skipped blocks. The
-   template example's id is `AD-EXAMPLE`, which no parser reads.
+1. Both parsers skip a block only when it equals one of the three blocks the templates shipped —
+   the `#1` and `ADR-001` placeholders (one shipped version) and the anti-decision example (identical
+   in every shipped version) — compared after removing CR, with the entry number ignored so a copied
+   skeleton is skipped too. Any real text, in the title or the body, keeps the block an entry (the
+   REVIEW measured that a rule on `<TODO:` titles and placeholder-shaped lines hid real text). The id
+   counters behind the "ids present, none parsed" warning ignore skipped blocks and the numbering
+   line the templates shipped before 2.7.2 (`Numbering: AD-001, AD-002, ...`). The template
+   example's id is `AD-EXAMPLE`, which no parser reads.
 2. A `conflict` finding names the matching decision that carries the negation; an anti-decision hit
    also names the decision the claim would be charged with without it (the negation match, else the
    top match). One finding per claim, same severities.
@@ -3191,8 +3193,9 @@ project through `/rsct-setup`.
    premise findings, and `verification.start` records `claims_count`. Never the claim text.
 4. The `forgotten` prompts are taken in name order by code. A knowledge prompt, and the architecture
    overview prompt, say in their detail when the file is still the untouched template: its body (the
-   bytes after the first line, CR removed) matches its own `RSCT-GENERATED` `sha256-body`, the same
-   test `/rsct-setup` uses to decide a file was not edited. Titles and evidence are unchanged, so the
+   bytes after the first line, CR removed) matches its own `RSCT-GENERATED` `sha256-body` (the last
+   one on the line, as the setup's `sed` reads it), the same test `/rsct-setup` uses to decide a file
+   was not edited. A file above 4 MB gets no claim. Titles and evidence are unchanged, so the
    findings baseline is unchanged; every prompt is still raised and answered.
 5. The walk hint names the declared paths that are not files it can key on but still have
    importers: those importers are listed and are a lower bound. "UNAVAILABLE" stays for the paths
@@ -3201,8 +3204,9 @@ project through `/rsct-setup`.
 6. `rsct_get_topology` takes optional `paths` and answers which contracts they touch through the
    same contract reading V and the commit gate use. It never records the universe baseline (only an
    approved commit does), so the commit dialog keeps comparing against the last approved commit.
-   A path outside the root is reported as such; no universe reads "contracts do not apply"; an
-   unreadable `contracts.json` reads UNKNOWN.
+   A folder is reported as a folder to list files in (surfaces match files) and a path outside the
+   root as such; no universe reads "contracts do not apply"; no `app.name` or an unreadable
+   `contracts.json` reads UNKNOWN.
 7. The contract fact is raised at two points on purpose, and asymmetrically. V raises a
    `contract-surface` finding for any project with a linked universe (`always: true`): the plan-level
    early warning, answered like every finding. The commit gate refuses only in a confirmed multi-repo
