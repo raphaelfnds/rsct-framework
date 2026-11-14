@@ -28494,30 +28494,20 @@ init_esm_shims();
 
 // src/lib/placeholder-entries.ts
 init_esm_shims();
-var SHIPPED_EXAMPLE_SHA256 = /* @__PURE__ */ new Set([
-  "70400ede1b967d7f1719af91db1d1247f4e5b839833c3b6b13a27691d4e07769"
+var SHIPPED_PLACEHOLDER_SHA256 = /* @__PURE__ */ new Set([
+  "eb53d44c4e2bd0f1ce079ac487747d58275bb7b89d8fa54ffc858db211d8bd42",
+  "0a66a2c5754c1b5eead299804a643f5504e7c74b7fc235255d6f68a29aa1cf61",
+  "8b857e6c0e099df5ff5ee9dfb3c7d904c7cac5951d47b43dae119006cc32bb8f"
 ]);
-var PLACEHOLDER2 = /^<[^<>]*>$/;
-var PLACEHOLDER_FIELD = /^(?:[-*]\s+)?\*\*[^*]+\*\*:?\s*<[^<>]*>$/;
-var STATUS_FIELD = /^\*\*Status\*\*:\s*[A-Za-z]+$/i;
-function isShippedPlaceholder(heading, title, bodyLines) {
-  const lines2 = [heading, ...bodyLines].map((line2) => line2.replace(/\r/g, ""));
+var SHIPPED_ID_LINES = /* @__PURE__ */ new Set(["Numbering: AD-001, AD-002, ... sequential, append-only."]);
+var ENTRY_NUMBER = /^(#{2,3}\s+(?:#|ADR-|AD-))\d+/;
+function isShippedPlaceholder(heading, bodyLines) {
+  const lines2 = [heading.replace(ENTRY_NUMBER, "$1N"), ...bodyLines].map((line2) => line2.replace(/\r/g, ""));
   while (lines2.length > 1 && lines2[lines2.length - 1]?.trim() === "") lines2.pop();
-  if (SHIPPED_EXAMPLE_SHA256.has(createHash("sha256").update(lines2.join("\n")).digest("hex"))) return true;
-  return title.startsWith("<TODO:") && placeholderBody(lines2.slice(1));
+  return SHIPPED_PLACEHOLDER_SHA256.has(createHash("sha256").update(lines2.join("\n")).digest("hex"));
 }
-function placeholderBody(lines2) {
-  let inComment = false;
-  for (const raw of lines2) {
-    const line2 = raw.trim();
-    if (inComment || line2.startsWith("<!--")) {
-      inComment = !line2.includes("-->");
-      continue;
-    }
-    if (line2 === "" || PLACEHOLDER2.test(line2) || PLACEHOLDER_FIELD.test(line2) || STATUS_FIELD.test(line2)) continue;
-    return false;
-  }
-  return true;
+function withoutShippedIdLines(lines2) {
+  return lines2.filter((line2) => !SHIPPED_ID_LINES.has(line2.replace(/\r$/, ""))).join("\n");
 }
 
 // src/lib/decisions.ts
@@ -28576,7 +28566,7 @@ function scanDecisions(body2) {
   let current = null;
   const flush = () => {
     if (!current) return;
-    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) {
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) {
       kept.length = current.start;
     } else {
       const entry = buildEntry(
@@ -28628,7 +28618,7 @@ function scanDecisions(body2) {
     kept.push(line2);
   }
   flush();
-  return { premises, adrs, residue: kept.join("\n") };
+  return { premises, adrs, residue: withoutShippedIdLines(kept) };
 }
 function buildEntry(kind, id, title, section) {
   const meta2 = extractMeta(section);
@@ -30353,6 +30343,7 @@ function unregisteredNames(names, registered) {
 // src/lib/contract-facts.ts
 init_esm_shims();
 var UNIVERSE_BASELINE_EVENT = "universe.baseline";
+var FIRST_RECORD_LINE = "Universe contracts: first record of what the contract gate reads.";
 var PIECE = 120;
 var ID_SHOWN = 12;
 var IDS_SHOWN = 400;
@@ -30677,7 +30668,7 @@ function gatherContractFacts(args2) {
       }
     }
   }
-  if (recorded === void 0 && multiRepo) change("Universe contracts: first record of what the contract gate reads.");
+  if (recorded === void 0 && multiRepo) change(FIRST_RECORD_LINE);
   const record2 = facts.map((r) => ({ root: r.path.replace(/\\/g, "/"), head: r.head, upstream: r.upstream }));
   const rootRecords = facts.map((r) => {
     const contracts = {};
@@ -30709,7 +30700,7 @@ function universeFactsChanged(facts) {
 }
 
 // src/tools/get-topology.ts
-var PATHS_DESCRIPTION = "Optional files or folders you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A path outside the project root is reported as such, never as untouched.";
+var PATHS_DESCRIPTION = "Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A folder and a path outside the project root are reported as such, never as untouched.";
 var getTopologyInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
   paths: external_exports.array(external_exports.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION)
@@ -30838,32 +30829,45 @@ async function getTopologyHandler(rawInput) {
 function checkPaths(root, config2, paths) {
   const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))];
   const outside = rel.filter((p) => p === ".." || p.startsWith("../") || isAbsolute(p));
-  const inside = rel.filter((p) => !outside.includes(p));
+  const folders = rel.filter((p) => !outside.includes(p) && (p === "" || isFolder(resolve(root, p))));
+  const files = rel.filter((p) => !outside.includes(p) && !folders.includes(p));
   const facts = gatherContractFacts({
     projectRoot: root,
     config: config2,
-    readPaths: () => inside,
+    readPaths: () => files,
     executor: defaultGitExecutor,
     always: true,
     ...config2?.audit !== void 0 && { auditConfig: config2.audit }
   });
   return {
-    paths: inside,
+    paths: files,
+    folders: folders.map((p) => p === "" ? "." : p),
     outside_root: outside,
+    app_names: facts?.apps ?? [],
     universe_linked: facts?.universeLinked ?? false,
     contracts_readable: facts !== null && facts.universeLinked && !facts.inactive,
     contracts_touched: facts?.hits ?? [],
     consumers: facts?.consumers ?? [],
-    notes: facts?.lines ?? []
+    notes: (facts?.lines ?? []).filter((line2) => line2 !== FIRST_RECORD_LINE)
   };
+}
+function isFolder(path2) {
+  try {
+    return statSync(path2).isDirectory();
+  } catch {
+    return false;
+  }
 }
 function describePathsCheck(check) {
   const outside = check.outside_root.length > 0 ? ` ${check.outside_root.length} path(s) are outside the project root and are not matched against any surface: ${check.outside_root.join(", ")}.` : "";
-  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${outside}`;
-  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${outside}`;
+  const folders = check.folders.length > 0 ? ` ${check.folders.length} path(s) are folders, and surfaces are matched against files, so list the files you plan to change in them: ${check.folders.join(", ")}.` : "";
+  const unmatched = `${folders}${outside}`;
+  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${unmatched}`;
+  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${unmatched}`;
+  if (check.app_names.length === 0) return `paths_check: no .rsct.json names an app.name, so no surface can match and whether these paths touch a contract is UNKNOWN.${unmatched}`;
   const ids = check.contracts_touched.map((c) => c.id).join(", ");
-  const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(", ") || "none listed"}.` : "No declared contract surface is touched by these paths.";
-  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${outside}`;
+  const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(", ") || "none listed"}.` : check.paths.length > 0 ? "No declared contract surface is touched by the files given." : "No file was given to match.";
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${unmatched}`;
 }
 
 // src/tools/detect-onboarding.ts
@@ -31193,7 +31197,7 @@ function scanAntiDecisions(body2) {
   let current = null;
   const flush = () => {
     if (!current) return;
-    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) kept.length = current.start;
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) kept.length = current.start;
     else out2.push(buildEntry2(current.id, current.title, current.bodyLines.join("\n")));
     current = null;
   };
@@ -31214,7 +31218,7 @@ function scanAntiDecisions(body2) {
     kept.push(line2);
   }
   flush();
-  return { entries: out2, residue: kept.join("\n") };
+  return { entries: out2, residue: withoutShippedIdLines(kept) };
 }
 function buildEntry2(id, title, section) {
   const entry = {
@@ -53706,10 +53710,12 @@ init_esm_shims();
 
 // src/lib/generated-marker.ts
 init_esm_shims();
-var MARKER2 = /^<!-- RSCT-GENERATED\b[^\n]*?\bsha256-body=([a-f0-9]{64})\b/;
+var MARKER2 = /^<!-- RSCT-GENERATED\b[^\n]*\bsha256-body=([a-f0-9]{64})\b/;
+var MAX_BYTES = 4 * 1024 * 1024;
 function isUntouchedTemplate(path2) {
   let bytes;
   try {
+    if (statSync(path2).size > MAX_BYTES) return false;
     bytes = readFileSync(path2);
   } catch {
     return false;
