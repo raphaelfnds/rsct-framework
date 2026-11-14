@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
+import { isShippedPlaceholder } from './placeholder-entries.js'
 
 export type DecisionStatus = 'active' | 'superseded' | 'deprecated'
 
@@ -83,13 +84,13 @@ export function readDecisions(projectRoot: string): DecisionsSnapshot {
     }
   }
 
-  const { premises, adrs } = extractDecisions(body)
+  const { premises, adrs, residue } = scanDecisions(body)
   return {
     exists: true,
     path,
     premises,
     adrs,
-    has_decision_ids: DECISION_ID_TOKEN.test(body),
+    has_decision_ids: DECISION_ID_TOKEN.test(residue),
     read_error: false,
   }
 }
@@ -121,6 +122,8 @@ interface PendingEntry {
   kind: 'premise' | 'adr'
   id: string
   title: string
+  heading: string
+  start: number
   bodyLines: string[]
 }
 
@@ -128,21 +131,35 @@ export function extractDecisions(body: string): {
   premises: DecisionEntry[]
   adrs: DecisionEntry[]
 } {
+  const { premises, adrs } = scanDecisions(body)
+  return { premises, adrs }
+}
+
+function scanDecisions(body: string): {
+  premises: DecisionEntry[]
+  adrs: DecisionEntry[]
+  residue: string
+} {
   const lines = body.split('\n')
   const premises: DecisionEntry[] = []
   const adrs: DecisionEntry[] = []
+  const kept: string[] = []
   let current: PendingEntry | null = null
 
   const flush = () => {
     if (!current) return
-    const entry = buildEntry(
-      current.kind,
-      current.id,
-      current.title,
-      current.bodyLines.join('\n'),
-    )
-    if (current.kind === 'premise') premises.push(entry)
-    else adrs.push(entry)
+    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) {
+      kept.length = current.start
+    } else {
+      const entry = buildEntry(
+        current.kind,
+        current.id,
+        current.title,
+        current.bodyLines.join('\n'),
+      )
+      if (current.kind === 'premise') premises.push(entry)
+      else adrs.push(entry)
+    }
     current = null
   }
 
@@ -154,8 +171,11 @@ export function extractDecisions(body: string): {
         kind: 'premise',
         id: `#${premiseMatch[1]}`,
         title: premiseMatch[2].trim(),
+        heading: line,
+        start: kept.length,
         bodyLines: [],
       }
+      kept.push(line)
       continue
     }
 
@@ -166,21 +186,26 @@ export function extractDecisions(body: string): {
         kind: 'adr',
         id: adrMatch[1],
         title: adrMatch[2].trim(),
+        heading: line,
+        start: kept.length,
         bodyLines: [],
       }
+      kept.push(line)
       continue
     }
 
     if (current && (/^##\s/.test(line) || /^###\s/.test(line) || /^---\s*$/.test(line))) {
       flush()
+      kept.push(line)
       continue
     }
 
     if (current) current.bodyLines.push(line)
+    kept.push(line)
   }
 
   flush()
-  return { premises, adrs }
+  return { premises, adrs, residue: kept.join('\n') }
 }
 
 function buildEntry(
