@@ -4793,6 +4793,46 @@ those files. Keyed by module and symbol; restatements of what the code says were
   the flag is declared in this module because importing it from `onboarding-detect.ts` would close an
   import cycle.
 
+### `lib/decisions.ts`, `lib/anti-decisions.ts`, `tools/get-topology.ts` (migrated in the 2.25.0 REVIEW)
+
+- **Why the id-token flags exist (#49, #58).** `has_decision_ids` / `has_entry_ids` say the body
+  carries a token shaped like an id (`ADR-NNN` or `#N`; `AD-NNN`). With an empty parse that is a
+  parser miss, and it must be reported: a clean zero reads as "no decisions", which is how dozens
+  of real ADRs stayed invisible. The flag is deliberately narrower than "the file is non-empty": a
+  file holding only section headings has no entries, and warning on every bootstrap would train the
+  reader to ignore the warning. Nothing upstream reads `anti-decisions.md` except the premise check
+  and the V checklist, so for that corpus a clean zero is the last word anyone gets. Since 2.25.0
+  both flags read the body with the skipped placeholder blocks removed (ADR-046).
+- **The anti-decision id token is `AD-\d+`, not `\w+`,** so the template's `AD-NNN`, `AD-XXX` and,
+  since 2.25.0, `AD-EXAMPLE` do not count as ids; it does not match `ADR-\d+` (after `AD` comes `R`).
+- **`read_error`.** The file exists but could not be read (a directory at the path, mode 000, a
+  Windows lock): content is unknown, so zero entries proves nothing, and it is reported.
+- **Line scan, not an end-anchored regex.** An entry's body runs from its heading to the next H3, H2,
+  `---` or end of file. A JS regex has no end-of-input anchor; an earlier version used `\z`, which
+  parsed as a literal `z` and worked only by accident of fixture shape.
+- **Heading shapes (#49, #58).** Both parsers accept `##` or `###` and every separator in
+  `ENTRY_HEADING_SEPARATOR` (`lib/markdown.ts`, shared so the two parsers cannot drift); §H
+  prescribes one shape to write. The section terminator is deliberately not relaxed: both heading
+  branches `continue`, so a matched `##` entry never reaches it, and dropping `^##\s` from it would
+  stop a trailing `## Out of scope` from closing the last entry of a file written without `---`.
+  Known and stated: a `##` entry followed by `###` sub-headings closes at the first sub-heading, so
+  `Related` / `Captured` written as sub-headings go unread; the template and §H prescribe bullet
+  fields. Closing it needs a level-aware terminator.
+- **Excerpt windows.** Decisions use the defaults (3 lines / 280 characters) and skip the
+  `**Status**` / `**Tags**` lines. Anti-decisions use 4 lines / 320 characters on purpose (#10): an
+  anti-decision carries the rationale for abandoning a path, and a 3-line window cuts it
+  mid-sentence.
+- **`rsct_get_topology` hints.** `detectTopology` is the single source of the topology block, the
+  universe root and the inactive-gate hint (multi-repo confirmed but no universe or no manifest).
+  A confirmed non-multi-repo mode that contradicts a high-confidence multi-repo inference turns the
+  gate off, so it is surfaced: a silently-off gate is never silent. A repo that only consumes
+  contracts is told the gate is producer-side, so it never blocks there. Name-mismatch warnings
+  fire in any mode when the graph and the universe are readable: the gate compares names with `===`,
+  so an unregistered or mis-cased producer, consumer or `app.name` never gates; the registered names
+  are the union of `applications/` and `registered_apps[]`, mirroring `this_app_registered`; an
+  empty registry gives one summary hint instead of one per name; for `app.name` only a case
+  mismatch is a bug, since an unregistered name is just not registered yet.
+
 ## How to contribute new decisions
 
 - Firm premise: append under "Firm premises", sequential numbering.
