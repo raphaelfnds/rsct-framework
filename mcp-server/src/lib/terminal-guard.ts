@@ -1664,7 +1664,12 @@ function judgeCommandWords(command: Token[], dialect: ShellDialect, ctx: Ctx, pi
     const dashed = w.value.includes('://') ? undefined : /^git-(.+)$/.exec(name)?.[1]
     if (name === 'git') v = judgeGit(rest(), ctx, {}, restDynamic())
     else if (dashed !== undefined && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest(), restDynamic()) ? ALLOW : denyGit(dashed)
-    else if (name === 'gh') v = judgeGh(rest(), restDynamic())
+    else if (dashed === 'init' || dashed === 'clone') v = judgeGitPlanting(dashed, [], rest(), restDynamic(), ctx.units)
+    else if (name === 'gh') {
+      v = judgeGh(rest(), restDynamic())
+      if (!isDeny(v) && rest().includes('repo') && rest().includes('clone')) v = judgePlantingNames('clone', ctx.units)
+    }
+    else if (name === 'scalar' && rest().includes('clone')) v = judgePlantingNames('clone', ctx.units)
     else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest(), bodies, ctx)
     else if (POWERSHELLS.has(name)) v = judgePowerShellRunner(rest(), words.slice(i + 1).map(isVariable), bodies, ctx, name !== 'pwsh')
     else if (dialect === 'powershell' && START_PROCESS.has(name)) v = judgeStartProcess(words.slice(i + 1), { ...ctx, depth: ctx.depth + 1 })
@@ -1872,12 +1877,15 @@ function judgePackageScripts(manager: Manager, plan: ManagerPlan, dir: string, c
 }
 
 function judgeScriptName(manager: Manager, path: string, json: Record<string, unknown>, name: string, ctx: Ctx): TerminalVerdict {
-  const key = `${path}\u0000${name}`
+  const running = `${path}\u0000${name}`
+  const key = `${running}\u0000${ctx.units.map((u) => u.text).join('\u0001')}`
   if (ctx.pkg.memo.has(key)) return ctx.pkg.memo.get(key) ?? ALLOW
+  if (ctx.pkg.memo.has(running)) return ALLOW
   const texts = scriptTexts(manager, json, name)
   if (texts.length === 0) return ALLOW
-  ctx.pkg.memo.set(key, null)
+  ctx.pkg.memo.set(running, null)
   const v = judgeScriptTexts(texts, dirname(path), ctx)
+  ctx.pkg.memo.delete(running)
   const verdict = isDeny(v) ? deny(`the ${basename(path)} script '${name}' that this command runs is refused (${path}): ${v.reason}`) : ALLOW
   ctx.pkg.memo.set(key, verdict)
   return verdict
@@ -2068,17 +2076,28 @@ const CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
 const PLANTING_OPTIONS = ['template', 'separate-git-dir', 'config', 'config-env']
 const SHORT_VALUE_FLAGS = new Set(['c', 'o', 'b', 'u', 'j'])
 const HOME_NAMES = 'HOME|XDG_CONFIG_HOME|USERPROFILE|HOMEDRIVE|HOMEPATH'
+const POWERSHELL_ITEM = '\\b(?:new|set|rename|copy|move)-item(?:property)?\\b[^;|\\n]*?'
 const PLANTING_HOME = new RegExp(
-  `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=|\\$env:(${HOME_NAMES})\\s*=|\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b|(?<!\\$)\\benv:(${HOME_NAMES})\\b|SetEnvironmentVariable\\s*\\(\\s*['"](${HOME_NAMES})['"]`,
+  [
+    `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=`,
+    `\\$env:(${HOME_NAMES})\\s*\\+?=`,
+    `\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b`,
+    `(?<!\\$)\\benv:[\\\\/]?(${HOME_NAMES})\\b`,
+    `SetEnvironmentVariable\\s*\\(\\s*\\(*\\s*['"](${HOME_NAMES})['"]`,
+    `\\$\\{(${HOME_NAMES}):?=`,
+    `${POWERSHELL_ITEM}(?<!\\$)\\benv:[^;|\\n]*?(?<![\\w$:])(${HOME_NAMES})\\b`,
+    `${POWERSHELL_ITEM}(?<![\\w$:])(${HOME_NAMES})\\b[^;|\\n]*?(?<!\\$)\\benv:`,
+  ].join('|'),
   'i',
 )
 const PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i
+const COMMAND_START = `(?:^|[;&|({\\n]|\\b(?:then|do|else|elif|while|until|if|time)\\b)\\s*[\\\\'"]*`
 const HOME_READ = new RegExp(
-  `\\b(?:read|mapfile|readarray|getopts|declare|typeset|local|readonly)\\b[^;&|\\n]*?(?<![\\w$])(${HOME_NAMES})\\b|\\bprintf\\b[^;&|\\n]*?-v\\s*(${HOME_NAMES})\\b`,
+  `${COMMAND_START}(?:read|mapfile|readarray|getopts|declare|typeset|local|readonly|for|select)['"]?\\b[^;&|\\n]*?(?<![\\w\\$\\{:/.\\-])(${HOME_NAMES})\\b|${COMMAND_START}printf['"]?\\b[^;&|\\n]*?-v\\s*['"]?(${HOME_NAMES})\\b`,
 )
 const POWERSHELL_JOIN = /(['"])\s*\+\s*(['"])/g
-const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly'])
-const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir'])
+const BUILT_NAME = /[$`{}()?*]|.\[/
+const ENV_BUILT = /(?:^|[\s;&|(`])[\\'"]*(?:[^\s;&|]*\/)?env['"]?(?:\s+-{1,2}[A-Za-z-]+(?:[= ][^\s;&|]+)?)*\s+["']?[$`]/
 
 function plantingName(unit: ShellUnit): string | undefined {
   const spellings = [unit.text, unit.words, ...(unit.dialect === 'powershell' ? [unit.text.replace(POWERSHELL_JOIN, '')] : [])]
@@ -2089,33 +2108,15 @@ function plantingName(unit: ShellUnit): string | undefined {
   return undefined
 }
 
-function builtName(token: string): boolean {
-  const name = token.includes('=') ? token.slice(0, token.indexOf('=')) : token
-  return /[A-Za-z_]/.test(name) && /[$`{}()]/.test(name)
-}
-
 function builtAssignment(text: string): string | undefined {
-  for (const command of text.split(/[;&|\n]+/)) {
-    const tokens = command.trim().split(/\s+/).filter((t) => t.length > 0)
-    let k = 0
-    while (k < tokens.length && /^[({!]+$/.test(tokens[k]!)) k++
-    const checked: string[] = []
-    while (k < tokens.length && tokens[k]!.includes('=')) checked.push(tokens[k++]!)
-    const program = tokens[k]?.replace(/^[({!]+/, '')
-    if (program !== undefined && DECLARERS.has(program)) checked.push(...tokens.slice(k + 1).filter((t) => !t.startsWith('-')))
-    if (program === 'env') {
-      for (let m = k + 1; m < tokens.length; m++) {
-        const t = tokens[m]!
-        if (ENV_VALUE_OPTIONS.has(t)) m++
-        if (t.startsWith('-')) continue
-        if (!t.includes('=') && !builtName(t)) break
-        checked.push(t)
-      }
-    }
-    const found = checked.find(builtName)
-    if (found !== undefined) return found
+  for (const token of text.split(/[\s;&|]+/)) {
+    const eq = token.indexOf('=')
+    if (eq <= 0) continue
+    const name = token.slice(0, eq)
+    if (name.startsWith('-') || /[/:.@]/.test(name) || !/[A-Za-z_]/.test(name)) continue
+    if (BUILT_NAME.test(name)) return token
   }
-  return undefined
+  return ENV_BUILT.exec(text)?.[0].trim()
 }
 
 function judgePlantingNames(verb: string, units: readonly ShellUnit[]): TerminalVerdict {
@@ -2123,7 +2124,7 @@ function judgePlantingNames(verb: string, units: readonly ShellUnit[]): Terminal
     const variable = plantingName(unit)
     if (variable !== undefined) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`)
     const built = unit.dialect === 'bash' ? builtAssignment(unit.text) : undefined
-    if (built !== undefined) return deny(`\`git ${verb}\` in a command that sets a variable whose name is built from a variable, a substitution, quotes or a brace pattern ('${built}') cannot be read, and that variable could plant hooks or configuration; write the name out, or the developer runs it in their own terminal`)
+    if (built !== undefined) return deny(`\`git ${verb}\` in a command that sets a variable whose name is built from a variable, a substitution, or a brace or glob pattern ('${built}') cannot be read, and that variable could plant hooks or configuration; write the name out, or the developer runs it in their own terminal`)
   }
   return ALLOW
 }

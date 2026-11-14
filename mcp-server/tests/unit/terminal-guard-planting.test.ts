@@ -229,6 +229,24 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'read HOME <<< /x; git init',
     'printf -v HOME %s /x; git init',
     'local XDG_CONFIG_HOME; git clone https://example.invalid/r.git',
+    'V=DIR; if true; then export GIT_TEMPLATE_$' + '{V}=/x; fi; git init',
+    'V=DIR; \\export GIT_TEMPLATE_$' + '{V}=/x; git init',
+    'V=DIR; command export GIT_TEMPLATE_$' + '{V}=/x; git init',
+    'V=DIR; builtin export GIT_TEMPLATE_$' + '{V}=/x; git init',
+    '/usr/bin/env "$ASSIGN" git init',
+    'nice env "$ASSIGN" git init',
+    'export GIT_TEMPLATE_DI?=tpl; git init',
+    'env GIT_TEMPLATE_DI*=tpl git init',
+    'export HOM[E]=/x; git init',
+    'for HOME in /x; do git init; done',
+    'select HOME in /x; do git init; done',
+    'while read HOME; do git init; done < list',
+    'set -a; : "$' + '{XDG_CONFIG_HOME:=/x}"; git init',
+    'eval "export GIT_TEMPLATE_$(echo DIR)=/x"; git init',
+    'GIT_TEMPLATE_DIR=/x gh repo clone o/r',
+    'GIT_TEMPLATE_DIR=/x scalar clone https://example.invalid/r.git',
+    'GIT_TEMPLATE_DIR=/x git-init',
+    'HOME=/x git-clone https://example.invalid/r.git',
   ])('refuses %s', (command) => {
     expect(verdictOf(command)).toBe('deny')
   })
@@ -240,6 +258,12 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     "Set-Item (\"env:GIT_TEMPLATE\" + '_DIR') C:\\x; git init",
     "[Environment]::SetEnvironmentVariable('GIT_' + 'TEMPLATE_DIR', 'C:\\x'); git init",
     "Set-Item ('env:HO' + 'ME') C:\\x; git clone https://example.invalid/r.git",
+    "$env:HOME += '\\evil'; git init",
+    'Set-Item Env:\\HOME C:\\x; git init',
+    'Set-Item -Path Env:/USERPROFILE -Value C:\\x; git init',
+    'New-Item -Path Env: -Name XDG_CONFIG_HOME -Value C:\\x; git init',
+    'New-Item -Name HOME -Value C:\\x -Path Env:; git init',
+    "[Environment]::SetEnvironmentVariable(('HO'+'ME'), 'C:\\x'); git init",
   ])('refuses in PowerShell %s', (command) => {
     expect(verdictOf(command, 'powershell')).toBe('deny')
   })
@@ -257,6 +281,19 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'read -r name; git init "$name"',
     'for d in a b; do git init "$d"; done',
     'declare -A map=( [k]=v ); git init',
+    'export GH_TOKEN=$(gh auth token) && git clone https://example.invalid/r.git',
+    'export SHA=$(git rev-parse HEAD); git init ../mirror',
+    'export WORK=$(mktemp -d -t clone) && git clone https://example.invalid/r.git "$WORK"',
+    'declare -a repos=(api web); for r in "$' + '{repos[@]}"; do git clone "https://example.invalid/$r.git"; done',
+    'readonly DIRS=(a b); git init',
+    'export MSG="fix (x)"; git init',
+    'git clone --local ../origin "$' + '{HOME}/copy"',
+    'git clone https://example.invalid/local-tools "$' + '{HOME}/local-tools"',
+    'cd "$(dirname "$0")" && git init',
+    'git -c user.name="$NAME" clone https://example.invalid/r.git',
+    'git clone "https://example.invalid/r.git?a=b"',
+    'printenv HOME; git init',
+    'for d in "$HOME"/a "$HOME"/b; do git init "$d"; done',
   ])('allows %s', (command) => {
     expect(verdictOf(command)).toBe('allow')
   })
@@ -265,6 +302,8 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     "$env:Path += ';C:\\x'; git clone https://example.invalid/r.git",
     "Set-Item ('env:' + 'FOO') 1; git init",
     'git clone C:\\HOME\\r C:\\x\\y',
+    'Copy-Item $env:HOME\\a.txt b.txt; git init',
+    'New-Item -ItemType Directory "$env:USERPROFILE\\src"; git init "$env:USERPROFILE\\src"',
   ])('allows in PowerShell %s', (command) => {
     expect(verdictOf(command, 'powershell')).toBe('allow')
   })
@@ -288,6 +327,11 @@ describe('terminal guard — planting names inside the package scripts a command
 
   it.each(['npm run plant', 'npm run home', 'npm run spelled', 'pnpm run plant', 'yarn plant'])('refuses %s', (command) => {
     expect(judgeCommand(command, { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('deny')
+  })
+
+  it('judges a script again under the command that runs it a second time', () => {
+    const twice = String.raw`npm run plain; bash -c 'export GIT_TEMPLATE""_DIR=/t; npm run plain'`
+    expect(judgeCommand(twice, { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('deny')
   })
 
   it('allows a script that runs a plain git init', () => {
