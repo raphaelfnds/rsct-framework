@@ -1,6 +1,5 @@
 import { statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { canonicalPath } from './repo-anchor.js'
 
 export type ProtectedVerdict = { block: false } | { block: true; reason: string }
@@ -34,18 +33,27 @@ export function holdsGitRepository(dir: string): boolean {
   return exists(join(dir, 'HEAD'), 'file') && exists(join(dir, 'objects'), 'dir') && exists(join(dir, 'refs'), 'dir')
 }
 
-export function judgeProtectedPath(absolutePath: string, home: string = homedir()): ProtectedVerdict {
-  const canonical = canonicalPath(absolutePath)
-  const parts = pathComponents(canonical)
+function judgeComponents(parts: string[]): ProtectedVerdict {
   const name = parts[parts.length - 1] ?? ''
   const parent = parts[parts.length - 2] ?? ''
   if (parts.includes('.git')) return { block: true, reason: GIT_FOLDER }
   if (name === '.gitconfig' || (name === 'gitconfig' && parent === 'etc') || ((name === 'config' || name === 'attributes') && parent === 'git')) {
     return { block: true, reason: "this write would change a git configuration file, which can make git run programs; that is the developer's own edit" }
   }
-  const rsctAt = parts.indexOf('.rsct')
-  if (rsctAt !== -1 && parts.slice(0, rsctAt + 1).join('/') !== pathComponents(canonicalPath(join(home, '.rsct'))).join('/')) {
-    return { block: true, reason: "this write would change RSCT's own state or guard scripts under .rsct/; that is the developer's own edit, or /rsct-setup" }
+  if (parts.includes('.rsct')) {
+    return { block: true, reason: "this write would change RSCT's own state, guard scripts or installed server under .rsct/; that is the developer's own edit, /rsct-setup or the installer" }
+  }
+  if (name.split('.')[0] === 'rsct-mcp' || parts.some((part, i) => part === 'node_modules' && parts[i + 1] === 'rsct-mcp')) {
+    return { block: true, reason: "this write would change the rsct-mcp launcher or package that Claude Code starts as the RSCT server; that is the developer's own edit or the installer" }
+  }
+  return PASS
+}
+
+export function judgeProtectedPath(absolutePath: string): ProtectedVerdict {
+  const canonical = canonicalPath(absolutePath)
+  for (const spelling of [resolve(absolutePath), canonical]) {
+    const verdict = judgeComponents(pathComponents(spelling))
+    if (verdict.block) return verdict
   }
   let current = dirname(canonical)
   for (;;) {
