@@ -11,8 +11,9 @@ last_capture: [CREATED_AT]
 Canonical vocabulary of this project's domain. One term, one definition,
 visible synonyms, anti-synonyms to prevent confusion.
 
-This file is read by `rsct_get_knowledge(category="business-glossary")` and by
-`rsct_check_premise` before any spec is approved. A term defined here is the
+This file is read by `rsct_get_knowledge(category="business-glossary")`, and the
+V phase checklist asks whether the spec considered it (`rsct_check_premise`
+reads only `decisions.md` and `anti-decisions.md`). A term defined here is the
 **only** way Claude should refer to that concept in plans, code, comments,
 commits, and conversation.
 

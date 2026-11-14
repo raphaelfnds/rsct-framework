@@ -422,6 +422,7 @@ export async function phaseVerificationStartHandler(
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
+      claims_count: input.spec_claims?.length ?? 0,
       findings_count: checklist.findings.length,
       evidence_mix: summarizeEvidence(checklist.findings),
       phase_state_written: writeResult.ok,
@@ -442,6 +443,7 @@ export async function phaseVerificationStartHandler(
         source: finding.source,
         title: finding.title,
         evidence_kind: finding.evidence.kind,
+        ...checklist.premise_audit[finding.id],
       },
       config?.audit,
     )

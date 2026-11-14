@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
+import { isShippedPlaceholder, withoutShippedIdLines } from './placeholder-entries.js'
 
 export interface AntiDecisionEntry {
   id: string
@@ -15,43 +16,10 @@ export interface AntiDecisionsSnapshot {
   exists: boolean
   path: string | null
   entries: AntiDecisionEntry[]
-  /**
-   * #58 — the body carries a token shaped like an entry id (`AD-NNN`). Together
-   * with an empty result it identifies a parser miss, which has to be REPORTED.
-   * Nothing upstream reads this file — `rsct_load_context` covers `decisions.md`
-   * but not this one — so a clean zero here is the last word anyone gets.
-   */
   has_entry_ids: boolean
-  /**
-   * #58 — the file exists but could not be READ (a directory at the path, mode
-   * 000, a lock). Content is unknown, so zero entries proves nothing at all.
-   */
   read_error: boolean
 }
 
-/**
- * Parse `documentation/knowledge/anti-decisions.md` extracting `AD-NNN` entries.
- *
- * Headings parse at `##` or `###` with any separator in
- * `ENTRY_HEADING_SEPARATOR`. §H prescribes one shape to WRITE —
- * `### AD-NNN — <title>` — and the reader tolerates the rest (#58); the
- * separator itself lives in `lib/markdown.ts` so this parser and
- * `lib/decisions.ts` cannot drift apart again.
- *
- * Same line-scan strategy as `lib/decisions.ts`: an entry's body runs from its
- * heading until the next H3 / H2 / `---` / end-of-file, and the `<TODO: ...>`
- * placeholder shipped in the template is skipped from the excerpt.
- *
- * One shape the terminator does not serve, stated rather than silently carried:
- * a `##`-level entry followed by `###` sub-headings closes at the first
- * sub-heading and drops the rest of its body, so `Related` / `Captured` go
- * unread. Both the template and §H prescribe bullet fields instead of
- * sub-headings, and `lib/decisions.ts` carries the identical exposure — closing
- * it needs a level-aware terminator, which is a separate change.
- *
- * The corpus is consumed by `rsct_check_premise` and by
- * `lib/verification-checklist.ts` to surface "we already tried that" signals.
- */
 export function readAntiDecisions(projectRoot: string): AntiDecisionsSnapshot {
   const path = join(
     projectRoot,
@@ -70,22 +38,16 @@ export function readAntiDecisions(projectRoot: string): AntiDecisionsSnapshot {
     return { exists: true, path, entries: [], has_entry_ids: false, read_error: true }
   }
 
+  const { entries, residue } = scanAntiDecisions(body)
   return {
     exists: true,
     path,
-    entries: extractAntiDecisions(body),
-    has_entry_ids: AD_ID_TOKEN.test(body),
+    entries,
+    has_entry_ids: AD_ID_TOKEN.test(residue),
     read_error: false,
   }
 }
 
-/**
- * A token shaped like an entry id, anywhere in the body. Used only to tell
- * "nothing to find" apart from "found nothing" — never to parse. `\d+` and not
- * `\w+` on purpose: the template ships `AD-NNN` and `AD-XXX` placeholders, and
- * matching those would raise a parser-miss warning on a file that genuinely holds
- * no entries. It does not match `ADR-\d+` either — after `AD` comes `R`.
- */
 const AD_ID_TOKEN = /\bAD-\d+\b/
 
 const AD_HEADING = new RegExp(
@@ -95,17 +57,25 @@ const AD_HEADING = new RegExp(
 interface PendingEntry {
   id: string
   title: string
+  heading: string
+  start: number
   bodyLines: string[]
 }
 
 export function extractAntiDecisions(body: string): AntiDecisionEntry[] {
+  return scanAntiDecisions(body).entries
+}
+
+function scanAntiDecisions(body: string): { entries: AntiDecisionEntry[]; residue: string } {
   const lines = body.split('\n')
   const out: AntiDecisionEntry[] = []
+  const kept: string[] = []
   let current: PendingEntry | null = null
 
   const flush = (): void => {
     if (!current) return
-    out.push(buildEntry(current.id, current.title, current.bodyLines.join('\n')))
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) kept.length = current.start
+    else out.push(buildEntry(current.id, current.title, current.bodyLines.join('\n')))
     current = null
   }
 
@@ -113,18 +83,21 @@ export function extractAntiDecisions(body: string): AntiDecisionEntry[] {
     const adMatch = line.match(AD_HEADING)
     if (adMatch?.[1] && adMatch[2]) {
       flush()
-      current = { id: adMatch[1], title: adMatch[2].trim(), bodyLines: [] }
+      current = { id: adMatch[1], title: adMatch[2].trim(), heading: line, start: kept.length, bodyLines: [] }
+      kept.push(line)
       continue
     }
     if (current && (/^##\s/.test(line) || /^###\s/.test(line) || /^---\s*$/.test(line))) {
       flush()
+      kept.push(line)
       continue
     }
     if (current) current.bodyLines.push(line)
+    kept.push(line)
   }
 
   flush()
-  return out
+  return { entries: out, residue: withoutShippedIdLines(kept) }
 }
 
 function buildEntry(id: string, title: string, section: string): AntiDecisionEntry {
@@ -140,12 +113,6 @@ function buildEntry(id: string, title: string, section: string): AntiDecisionEnt
   return entry
 }
 
-/**
- * Wider window than the other two callers (4 lines / 320 chars) — deliberate,
- * and preserved as-is by #10 rather than normalised: an anti-decision carries a
- * rationale for why a path was abandoned, and a 3-line window cuts it
- * mid-sentence, which is exactly the sentence a reader needs.
- */
 function extractExcerpt(section: string): string {
   return makeExcerpt(section, {
     maxLines: 4,

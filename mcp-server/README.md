@@ -640,9 +640,21 @@ Reports the repo **topology** ([`topology` block](#the-topology-block)) plus the
 path globs in the producer repo (`openapi/*.yaml`, `src/api/**`, `proto/**`) that consumer
 apps depend on.
 
-- Input: `project_root?`
+- Input: `project_root?`, `paths?` (files you plan to change, relative to the project root or
+  absolute, at most 500)
 - Output: `topology` block, `contracts` graph (`{ available, contracts[], note }`), `produced[]`,
-  `consumed[]`, `app_name`, `universe_path` + hints
+  `consumed[]`, `app_name`, `universe_path` + hints; with `paths`, also `paths_check`
+  (`{ paths[], folders[], outside_root[], app_names[], universe_linked, contracts_readable,
+  contracts_touched[], consumers[], notes[] }`)
+
+**Contracts touched by planned paths (2.25.0).** With `paths`, the answer lists the contracts
+whose surface those paths touch and their declared consumers, read the way V and the commit gate
+read contracts: every `.rsct.json` app name, and in each linked universe its working tree, HEAD and
+fetched upstream. It never records the universe baseline, so the commit dialog keeps comparing
+against the last approved commit. A folder is listed in `folders` (surfaces match files, so list
+the files), a path outside the project root in `outside_root`; a project with no universe reads
+"contracts do not apply", and no `app.name` or an unreadable `contracts.json` reads UNKNOWN — never
+"none touched". Importers and impact docs stay in the V phase (`rsct_phase_verification_start`).
 
 In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks** a commit that
 touches a produced surface (listing the affected consumers) unless
@@ -696,6 +708,8 @@ Heuristic check: tokenises a claim, scores against decisions AND anti-decisions 
 `conflict` is returned when:
 - a matched decision contains rollback / rejection language (`rolled back`, `superseded`, `deprecated`, `do not`, `rejected`, `anti-pattern`, `never`, `revogado`, `não usar`, etc.), OR
 - the claim matches an anti-decision entry in `documentation/knowledge/anti-decisions.md` — the team explicitly abandoned that path. Anti-decision hits ALWAYS dominate the recommendation, even when an active premise also matches.
+
+**Shipped placeholders are not entries (2.25.0).** A block equal to one of the blocks the templates shipped — the `#1` and `ADR-001` placeholders and the anti-decision example shipped before 2.25.0 — is skipped by both parsers, whatever its number; any real text in the title or the body keeps it an entry. In the V phase, a `conflict` finding names the matching decision that carries the negation, and an anti-decision hit also names the decision the claim would be charged with without it.
 
 Anti-decision headings parse at `##` or `###` with `—`, `–`, `-` or `:` as the
 separator; §H prescribes `### AD-NNN — <title>` as the one shape to write, and the
