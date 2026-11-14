@@ -89,7 +89,7 @@ context matters when reading old PRs.
 - **Captured:** 2025-10-15 by alice
 
 ### SH-005 — Customer: Largo Brasil S.A. (single-tenant SLA)
-- **Role:** Strategic enterprise account; signed single-tenant DB requirement (see [[anti-decisions]] AD-003 context)
+- **Role:** Strategic enterprise account; signed single-tenant DB requirement (see [[anti-decisions]] AD-EXAMPLE context)
 - **Approves:**
   - Any change to API endpoints they consume (contract changes require 30-day notice per contract Cláusula 7.2)
   - Maintenance windows on their tenant (must be > 7 days advance, never on month-end)

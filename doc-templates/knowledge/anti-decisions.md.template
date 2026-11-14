@@ -78,7 +78,7 @@ Numbering: AD-NNN, sequential, append-only.
 
 ## Example entry (✅ good — keep this style)
 
-### AD-003 — Multi-tenancy via separate database per tenant
+### AD-EXAMPLE — Multi-tenancy via separate database per tenant
 - **Tried:** Provisioned isolated PostgreSQL database per customer-org for the first 4 paying tenants. Tenant-aware routing layer dispatched per-request connections.
 - **Hoped to gain:** Strong data isolation for LGPD audit, easier per-tenant backup/restore, no risk of cross-tenant query leak.
 - **Abandoned because:** Provisioning a new DB took 14 minutes including replica setup; onboarding flow timed out. Schema migrations had to run N times serially (~6h for 50 tenants in projection). Per-DB backup retention cost projected at $4.2k/mo at 200 tenants vs $180/mo for shared-DB-with-tenant_id. Customer-isolation requirement was satisfiable via row-level security + audited tenant_id column, validated with legal team 2024-08-22.
