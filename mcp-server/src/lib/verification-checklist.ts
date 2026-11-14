@@ -1,9 +1,10 @@
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { readDecisions } from './decisions.js'
 import { readAntiDecisions } from './anti-decisions.js'
 import { corpusMiss, type CorpusMiss } from './corpus-health.js'
 import { readKnowledgeIndex } from './knowledge.js'
+import { isUntouchedTemplate } from './generated-marker.js'
 import {
   readArchitectureOverview,
   readArchitectureModules,
@@ -136,6 +137,16 @@ export interface ChecklistResult {
   stats: ChecklistStats
   hints: string[]
   premise_audit: Record<string, PremiseAudit>
+}
+
+export function promptCategories(present: readonly string[], cap: number): string[] {
+  return [...present].sort().filter((cat) => CATEGORY_PROMPTS[cat]).slice(0, cap)
+}
+
+function untouchedNote(projectRoot: string, file: string): string {
+  return isUntouchedTemplate(join(projectRoot, file))
+    ? ` ${file} is still the untouched template: nothing has been captured in it yet.`
+    : ''
 }
 
 export const CATEGORY_PROMPTS: Record<string, string> = {
@@ -420,21 +431,17 @@ export function runVerificationChecklist(
 
   stats.categories_run.push('forgotten')
   const tierMaxPrompts = input.specTier === 'complex' ? 10 : 5
-  let promptedCount = 0
-  for (const cat of knowledge.categories_present) {
-    if (promptedCount >= tierMaxPrompts) break
-    const prompt = CATEGORY_PROMPTS[cat]
-    if (!prompt) continue
+  for (const cat of promptCategories(knowledge.categories_present, tierMaxPrompts)) {
+    const file = `documentation/knowledge/${cat}.md`
     findings.push({
       id: nextId('forgotten'),
       category: 'forgotten',
       severity: 'defer',
       title: `Checklist: ${cat}`,
-      detail: prompt,
+      detail: `${CATEGORY_PROMPTS[cat]}${untouchedNote(input.projectRoot, file)}`,
       affected_paths: [...input.declaredPaths],
       source: `knowledge-category:${cat}`,
     })
-    promptedCount++
   }
 
   if (architecture.exists && architecture.sections.length > 0) {
@@ -443,7 +450,7 @@ export function runVerificationChecklist(
       category: 'forgotten',
       severity: 'defer',
       title: 'Checklist: architecture overview',
-      detail: `documentation/architecture.md has ${architecture.sections.length} sections. Confirm the spec aligns with the documented architecture before code-phase.`,
+      detail: `documentation/architecture.md has ${architecture.sections.length} sections. Confirm the spec aligns with the documented architecture before code-phase.${untouchedNote(input.projectRoot, 'documentation/architecture.md')}`,
       affected_paths: [...input.declaredPaths],
       source: 'architecture-overview',
     })
