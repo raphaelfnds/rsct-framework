@@ -533,8 +533,10 @@ step doesn't behave as described, that's a bug worth filing.
      inside the operation, marking what is new since your last approval.
      Audit trail goes to `.rsct/audit.log`.
    - Claude's editor tools cannot change git folders, git configuration,
-     `.rsct/`, `.mcp.json`, `.claude.json`, hooks or keys that run commands in
-     `.claude/settings*.json`, hooks and `!` lines in skills, commands and
+     any `.rsct/` folder (the one in your home holds the installed server),
+     the `rsct-mcp` launchers, `.mcp.json`, `.claude.json`, hooks or keys that
+     run commands in `.claude/settings*.json` (or in the folder
+     `CLAUDE_CONFIG_DIR` names), hooks and `!` lines in skills, commands and
      agents, or an agent's MCP servers: those are your own edits.
 5. **Reverse it.** `/rsct-uninstall` removes what the framework added to
    *this project* and lists what it keeps (markers find the framework text; SHA256

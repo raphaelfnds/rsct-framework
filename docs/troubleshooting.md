@@ -165,14 +165,19 @@ Since 2.24.1 more refusals hold everywhere, and a malformed `.rsct.json` no long
 - `protected_path` — a file in a git folder (`.git/` in any letter case, or a folder git uses as
   its repository wherever it is, such as one `git init --separate-git-dir` made), a git
   configuration file (`.gitconfig`, `git/config`, `git/attributes`, `etc/gitconfig`), anything under
-  a project's `.rsct/`, and a configured audit log;
+  a `.rsct/` folder — since 2.24.2 the one in your home too, which holds the installed server and the
+  hook scripts each project copies (update it with the installer) — an `rsct-mcp` launcher of any
+  extension or an `rsct-mcp` package folder (since 2.24.2), and a configured audit log. Since 2.24.2
+  each path is judged as written and as its real path, so a link does not change the answer;
 - `rsct_config` — a write that leaves a `.rsct.json` the server rejects (unparseable, or outside its schema), or unparseable where it parsed before, or that changes its `audit` key;
 - `claude_settings` — `.mcp.json`, `.claude.json`, managed settings and plugin files, whole; any hook
   entry, or a key that runs a command or loads servers or plugins (`statusLine`, `apiKeyHelper`,
   `enabledPlugins`, `enableAllProjectMcpServers` and the rest), in `.claude/settings.json` and
   `.claude/settings.local.json`; hooks or `` !`command` `` lines in a skill, command or agent file,
   and an agent's `mcpServers`. A front matter change that holds a backslash, or a front matter with
-  no closing `---` line, is refused the same way; edit it yourself.
+  no closing `---` line, is refused the same way; edit it yourself. Since 2.24.2 the folder
+  `CLAUDE_CONFIG_DIR` names counts as a `.claude` folder for all of these (an empty value counts as
+  unset; a relative one is read against the hook's folder and the project folder).
 
 Make those edits yourself: adding an MCP server, a plugin, a hook or a status line is the
 developer's own edit.
@@ -327,6 +332,13 @@ the sections whose keys can make git run programs inside RSCT's approved calls (
 a transport helper (`<x>::…`, or a scheme git does not handle itself). Reads pass (`git config
 <key>`, `--get`, `--list`). Run the change yourself, in your own terminal.
 
+Since 2.24.2 those variables are looked for in every part of the command `git init` or `git clone`
+runs in — nested shells, `eval` texts and the package scripts the command starts — also when the name
+is split by quotes or escapes, and in PowerShell when it is joined from quoted strings. In bash, a
+command that runs `git init` or `git clone` is also refused when it exports, declares or sets a
+variable whose name is built from a variable, a substitution, quotes or a brace pattern; write the
+name out.
+
 ## "This project's RSCT enforcement scripts are not the ones rsct-mcp vX ships"
 
 Lower-key than the message above, and usually harmless: the scripts are present,
@@ -476,7 +488,12 @@ Since 2.24.1 commit, push, merge and rebase list every file in the hooks folder 
 configured key that runs a program (ssh command, credential helper, filters, merge drivers,
 signing, remote programs, transport helpers, the gc hook), with where each comes from, and for a push to a
 local path that repository's own. A merge, rebase or squash also lists the hooks it brings into a
-hooks folder kept in the work tree (husky and the like), in the version git will run. `NEW OR CHANGED` marks what your last approved call did not
+hooks folder kept in the work tree. Since 2.24.2: a hook only the incoming side changed is listed in
+that exact version, and a rebase also lists each version the replayed commits carry; a hook changed
+on both sides, that differs between the merge bases, or that a rebase merges (the upstream changed it
+too, or a merge sits among the replayed commits) is listed as merged while git runs, because its
+content is not known before git runs it — read both versions before you approve; a hooks folder that
+is not a folder at one of those commits is listed too. `NEW OR CHANGED` marks what your last approved call did not
 list; the first call after the upgrade marks everything. If you did not add an entry, find out who
 did before you approve.
 

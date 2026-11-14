@@ -3088,6 +3088,64 @@ the developer in a dialog.
 **Consequences**: the first plan-token commit after the upgrade is refused once (`programs_changed`, and `universe_changed` in a multi-repo project) until one commit with a per-action approval records both; the developer adds MCP servers, plugins, hooks and command keys
 in their own editor; the guards are hook scripts, so they reach a project through `/rsct-setup`.
 
+### ADR-045 — The hook versions a merge or rebase runs, every .rsct folder, CLAUDE_CONFIG_DIR in the edit hook, and planting names in every shell unit (2.24.2)
+**Status**: active. Narrows ADR-044 Decision 1 (its "in the version git will run" held only for a hook
+the incoming side alone changed), Decisions 3 and 4, and the #73 pin (ADR-044 Decision 5).
+**Tags**: gates, hooks, terminal, universe, contracts, settings, cross-os
+
+**Context**: MEASURED on git 2.45.1 (Windows) in throwaway repositories:
+- a merge ran `post-merge` from the version on disk after the merge: the incoming version when only
+  the incoming side changed the hook, HEAD's when only HEAD changed it, a merged file when both did;
+- a plain rebase ran `post-checkout` from the upstream's version, then `post-commit` from each replayed
+  commit's version; over a branch holding a merge it replayed the commits in a line and ran a version
+  that is in no commit;
+- `git merge-base --all` exits 1 with no output on unrelated histories and 128 on a bad name;
+- with `submodule.recurse` set, the push coverage dry run recursed and ran a submodule's `pre-push`
+  before any dialog (git does not pass `--no-verify` down); `--recurse-submodules=no` stopped it;
+- the global `rsct-mcp` is an npm link to `~/.rsct/mcp-server`, and on Windows its launchers are
+  plain files (`rsct-mcp`, `.cmd`, `.ps1`; PATHEXT also finds `.bat`, `.com`, `.exe`);
+- Claude Code 2.1.173 writes `.claude.json` into the folder `CLAUDE_CONFIG_DIR` names; its documentation
+  says hooks inherit Claude Code's environment (REPORTED);
+- the terminal guard matched planting variables only in the top-level command text: a package script
+  that ran `GIT_TEMPLATE_DIR=… git init` passed, and so did names split by quotes or escapes.
+
+**Decision**:
+1. The programs list knows the operation. A merge or squash compares each hook at the merge bases
+   (none on unrelated histories), HEAD and the incoming commit: one only the incoming side changed is
+   listed in that exact version; one only HEAD changed is not listed as brought (git runs the version
+   on disk, already listed as a hook file); one changed on both sides, or that differs between merge
+   bases, is listed as merged while git runs, its content not known before. A rebase also lists each
+   version the replayed commits carry, and lists a hook as merged during the rebase when the upstream
+   changed it too or a merge sits among the replayed commits. A hooks folder that is not a folder at
+   one of those commits is listed. A merged entry's identity hashes every version it names.
+2. The editor tools are refused on every `.rsct` path component, the home one included, on any file
+   whose name stem is `rsct-mcp`, and on a `node_modules/rsct-mcp` folder; each path is judged as
+   written and as its real path.
+3. The edit hook reads `CLAUDE_CONFIG_DIR` from its environment and the settings, plugin, hooks, skill,
+   command and agent judges treat that folder like a `.claude` folder: an empty value counts as unset,
+   a relative one resolves against the hook's folder and the project folder, a `~` one is read as
+   written and in the home folder. The #73 pin allows exactly that one line in `edit-scope-hook.ts`
+   and checks that `src/index.ts` never loads that file: the server still never reads host
+   configuration.
+4. The terminal guard looks for planting variables in every shell unit `git init` or `git clone` runs
+   in (the command, nested shells, `eval` texts, package scripts), as written, as its lexer decodes
+   them, and in PowerShell with quoted string joins collapsed. In bash it refuses such a unit when it
+   exports, declares or sets a variable whose name is built from a variable, a substitution, quotes or
+   a brace pattern, and when `read`, `printf -v` or a declaring builtin sets a home folder variable.
+5. The contract gate resolves each `.rsct.json` against the project folder as written and its real
+   folder, reads the universes both find, and the dialog says when they differ.
+6. The push coverage dry run passes `--recurse-submodules=no`.
+
+**Direction**: stricter everywhere. One dialog line goes: a hook only HEAD changed is no longer listed
+as brought by a merge (developer OK: that version never runs, and the version that runs stays listed
+as a hook file). A rebase keeps listing it.
+
+**What is given up, by name**: the limits ADR-028 and ADR-044 name stay as they are.
+
+**Consequences**: an agent edit under `~/.rsct` or to an `rsct-mcp` launcher is refused in a project with
+the edit hook — update the server with the installer; the guards are hook scripts, so they reach a
+project through `/rsct-setup`.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic
