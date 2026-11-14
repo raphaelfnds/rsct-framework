@@ -52,7 +52,7 @@ export function probeEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 const PROBE_GIT_OPTIONS = ['-c', 'core.askPass=', '-c', 'credential.helper=', '-c', 'credential.interactive=never']
 
 export const defaultPushProbe: PushProbe = (projectRoot, remote, refspec) => {
-  const r = spawnGitSync([...PROBE_GIT_OPTIONS, 'push', '--dry-run', '--porcelain', '--no-verify', '--', remote, refspec], {
+  const r = spawnGitSync([...PROBE_GIT_OPTIONS, 'push', '--dry-run', '--porcelain', '--no-verify', '--recurse-submodules=no', '--', remote, refspec], {
     cwd: projectRoot,
     env: probeEnv(process.env),
     encoding: 'utf8',
