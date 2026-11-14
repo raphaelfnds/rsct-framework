@@ -3113,11 +3113,15 @@ the incoming side alone changed), Decisions 3 and 4, and the #73 pin (ADR-044 De
 1. The programs list knows the operation. A merge or squash compares each hook at the merge bases
    (none on unrelated histories), HEAD and the incoming commit: one only the incoming side changed is
    listed in that exact version; one only HEAD changed is not listed as brought (git runs the version
-   on disk, already listed as a hook file); one changed on both sides, or that differs between merge
-   bases, is listed as merged while git runs, its content not known before. A rebase also lists each
-   version the replayed commits carry, and lists a hook as merged during the rebase when the upstream
-   changed it too or a merge sits among the replayed commits. A hooks folder that is not a folder at
-   one of those commits is listed. A merged entry's identity hashes every version it names.
+   on disk, already listed as a hook file); one changed on both sides, that differs between merge
+   bases, or that receives content a rename moves into it while the other side changed that content,
+   is listed as merged while git runs, its content not known before. A rebase also lists each version
+   the replayed commits carry, and lists a hook as merged during the rebase when the upstream changed
+   it (even back again), a merge sits among the replayed commits, or such a rename moves content in.
+   The hooks folder is read one path part at a time, in any letter case where git ignores case, and
+   as written when it is a tracked link; a folder that changes at one of those commits is listed. With
+   `merge.autoStash` or `rebase.autoStash` on, each tracked hook is also listed as committed at HEAD.
+   A merged entry's identity follows HEAD and the incoming commit.
 2. The editor tools are refused on every `.rsct` path component, the home one included, on any file
    whose name stem is `rsct-mcp`, and on a `node_modules/rsct-mcp` folder; each path is judged as
    written and as its real path.
@@ -3129,9 +3133,12 @@ the incoming side alone changed), Decisions 3 and 4, and the #73 pin (ADR-044 De
    configuration.
 4. The terminal guard looks for planting variables in every shell unit `git init` or `git clone` runs
    in (the command, nested shells, `eval` texts, package scripts), as written, as its lexer decodes
-   them, and in PowerShell with quoted string joins collapsed. In bash it refuses such a unit when it
-   exports, declares or sets a variable whose name is built from a variable, a substitution, quotes or
-   a brace pattern, and when `read`, `printf -v` or a declaring builtin sets a home folder variable.
+   them, and in PowerShell with quoted string joins collapsed; `gh repo clone`, `scalar clone` and
+   `git-init` get the same check. In bash it refuses such a unit when a word assigns a variable whose
+   name is built from a variable, a substitution, or a brace or glob pattern, when `env` is followed by
+   a word from a variable, and when `read`, `for`, `select`, `printf -v` or a declaring builtin at the
+   start of a command sets a home folder variable. A package script is judged again under each
+   command that runs it.
 5. The contract gate resolves each `.rsct.json` against the project folder as written and its real
    folder, reads the universes both find, and the dialog says when they differ.
 6. The push coverage dry run passes `--recurse-submodules=no`.

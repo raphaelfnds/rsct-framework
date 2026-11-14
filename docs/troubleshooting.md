@@ -334,10 +334,11 @@ a transport helper (`<x>::…`, or a scheme git does not handle itself). Reads p
 
 Since 2.24.2 those variables are looked for in every part of the command `git init` or `git clone`
 runs in — nested shells, `eval` texts and the package scripts the command starts — also when the name
-is split by quotes or escapes, and in PowerShell when it is joined from quoted strings. In bash, a
-command that runs `git init` or `git clone` is also refused when it exports, declares or sets a
-variable whose name is built from a variable, a substitution, quotes or a brace pattern; write the
-name out.
+is split by quotes or escapes, a home folder variable `read`, `for` or `printf -v` sets, and in
+PowerShell when it is joined from quoted strings or set through `Env:`; `gh repo clone`, `scalar
+clone` and `git-init` get the same check. In bash, a command that runs `git init` or `git clone` is
+also refused when it sets a variable whose name is built from a variable, a substitution, or a brace
+or glob pattern, or hands `env` a word from a variable; write the name out.
 
 ## "This project's RSCT enforcement scripts are not the ones rsct-mcp vX ships"
 
@@ -490,10 +491,13 @@ signing, remote programs, transport helpers, the gc hook), with where each comes
 local path that repository's own. A merge, rebase or squash also lists the hooks it brings into a
 hooks folder kept in the work tree. Since 2.24.2: a hook only the incoming side changed is listed in
 that exact version, and a rebase also lists each version the replayed commits carry; a hook changed
-on both sides, that differs between the merge bases, or that a rebase merges (the upstream changed it
-too, or a merge sits among the replayed commits) is listed as merged while git runs, because its
-content is not known before git runs it — read both versions before you approve; a hooks folder that
-is not a folder at one of those commits is listed too. `NEW OR CHANGED` marks what your last approved call did not
+on both sides, that differs between the merge bases, that receives content a rename moves into it
+while the other side changed that content, or that a rebase merges (the upstream changed it, even
+back again, or a merge sits among the replayed commits) is listed as merged while git runs, because
+its content is not known before git runs it — read both versions before you approve; a hooks folder
+that changes at one of those commits (another letter case, a tracked link pointed elsewhere) is listed
+too; with `merge.autoStash` or `rebase.autoStash` on, each tracked hook is also listed as committed at
+HEAD. `NEW OR CHANGED` marks what your last approved call did not
 list; the first call after the upgrade marks everything. If you did not add an entry, find out who
 did before you approve.
 
