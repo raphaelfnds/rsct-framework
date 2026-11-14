@@ -86,18 +86,26 @@ function namesRsctConfig(path: string): boolean {
   return bare(basename(path)) === '.rsct.json'
 }
 
-function spellings(filePath: string): string[] {
+function inClaudeFolder(path: string, configDir: string): string[] {
+  const parts = pathComponents(path)
+  const base = pathComponents(canonicalPath(resolve(configDir)))
+  if (base.length === 0 || parts.length <= base.length || !base.every((c, i) => parts[i] === c)) return []
+  return [[...base, '.claude', ...parts.slice(base.length)].join('/')]
+}
+
+function spellings(filePath: string, configDirs: readonly string[]): string[] {
   const lexical = resolve(filePath)
   const realDir = realOrNull(dirname(lexical))
-  return [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+  const plain = [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c): c is string => c !== null)
+  return [...plain, ...plain.flatMap((p) => configDirs.flatMap((dir) => inClaudeFolder(p, dir)))]
 }
 
-function anySpellingNames(filePath: string, names: (path: string) => boolean): boolean {
-  return spellings(filePath).some(names)
+function anySpellingNames(filePath: string, names: (path: string) => boolean, configDirs: readonly string[]): boolean {
+  return spellings(filePath, configDirs).some(names)
 }
 
-function firstSpelling<T>(filePath: string, judge: (path: string) => T | null): T | null {
-  for (const candidate of spellings(filePath)) {
+function firstSpelling<T>(filePath: string, judge: (path: string) => T | null, configDirs: readonly string[]): T | null {
+  for (const candidate of spellings(filePath, configDirs)) {
     const found = judge(candidate)
     if (found !== null) return found
   }
@@ -123,9 +131,9 @@ function wholeFileKind(path: string): string | null {
   return null
 }
 
-export function judgeClaudeConfigFile(toolName: string, filePath: string): SettingsWriteVerdict {
+export function judgeClaudeConfigFile(toolName: string, filePath: string, configDirs: readonly string[] = []): SettingsWriteVerdict {
   if (!EDITOR_TOOLS.has(toolName)) return PASS
-  const kind = firstSpelling(filePath, wholeFileKind)
+  const kind = firstSpelling(filePath, wholeFileKind, configDirs)
   if (kind === null) return PASS
   return { block: true, reason: `this write would change ${kind}, which Claude Code runs or loads; that is the developer's own edit` }
 }
@@ -164,9 +172,10 @@ export function judgeClaudeAssetWrite(
   input: Record<string, unknown>,
   filePath: string,
   read: Reader = readOrNull,
+  configDirs: readonly string[] = [],
 ): SettingsWriteVerdict {
   if (!EDITOR_TOOLS.has(toolName)) return PASS
-  const kind = firstSpelling(filePath, assetKind)
+  const kind = firstSpelling(filePath, assetKind, configDirs)
   if (kind === null) return PASS
   if (toolName === 'NotebookEdit') return { block: true, reason: `a Claude Code ${kind} file cannot be edited as a notebook` }
   const current = lf(read(filePath) ?? '')
@@ -184,8 +193,8 @@ export function judgeClaudeAssetWrite(
   return PASS
 }
 
-export function isClaudeSettingsFile(filePath: string): boolean {
-  return anySpellingNames(filePath, namesSettingsFile)
+export function isClaudeSettingsFile(filePath: string, configDirs: readonly string[] = []): boolean {
+  return anySpellingNames(filePath, namesSettingsFile, configDirs)
 }
 
 type Applied = { text: string; missed: boolean }
@@ -310,7 +319,7 @@ export function judgeRsctConfigWrite(
   read: Reader = readOrNull,
 ): SettingsWriteVerdict {
   if (!EDITOR_TOOLS.has(toolName)) return PASS
-  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS
+  if (!anySpellingNames(filePath, namesRsctConfig, [])) return PASS
   if (toolName === 'NotebookEdit') return { block: true, reason: '.rsct.json cannot be edited as a notebook' }
   const current = lf(read(filePath) ?? '')
   const applied = resultingText(toolName, input, current)
@@ -340,9 +349,10 @@ export function judgeSettingsWrite(
   input: Record<string, unknown>,
   filePath: string,
   read: Reader = readOrNull,
+  configDirs: readonly string[] = [],
 ): SettingsWriteVerdict {
   if (!EDITOR_TOOLS.has(toolName)) return PASS
-  if (!isClaudeSettingsFile(filePath)) return PASS
+  if (!isClaudeSettingsFile(filePath, configDirs)) return PASS
   if (toolName === 'NotebookEdit') return { block: true, reason: 'a Claude Code settings file cannot be edited as a notebook' }
   const current = lf(read(filePath) ?? '')
   const applied = resultingText(toolName, input, current)
