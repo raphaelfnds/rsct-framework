@@ -81,7 +81,7 @@ export function isUniverseDir(dir: string): boolean {
 
 /**
  * Infer the org slug by stripping a trailing `-<digits>` suffix
- * (e.g. "bluelt-23" → "bluelt"). The `-\d*$` (not `-\d+$`) mirrors the prompt's
+ * (e.g. "acme-23" → "acme"). The `-\d*$` (not `-\d+$`) mirrors the prompt's
  * `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.
  * Single source so the universe resolver and the onboarding detector can never
  * drift on what counts as the "same org". Behavior-preserving: no trim/lowercase
@@ -214,7 +214,7 @@ export function resolveUniverseRoot(
   // (b) candidate probe — build "<base>-universe" candidates from the known
   // basenames, in the canonical-source / Phase 1.9 priority order: explicit
   // universe.name first, then the org name INFERRED by stripping a trailing
-  // -<digits> suffix (e.g. "bluelt-23" → "bluelt"; T1.d — lets an unlinked,
+  // -<digits> suffix (e.g. "acme-23" → "acme"; T1.d — lets an unlinked,
   // org-suffixed project still discover the canonically-named universe), then
   // the raw org. The inference uses `-\d*$` to match the prompt's
   // `sed 's/-[0-9]*$//'` EXACTLY — `-\d+$` would diverge on a bare trailing dash.

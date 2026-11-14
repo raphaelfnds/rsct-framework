@@ -50,22 +50,22 @@ describe('lib/universe — resolveUniverseRoot', () => {
     expect(r).toEqual({ kind: 'none' })
   })
 
-  it('T1.d: infers the universe name from an org slug suffix (bluelt-23 → bluelt)', () => {
+  it('T1.d: infers the universe name from an org slug suffix (acme-23 → acme)', () => {
     const parent = tmp()
-    const proj = join(parent, 'apibluelt'); mkdirSync(proj)
-    const sib = join(parent, 'bluelt-universe'); mkdirSync(join(sib, 'applications'), { recursive: true })
-    writeFileSync(join(sib, '.universe.json'), '{"name":"bluelt-universe","registered_apps":[]}')
-    // org "bluelt-23", NO universe.name (unlinked project) — resolves via inference.
-    const r = resolveUniverseRoot(cfg({ app: { name: 'apibluelt', org: 'bluelt-23' } }), proj, { home: tmp() })
+    const proj = join(parent, 'apiacme'); mkdirSync(proj)
+    const sib = join(parent, 'acme-universe'); mkdirSync(join(sib, 'applications'), { recursive: true })
+    writeFileSync(join(sib, '.universe.json'), '{"name":"acme-universe","registered_apps":[]}')
+    // org "acme-23", NO universe.name (unlinked project) — resolves via inference.
+    const r = resolveUniverseRoot(cfg({ app: { name: 'apiacme', org: 'acme-23' } }), proj, { home: tmp() })
     expect(r).toEqual({ kind: 'found', path: sib })
   })
 
   it('T1.d: inference also works via the $HOME/projetos candidate', () => {
     const home = tmp()
-    const uni = join(home, 'projetos', 'bluelt-universe')
+    const uni = join(home, 'projetos', 'acme-universe')
     mkdirSync(uni, { recursive: true })
-    writeFileSync(join(uni, '.universe.json'), '{"name":"bluelt-universe","registered_apps":[]}')
-    const r = resolveUniverseRoot(cfg({ app: { name: 'apibluelt', org: 'bluelt-23' } }), tmp(), { home })
+    writeFileSync(join(uni, '.universe.json'), '{"name":"acme-universe","registered_apps":[]}')
+    const r = resolveUniverseRoot(cfg({ app: { name: 'apiacme', org: 'acme-23' } }), tmp(), { home })
     expect(r).toEqual({ kind: 'found', path: uni })
   })
 })

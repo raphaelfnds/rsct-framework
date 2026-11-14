@@ -659,8 +659,8 @@ and this repo's own `app.name` against the **registered apps** (the union of the
 exactly and case-sensitively (`===`), so an unregistered or mis-cased name silently never
 gates/matches — a case-only difference is flagged as a likely typo with the correctly-cased
 name to use. The **`app.name` check is load-bearing**: because the gate's own left operand is
-`config.app.name`, a folder-cased `app.name` (e.g. `Api-AdminBluelt` vs the registered
-`api-adminbluelt`) makes the gate silently never fire for **this** repo's own commits — that
+`config.app.name`, a folder-cased `app.name` (e.g. `Api-AdminAcme` vs the registered
+`api-adminacme`) makes the gate silently never fire for **this** repo's own commits — that
 case-drift is surfaced explicitly (an outright-unregistered `app.name` is just "not registered
 yet" and is not flagged here). When the universe has **zero** registered apps, a single summary
 hint replaces the per-name wall. Lists the offending name(s), not just a count.
