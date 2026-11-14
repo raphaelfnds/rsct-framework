@@ -296,7 +296,7 @@ export async function requestRebaseHandler(
     })
   }
 
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: pinned })
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: { tip: pinned, operation: mode === 'rebase' ? 'rebase' : 'merge' } })
   if (!programs.ok) {
     return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed — nothing was changed and no dialog was shown.`, { protected: currentProtected })
   }
@@ -381,7 +381,7 @@ export async function requestRebaseHandler(
     })
   }
 
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned })
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: { tip: pinned, operation: mode === 'rebase' ? 'rebase' : 'merge' } })
   if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected })
   appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 

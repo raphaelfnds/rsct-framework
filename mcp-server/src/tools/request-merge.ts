@@ -366,7 +366,7 @@ export async function requestMergeHandler(
     })
   }
 
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: pinned })
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config?.audit, { incoming: { tip: pinned, operation: 'merge' } })
   if (!programs.ok) {
     return reject('programs_unreadable', `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed — nothing was merged and no dialog was shown.`, { protected: targetProtected })
   }
@@ -473,7 +473,7 @@ export async function requestMergeHandler(
     })
   }
 
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned })
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: { tip: pinned, operation: 'merge' } })
   if (!programsNow.ok) return reject(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected })
   appendAudit(projectRoot, baselineEntry(programs.read, programs.baseline), config?.audit)
 

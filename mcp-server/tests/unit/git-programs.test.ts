@@ -14,6 +14,7 @@ import {
   programsDialogLines,
   programsStillSame,
   readGitPrograms,
+  type GitCallTargets,
 } from '../../src/lib/git-programs.js'
 import { helperUrl } from '../../src/lib/git-url.js'
 
@@ -45,7 +46,7 @@ function hook(dir: string, name: string, body = 'echo hi'): string {
   return path
 }
 
-function labels(root: string, push?: { urls?: readonly string[]; incoming?: string }): string[] {
+function labels(root: string, push?: GitCallTargets): string[] {
   const read = readGitPrograms(root, defaultGitExecutor, push)
   if (!read.ok) throw new Error(read.reason)
   return read.entries.map((e) => e.label)
@@ -389,10 +390,192 @@ describe('git-programs — what git runs from somewhere the list did not read (R
     git(r, 'commit', '-q', '-am', 'v2')
     const tip = git(r, 'rev-parse', 'HEAD').trim()
     git(r, 'checkout', '-q', '-')
-    const brought = labels(r, { incoming: tip }).filter((l) => l.includes('as this operation brings it'))
-    expect(brought).toHaveLength(1)
-    expect(brought[0]).toContain('"post-merge"')
+    for (const operation of ['merge', 'rebase'] as const) {
+      const brought = labels(r, { incoming: { tip, operation } }).filter((l) => l.includes('as this operation brings it'))
+      expect(brought, operation).toHaveLength(1)
+      expect(brought[0]).toContain('"post-merge"')
+      expect(labels(r, { incoming: { tip: git(r, 'rev-parse', 'HEAD').trim(), operation } }).some((l) => l.includes('as this operation brings it'))).toBe(false)
+    }
     expect(labels(r).some((l) => l.includes('as this operation brings it'))).toBe(false)
-    expect(labels(r, { incoming: git(r, 'rev-parse', 'HEAD').trim() }).some((l) => l.includes('as this operation brings it'))).toBe(false)
+  })
+})
+
+describe('git-programs — the hook versions a merge, squash or rebase runs (2.24.2)', () => {
+  function tracked(): string {
+    const r = repo()
+    git(r, 'config', 'user.email', 't@t.invalid')
+    git(r, 'config', 'user.name', 't')
+    git(r, 'config', 'core.hooksPath', 'hooks')
+    hook(join(r, 'hooks'), 'post-merge', 'echo base')
+    hook(join(r, 'hooks'), 'post-commit', 'echo base')
+    git(r, 'add', '-A')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'base')
+    git(r, 'branch', '-M', 'main')
+    return r
+  }
+
+  function commitHook(r: string, name: string, body: string, message: string): string {
+    hook(join(r, 'hooks'), name, body)
+    git(r, 'add', '-A')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', message)
+    return git(r, 'rev-parse', 'HEAD').trim()
+  }
+
+  function blobOf(r: string, rev: string, name: string): string {
+    return git(r, 'rev-parse', `${rev}:hooks/${name}`).trim().slice(0, 12)
+  }
+
+  function about(list: string[], name: string): string[] {
+    return list.filter((l) => l.includes(`"${name}"`))
+  }
+
+  it('merge: a hook only HEAD changed is not listed as brought, since git runs the version already on disk', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--allow-empty', '-m', 'feat')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', 'main')
+    commitHook(r, 'post-merge', 'echo mine', 'mine')
+    expect(about(labels(r, { incoming: { tip, operation: 'merge' } }), 'post-merge').filter((l) => l.includes('brings it') || l.includes('both sides'))).toEqual([])
+  })
+
+  it('merge: a hook both sides changed is listed as merged while git runs, not as one exact version', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    const tip = commitHook(r, 'post-merge', 'echo theirs', 'theirs')
+    git(r, 'checkout', '-q', 'main')
+    commitHook(r, 'post-merge', 'echo mine', 'mine')
+    const shown = about(labels(r, { incoming: { tip, operation: 'merge' } }), 'post-merge')
+    expect(shown.some((l) => l.includes('changed on both sides'))).toBe(true)
+    expect(shown.some((l) => l.includes('as this operation brings it'))).toBe(false)
+  })
+
+  it('merge: the same version on both sides is not listed', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    const tip = commitHook(r, 'post-merge', 'echo same', 'theirs')
+    git(r, 'checkout', '-q', 'main')
+    commitHook(r, 'post-merge', 'echo same', 'mine')
+    expect(about(labels(r, { incoming: { tip, operation: 'merge' } }), 'post-merge').filter((l) => l.includes('brings it') || l.includes('both sides'))).toEqual([])
+  })
+
+  it('merge: unrelated histories read as an empty base, not as an unreadable list', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '--orphan', 'lone')
+    git(r, 'rm', '-rqf', '.')
+    hook(join(r, 'hooks'), 'post-merge', 'echo lone')
+    hook(join(r, 'hooks'), 'pre-push', 'echo lone')
+    git(r, 'add', '-A')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'lone')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', '-f', 'main')
+    const shown = labels(r, { incoming: { tip, operation: 'merge' } })
+    expect(about(shown, 'pre-push').some((l) => l.includes('as this operation brings it'))).toBe(true)
+    expect(about(shown, 'post-merge').some((l) => l.includes('changed on both sides'))).toBe(true)
+  })
+
+  it('merge: merge bases that disagree on a hook give the merged label', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'b1')
+    commitHook(r, 'post-merge', 'echo one', 'b1')
+    git(r, 'checkout', '-q', '-b', 'b2', 'main')
+    commitHook(r, 'post-merge', 'echo two', 'b2')
+    git(r, 'checkout', '-q', '-b', 'side', 'b2')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-s', 'ours', '-m', 'm2', 'b1')
+    const tip = commitHook(r, 'post-commit', 'echo side', 'side')
+    git(r, 'checkout', '-q', '-b', 'mine', 'b1')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-s', 'ours', '-m', 'm1', 'b2')
+    commitHook(r, 'post-commit', 'echo mine', 'mine')
+    expect(git(r, 'merge-base', '--all', 'HEAD', tip).trim().split('\n')).toHaveLength(2)
+    expect(about(labels(r, { incoming: { tip, operation: 'merge' } }), 'post-merge').some((l) => l.includes('merge bases'))).toBe(true)
+  })
+
+  it('rebase: each version a replayed commit carries is listed, not only the upstream one', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    const mid = commitHook(r, 'post-commit', 'echo mid', 'mid')
+    commitHook(r, 'post-commit', 'echo last', 'last')
+    git(r, 'checkout', '-q', 'main')
+    writeFileSync(join(r, 'u.txt'), 'u\n')
+    git(r, 'add', 'u.txt')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'u')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', 'feat')
+    const shown = about(labels(r, { incoming: { tip, operation: 'rebase' } }), 'post-commit')
+    expect(shown.some((l) => l.includes(`blob ${blobOf(r, mid, 'post-commit')}`) && l.includes('replayed commit'))).toBe(true)
+    expect(shown.some((l) => l.includes(`blob ${blobOf(r, tip, 'post-commit')}`) && l.includes('as this operation brings it'))).toBe(true)
+  })
+
+  it('rebase: a hook only the local commits changed is still listed, unlike a merge', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    commitHook(r, 'post-commit', 'echo mine', 'mine')
+    git(r, 'checkout', '-q', 'main')
+    writeFileSync(join(r, 'u.txt'), 'u\n')
+    git(r, 'add', 'u.txt')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'u')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', 'feat')
+    expect(about(labels(r, { incoming: { tip, operation: 'rebase' } }), 'post-commit').some((l) => l.includes(`blob ${blobOf(r, tip, 'post-commit')}`))).toBe(true)
+  })
+
+  it('rebase: a merge among the replayed commits gives the merged label, since rebase replays them in a line', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'side')
+    commitHook(r, 'post-commit', 'echo side', 'side')
+    git(r, 'checkout', '-q', '-b', 'feat', 'main')
+    writeFileSync(join(r, 'f.txt'), 'f\n')
+    git(r, 'add', 'f.txt')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'f')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', '--no-ff', '-m', 'm', 'side')
+    git(r, 'checkout', '-q', 'main')
+    writeFileSync(join(r, 'u.txt'), 'u\n')
+    git(r, 'add', 'u.txt')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'u')
+    const tip = git(r, 'rev-parse', 'HEAD').trim()
+    git(r, 'checkout', '-q', 'feat')
+    expect(about(labels(r, { incoming: { tip, operation: 'rebase' } }), 'post-commit').some((l) => l.includes('merged during the rebase'))).toBe(true)
+  })
+
+  it('rebase: a hook the upstream and the replayed commits both changed gives the merged label', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    commitHook(r, 'post-commit', 'echo mine', 'mine')
+    git(r, 'checkout', '-q', 'main')
+    const tip = commitHook(r, 'post-commit', 'echo upstream', 'upstream')
+    git(r, 'checkout', '-q', 'feat')
+    const shown = about(labels(r, { incoming: { tip, operation: 'rebase' } }), 'post-commit')
+    expect(shown.some((l) => l.includes('merged during the rebase'))).toBe(true)
+  })
+
+  it('a merged label changes identity when either version changes, so a new version is never taken for an approved one', () => {
+    const r = tracked()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    const tip1 = commitHook(r, 'post-merge', 'echo theirs', 'theirs')
+    const tip2 = commitHook(r, 'post-merge', 'echo theirs again', 'theirs2')
+    git(r, 'checkout', '-q', 'main')
+    commitHook(r, 'post-merge', 'echo mine', 'mine')
+    const idsOf = (tip: string): string[] => {
+      const read = readGitPrograms(r, defaultGitExecutor, { incoming: { tip, operation: 'merge' } })
+      if (!read.ok) throw new Error(read.reason)
+      return read.entries.filter((e) => e.label.includes('both sides')).map((e) => e.identity)
+    }
+    expect(idsOf(tip1)).toHaveLength(1)
+    expect(idsOf(tip1)[0]).not.toBe(idsOf(tip2)[0])
+  })
+
+  it('a hooks folder that is not a folder at the incoming commit is listed', () => {
+    const r = tracked()
+    const link = git(r, 'hash-object', '-w', join(r, 'hooks', 'post-commit')).trim()
+    git(r, 'checkout', '-q', '-b', 'feat')
+    git(r, 'rm', '-rq', '--cached', 'hooks')
+    git(r, 'update-index', '--add', '--cacheinfo', `120000,${link},hooks`)
+    const tree = git(r, 'write-tree').trim()
+    const tip = git(r, 'commit-tree', tree, '-p', 'HEAD', '-m', 'hooks becomes a link').trim()
+    git(r, 'reset', '-q', '--hard', 'main')
+    git(r, 'checkout', '-q', 'main')
+    for (const operation of ['merge', 'rebase'] as const) {
+      expect(labels(r, { incoming: { tip, operation } }).some((l) => l.includes('hooks folder') && l.includes(tip.slice(0, 12))), operation).toBe(true)
+    }
   })
 })

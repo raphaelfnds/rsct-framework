@@ -342,7 +342,7 @@ describe.skipIf(!GIT)('merge and rebase list the programs git runs inside them',
     expect(git('rev-parse', 'HEAD')).toBe(head)
   })
 
-  it('a merge lists the hook its source brings into a tracked hooks folder, in the version git runs (REVIEW round 3)', async () => {
+  it('a merge lists the hook only its source changed in a tracked hooks folder, in that exact version (REVIEW round 3)', async () => {
     mkdirSync(join(root, '.husky'))
     const source = commitFile('.husky/post-merge', '#!/bin/sh\nexit 0\n', 'hook')
     git('checkout', '-q', 'integ')
@@ -365,5 +365,19 @@ describe.skipIf(!GIT)('merge and rebase list the programs git runs inside them',
     const out = (await requestRebaseHandler({ project_root: root, ref: 'integ', pre_merge_ack: { ...ACK, files_swept: [...swept(), '.husky/post-rewrite'] }, dev_approval: approval() }, { promptFn: d.fn, now: NOW })) as RequestRebaseOutput
     expect(out.status).toBe('rebased')
     expect(d.seen[0]?.message ?? '').toContain('NEW OR CHANGED: hook "post-rewrite" as this operation brings it')
+  })
+
+  it('a squash reads a hook both sides changed like a merge does: merged while git runs (2.24.2)', async () => {
+    mkdirSync(join(root, '.husky'))
+    commitFile('.husky/post-merge', '#!/bin/sh\nexit 0\n', 'hook')
+    git('checkout', '-q', 'integ')
+    git('merge', '-q', '--ff-only', 'feat/x')
+    commitFile('.husky/post-merge', '#!/bin/sh\necho theirs\n', 'theirs')
+    git('checkout', '-q', 'feat/x')
+    commitFile('.husky/post-merge', '#!/bin/sh\necho mine\n', 'mine')
+    git('config', 'core.hooksPath', '.husky')
+    const { text } = await rebase({ ref: 'integ', mode: 'squash', pre_merge_ack: { ...ACK, files_swept: [...swept(), '.husky/post-merge'] }, dev_approval: approval() }, 'no')
+    expect(text).toContain('hook "post-merge" changed on both sides')
+    expect(text).not.toContain('merged during the rebase')
   })
 })
