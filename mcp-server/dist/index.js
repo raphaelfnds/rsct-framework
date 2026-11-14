@@ -3017,7 +3017,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve12.call(this, root, ref);
+      let _sch = resolve13.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -3044,7 +3044,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve12(root, ref) {
+    function resolve13(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3908,7 +3908,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve12(baseURI, relativeURI, options) {
+    function resolve13(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4299,7 +4299,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve12,
+      resolve: resolve13,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -19079,7 +19079,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve12) {
+function isRecursive(inst, stack, resolve13) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -24402,7 +24402,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve12) => setTimeout(resolve12, pollInterval));
+        await new Promise((resolve13) => setTimeout(resolve13, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -24419,7 +24419,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve12, reject2) => {
+    return new Promise((resolve13, reject2) => {
       const earlyReject = (error2) => {
         reject2(error2);
       };
@@ -24497,7 +24497,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject2(parseResult.error);
           } else {
-            resolve12(parseResult.data);
+            resolve13(parseResult.data);
           }
         } catch (error2) {
           reject2(error2);
@@ -24759,12 +24759,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve12, reject2) => {
+    return new Promise((resolve13, reject2) => {
       if (signal.aborted) {
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve12, interval);
+      const timeoutId = setTimeout(resolve13, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -25631,12 +25631,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve12) => {
+    return new Promise((resolve13) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve12();
+        resolve13();
       } else {
-        this._stdout.once("drain", resolve12);
+        this._stdout.once("drain", resolve13);
       }
     });
   }
@@ -27070,7 +27070,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.24.1";
+var RSCT_MCP_VERSION = "2.24.2";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -27222,14 +27222,6 @@ function discoverUniverseCandidate(projectRoot, orgKey, opts = {}) {
     const basenames = [
       ...new Set(
         [inferred, raw].filter(
-          // `!!x` drops the empty string `normalizeOrg` returns for a digits-only org
-          // (`-9` → ''), which would otherwise probe `../-universe`.
-          //
-          // The rest is a path-traversal guard: a basename becomes a path component, and
-          // `rawSelfOrg` can come from a git remote (`parseGitRemoteOrg` returns the first
-          // URL segment verbatim). That is untrusted input reaching `resolve()` for the
-          // first time here — on Windows a `\` in it is a separator and walks out of the
-          // scanned parent.
           (x) => !!x && !/[\\/]/.test(x) && x !== "." && x !== ".."
         )
       )
@@ -27322,7 +27314,6 @@ function getUniverse(config2, projectRoot, opts = {}) {
     registered_apps_count: data.registeredFromDirs.length,
     this_app_registered: thisAppRegistered,
     note,
-    // V FV2: only the found+readable path computes the governance index.
     governance: readUniverseGovernanceIndex(resolution.path)
   };
   const hint = !thisAppRegistered && appName !== null ? `Universe found at ${resolution.path}; this app ("${appName}") is not registered there. Run /rsct-setup to register it.` : null;
@@ -42361,8 +42352,8 @@ var Module2 = (() => {
     var moduleRtn;
     var Module = moduleArg;
     var readyPromiseResolve, readyPromiseReject;
-    var readyPromise = new Promise((resolve12, reject2) => {
-      readyPromiseResolve = resolve12;
+    var readyPromise = new Promise((resolve13, reject2) => {
+      readyPromiseResolve = resolve13;
       readyPromiseReject = reject2;
     });
     var ENVIRONMENT_IS_WEB = typeof window == "object";
@@ -42444,13 +42435,13 @@ var Module2 = (() => {
         }
         readAsync = /* @__PURE__ */ __name(async (url) => {
           if (isFileURI(url)) {
-            return new Promise((resolve12, reject2) => {
+            return new Promise((resolve13, reject2) => {
               var xhr = new XMLHttpRequest();
               xhr.open("GET", url, true);
               xhr.responseType = "arraybuffer";
               xhr.onload = () => {
                 if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                  resolve12(xhr.response);
+                  resolve13(xhr.response);
                   return;
                 }
                 reject2(xhr.status);
@@ -42673,10 +42664,10 @@ var Module2 = (() => {
       __name(receiveInstantiationResult, "receiveInstantiationResult");
       var info2 = getWasmImports();
       if (Module["instantiateWasm"]) {
-        return new Promise((resolve12, reject2) => {
+        return new Promise((resolve13, reject2) => {
           Module["instantiateWasm"](info2, (mod, inst) => {
             receiveInstance(mod, inst);
-            resolve12(mod.exports);
+            resolve13(mod.exports);
           });
         });
       }
@@ -46285,7 +46276,7 @@ function createModuleResolver(args2) {
     }
     return [...files];
   };
-  const resolve12 = (fromRel, specifier) => {
+  const resolve13 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
@@ -46371,7 +46362,7 @@ function createModuleResolver(args2) {
     const source = settingsFor(fromRel)?.jsxImportSource;
     return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
   };
-  return { resolve: resolve12, prefixFiles, jsxFactories, jsxRuntimes };
+  return { resolve: resolve13, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -49540,18 +49531,19 @@ function asObject(value) {
 function str(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
-function configFacts(text2, where, dir) {
+function configFacts(text2, where, dir, written) {
   if (text2 === null) return null;
   let parsed;
   try {
     parsed = JSON.parse(text2.replace(/^﻿/, ""));
   } catch {
-    return { where, dir, mode: null, app: null, org: null, universeName: null, universeLocal: null };
+    return { where, dir, written, mode: null, app: null, org: null, universeName: null, universeLocal: null };
   }
   const o = asObject(parsed);
   return {
     where,
     dir,
+    written,
     mode: str(asObject(o.topology).mode),
     app: str(asObject(o.app).name),
     org: str(asObject(o.app).org),
@@ -49584,15 +49576,18 @@ function readConfigSources(projectRoot, config2, executor) {
   const topDir = top !== null ? canonicalPath(resolve(top)) : root;
   const dirs = [];
   let current = root;
+  let written = resolve(projectRoot);
   for (; ; ) {
-    dirs.push(current);
+    dirs.push({ dir: current, written });
     if (rootKey(current) === rootKey(topDir)) break;
     const up = dirname(current);
     if (up === current) break;
     current = up;
+    const writtenUp = dirname(written);
+    written = rootKey(writtenUp) === rootKey(up) ? writtenUp : up;
   }
   const sources = [];
-  for (const dir of dirs) {
+  for (const { dir, written: writtenDir } of dirs) {
     const file = join(dir, ".rsct.json");
     let working = null;
     try {
@@ -49600,13 +49595,13 @@ function readConfigSources(projectRoot, config2, executor) {
     } catch {
       working = null;
     }
-    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || ".rsct.json")} (working tree)`, dir);
+    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || ".rsct.json")} (working tree)`, dir, writtenDir);
     if (fromWorking !== null) sources.push(fromWorking);
     if (top !== null) {
       const rel = relative(topDir, file).replace(/\\/g, "/");
       const blob = blobAt(executor, topDir, "HEAD", rel);
       if (blob.state === "present") {
-        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir);
+        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir, writtenDir);
         if (fromHead !== null) sources.push(fromHead);
       }
     }
@@ -49615,6 +49610,7 @@ function readConfigSources(projectRoot, config2, executor) {
     sources.push({
       where: ".rsct.json",
       dir: root,
+      written: resolve(projectRoot),
       mode: config2.topology?.mode ?? null,
       app: config2.app?.name ?? null,
       org: config2.app?.org ?? null,
@@ -49768,10 +49764,20 @@ function gatherContractFacts(args2) {
   const paths = args2.readPaths();
   if (paths === null) return null;
   const roots = /* @__PURE__ */ new Map();
+  const fromReal = /* @__PURE__ */ new Map();
+  const fromWritten = /* @__PURE__ */ new Map();
   for (const s of sources) {
     const mini = { app: { name: s.app ?? "", org: s.org ?? "" }, universe: { name: s.universeName ?? void 0, local: s.universeLocal ?? void 0 } };
-    const found = resolveUniverseRoot(mini, s.dir, args2.home !== void 0 ? { home: args2.home } : {});
-    if (found.kind === "found") roots.set(rootKey(found.path), found.path);
+    for (const [dir, into] of [[s.dir, fromReal], [s.written, fromWritten]]) {
+      const found = resolveUniverseRoot(mini, dir, args2.home !== void 0 ? { home: args2.home } : {});
+      if (found.kind !== "found") continue;
+      roots.set(rootKey(found.path), found.path);
+      into.set(rootKey(found.path), found.path);
+    }
+  }
+  if ([...fromWritten.keys()].some((k) => !fromReal.has(k)) || [...fromReal.keys()].some((k) => !fromWritten.has(k))) {
+    const list = (m) => [...m.values()].map(shortPath).join(", ") || "(none)";
+    lines2.push(`\u26A0 The project folder is reached through a link, and its universe resolves differently from the folder as written (${list(fromWritten)}) and from its real folder (${list(fromReal)}); the contract gate reads both.`);
   }
   for (const r of recorded?.roots ?? []) {
     if (!roots.has(rootKey(r.path)) && isUniverseDir(r.path)) roots.set(rootKey(r.path), r.path);
@@ -50080,44 +50086,238 @@ function unresolvedLocal(url) {
   if (file) return !/^(\/|[A-Za-z]:)/.test(file[1]);
   return /^~[^/\\]/.test(url);
 }
+var ABSENT = "-";
 function within(parent, child) {
   const rel = relative(parent, child);
   return rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
-function treeHooks(executor, top, rev, rel) {
-  const listed2 = executor(top, ["ls-tree", "-z", rev, ...rel === "" ? [] : ["--", `:(literal)${rel}/`]]);
-  if (!listed2.ok) return null;
-  const hooks = /* @__PURE__ */ new Map();
-  for (const record2 of listed2.stdout.split("\0")) {
+function treeRecords(stdout) {
+  const records = [];
+  for (const record2 of stdout.split("\0")) {
     const tab = record2.indexOf("	");
     if (tab === -1) continue;
     const [mode, type, oid] = record2.slice(0, tab).split(" ");
-    const name2 = record2.slice(tab + 1).split("/").pop() ?? "";
-    if (type !== "blob" || name2.endsWith(".sample")) continue;
-    hooks.set(name2, `${mode} ${oid}`);
+    records.push({ mode, type, oid, name: record2.slice(tab + 1) });
   }
-  return hooks;
+  return records;
 }
-function incomingHooks(executor, projectRoot, repo, tip) {
+function folder(caseBlind) {
+  return (s) => caseBlind ? s.toLowerCase() : s;
+}
+function hookTree(executor, top, rev, rels, caseBlind) {
+  const fold = folder(caseBlind);
+  const hooks = /* @__PURE__ */ new Map();
+  const links = [];
+  for (const rel of rels) {
+    let trees = [`${rev}^{tree}`];
+    for (const part of rel === "" ? [] : rel.split("/")) {
+      const next = [];
+      for (const tree of trees) {
+        const listed2 = executor(top, ["ls-tree", "-z", tree]);
+        if (!listed2.ok) return null;
+        for (const r of treeRecords(listed2.stdout)) {
+          if (fold(r.name) !== fold(part)) continue;
+          if (r.type === "tree") next.push(r.oid);
+          else links.push(`${rel}:${r.name} ${r.mode} ${r.oid}`);
+        }
+      }
+      trees = next;
+    }
+    for (const tree of trees) {
+      const listed2 = executor(top, ["ls-tree", "-z", tree]);
+      if (!listed2.ok) return null;
+      for (const r of treeRecords(listed2.stdout)) {
+        if (r.type !== "blob" || fold(r.name).endsWith(".sample")) continue;
+        const key = fold(r.name);
+        const blob = `${r.mode} ${r.oid}`;
+        const had = hooks.get(key);
+        hooks.set(key, had === void 0 || had === blob ? blob : [.../* @__PURE__ */ new Set([...had.split("|"), blob])].sort().join("|"));
+      }
+    }
+  }
+  return { hooks, links: links.sort().join("\n") };
+}
+function childOf(path2, rel) {
+  if (rel === "") return path2.includes("/") ? null : path2;
+  if (!path2.startsWith(`${rel}/`)) return null;
+  const rest = path2.slice(rel.length + 1);
+  return rest.includes("/") ? null : rest;
+}
+function parentOf(path2) {
+  return path2.includes("/") ? path2.slice(0, path2.lastIndexOf("/")) : "";
+}
+function sideChanges(executor, top, from, to, caseBlind) {
+  const r = executor(top, ["diff", "-z", "--name-status", "--no-renames", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", from, to, "--"]);
+  if (!r.ok) return null;
+  const fold = folder(caseBlind);
+  const fields = r.stdout.split("\0");
+  const changes = { added: /* @__PURE__ */ new Set(), deleted: /* @__PURE__ */ new Set(), changed: /* @__PURE__ */ new Set() };
+  for (let i2 = 0; i2 + 1 < fields.length; i2 += 2) {
+    const path2 = fold(fields[i2 + 1]);
+    if (fields[i2] === "A") changes.added.add(path2);
+    if (fields[i2] === "D") changes.deleted.add(path2);
+    changes.changed.add(path2);
+  }
+  return changes;
+}
+function movedIn(side, other, rels) {
+  const added = [...side.added].flatMap((p) => rels.map((rel) => childOf(p, rel)).filter((n) => n !== null));
+  if (added.length === 0) return [];
+  const names = /* @__PURE__ */ new Set();
+  if ([...side.deleted].some((p) => other.changed.has(p))) for (const name2 of added) names.add(name2);
+  const emptied = new Set([...side.deleted].map(parentOf));
+  for (const p of other.added) if (emptied.has(parentOf(p))) names.add(p.slice(p.lastIndexOf("/") + 1));
+  return [...names];
+}
+function loggedVersions(executor, top, range, pathspecs, rels, caseBlind) {
+  const r = executor(top, ["log", "--raw", "-z", "--no-renames", "--no-abbrev", "--format=commit %H", range, "--", ...pathspecs]);
+  if (!r.ok) return null;
+  const fold = folder(caseBlind);
+  const versions = [];
+  let commit = "";
+  const fields = r.stdout.split("\0");
+  for (let i2 = 0; i2 < fields.length; i2++) {
+    const field = fields[i2].replace(/^\n/, "");
+    if (field.startsWith("commit ")) {
+      commit = field.slice("commit ".length).trim();
+      continue;
+    }
+    if (!field.startsWith(":")) continue;
+    const [, newMode, , newOid] = field.slice(1).split(" ");
+    const path2 = fold(fields[++i2] ?? "");
+    for (const rel of rels) {
+      const name2 = childOf(path2, rel);
+      if (name2 !== null) versions.push({ commit, name: name2, blob: /^0+$/.test(newOid ?? "") ? ABSENT : `${newMode} ${newOid}` });
+    }
+  }
+  return versions;
+}
+function mergeBases(executor, top, tip) {
+  const r = executor(top, ["merge-base", "--all", "HEAD", tip]);
+  if (r.ok) return r.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return r.exitCode === 1 ? [] : null;
+}
+function revList(executor, top, args2) {
+  const r = executor(top, ["rev-list", ...args2]);
+  return r.ok ? r.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0) : null;
+}
+function configTrue(executor, top, key) {
+  const r = executor(top, ["config", "--bool", "--get", key]);
+  return r.ok && r.stdout.trim() === "true";
+}
+function blobShown(blob) {
+  if (blob === ABSENT) return "none";
+  if (blob.includes("|")) return "several, differing in letter case";
+  return blob.split(" ")[1].slice(0, HASH_SHOWN);
+}
+function incomingHooks(executor, projectRoot, repo, incoming) {
+  const { tip, operation } = incoming;
   const hooksDir = canonicalPath(repo.hooksDir);
   if (within(canonicalPath(repo.gitFolder), hooksDir)) return [];
   const toplevel = executor(projectRoot, ["rev-parse", "--show-toplevel"]);
-  if (!toplevel.ok) return null;
+  const head = executor(projectRoot, ["rev-parse", "--verify", "-q", "HEAD"]);
+  if (!toplevel.ok || !head.ok) return null;
+  const headOid = head.stdout.trim();
   const top = canonicalPath(toplevel.stdout.trim());
-  if (!within(top, hooksDir)) return [];
-  const rel = posix2(relative(top, hooksDir));
-  const now = treeHooks(executor, top, "HEAD", rel);
-  const then = treeHooks(executor, top, tip, rel);
-  if (now === null || then === null) return null;
+  const real = posix2(relative(top, hooksDir));
+  const configured = posix2(relative(top, repo.hooksDir));
+  const rels = [.../* @__PURE__ */ new Set([...within(top, hooksDir) ? [real] : [], ...within(top, repo.hooksDir) && !configured.startsWith("..") ? [configured] : []])];
+  if (rels.length === 0) return [];
+  const rel = rels[0];
+  const caseBlind = CASE_BLIND3 || configTrue(executor, top, "core.ignorecase");
+  const fold = folder(caseBlind);
+  const foldedRels = rels.map(fold);
+  const pathspecs = rels.map((r) => `:(${caseBlind ? "icase," : ""}literal)${r === "" ? "." : r}`);
+  const bases = mergeBases(executor, top, tip);
+  if (bases === null) return null;
+  const replayed = operation === "rebase" ? loggedVersions(executor, top, `${tip}..HEAD`, pathspecs, foldedRels, caseBlind) : [];
+  const upstream = operation === "rebase" ? loggedVersions(executor, top, `HEAD..${tip}`, pathspecs, foldedRels, caseBlind) : [];
+  const merges = operation === "rebase" ? revList(executor, top, ["--merges", "--max-count=1", `${tip}..HEAD`]) : [];
+  if (replayed === null || upstream === null || merges === null) return null;
+  const read = (rev) => hookTree(executor, top, rev, rels, caseBlind);
+  const now = read("HEAD");
+  const then = read(tip);
+  const baseTrees = bases.map(read);
+  if (now === null || then === null || baseTrees.some((t) => t === null)) return null;
+  const moved = /* @__PURE__ */ new Set();
+  for (const base of bases) {
+    const ours = sideChanges(executor, top, base, "HEAD", caseBlind);
+    const theirs = sideChanges(executor, top, base, tip, caseBlind);
+    if (ours === null || theirs === null) return null;
+    for (const name2 of [...movedIn(ours, theirs, foldedRels), ...movedIn(theirs, ours, foldedRels)]) moved.add(name2);
+  }
   const entries = [];
-  for (const [name2, blob] of [...then].sort(([a], [b]) => a.localeCompare(b))) {
-    if (now.get(name2) === blob) continue;
-    const where = rel === "" ? name2 : `${rel}/${name2}`;
-    entries.push({
+  const seenIds = /* @__PURE__ */ new Set();
+  const push = (entry) => {
+    if (seenIds.has(entry.identity)) return;
+    seenIds.add(entry.identity);
+    entries.push(entry);
+  };
+  const baseLinks = bases.length === 0 ? [""] : baseTrees.map((t) => t.links);
+  if (then.links !== now.links && baseLinks.some((l) => l !== then.links)) {
+    push({
       scopeKey: repo.scopeKey,
-      identity: digest("incoming-hook", name2, blob),
-      label: `hook ${specLabel(`"${name2}"`)} as this operation brings it (${specLabel(where)} at ${tip.slice(0, HASH_SHOWN)}, blob ${blob.split(" ")[1].slice(0, HASH_SHOWN)})`
+      identity: digest("hooks-folder", ...rels, tip, then.links),
+      label: `the hooks folder ${specLabel(`"${rels.join('", "')}"`)} changes at ${tip.slice(0, HASH_SHOWN)}: git may run hooks from a place this list cannot read`
     });
+  }
+  const upstreamTouched = new Set(upstream.map((v) => v.name));
+  const names = /* @__PURE__ */ new Set([...then.hooks.keys(), ...now.hooks.keys(), ...baseTrees.flatMap((t) => [...t.hooks.keys()]), ...replayed.map((v) => v.name), ...upstreamTouched, ...moved]);
+  for (const name2 of [...names].sort((a, b) => a.localeCompare(b))) {
+    const where = specLabel(rel === "" ? name2 : `${rel}/${name2}`);
+    const tipBlob = then.hooks.get(name2) ?? ABSENT;
+    const headBlob = now.hooks.get(name2) ?? ABSENT;
+    const baseBlobs = bases.length === 0 ? [ABSENT] : baseTrees.map((t) => t.hooks.get(name2) ?? ABSENT);
+    const distinctBases = [...new Set(baseBlobs)].sort();
+    const base = distinctBases[0];
+    const merged = (why) => {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest("merged-hook", operation, name2, headOid, tip),
+        label: `hook ${specLabel(`"${name2}"`)} ${why}, so the content git runs is not known before it runs (${where}: HEAD blob ${blobShown(headBlob)}, ${tip.slice(0, HASH_SHOWN)} blob ${blobShown(tipBlob)})`
+      });
+    };
+    const exact = (blob, at, how) => {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest("incoming-hook", name2, blob),
+        label: `hook ${specLabel(`"${name2}"`)} as ${how} (${where} at ${at.slice(0, HASH_SHOWN)}, blob ${blobShown(blob)})`
+      });
+    };
+    if (moved.has(name2)) {
+      merged(operation === "rebase" ? "is merged during the rebase with content another file or folder may move into it" : "may receive content git moves in from another file or folder while it merges");
+      continue;
+    }
+    if (operation === "merge") {
+      if (tipBlob === headBlob) continue;
+      if (distinctBases.length > 1) merged("differs between the merge bases: git merges the versions while it runs");
+      else if (tipBlob === base) continue;
+      else if (headBlob === base) {
+        if (tipBlob !== ABSENT) exact(tipBlob, tip, "this operation brings it");
+      } else merged("changed on both sides: git merges the two versions while it runs");
+      continue;
+    }
+    if (tipBlob !== ABSENT && tipBlob !== headBlob) exact(tipBlob, tip, "this operation brings it");
+    const carried = replayed.filter((v) => v.name === name2);
+    if (distinctBases.length > 1 || carried.length > 0 && (merges.length > 0 || upstreamTouched.has(name2))) {
+      merged("is merged during the rebase");
+      continue;
+    }
+    const seen = /* @__PURE__ */ new Set([headBlob, tipBlob, ABSENT]);
+    for (const v of carried) {
+      if (seen.has(v.blob)) continue;
+      seen.add(v.blob);
+      exact(v.blob, v.commit, "a replayed commit brings it");
+    }
+  }
+  if (configTrue(executor, top, operation === "rebase" ? "rebase.autoStash" : "merge.autoStash")) {
+    for (const [name2, blob] of [...now.hooks].sort(([a], [b]) => a.localeCompare(b))) {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest("incoming-hook", name2, blob),
+        label: `hook ${specLabel(`"${name2}"`)} as committed at HEAD, which git runs when ${operation === "rebase" ? "rebase" : "merge"}.autoStash puts local changes aside (${specLabel(rel === "" ? name2 : `${rel}/${name2}`)} at ${headOid.slice(0, HASH_SHOWN)}, blob ${blobShown(blob)})`
+      });
+    }
   }
   return entries;
 }
@@ -50127,7 +50327,7 @@ function readGitPrograms(projectRoot, executor, targets) {
   const entries = [...repo.entries];
   if (targets?.incoming !== void 0) {
     const brought = incomingHooks(executor, projectRoot, repo, targets.incoming);
-    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.slice(0, HASH_SHOWN))}` };
+    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.tip.slice(0, HASH_SHOWN))}` };
     entries.push(...brought);
   }
   const scopeKeys = /* @__PURE__ */ new Set([repo.scopeKey]);
@@ -51343,7 +51543,7 @@ function probeEnv(base) {
 }
 var PROBE_GIT_OPTIONS = ["-c", "core.askPass=", "-c", "credential.helper=", "-c", "credential.interactive=never"];
 var defaultPushProbe = (projectRoot, remote, refspec) => {
-  const r = spawnGitSync([...PROBE_GIT_OPTIONS, "push", "--dry-run", "--porcelain", "--no-verify", "--", remote, refspec], {
+  const r = spawnGitSync([...PROBE_GIT_OPTIONS, "push", "--dry-run", "--porcelain", "--no-verify", "--recurse-submodules=no", "--", remote, refspec], {
     cwd: projectRoot,
     env: probeEnv(process.env),
     encoding: "utf8",
@@ -52089,7 +52289,7 @@ var requestMergeInputSchema = external_exports.object({
 }).strict();
 var requestMergeTool = {
   name: "rsct_request_merge",
-  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the source brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
+  description: "\xA7C-gated merge of `source_branch` into the current branch (default --no-ff). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from the source; an armed review_drift lock refuses, as it refuses every commit; a protected target, and --allow-unrelated-histories on any target (force-like), need dev_approval.override_protected_branch; the source is pinned to its commit; and every commit the merge brings is scanned for secrets (each commit's own diff, merge commits included), so a finding needs dev_approval.override_secrets_check. The forced OS dialog then lists the pinned source commit, the protected branch and unrelated histories, each secret finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A source that moved after the dialog refuses (source_moved). The merge runs on the pinned commit (with the usual merge message), and HEAD must still be on the branch and commit it was on at the dialog (target_moved otherwise). After the merge, the merge commit it wrote, if any, is scanned (the source's commits were scanned before the dialog, at the pinned commit); a finding the dialog did not show arms review_drift with its paths, so commits, merges, rebases and pushes are refused until a REVIEW covers them. This is the LOCAL merge-commit path; GitHub PR merges are equivalent for cleanup purposes. On a successful merge whose plan is complete, the hints suggest deleting the merged working branch + plan_/progress_/spec_ files (never automated). Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the source brings into a hooks folder kept in the work tree (a hook only the source changed in that exact version; one changed on both sides, that differs between merge bases, or that may receive content moved in from another file or folder, as merged while git runs, its content not known before), marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -52262,7 +52462,7 @@ async function requestMergeHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: pinned });
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: { tip: pinned, operation: "merge" } });
   if (!programs.ok) {
     return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this merge cannot be listed \u2014 nothing was merged and no dialog was shown.`, { protected: targetProtected });
   }
@@ -52364,7 +52564,7 @@ ${reasons.join("\n")}` : "")
       protected: targetProtected
     });
   }
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned });
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: { tip: pinned, operation: "merge" } });
   if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected });
   appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories };
@@ -53073,7 +53273,7 @@ var requestRebaseInputSchema = external_exports.object({
 }).strict();
 var requestRebaseTool = {
   name: "rsct_request_rebase",
-  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the ref brings into a hooks folder kept in the work tree, in the version git will run, marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
+  description: "\xA7C-gated rebase / squash \u2014 the history-rewriting integration paths, ALWAYS per-action (never covered by a plan token). Before any dialog: pre_merge_ack is checked; HEAD must be on a branch with a commit (detached_head otherwise) and differ from `ref`; an armed review_drift lock refuses; rewriting a PROTECTED branch needs dev_approval.override_protected_branch; `ref` is pinned to its commit; and for mode='rebase' every commit on either side since the merge base is scanned for secrets (each commit's own diff), so a finding needs dev_approval.override_secrets_check. The forced OS dialog lists the pinned commit, the protected branch, each finding as file:line, rule and commit (never the value) and the pre_merge_ack answers, and after the framework footer the agent's reasons and ack note. A `ref` that moved after the dialog refuses (source_moved), and so does a HEAD no longer on the branch and commit it was on at the dialog (target_moved). mode='rebase' runs `git rebase` on the pinned commit and then scans the rewritten commits again: a finding the dialog did not show arms review_drift with its paths. mode='squash' runs `git merge --squash <ref>` (stages a squashed change WITHOUT committing \u2014 rsct_request_commit scans it when it is committed). Conflicts surface as mutation_failed with git's stderr; content resolved by hand during `git rebase --continue` is outside RSCT, and the push gate scans it again; nothing is force-pushed. Before the dialog it also lists every file in the hooks folder git runs and every configured key that runs a program (ssh command, credential helper, filters, merge drivers, signing, remote programs, transport helpers, the gc hook), with its origin and URL credentials masked, and the hooks the ref brings into a hooks folder kept in the work tree (a hook only the ref changed in that exact version, and for a rebase each version the replayed commits carry; one changed on both sides, that differs between merge bases, that may receive content moved in from another file or folder, or that a rebase merges, as merged while git runs, its content not known before), marking what is new or changed since the last approved call; the list is read again right before git runs (programs_moved), and a list that cannot be read refuses (programs_unreadable).",
   inputSchema: {
     type: "object",
     properties: {
@@ -53223,7 +53423,7 @@ async function requestRebaseHandler(rawInput, internal = {}) {
       audit: { findings_count: findings.length }
     });
   }
-  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: pinned });
+  const programs = checkGitPrograms(projectRoot, gitExecutor, config2?.audit, { incoming: { tip: pinned, operation: mode === "rebase" ? "rebase" : "merge" } });
   if (!programs.ok) {
     return reject2("programs_unreadable", `${programs.reason}, so the hooks and programs git would run inside this ${mode} cannot be listed \u2014 nothing was changed and no dialog was shown.`, { protected: currentProtected });
   }
@@ -53304,7 +53504,7 @@ ${reasons.join("\n")}` : "")
       protected: currentProtected
     });
   }
-  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: pinned });
+  const programsNow = programsStillSame(programs, projectRoot, gitExecutor, { incoming: { tip: pinned, operation: mode === "rebase" ? "rebase" : "merge" } });
   if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: currentProtected });
   appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: currentProtected, override_used: currentProtected };

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   isClaudeSettingsFile,
@@ -493,5 +493,99 @@ describe('front matter the guard cannot read word by word, and a .rsct.json left
   it('refuses a write that leaves unparseable a .rsct.json that parsed, even one outside the schema', () => {
     const outside = JSON.stringify({ rsct_version: '1.0.0', app: { name: 'a', org: '' }, audit: { path: 'x.log' } })
     expect(judgeRsctConfigWrite('Write', { content: '{' }, join('p', '.rsct.json'), read(outside)).block).toBe(true)
+  })
+})
+
+describe('edit-scope hook — Claude Code files in the folder CLAUDE_CONFIG_DIR names (2.24.2)', () => {
+  function sandbox(): { root: string; cfg: string } {
+    const root = mkdtempSync(join(tmpdir(), 'rsct-config-dir-'))
+    roots.push(root)
+    mkdirSync(join(root, 'p'), { recursive: true })
+    return { root, cfg: join(root, 'cfg') }
+  }
+
+  function exitOf(file: string, content: string, env: NodeJS.ProcessEnv, cwd: string): number {
+    return decide(JSON.stringify({ tool_name: 'Write', tool_input: { file_path: file, content }, cwd }), env, cwd).exitCode
+  }
+
+  const HOOKED = '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"x"}]}]}}'
+
+  it.each([
+    ['settings.json', HOOKED],
+    ['settings.local.json', '{"apiKeyHelper":"x"}'],
+    [join('commands', 'c.md'), '!`ls`\n'],
+    [join('agents', 'a.md'), '---\nhooks: x\n---\n'],
+    [join('skills', 's', 'SKILL.md'), '!`ls`\n'],
+    [join('plugins', 'p', 'index.js'), 'x'],
+    ['hooks.json', '{}'],
+  ])('refuses %s there, and the same path passes without the variable', (rel, content) => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    expect(exitOf(join(cfg, rel), content, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }, p)).toBe(2)
+    expect(exitOf(join(cfg, rel), content, { CLAUDE_PROJECT_DIR: p }, p)).toBe(0)
+  })
+
+  it('resolves a relative value against the hook folder and against the project folder', () => {
+    const { root } = sandbox()
+    const p = join(root, 'p')
+    const q = join(root, 'q')
+    const env = { CLAUDE_PROJECT_DIR: q, CLAUDE_CONFIG_DIR: 'cfg' }
+    expect(exitOf(join(p, 'cfg', 'settings.json'), HOOKED, env, p)).toBe(2)
+    expect(exitOf(join(q, 'cfg', 'settings.json'), HOOKED, env, p)).toBe(2)
+    expect(exitOf(join(root, 'cfg', 'settings.json'), HOOKED, env, p)).toBe(0)
+  })
+
+  it('reads a value with a trailing separator, and a ~ value both as written and in the home folder', () => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    expect(exitOf(join(cfg, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: `${cfg}/` }, p)).toBe(2)
+    const tilde = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: '~/rsct-config-dir-probe' }
+    expect(exitOf(join(homedir(), 'rsct-config-dir-probe', 'settings.json'), HOOKED, tilde, p)).toBe(2)
+    expect(exitOf(join(p, '~', 'rsct-config-dir-probe', 'settings.json'), HOOKED, tilde, p)).toBe(2)
+  })
+
+  it('reads a folder named through a link by its real path too', () => {
+    const { root } = sandbox()
+    const p = join(root, 'p')
+    const real = join(root, 'real')
+    mkdirSync(real)
+    symlinkSync(real, join(root, 'cfglink'), 'junction')
+    const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: join(root, 'cfglink') }
+    expect(exitOf(join(real, 'settings.json'), HOOKED, env, p)).toBe(2)
+    expect(exitOf(join(root, 'cfglink', 'settings.json'), HOOKED, env, p)).toBe(2)
+  })
+
+  it('treats an empty value as unset', () => {
+    const { root } = sandbox()
+    const p = join(root, 'p')
+    expect(exitOf(join(p, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: '' }, p)).toBe(0)
+  })
+
+  const tmpShare = `\\\\localhost\\${tmpdir()[0]}$${tmpdir().slice(2)}`
+  it.skipIf(process.platform !== 'win32' || !existsSync(tmpShare))('reads a file written through an administrative share of the folder\'s drive', () => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    mkdirSync(cfg)
+    const share = `\\\\localhost\\${cfg[0]}$${cfg.slice(2)}`
+    const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }
+    expect(exitOf(join(share, 'settings.json'), HOOKED, env, p)).toBe(2)
+    expect(exitOf(join(cfg, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: share }, p)).toBe(2)
+  })
+
+  it('leaves ordinary files in that folder alone', () => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }
+    expect(exitOf(join(cfg, 'CLAUDE.md'), '# notes', env, p)).toBe(0)
+    expect(exitOf(join(cfg, 'projects', 'x', 'memory', 'MEMORY.md'), '- a', env, p)).toBe(0)
+    expect(exitOf(join(cfg, 'settings.json'), '{"theme":"dark"}', env, p)).toBe(0)
+  })
+
+  it('leaves a file of the same name in another folder alone', () => {
+    const { root, cfg } = sandbox()
+    const p = join(root, 'p')
+    const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }
+    expect(exitOf(join(root, 'other', 'settings.json'), HOOKED, env, p)).toBe(0)
+    expect(exitOf(join(root, 'other', 'commands', 'c.md'), '!`ls`\n', env, p)).toBe(0)
   })
 })

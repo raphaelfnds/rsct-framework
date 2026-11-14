@@ -246,3 +246,60 @@ describe('contract facts — the universe cannot go quiet (REVIEW round 1)', () 
     expect(f.ids).toEqual(['orders-api'])
   })
 })
+
+describe('contract facts — a project folder reached through a link (2.24.2)', () => {
+  const PAYMENTS = { id: 'payments-api', producer: 'api', surface: ['api/**'], consumers: ['web'] }
+
+  function linkedProject(universeLocal: string): { real: string; linked: string } {
+    const real = join(base, 'real', 'project')
+    mkdirSync(real, { recursive: true })
+    git(real, 'init', '-q', '-b', 'main')
+    writeFileSync(join(real, '.rsct.json'), rsctJson({ universe: { local: universeLocal } }))
+    commitAll(real, 'project')
+    mkdirSync(join(base, 'link'), { recursive: true })
+    const linked = join(base, 'link', 'project')
+    symlinkSync(real, linked, 'junction')
+    return { real, linked }
+  }
+
+  it('reads the universe found from the folder as written and from its real folder, and says they differ', () => {
+    universeRepo(join(base, 'real', 'u'), [ORDERS])
+    universeRepo(join(base, 'link', 'u'), [PAYMENTS])
+    const { linked } = linkedProject('../u')
+    const f = facts(linked)
+    expect([...f.ids].sort()).toEqual(['orders-api', 'payments-api'])
+    expect(f.lines.join('\n')).toContain('reached through a link')
+  })
+
+  it('says nothing when both folders find the same universe', () => {
+    const u = universeRepo(join(base, 'u'), [ORDERS])
+    const { linked } = linkedProject(u)
+    const f = facts(linked)
+    expect(f.ids).toEqual(['orders-api'])
+    expect(f.lines.join('\n')).not.toContain('reached through a link')
+  })
+
+  it('says nothing when the link is the project folder itself and the .rsct.json sits in a parent', () => {
+    const u = universeRepo(join(base, 'real', 'u'), [ORDERS])
+    const mono = join(base, 'real', 'mono')
+    mkdirSync(join(mono, 'sub'), { recursive: true })
+    git(mono, 'init', '-q', '-b', 'main')
+    writeFileSync(join(mono, '.rsct.json'), rsctJson({ universe: { local: '../u' } }))
+    writeFileSync(join(mono, 'sub', 'a.txt'), 'a\n')
+    commitAll(mono, 'mono')
+    mkdirSync(join(base, 'link'), { recursive: true })
+    symlinkSync(join(mono, 'sub'), join(base, 'link', 'proj'), 'junction')
+    const f = facts(join(base, 'link', 'proj'))
+    expect(f.ids).toEqual(['orders-api'])
+    expect(f.lines.join('\n')).not.toContain('reached through a link')
+    expect(u).toBeTruthy()
+  })
+
+  it('says nothing for a project read through its real folder', () => {
+    universeRepo(join(base, 'real', 'u'), [ORDERS])
+    const { real } = linkedProject('../u')
+    const f = facts(real)
+    expect(f.ids).toEqual(['orders-api'])
+    expect(f.lines.join('\n')).not.toContain('reached through a link')
+  })
+})

@@ -242,49 +242,285 @@ function unresolvedLocal(url: string): boolean {
 
 export interface GitCallTargets {
   urls?: readonly string[]
-  incoming?: string
+  incoming?: { tip: string; operation: 'merge' | 'rebase' }
 }
+
+const ABSENT = '-'
 
 function within(parent: string, child: string): boolean {
   const rel = relative(parent, child)
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
-function treeHooks(executor: GitExecutor, top: string, rev: string, rel: string): Map<string, string> | null {
-  const listed = executor(top, ['ls-tree', '-z', rev, ...(rel === '' ? [] : ['--', `:(literal)${rel}/`])])
-  if (!listed.ok) return null
-  const hooks = new Map<string, string>()
-  for (const record of listed.stdout.split('\0')) {
+interface TreeRecord {
+  mode: string
+  type: string
+  oid: string
+  name: string
+}
+
+interface HookTree {
+  hooks: Map<string, string>
+  links: string
+}
+
+interface SideChanges {
+  added: Set<string>
+  deleted: Set<string>
+  changed: Set<string>
+}
+
+interface LoggedVersion {
+  commit: string
+  name: string
+  blob: string
+}
+
+function treeRecords(stdout: string): TreeRecord[] {
+  const records: TreeRecord[] = []
+  for (const record of stdout.split('\0')) {
     const tab = record.indexOf('\t')
     if (tab === -1) continue
     const [mode, type, oid] = record.slice(0, tab).split(' ')
-    const name = record.slice(tab + 1).split('/').pop() ?? ''
-    if (type !== 'blob' || name.endsWith('.sample')) continue
-    hooks.set(name, `${mode} ${oid}`)
+    records.push({ mode: mode!, type: type!, oid: oid!, name: record.slice(tab + 1) })
   }
-  return hooks
+  return records
 }
 
-function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract<RepositoryRead, { ok: true }>, tip: string): ProgramEntry[] | null {
+function folder(caseBlind: boolean): (s: string) => string {
+  return (s) => (caseBlind ? s.toLowerCase() : s)
+}
+
+function hookTree(executor: GitExecutor, top: string, rev: string, rels: readonly string[], caseBlind: boolean): HookTree | null {
+  const fold = folder(caseBlind)
+  const hooks = new Map<string, string>()
+  const links: string[] = []
+  for (const rel of rels) {
+    let trees = [`${rev}^{tree}`]
+    for (const part of rel === '' ? [] : rel.split('/')) {
+      const next: string[] = []
+      for (const tree of trees) {
+        const listed = executor(top, ['ls-tree', '-z', tree])
+        if (!listed.ok) return null
+        for (const r of treeRecords(listed.stdout)) {
+          if (fold(r.name) !== fold(part)) continue
+          if (r.type === 'tree') next.push(r.oid)
+          else links.push(`${rel}:${r.name} ${r.mode} ${r.oid}`)
+        }
+      }
+      trees = next
+    }
+    for (const tree of trees) {
+      const listed = executor(top, ['ls-tree', '-z', tree])
+      if (!listed.ok) return null
+      for (const r of treeRecords(listed.stdout)) {
+        if (r.type !== 'blob' || fold(r.name).endsWith('.sample')) continue
+        const key = fold(r.name)
+        const blob = `${r.mode} ${r.oid}`
+        const had = hooks.get(key)
+        hooks.set(key, had === undefined || had === blob ? blob : [...new Set([...had.split('|'), blob])].sort().join('|'))
+      }
+    }
+  }
+  return { hooks, links: links.sort().join('\n') }
+}
+
+function childOf(path: string, rel: string): string | null {
+  if (rel === '') return path.includes('/') ? null : path
+  if (!path.startsWith(`${rel}/`)) return null
+  const rest = path.slice(rel.length + 1)
+  return rest.includes('/') ? null : rest
+}
+
+function parentOf(path: string): string {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+}
+
+function sideChanges(executor: GitExecutor, top: string, from: string, to: string, caseBlind: boolean): SideChanges | null {
+  const r = executor(top, ['diff', '-z', '--name-status', '--no-renames', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', from, to, '--'])
+  if (!r.ok) return null
+  const fold = folder(caseBlind)
+  const fields = r.stdout.split('\0')
+  const changes: SideChanges = { added: new Set(), deleted: new Set(), changed: new Set() }
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const path = fold(fields[i + 1]!)
+    if (fields[i] === 'A') changes.added.add(path)
+    if (fields[i] === 'D') changes.deleted.add(path)
+    changes.changed.add(path)
+  }
+  return changes
+}
+
+function movedIn(side: SideChanges, other: SideChanges, rels: readonly string[]): string[] {
+  const added = [...side.added].flatMap((p) => rels.map((rel) => childOf(p, rel)).filter((n): n is string => n !== null))
+  if (added.length === 0) return []
+  const names = new Set<string>()
+  if ([...side.deleted].some((p) => other.changed.has(p))) for (const name of added) names.add(name)
+  const emptied = new Set([...side.deleted].map(parentOf))
+  for (const p of other.added) if (emptied.has(parentOf(p))) names.add(p.slice(p.lastIndexOf('/') + 1))
+  return [...names]
+}
+
+function loggedVersions(executor: GitExecutor, top: string, range: string, pathspecs: readonly string[], rels: readonly string[], caseBlind: boolean): LoggedVersion[] | null {
+  const r = executor(top, ['log', '--raw', '-z', '--no-renames', '--no-abbrev', '--format=commit %H', range, '--', ...pathspecs])
+  if (!r.ok) return null
+  const fold = folder(caseBlind)
+  const versions: LoggedVersion[] = []
+  let commit = ''
+  const fields = r.stdout.split('\0')
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i]!.replace(/^\n/, '')
+    if (field.startsWith('commit ')) {
+      commit = field.slice('commit '.length).trim()
+      continue
+    }
+    if (!field.startsWith(':')) continue
+    const [, newMode, , newOid] = field.slice(1).split(' ')
+    const path = fold(fields[++i] ?? '')
+    for (const rel of rels) {
+      const name = childOf(path, rel)
+      if (name !== null) versions.push({ commit, name, blob: /^0+$/.test(newOid ?? '') ? ABSENT : `${newMode} ${newOid}` })
+    }
+  }
+  return versions
+}
+
+function mergeBases(executor: GitExecutor, top: string, tip: string): string[] | null {
+  const r = executor(top, ['merge-base', '--all', 'HEAD', tip])
+  if (r.ok) return r.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0)
+  return r.exitCode === 1 ? [] : null
+}
+
+function revList(executor: GitExecutor, top: string, args: string[]): string[] | null {
+  const r = executor(top, ['rev-list', ...args])
+  return r.ok ? r.stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0) : null
+}
+
+function configTrue(executor: GitExecutor, top: string, key: string): boolean {
+  const r = executor(top, ['config', '--bool', '--get', key])
+  return r.ok && r.stdout.trim() === 'true'
+}
+
+function blobShown(blob: string): string {
+  if (blob === ABSENT) return 'none'
+  if (blob.includes('|')) return 'several, differing in letter case'
+  return blob.split(' ')[1]!.slice(0, HASH_SHOWN)
+}
+
+function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract<RepositoryRead, { ok: true }>, incoming: NonNullable<GitCallTargets['incoming']>): ProgramEntry[] | null {
+  const { tip, operation } = incoming
   const hooksDir = canonicalPath(repo.hooksDir)
   if (within(canonicalPath(repo.gitFolder), hooksDir)) return []
   const toplevel = executor(projectRoot, ['rev-parse', '--show-toplevel'])
-  if (!toplevel.ok) return null
+  const head = executor(projectRoot, ['rev-parse', '--verify', '-q', 'HEAD'])
+  if (!toplevel.ok || !head.ok) return null
+  const headOid = head.stdout.trim()
   const top = canonicalPath(toplevel.stdout.trim())
-  if (!within(top, hooksDir)) return []
-  const rel = posix(relative(top, hooksDir))
-  const now = treeHooks(executor, top, 'HEAD', rel)
-  const then = treeHooks(executor, top, tip, rel)
-  if (now === null || then === null) return null
+  const real = posix(relative(top, hooksDir))
+  const configured = posix(relative(top, repo.hooksDir))
+  const rels = [...new Set([...(within(top, hooksDir) ? [real] : []), ...(within(top, repo.hooksDir) && !configured.startsWith('..') ? [configured] : [])])]
+  if (rels.length === 0) return []
+  const rel = rels[0]!
+  const caseBlind = CASE_BLIND || configTrue(executor, top, 'core.ignorecase')
+  const fold = folder(caseBlind)
+  const foldedRels = rels.map(fold)
+  const pathspecs = rels.map((r) => `:(${caseBlind ? 'icase,' : ''}literal)${r === '' ? '.' : r}`)
+
+  const bases = mergeBases(executor, top, tip)
+  if (bases === null) return null
+  const replayed = operation === 'rebase' ? loggedVersions(executor, top, `${tip}..HEAD`, pathspecs, foldedRels, caseBlind) : []
+  const upstream = operation === 'rebase' ? loggedVersions(executor, top, `HEAD..${tip}`, pathspecs, foldedRels, caseBlind) : []
+  const merges = operation === 'rebase' ? revList(executor, top, ['--merges', '--max-count=1', `${tip}..HEAD`]) : []
+  if (replayed === null || upstream === null || merges === null) return null
+  const read = (rev: string): HookTree | null => hookTree(executor, top, rev, rels, caseBlind)
+  const now = read('HEAD')
+  const then = read(tip)
+  const baseTrees = bases.map(read)
+  if (now === null || then === null || baseTrees.some((t) => t === null)) return null
+  const moved = new Set<string>()
+  for (const base of bases) {
+    const ours = sideChanges(executor, top, base, 'HEAD', caseBlind)
+    const theirs = sideChanges(executor, top, base, tip, caseBlind)
+    if (ours === null || theirs === null) return null
+    for (const name of [...movedIn(ours, theirs, foldedRels), ...movedIn(theirs, ours, foldedRels)]) moved.add(name)
+  }
+
   const entries: ProgramEntry[] = []
-  for (const [name, blob] of [...then].sort(([a], [b]) => a.localeCompare(b))) {
-    if (now.get(name) === blob) continue
-    const where = rel === '' ? name : `${rel}/${name}`
-    entries.push({
+  const seenIds = new Set<string>()
+  const push = (entry: ProgramEntry): void => {
+    if (seenIds.has(entry.identity)) return
+    seenIds.add(entry.identity)
+    entries.push(entry)
+  }
+  const baseLinks = bases.length === 0 ? [''] : baseTrees.map((t) => t!.links)
+  if (then.links !== now.links && baseLinks.some((l) => l !== then.links)) {
+    push({
       scopeKey: repo.scopeKey,
-      identity: digest('incoming-hook', name, blob),
-      label: `hook ${specLabel(`"${name}"`)} as this operation brings it (${specLabel(where)} at ${tip.slice(0, HASH_SHOWN)}, blob ${blob.split(' ')[1]!.slice(0, HASH_SHOWN)})`,
+      identity: digest('hooks-folder', ...rels, tip, then.links),
+      label: `the hooks folder ${specLabel(`"${rels.join('", "')}"`)} changes at ${tip.slice(0, HASH_SHOWN)}: git may run hooks from a place this list cannot read`,
     })
+  }
+
+  const upstreamTouched = new Set(upstream.map((v) => v.name))
+  const names = new Set([...then.hooks.keys(), ...now.hooks.keys(), ...baseTrees.flatMap((t) => [...t!.hooks.keys()]), ...replayed.map((v) => v.name), ...upstreamTouched, ...moved])
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const where = specLabel(rel === '' ? name : `${rel}/${name}`)
+    const tipBlob = then.hooks.get(name) ?? ABSENT
+    const headBlob = now.hooks.get(name) ?? ABSENT
+    const baseBlobs = bases.length === 0 ? [ABSENT] : baseTrees.map((t) => t!.hooks.get(name) ?? ABSENT)
+    const distinctBases = [...new Set(baseBlobs)].sort()
+    const base = distinctBases[0]!
+    const merged = (why: string): void => {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest('merged-hook', operation, name, headOid, tip),
+        label: `hook ${specLabel(`"${name}"`)} ${why}, so the content git runs is not known before it runs (${where}: HEAD blob ${blobShown(headBlob)}, ${tip.slice(0, HASH_SHOWN)} blob ${blobShown(tipBlob)})`,
+      })
+    }
+    const exact = (blob: string, at: string, how: string): void => {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest('incoming-hook', name, blob),
+        label: `hook ${specLabel(`"${name}"`)} as ${how} (${where} at ${at.slice(0, HASH_SHOWN)}, blob ${blobShown(blob)})`,
+      })
+    }
+
+    if (moved.has(name)) {
+      merged(operation === 'rebase' ? 'is merged during the rebase with content another file or folder may move into it' : 'may receive content git moves in from another file or folder while it merges')
+      continue
+    }
+    if (operation === 'merge') {
+      if (tipBlob === headBlob) continue
+      if (distinctBases.length > 1) merged('differs between the merge bases: git merges the versions while it runs')
+      else if (tipBlob === base) continue
+      else if (headBlob === base) {
+        if (tipBlob !== ABSENT) exact(tipBlob, tip, 'this operation brings it')
+      } else merged('changed on both sides: git merges the two versions while it runs')
+      continue
+    }
+
+    if (tipBlob !== ABSENT && tipBlob !== headBlob) exact(tipBlob, tip, 'this operation brings it')
+    const carried = replayed.filter((v) => v.name === name)
+    if (distinctBases.length > 1 || (carried.length > 0 && (merges.length > 0 || upstreamTouched.has(name)))) {
+      merged('is merged during the rebase')
+      continue
+    }
+    const seen = new Set([headBlob, tipBlob, ABSENT])
+    for (const v of carried) {
+      if (seen.has(v.blob)) continue
+      seen.add(v.blob)
+      exact(v.blob, v.commit, 'a replayed commit brings it')
+    }
+  }
+
+  if (configTrue(executor, top, operation === 'rebase' ? 'rebase.autoStash' : 'merge.autoStash')) {
+    for (const [name, blob] of [...now.hooks].sort(([a], [b]) => a.localeCompare(b))) {
+      push({
+        scopeKey: repo.scopeKey,
+        identity: digest('incoming-hook', name, blob),
+        label: `hook ${specLabel(`"${name}"`)} as committed at HEAD, which git runs when ${operation === 'rebase' ? 'rebase' : 'merge'}.autoStash puts local changes aside (${specLabel(rel === '' ? name : `${rel}/${name}`)} at ${headOid.slice(0, HASH_SHOWN)}, blob ${blobShown(blob)})`,
+      })
+    }
   }
   return entries
 }
@@ -299,7 +535,7 @@ export function readGitPrograms(
   const entries = [...repo.entries]
   if (targets?.incoming !== undefined) {
     const brought = incomingHooks(executor, projectRoot, repo, targets.incoming)
-    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.slice(0, HASH_SHOWN))}` }
+    if (brought === null) return { ok: false, reason: `git could not read the hooks this operation brings from ${specLabel(targets.incoming.tip.slice(0, HASH_SHOWN))}` }
     entries.push(...brought)
   }
   const scopeKeys = new Set([repo.scopeKey])

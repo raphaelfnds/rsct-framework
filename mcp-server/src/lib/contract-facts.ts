@@ -16,6 +16,7 @@ type Source = 'working tree' | 'HEAD' | 'upstream'
 interface ConfigFacts {
   where: string
   dir: string
+  written: string
   mode: string | null
   app: string | null
   org: string | null
@@ -81,18 +82,19 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-function configFacts(text: string | null, where: string, dir: string): ConfigFacts | null {
+function configFacts(text: string | null, where: string, dir: string, written: string): ConfigFacts | null {
   if (text === null) return null
   let parsed: unknown
   try {
     parsed = JSON.parse(text.replace(/^﻿/, ''))
   } catch {
-    return { where, dir, mode: null, app: null, org: null, universeName: null, universeLocal: null }
+    return { where, dir, written, mode: null, app: null, org: null, universeName: null, universeLocal: null }
   }
   const o = asObject(parsed)
   return {
     where,
     dir,
+    written,
     mode: str(asObject(o.topology).mode),
     app: str(asObject(o.app).name),
     org: str(asObject(o.app).org),
@@ -127,17 +129,20 @@ function readConfigSources(projectRoot: string, config: RsctConfig | null, execu
   const top = git(executor, projectRoot, ['rev-parse', '--show-toplevel'])?.trim() || null
   const root = canonicalPath(resolve(projectRoot))
   const topDir = top !== null ? canonicalPath(resolve(top)) : root
-  const dirs: string[] = []
+  const dirs: Array<{ dir: string; written: string }> = []
   let current = root
+  let written = resolve(projectRoot)
   for (;;) {
-    dirs.push(current)
+    dirs.push({ dir: current, written })
     if (rootKey(current) === rootKey(topDir)) break
     const up = dirname(current)
     if (up === current) break
     current = up
+    const writtenUp = dirname(written)
+    written = rootKey(writtenUp) === rootKey(up) ? writtenUp : up
   }
   const sources: ConfigFacts[] = []
-  for (const dir of dirs) {
+  for (const { dir, written: writtenDir } of dirs) {
     const file = join(dir, '.rsct.json')
     let working: string | null = null
     try {
@@ -145,13 +150,13 @@ function readConfigSources(projectRoot: string, config: RsctConfig | null, execu
     } catch {
       working = null
     }
-    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || '.rsct.json')} (working tree)`, dir)
+    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || '.rsct.json')} (working tree)`, dir, writtenDir)
     if (fromWorking !== null) sources.push(fromWorking)
     if (top !== null) {
       const rel = relative(topDir, file).replace(/\\/g, '/')
       const blob = blobAt(executor, topDir, 'HEAD', rel)
       if (blob.state === 'present') {
-        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir)
+        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir, writtenDir)
         if (fromHead !== null) sources.push(fromHead)
       }
     }
@@ -160,6 +165,7 @@ function readConfigSources(projectRoot: string, config: RsctConfig | null, execu
     sources.push({
       where: '.rsct.json',
       dir: root,
+      written: resolve(projectRoot),
       mode: config.topology?.mode ?? null,
       app: config.app?.name ?? null,
       org: config.app?.org ?? null,
@@ -333,10 +339,20 @@ export function gatherContractFacts(args: {
   if (paths === null) return null
 
   const roots = new Map<string, string>()
+  const fromReal = new Map<string, string>()
+  const fromWritten = new Map<string, string>()
   for (const s of sources) {
     const mini = { app: { name: s.app ?? '', org: s.org ?? '' }, universe: { name: s.universeName ?? undefined, local: s.universeLocal ?? undefined } } as unknown as RsctConfig
-    const found = resolveUniverseRoot(mini, s.dir, args.home !== undefined ? { home: args.home } : {})
-    if (found.kind === 'found') roots.set(rootKey(found.path), found.path)
+    for (const [dir, into] of [[s.dir, fromReal], [s.written, fromWritten]] as const) {
+      const found = resolveUniverseRoot(mini, dir, args.home !== undefined ? { home: args.home } : {})
+      if (found.kind !== 'found') continue
+      roots.set(rootKey(found.path), found.path)
+      into.set(rootKey(found.path), found.path)
+    }
+  }
+  if ([...fromWritten.keys()].some((k) => !fromReal.has(k)) || [...fromReal.keys()].some((k) => !fromWritten.has(k))) {
+    const list = (m: Map<string, string>): string => [...m.values()].map(shortPath).join(', ') || '(none)'
+    lines.push(`⚠ The project folder is reached through a link, and its universe resolves differently from the folder as written (${list(fromWritten)}) and from its real folder (${list(fromReal)}); the contract gate reads both.`)
   }
   for (const r of recorded?.roots ?? []) {
     if (!roots.has(rootKey(r.path)) && isUniverseDir(r.path)) roots.set(rootKey(r.path), r.path)

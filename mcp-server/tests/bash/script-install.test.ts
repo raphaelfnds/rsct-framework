@@ -1480,19 +1480,34 @@ describe('architectural boundary — rsct-mcp does not know the host config (#73
   }
 
   const REFUSAL_LIST = 'lib/settings-write-guard.ts'
-  const REFUSAL_LINES: ReadonlyArray<{ token: string; line: string }> = [
-    { token: 'enabledMcpjsonServers', line: "'enabledMcpjsonServers'," },
-    { token: 'disabledMcpjsonServers', line: "'disabledMcpjsonServers'," },
-    { token: '.claude.json', line: `['.claude.json', "Claude Code's MCP servers, approvals and folder trust"],` },
+  const EDIT_HOOK = 'lib/edit-scope-hook.ts'
+  const ALLOWED_LINES: ReadonlyArray<{ file: string; token: string; line: string }> = [
+    { file: REFUSAL_LIST, token: 'enabledMcpjsonServers', line: "'enabledMcpjsonServers'," },
+    { file: REFUSAL_LIST, token: 'disabledMcpjsonServers', line: "'disabledMcpjsonServers'," },
+    { file: REFUSAL_LIST, token: '.claude.json', line: `['.claude.json', "Claude Code's MCP servers, approvals and folder trust"],` },
+    { file: EDIT_HOOK, token: 'CLAUDE_CONFIG_DIR', line: "const value = env.CLAUDE_CONFIG_DIR ?? ''" },
   ]
+  const REFUSAL_LINES = ALLOWED_LINES.filter((r) => r.file === REFUSAL_LIST)
 
   function beyondRefusalList(hits: string[]): string[] {
     return hits.filter((hit) => {
       const m = /^(.+?):\d+ \[(.+?)\] (.*)$/.exec(hit)
       if (!m) return true
       const [, rel, token, text] = m
-      return !(rel!.replace(/\\/g, '/') === REFUSAL_LIST && REFUSAL_LINES.some((r) => r.token === token && r.line === text))
+      return !ALLOWED_LINES.some((r) => r.file === rel!.replace(/\\/g, '/') && r.token === token && r.line === text)
     })
+  }
+
+  function reachedFromIndex(): Set<string> {
+    const seen = new Set<string>()
+    const queue = [join(SRC, 'index.ts')]
+    while (queue.length > 0) {
+      const file = queue.pop()!
+      if (seen.has(file) || !existsSync(file)) continue
+      seen.add(file)
+      for (const m of readFileSync(file, 'utf8').matchAll(/from '(\.{1,2}\/[^']+)\.js'/g)) queue.push(join(dirname(file), `${m[1]}.ts`))
+    }
+    return seen
   }
 
   it('mcp-server/src/ holds no host-config reference beyond the edit guard\'s refusal list (ADR-044)', () => {
@@ -1508,16 +1523,24 @@ describe('architectural boundary — rsct-mcp does not know the host config (#73
   })
 
   it('the server itself never loads the edit guard: src/index.ts does not import it, directly or not', () => {
-    const seen = new Set<string>()
-    const queue = [join(SRC, 'index.ts')]
-    while (queue.length > 0) {
-      const file = queue.pop()!
-      if (seen.has(file) || !existsSync(file)) continue
-      seen.add(file)
-      for (const m of readFileSync(file, 'utf8').matchAll(/from '(\.{1,2}\/[^']+)\.js'/g)) queue.push(join(dirname(file), `${m[1]}.ts`))
-    }
+    const seen = reachedFromIndex()
     expect([...seen].some((f) => f.replace(/\\/g, '/').endsWith(REFUSAL_LIST)), 'settings-write-guard.ts reached from index.ts').toBe(false)
     expect(seen.size, 'the walk must reach the tools').toBeGreaterThan(20)
+  })
+
+  it('the server never loads the edit hook either, the one file allowed to read CLAUDE_CONFIG_DIR', () => {
+    const seen = reachedFromIndex()
+    expect([...seen].some((f) => f.replace(/\\/g, '/').endsWith(EDIT_HOOK)), 'edit-scope-hook.ts reached from index.ts').toBe(false)
+    expect(seen.size, 'the walk must reach the tools').toBeGreaterThan(20)
+  })
+
+  it('positive control — a second CLAUDE_CONFIG_DIR line in the edit hook is still reported', () => {
+    const fixture = newSandbox()
+    mkdirSync(join(fixture, 'lib'), { recursive: true })
+    writeFileSync(join(fixture, 'lib', 'edit-scope-hook.ts'), ["const value = env.CLAUDE_CONFIG_DIR ?? ''", 'const other = process.env.CLAUDE_CONFIG_DIR'].join('\n'))
+    const hits = beyondRefusalList(scanSrc(fixture))
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toContain('process.env.CLAUDE_CONFIG_DIR')
   })
 
   it('positive control — a new host-config line in the refusal-list file is still reported', () => {

@@ -12,6 +12,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.24.2] - 2026-11-14
+
+### Security
+
+- **Merge, squash and rebase dialogs list the hook versions git really runs** (ADR-045). The 2.24.1
+  notes said these dialogs list the hooks an operation brings "in the version git will run"; that held
+  only for a hook the incoming side alone changed. Now:
+  - a hook only the incoming side changed is listed in that exact version;
+  - a hook only your branch changed is not listed as brought by a merge or squash: git runs the version
+    already on disk, which the dialog lists as a hook file;
+  - a hook changed on both sides, that differs between merge bases, or that git may fill with content
+    moved in from another file or folder (one side adds the hook and deletes a file the other side
+    changed, or the other side adds a file to a folder this side moved out of), is listed as merged
+    while git runs: its content is not known before git runs it;
+  - a rebase also lists each version the replayed commits carry, and lists a hook as merged during the
+    rebase when the upstream changed it too (even if it changed it back), a merge sits among the
+    replayed commits, or content may move into it the same way;
+  - the hooks folder is read the way git finds it: in any letter case where git ignores case, and as
+    written when it is a tracked link; a hooks folder the incoming side changes is listed;
+  - with `merge.autoStash` or `rebase.autoStash` on, each tracked hook is also listed as committed at
+    HEAD, the version git runs after it puts local changes aside;
+  - unrelated histories no longer make the list unreadable.
+- **The push coverage dry run no longer recurses into submodules** (ADR-045). With `submodule.recurse`
+  or `push.recurseSubmodules` set, it ran the submodules' `pre-push` hooks before any dialog.
+- **The agent's editor tools are refused on more of RSCT itself** (ADR-045): every `.rsct/` folder,
+  the one in your home included (it holds the installed server and the hook scripts each project
+  copies), the `rsct-mcp` launchers of any extension and an `rsct-mcp` package folder. Each path is
+  judged as written and as its real path.
+- **The folder `CLAUDE_CONFIG_DIR` names is guarded like `.claude`** (ADR-045): its settings files,
+  plugins, hooks, skills, commands and agents get the same refusals. Only the edit hook reads the
+  variable; the server still never reads host configuration.
+- **The terminal guard reads planting variables everywhere `git init` or `git clone` runs** (ADR-045):
+  nested shells, `eval` texts and the package scripts a command starts, names split by quotes or
+  escapes, home folder variables set by `read`, `for`, `printf -v` or a declaring builtin, and
+  PowerShell names joined from quoted strings or set through `Env:`; `git init-db`, `gh repo clone`
+  (and `fork`/`create --clone`), `scalar clone` and `git-init` get the same check. In bash, a command
+  that runs `git init` or `git clone` is refused when it glues part of a git or home folder variable
+  name to a variable, a substitution, or a brace or glob pattern.
+- **The contract gate reads the universe a linked project folder finds as written too** (ADR-045), and
+  the dialog says when the folder as written and its real folder find different universes.
+
+### Changed
+
+- Examples and tests use the placeholder org name `acme`.
+
+### Upgrading
+
+1. Run the installer from an updated clone and restart the IDE.
+2. Run `/rsct-setup` in every project: the guards are hook scripts each project keeps its own copy of.
+
 ## [2.24.1] - 2026-11-13
 
 ### Security

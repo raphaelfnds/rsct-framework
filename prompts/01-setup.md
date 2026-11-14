@@ -571,10 +571,10 @@ rather than adding it.
 ```bash
 echo "  CHECKPOINT: Phase 1.9 executing canonical universe local-path probe"
 : "${ORG_SLUG:=[value from step 1.1]}"   # AI substitutes from 1.1; tests pre-set it
-# Strip a trailing -<digits> org suffix (e.g. "bluelt-23" → "bluelt"), mirroring
+# Strip a trailing -<digits> org suffix (e.g. "acme-23" → "acme"), mirroring
 # 02-canonical-source.md Phase 1.1, so an org-suffixed slug still discovers the
 # canonically-named universe (this is T1.d — Phase 1.9 previously probed only
-# "${ORG_SLUG}-universe" and missed e.g. "bluelt-universe" for org "bluelt-23").
+# "${ORG_SLUG}-universe" and missed e.g. "acme-universe" for org "acme-23").
 UNIVERSE_NAME=$(printf '%s' "$ORG_SLUG" | sed 's/-[0-9]*$//')
 for candidate in \
   "../${UNIVERSE_NAME}-universe" \

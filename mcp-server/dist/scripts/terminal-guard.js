@@ -2610,13 +2610,14 @@ function judgeText(text, dialect, ctx, firstPiped = false) {
   const keys = switchKeyVerdict(text);
   if (isDeny(keys)) return keys;
   const here = ctx.folder.current;
-  const inner = { ...ctx, depth: ctx.depth + 1, folder: { start: here, current: here, stack: [] } };
   const lexed = lex(text, dialect);
+  const commands = splitCommands(lexed.tokens, firstPiped);
+  const words = commands.map((c) => wordsOf(c.tokens).map((w) => w.value).join(" ")).join("\n");
+  const inner = { ...ctx, depth: ctx.depth + 1, folder: { start: here, current: here, stack: [] }, units: [...ctx.units, { text, dialect, words }] };
   for (const n of lexed.nested) {
     const v = judgeText(n.text, n.dialect, inner, n.piped === true);
     if (isDeny(v)) return v;
   }
-  const commands = splitCommands(lexed.tokens, firstPiped);
   const saved = [];
   for (let k = 0; k < commands.length; k++) {
     const command = commands[k];
@@ -2685,7 +2686,15 @@ function judgeCommandWords(command, dialect, ctx, piped = false) {
     const dashed = w.value.includes("://") ? void 0 : /^git-(.+)$/.exec(name)?.[1];
     if (name === "git") v = judgeGit(rest(), ctx, {}, restDynamic());
     else if (dashed !== void 0 && BLOCKED_GIT_VERBS.has(dashed)) v = isAllowedForm(dashed, [], rest(), restDynamic()) ? ALLOW : denyGit(dashed);
-    else if (name === "gh") v = judgeGh(rest(), restDynamic());
+    else if (dashed === "init" || dashed === "init-db" || dashed === "clone") v = judgeGitPlanting(dashed, [], rest(), restDynamic(), ctx.units);
+    else if (name === "gh") {
+      v = judgeGh(rest(), restDynamic());
+      if (!isDeny(v) && rest().includes("repo") && (rest().includes("clone") || rest().includes("--clone"))) {
+        const passed = rest().indexOf("--");
+        const planted = passed === -1 ? null : plantingOption(rest().slice(passed + 1));
+        v = planted !== null ? deny(`\`gh repo\` passes '${planted}' to git clone, which can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`) : judgePlantingNames("clone", ctx.units);
+      }
+    } else if (name === "scalar" && rest().includes("clone")) v = judgePlantingNames("clone", ctx.units);
     else if (POSIX_SHELLS.has(name)) v = judgeShellRunner(rest(), bodies, ctx);
     else if (POWERSHELLS.has(name)) v = judgePowerShellRunner(rest(), words.slice(i + 1).map(isVariable), bodies, ctx, name !== "pwsh");
     else if (dialect === "powershell" && START_PROCESS.has(name)) v = judgeStartProcess(words.slice(i + 1), { ...ctx, depth: ctx.depth + 1 });
@@ -2875,12 +2884,15 @@ function judgePackageScripts(manager, plan, dir, ctx) {
   return ALLOW;
 }
 function judgeScriptName(manager, path, json, name, ctx) {
-  const key = `${path}\0${name}`;
+  const running = `${path}\0${name}`;
+  const key = `${running}\0${ctx.units.map((u) => u.text).join("")}`;
   if (ctx.pkg.memo.has(key)) return ctx.pkg.memo.get(key) ?? ALLOW;
   const texts = scriptTexts(manager, json, name);
+  if (ctx.pkg.memo.has(running)) return texts.some((t) => /\b(?:init|init-db|clone)\b/.test(t)) ? judgePlantingNames("init or clone", ctx.units) : ALLOW;
   if (texts.length === 0) return ALLOW;
-  ctx.pkg.memo.set(key, null);
+  ctx.pkg.memo.set(running, null);
   const v = judgeScriptTexts(texts, dirname(path), ctx);
+  ctx.pkg.memo.delete(running);
   const verdict = isDeny(v) ? deny(`the ${basename(path)} script '${name}' that this command runs is refused (${path}): ${v.reason}`) : ALLOW;
   ctx.pkg.memo.set(key, verdict);
   return verdict;
@@ -3105,10 +3117,65 @@ var PLANTING_OPTIONS = ["template", "separate-git-dir", "config", "config-env"];
 var SHORT_VALUE_FLAGS = /* @__PURE__ */ new Set(["c", "o", "b", "u", "j"]);
 var HOME_NAMES = "HOME|XDG_CONFIG_HOME|USERPROFILE|HOMEDRIVE|HOMEPATH";
 var PLANTING_HOME = new RegExp(
-  `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=|\\$env:(${HOME_NAMES})\\s*=|\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b|(?<!\\$)\\benv:(${HOME_NAMES})\\b|SetEnvironmentVariable\\s*\\(\\s*['"](${HOME_NAMES})['"]`,
+  [
+    `(?<![\\w$:])(${HOME_NAMES})\\s*\\+?=`,
+    `\\$env:(${HOME_NAMES})\\s*\\+?=`,
+    `\\bexport\\s+(?:-\\w+\\s+)*(${HOME_NAMES})\\b`,
+    `(?<!\\$)\\benv:[\\\\/]?(${HOME_NAMES})\\b`,
+    `SetEnvironmentVariable\\s*\\(\\s*\\(*\\s*['"](${HOME_NAMES})['"]`,
+    `\\$\\{(${HOME_NAMES}):?=`
+  ].join("|"),
   "i"
 );
 var PLANTING_VARIABLE = /\b(GIT_TEMPLATE_DIR|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\b/i;
+var HOME_READERS = /\b(?:read|mapfile|readarray|getopts|declare|typeset|local|readonly|for|select)\b/;
+var HOME_READ_NAME = new RegExp(`(?<![\\w\\$\\{:/.\\\\-])(${HOME_NAMES})\\b`);
+var PRINTF_TO = new RegExp(`-v\\s*['"]?(${HOME_NAMES})\\b`);
+var POWERSHELL_JOIN = /(['"])\s*\+\s*(['"])/g;
+var POWERSHELL_ITEM = /^\s*[(&.]*\s*(?:(?:new|set|rename|copy|move)-item(?:property)?|ni|si|cpi|mi|rni|sp|cpp|mp|rnp|copy|cp|move|mv|ren)\b/i;
+var ENV_DRIVE = /(?<!\$)\benv:/i;
+var HOME_WORD = new RegExp(`(?<![\\w$:\\\\/])(${HOME_NAMES})\\b`, "i");
+var GLUED_PREFIX = /\b(?:GIT_|HO|XDG_|USERP)\w*[$`{?*[]/i;
+var GLUED_SUFFIX = /[$`}\])?*]\w*?(?:TEMPLATE_DIR|_DIR|CONFIG_\w+|HOME|OME|PROFILE|DRIVE|PATH)['"]?\s*\+?=/i;
+function homeRead(text) {
+  for (const segment of text.split(/[;&|\n]/)) {
+    const reader = HOME_READERS.exec(segment);
+    const found = reader === null ? void 0 : HOME_READ_NAME.exec(segment.slice(reader.index))?.[1];
+    if (found !== void 0) return found;
+    const printf = /\bprintf\b/.exec(segment);
+    const target = printf === null ? void 0 : PRINTF_TO.exec(segment.slice(printf.index))?.[1];
+    if (target !== void 0) return target;
+  }
+  return void 0;
+}
+function powershellItemName(text) {
+  for (const statement of text.split(/[;|\n]/)) {
+    if (!POWERSHELL_ITEM.test(statement) || !ENV_DRIVE.test(statement)) continue;
+    const found = HOME_WORD.exec(statement)?.[1];
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function plantingName(unit) {
+  const joined = unit.dialect === "powershell" ? [unit.text.replace(POWERSHELL_JOIN, "")] : [];
+  for (const s of [unit.text, unit.words, ...joined]) {
+    const found = PLANTING_VARIABLE.exec(s)?.[1] ?? PLANTING_HOME.exec(s)?.slice(1).find((n) => n !== void 0) ?? (unit.dialect === "bash" ? homeRead(s) : powershellItemName(s));
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function gluedName(text) {
+  return (GLUED_PREFIX.exec(text) ?? GLUED_SUFFIX.exec(text))?.[0];
+}
+function judgePlantingNames(verb, units) {
+  for (const unit of units) {
+    const variable = plantingName(unit);
+    if (variable !== void 0) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`);
+    const glued = unit.dialect === "bash" ? gluedName(unit.text) : void 0;
+    if (glued !== void 0) return deny(`\`git ${verb}\` in a command that builds a git or home folder variable name around a variable, a substitution, or a brace or glob pattern ('${glued}') cannot be read, and that variable could plant hooks or configuration; write the name out, or the developer runs it in their own terminal`);
+  }
+  return ALLOW;
+}
 function sectionOf(key) {
   return (key.split(".")[0] ?? "").toLowerCase();
 }
@@ -3207,11 +3274,11 @@ function shortConfigValue(word, next) {
   }
   return void 0;
 }
-function judgeGitPlanting(verb, globals, rest, dynamic, text) {
+function judgeGitPlanting(verb, globals, rest, dynamic, units) {
   if (verb === "config") return judgeConfigWrite(rest, dynamic);
-  if (verb === "init" || verb === "clone") {
-    const variable = PLANTING_VARIABLE.exec(text)?.[1] ?? PLANTING_HOME.exec(text)?.slice(1).find((n) => n !== void 0);
-    if (variable !== void 0) return deny(`\`git ${verb}\` in a command that sets ${variable} can plant hooks or configuration that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`);
+  if (verb === "init" || verb === "init-db" || verb === "clone") {
+    const named = judgePlantingNames(verb, units);
+    if (isDeny(named)) return named;
     const planted = plantingOption([...globals, ...rest]);
     if (planted !== null) return deny(`\`git ${verb}\` with '${planted}' can plant hooks or configuration, or move the git folder, that git then runs inside RSCT's approved git calls; that is the developer's own command, in their own terminal`);
     return ALLOW;
@@ -3243,7 +3310,7 @@ function judgeGit(args, ctx, inlineAliases, dynamic = []) {
   }
   if (verb === "submodule" && rest[0] === "foreach") return judgeText(rest.slice(1).filter((r) => !r.startsWith("--")).join(" "), "bash", ctx);
   if (verb === "bisect" && rest[0] === "run") return judgeText(joinWords(rest.slice(1)), "bash", ctx);
-  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.text);
+  const planting = judgeGitPlanting(verb, args.slice(0, j), rest, flags.slice(j + 1), ctx.units);
   if (isDeny(planting)) return planting;
   if (GIT_BUILTINS.has(verb)) return ALLOW;
   if (ctx.aliasDepth >= MAX_ALIAS_DEPTH) return deny(`the git alias '${verbWord}' expands through too many other aliases to be read; run the full git command`);
@@ -3438,7 +3505,7 @@ function judgeCommand(text, options = {}) {
     },
     database: options.database ?? false,
     databaseTestGuard: options.databaseTestGuard ?? true,
-    text
+    units: []
   };
   return judgeText(text, options.dialect ?? "bash", ctx);
 }
