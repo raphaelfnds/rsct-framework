@@ -12,8 +12,9 @@ Invariants of this project's domain. Rules that hold regardless of UI, code
 language, or storage technology. Violating one of these is a **business
 bug**, not just a code bug.
 
-This file is read by `rsct_get_knowledge(category="business-rules")` and by
-`rsct_check_premise` before any spec is approved. Spec phase MUST refuse
+This file is read by `rsct_get_knowledge(category="business-rules")`, and the
+V phase checklist asks whether the spec considered it (`rsct_check_premise`
+reads only `decisions.md` and `anti-decisions.md`). Spec phase MUST refuse
 options that violate a captured rule unless explicit `override_reason` is
 given (which itself triggers an anti-decision capture).
 
