@@ -878,7 +878,10 @@ Since 2.23.0 (ADR-039, ADR-040):
   right before `git commit` (`programs_moved`); a list that cannot be read refuses
   (`programs_unreadable`); a plan token never covers a new entry (`programs_changed`). Push, merge
   and rebase list the same, a push also a local-path remote's own, and a merge, rebase or squash
-  also the hooks it brings into a hooks folder kept in the work tree, in the version git will run.
+  also the hooks it brings into a hooks folder kept in the work tree (since 2.24.2, ADR-045): one
+  only the incoming side changed in that exact version, and for a rebase each version the replayed
+  commits carry; one changed on both sides, that differs between merge bases, or that a rebase
+  merges, as merged while git runs, its content not known before.
 - **The contract gate reads every source (since 2.24.1, ADR-044):** every `.rsct.json` from the
   project folder to the repository top, working tree and HEAD, at their strictest; the universe
   they name plus the one read at the last approved commit; and in each universe its working tree,
@@ -1144,7 +1147,8 @@ a file is not seen.
 
 In any project, managed or not, it also refuses (`claude_settings`) an `Edit`,
 `Write` or `MultiEdit` of a Claude Code settings file — `settings.json` or
-`settings.local.json` in a folder named `.claude` (the project's or `~/.claude`) — whose
+`settings.local.json` in a folder named `.claude` (the project's or `~/.claude`), or since 2.24.2 in
+the folder `CLAUDE_CONFIG_DIR` names (the edit hook is the one RSCT file that reads it) — whose
 resulting text would set `"disableAllHooks": true`, change or remove an entry for
 one of the three RSCT hooks (its event, matcher or any field of the hook), leave a
 settings file that holds RSCT hooks unparseable, or add, change or remove any `env`
