@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { decide } from '../../src/lib/edit-scope-hook.js'
@@ -15,7 +15,7 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true })
 })
 
-const blocked = (path: string, home = join(base, 'home')): boolean => judgeProtectedPath(path, home).block
+const blocked = (path: string): boolean => judgeProtectedPath(path).block
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -64,12 +64,41 @@ describe('judgeProtectedPath — git configuration files', () => {
 })
 
 describe('judgeProtectedPath — RSCT state', () => {
-  it('refuses the project .rsct folder, in any case, and leaves the installer folder in the home alone', () => {
+  it('refuses the project .rsct folder, in any case', () => {
     expect(blocked(join(base, 'p', '.rsct', 'scripts', 'terminal-guard.js'))).toBe(true)
     expect(blocked(join(base, 'p', '.rsct', 'audit.log'))).toBe(true)
     expect(blocked(join(base, 'p', '.RSCT', 'phase-state.json'))).toBe(true)
-    expect(blocked(join(base, 'home', '.rsct', 'memory-templates', 'x.md'))).toBe(false)
     expect(blocked(join(base, 'p', '.rsct.json'))).toBe(false)
+  })
+
+  it('refuses the .rsct folder in the home too, where the installed server and the hook scripts projects copy live', () => {
+    expect(blocked(join(homedir(), '.rsct', 'mcp-server', 'dist', 'index.js'))).toBe(true)
+    expect(blocked(join(homedir(), '.rsct', 'mcp-server', 'dist', 'scripts', 'terminal-guard.js'))).toBe(true)
+    expect(blocked(join(homedir(), '.RSCT', 'memory-templates', 'x.md'))).toBe(true)
+    expect(blocked(join(homedir(), '.rsct.', 'x'))).toBe(true)
+  })
+
+  it('refuses every rsct-mcp launcher, whatever its extension, and the package folder of a copy install', () => {
+    for (const name of ['rsct-mcp', 'rsct-mcp.cmd', 'rsct-mcp.CMD', 'rsct-mcp.bat', 'rsct-mcp.ps1', 'rsct-mcp.exe', 'RSCT-MCP.com', 'rsct-mcp.cmd:stream']) {
+      expect(blocked(join(base, 'npm', name)), name).toBe(true)
+    }
+    expect(blocked(join(base, 'npm', 'node_modules', 'rsct-mcp', 'dist', 'index.js'))).toBe(true)
+    expect(blocked(join(base, 'npm', 'node_modules', 'RSCT-MCP', 'package.json'))).toBe(true)
+    for (const name of ['rsct-mcp-notes.md', 'my-rsct-mcp.cmd', join('rsct-mcp-docs', 'x.md'), join('node_modules', 'rsct-mcp-extra', 'x.js')]) {
+      expect(blocked(join(base, 'p', name)), name).toBe(false)
+    }
+  })
+
+  it('judges the path as written as well as its real path, so a link cannot hide the .rsct or rsct-mcp name', () => {
+    const real = join(base, 'elsewhere')
+    mkdirSync(join(real, 'dist'), { recursive: true })
+    mkdirSync(join(base, 'home'), { recursive: true })
+    mkdirSync(join(base, 'npm', 'node_modules'), { recursive: true })
+    symlinkSync(real, join(base, 'home', '.rsct'), 'junction')
+    symlinkSync(real, join(base, 'npm', 'node_modules', 'rsct-mcp'), 'junction')
+    expect(blocked(join(base, 'home', '.rsct', 'dist', 'index.js'))).toBe(true)
+    expect(blocked(join(base, 'npm', 'node_modules', 'rsct-mcp', 'dist', 'index.js'))).toBe(true)
+    expect(blocked(join(real, 'dist', 'index.js'))).toBe(false)
   })
 })
 
