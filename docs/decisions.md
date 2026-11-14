@@ -3114,12 +3114,15 @@ the incoming side alone changed), Decisions 3 and 4, and the #73 pin (ADR-044 De
    (none on unrelated histories), HEAD and the incoming commit: one only the incoming side changed is
    listed in that exact version; one only HEAD changed is not listed as brought (git runs the version
    on disk, already listed as a hook file); one changed on both sides, that differs between merge
-   bases, or that receives content a rename moves into it while the other side changed that content,
-   is listed as merged while git runs, its content not known before. A rebase also lists each version
-   the replayed commits carry, and lists a hook as merged during the rebase when the upstream changed
-   it (even back again), a merge sits among the replayed commits, or such a rename moves content in.
+   bases, or that git may fill with content moved in from another file or folder, is listed as merged
+   while git runs, its content not known before. Renames are not guessed (git pairs them differently
+   from `git diff -M`, follows folder renames and replays a rebase commit by commit): a hook added on
+   the side that deletes a file the other side changed, or a file the other side adds to a folder this
+   side moved out of, counts as moved in. A rebase also lists each version the replayed commits carry
+   (one `git log`), and lists a hook as merged during the rebase when the upstream changed it (even
+   back again), a merge sits among the replayed commits, or content may move into it.
    The hooks folder is read one path part at a time, in any letter case where git ignores case, and
-   as written when it is a tracked link; a folder that changes at one of those commits is listed. With
+   as written when it is a tracked link; a folder the incoming side changes is listed. With
    `merge.autoStash` or `rebase.autoStash` on, each tracked hook is also listed as committed at HEAD.
    A merged entry's identity follows HEAD and the incoming commit.
 2. The editor tools are refused on every `.rsct` path component, the home one included, on any file
@@ -3133,12 +3136,13 @@ the incoming side alone changed), Decisions 3 and 4, and the #73 pin (ADR-044 De
    configuration.
 4. The terminal guard looks for planting variables in every shell unit `git init` or `git clone` runs
    in (the command, nested shells, `eval` texts, package scripts), as written, as its lexer decodes
-   them, and in PowerShell with quoted string joins collapsed; `gh repo clone`, `scalar clone` and
-   `git-init` get the same check. In bash it refuses such a unit when a word assigns a variable whose
-   name is built from a variable, a substitution, or a brace or glob pattern, when `env` is followed by
-   a word from a variable, and when `read`, `for`, `select`, `printf -v` or a declaring builtin at the
-   start of a command sets a home folder variable. A package script is judged again under each
-   command that runs it.
+   them (keeping command breaks), and in PowerShell with quoted string joins collapsed and `*-Item`
+   calls into `Env:` read per statement; `git init-db`, `gh repo clone` (and `fork`/`create
+   --clone`, and options gh passes on), `scalar clone` and `git-init` get the same check. In bash it
+   refuses such a unit when part of a git or home folder variable name is glued to a variable, a
+   substitution, or a brace or glob pattern, and when `read`, `for`, `select`, `printf -v` or a
+   declaring builtin sets a home folder variable. Every pattern runs in linear time. A package script
+   is judged again under each command that runs it, a script that runs itself included.
 5. The contract gate resolves each `.rsct.json` against the project folder as written and its real
    folder, reads the universes both find, and the dialog says when they differ.
 6. The push coverage dry run passes `--recurse-submodules=no`.
