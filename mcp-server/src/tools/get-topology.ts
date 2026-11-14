@@ -41,9 +41,7 @@ export interface GetTopologyOutput {
   universe_path: string | null
   topology: TopologyBlock
   contracts: ContractGraph
-  /** Contracts this app PRODUCES (its surfaces are gated on commit in multi-repo). */
   produced: Contract[]
-  /** Contracts this app CONSUMES (it depends on another app's surface). */
   consumed: Contract[]
   paths_check?: PathsCheck
   hints: string[]
@@ -88,8 +86,6 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
   const resolution = resolveProjectRoot(input.project_root)
   const appName = resolution.config?.app?.name ?? null
 
-  // Single source: detectTopology computes the block + resolves the universe root
-  // (+ the FV1 inactive-gate hint). Contracts are read on demand (payload).
   const { block, universe_root, hint } = detectTopology(resolution.config, resolution.root)
   const contracts = readContracts(universe_root)
   const produced = contractsProducedBy(contracts, appName)
@@ -101,16 +97,12 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
       'No .rsct.json in this project — run /rsct-setup. Topology detection + contract enforcement need an rsct-managed project.',
     )
   }
-  // FV1 — the inactive-gate hint (multi-repo confirmed but no universe / no manifest).
   if (hint) hints.push(hint)
   if (resolution.rsct_installed && block.confirmed_mode === null) {
     hints.push(
       `Topology not yet confirmed (inferred '${block.inferred_mode}', confidence ${block.confidence}). Run /rsct-setup to confirm + persist it — the contract gate stays OFF until a 'multi-repo' mode is confirmed.`,
     )
   }
-  // RV2: a confirmed non-multi-repo mode that CONTRADICTS a high-confidence
-  // multi-repo inference silently turns the gate off — surface it (the FV1
-  // philosophy: a silently-off gate is never silent).
   if (
     block.confirmed_mode !== null &&
     block.confirmed_mode !== 'multi-repo' &&
@@ -127,9 +119,6 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
       `This app produces ${produced.length} contract(s); ${consumers.length} consumer app(s) depend on its surfaces (${consumers.join(', ') || 'none listed'}). This repo is the PRODUCER, so rsct_request_commit blocks commits HERE that touch those surfaces unless dev_approval.override_contract_surface is given.`,
     )
   }
-  // The consumer's-eye view: a repo that only CONSUMES contracts often expects the
-  // gate to protect IT — but the gate is producer-side. Say so, so a consumer-side
-  // installer isn't left wondering why the gate never fires (field-report friction).
   if (
     block.confirmed_mode === 'multi-repo' &&
     contracts.available &&
@@ -140,26 +129,15 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
       `This app only CONSUMES contracts (it produces none of the ${consumed.length} it depends on). The contract gate protects the repo that PUBLISHES a surface — the producer — not the consumer, so it never blocks commits here. That's expected; nothing to configure.`,
     )
   }
-  // Name-mismatch warnings (DX-5 + PH-2) — fire whenever computable (any topology
-  // mode): a producer / consumer / app.name that matches no registered app the way
-  // the gate compares (`===`, case-SENSITIVE) can never gate/match. A case-only typo
-  // is the worst case — it looks right but the gate silently treats it as
-  // unregistered. Re-read the universe here: the registered NAME arrays don't escape
-  // universe.ts — getUniverse/TopologyBlock expose only the count (§9.A). readUniverse
-  // may still return null on a degraded-but-resolvable universe → that null is the guard.
   if (contracts.available && universe_root) {
     const universe = readUniverse(universe_root)
     if (universe) {
-      // Union dirs∪json mirrors `this_app_registered = inDirs || inJson` (universe.ts).
       const registered = [...universe.registeredFromDirs, ...universe.registeredFromJson]
       if (registered.length === 0) {
-        // Empty registry → EVERY name is trivially unregistered; emit ONE summary
-        // instead of a wall of per-name hints (V-P2-G — amplified now by consumers).
         hints.push(
           `The universe has no registered apps (empty applications/ + registered_apps[]), so no contract producer/consumer can be validated — register the apps by running /rsct-setup in each.`,
         )
       } else {
-        // (1) producers
         for (const issue of unregisteredNames(
           contracts.contracts.map((c) => c.producer),
           registered,
@@ -174,7 +152,6 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
             )
           }
         }
-        // (2) consumers (PH-2 net-new) — flat across all contracts, deduped by the classifier.
         for (const issue of unregisteredNames(
           contracts.contracts.flatMap((c) => c.consumers),
           registered,
@@ -189,10 +166,6 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
             )
           }
         }
-        // (3) app.name (PH-2 — the load-bearing one): the gate's LEFT operand is raw
-        // config.app.name. If it's registered under a DIFFERENT case, the gate silently
-        // never fires for THIS repo's own commits. Only case_mismatch is a bug here — an
-        // outright-unregistered app.name is just "not registered yet" (surfaced elsewhere).
         if (appName) {
           for (const issue of unregisteredNames([appName], registered)) {
             if (issue.kind === 'case_mismatch') {
