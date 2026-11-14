@@ -125,10 +125,11 @@ Claude (via rsct-mcp) reads this folder through:
 - `rsct_get_knowledge(category)` — returns the requested file, optionally
 filtered by a query string.
 - `rsct_check_premise(claim, against)` — heuristically matches a planning
-claim against `business-rules.md` + `decisions.md` + `anti-decisions.md`.
-- Phase brief auto-loading — `rsct_phase_research_start` and
-`rsct_phase_spec_start` automatically pull relevant categories based on
-the task's classification.
+claim against `decisions.md` + `anti-decisions.md` (not the other files
+of this folder).
+- The V phase checklist — `rsct_phase_verification_start` asks, for each
+category file present, whether the spec considered it, and says when a
+file is still the untouched template.
 - Persona reviews — each persona has a `knowledge_categories[]` list
 declaring which graph files it consults during review.
 
