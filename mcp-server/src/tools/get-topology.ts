@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
@@ -12,6 +13,13 @@ import {
   type ContractGraph,
 } from '../lib/contracts.js'
 import { readUniverse } from '../lib/universe.js'
+import { gatherContractFacts } from '../lib/contract-facts.js'
+import { defaultGitExecutor } from '../lib/git.js'
+import { toPosix } from '../lib/phase-scope.js'
+import type { RsctConfig } from '../lib/project-root.js'
+
+const PATHS_DESCRIPTION =
+  'Optional files or folders you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A path outside the project root is reported as such, never as untouched.'
 
 export const getTopologyInputSchema = z
   .object({
@@ -19,6 +27,7 @@ export const getTopologyInputSchema = z
       .string()
       .optional()
       .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
+    paths: z.array(z.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION),
   })
   .strict()
 
@@ -35,19 +44,36 @@ export interface GetTopologyOutput {
   produced: Contract[]
   /** Contracts this app CONSUMES (it depends on another app's surface). */
   consumed: Contract[]
+  paths_check?: PathsCheck
   hints: string[]
+}
+
+export interface PathsCheck {
+  paths: string[]
+  outside_root: string[]
+  universe_linked: boolean
+  contracts_readable: boolean
+  contracts_touched: Contract[]
+  consumers: string[]
+  notes: string[]
 }
 
 export const getTopologyTool: Tool = {
   name: 'rsct_get_topology',
   description:
-    "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo — inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
+    "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo — inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
   inputSchema: {
     type: 'object',
     properties: {
       project_root: {
         type: 'string',
         description: 'Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.',
+      },
+      paths: {
+        type: 'array',
+        items: { type: 'string', minLength: 1 },
+        maxItems: 500,
+        description: PATHS_DESCRIPTION,
       },
     },
     additionalProperties: false,
@@ -178,6 +204,9 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`)
 
+  const pathsCheck = input.paths === undefined ? undefined : checkPaths(resolution.root, resolution.config, input.paths)
+  if (pathsCheck !== undefined) hints.push(describePathsCheck(pathsCheck))
+
   return {
     rsct_installed: resolution.rsct_installed,
     app_name: appName,
@@ -187,6 +216,39 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
     contracts,
     produced,
     consumed,
+    ...(pathsCheck !== undefined && { paths_check: pathsCheck }),
     hints,
   }
+}
+
+function checkPaths(root: string, config: RsctConfig | null, paths: readonly string[]): PathsCheck {
+  const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))]
+  const outside = rel.filter((p) => p === '..' || p.startsWith('../') || isAbsolute(p))
+  const inside = rel.filter((p) => !outside.includes(p))
+  const facts = gatherContractFacts({
+    projectRoot: root,
+    config,
+    readPaths: () => inside,
+    executor: defaultGitExecutor,
+    always: true,
+    ...(config?.audit !== undefined && { auditConfig: config.audit }),
+  })
+  return {
+    paths: inside,
+    outside_root: outside,
+    universe_linked: facts?.universeLinked ?? false,
+    contracts_readable: facts !== null && facts.universeLinked && !facts.inactive,
+    contracts_touched: facts?.hits ?? [],
+    consumers: facts?.consumers ?? [],
+    notes: facts?.lines ?? [],
+  }
+}
+
+function describePathsCheck(check: PathsCheck): string {
+  const outside = check.outside_root.length > 0 ? ` ${check.outside_root.length} path(s) are outside the project root and are not matched against any surface: ${check.outside_root.join(', ')}.` : ''
+  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${outside}`
+  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${outside}`
+  const ids = check.contracts_touched.map((c) => c.id).join(', ')
+  const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(', ') || 'none listed'}.` : 'No declared contract surface is touched by these paths.'
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${outside}`
 }
