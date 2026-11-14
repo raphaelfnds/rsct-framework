@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from 'module';
 import { readFileSync, existsSync, statSync, realpathSync, copyFileSync, appendFileSync, mkdirSync, writeFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { homedir } from 'os';
 import { isAbsolute, resolve, dirname, sep, relative, join, basename } from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import { execFileSync } from 'child_process';
 import 'string_decoder';
 import { randomUUID } from 'crypto';
 import { cwd } from 'process';
-import { homedir } from 'os';
 
 createRequire(import.meta.url);
 var __defProp = Object.defineProperty;
@@ -4803,18 +4803,26 @@ function exists(path, kind) {
 function holdsGitRepository(dir) {
   return exists(join(dir, "HEAD"), "file") && exists(join(dir, "objects"), "dir") && exists(join(dir, "refs"), "dir");
 }
-function judgeProtectedPath(absolutePath, home = homedir()) {
-  const canonical = canonicalPath(absolutePath);
-  const parts = pathComponents(canonical);
+function judgeComponents(parts) {
   const name = parts[parts.length - 1] ?? "";
   const parent = parts[parts.length - 2] ?? "";
   if (parts.includes(".git")) return { block: true, reason: GIT_FOLDER };
   if (name === ".gitconfig" || name === "gitconfig" && parent === "etc" || (name === "config" || name === "attributes") && parent === "git") {
     return { block: true, reason: "this write would change a git configuration file, which can make git run programs; that is the developer's own edit" };
   }
-  const rsctAt = parts.indexOf(".rsct");
-  if (rsctAt !== -1 && parts.slice(0, rsctAt + 1).join("/") !== pathComponents(canonicalPath(join(home, ".rsct"))).join("/")) {
-    return { block: true, reason: "this write would change RSCT's own state or guard scripts under .rsct/; that is the developer's own edit, or /rsct-setup" };
+  if (parts.includes(".rsct")) {
+    return { block: true, reason: "this write would change RSCT's own state, guard scripts or installed server under .rsct/; that is the developer's own edit, /rsct-setup or the installer" };
+  }
+  if (name.split(".")[0] === "rsct-mcp" || parts.some((part, i) => part === "node_modules" && parts[i + 1] === "rsct-mcp")) {
+    return { block: true, reason: "this write would change the rsct-mcp launcher or package that Claude Code starts as the RSCT server; that is the developer's own edit or the installer" };
+  }
+  return PASS;
+}
+function judgeProtectedPath(absolutePath) {
+  const canonical = canonicalPath(absolutePath);
+  for (const spelling of [resolve(absolutePath), canonical]) {
+    const verdict = judgeComponents(pathComponents(spelling));
+    if (verdict.block) return verdict;
   }
   let current = dirname(canonical);
   for (; ; ) {
@@ -4947,16 +4955,31 @@ function namesSettingsFile(path) {
 function namesRsctConfig(path) {
   return bare(basename(path)) === ".rsct.json";
 }
-function spellings(filePath) {
+function driveForm(path) {
+  const share = /^(?:\\\\\?\\UNC\\|[\\/]{2})[^\\/]+[\\/]([A-Za-z])\$(?:[\\/](.*))?$/.exec(path);
+  return share === null ? null : `${share[1]}:\\${share[2] ?? ""}`;
+}
+function inClaudeFolder(path, configDir) {
+  const parts = pathComponents(path);
+  const real = canonicalPath(resolve(configDir));
+  return [real, driveForm(real)].flatMap((dir) => {
+    const base = dir === null ? [] : pathComponents(dir);
+    if (base.length === 0 || parts.length <= base.length || !base.every((c, i) => parts[i] === c)) return [];
+    return [[...base, ".claude", ...parts.slice(base.length)].join("/")];
+  });
+}
+function spellings(filePath, configDirs) {
   const lexical = resolve(filePath);
   const realDir = realOrNull(dirname(lexical));
-  return [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c) => c !== null);
+  const found = [canonicalPath(lexical), lexical, realOrNull(lexical), realDir === null ? null : join(realDir, basename(lexical))].filter((c) => c !== null);
+  const plain = [...found, ...found.map(driveForm).filter((c) => c !== null)];
+  return [...plain, ...plain.flatMap((p) => configDirs.flatMap((dir) => inClaudeFolder(p, dir)))];
 }
-function anySpellingNames(filePath, names) {
-  return spellings(filePath).some(names);
+function anySpellingNames(filePath, names, configDirs) {
+  return spellings(filePath, configDirs).some(names);
 }
-function firstSpelling(filePath, judge) {
-  for (const candidate of spellings(filePath)) {
+function firstSpelling(filePath, judge, configDirs) {
+  for (const candidate of spellings(filePath, configDirs)) {
     const found = judge(candidate);
     if (found !== null) return found;
   }
@@ -4979,9 +5002,9 @@ function wholeFileKind(path) {
   }
   return null;
 }
-function judgeClaudeConfigFile(toolName, filePath) {
+function judgeClaudeConfigFile(toolName, filePath, configDirs = []) {
   if (!EDITOR_TOOLS.has(toolName)) return PASS2;
-  const kind = firstSpelling(filePath, wholeFileKind);
+  const kind = firstSpelling(filePath, wholeFileKind, configDirs);
   if (kind === null) return PASS2;
   return { block: true, reason: `this write would change ${kind}, which Claude Code runs or loads; that is the developer's own edit` };
 }
@@ -5009,9 +5032,9 @@ function shellLines(text) {
   const fenced = text.match(/^```!.*$[\s\S]*?^```/gm) ?? [];
   return JSON.stringify([...inline, ...fenced].sort());
 }
-function judgeClaudeAssetWrite(toolName, input, filePath, read = readOrNull) {
+function judgeClaudeAssetWrite(toolName, input, filePath, read = readOrNull, configDirs = []) {
   if (!EDITOR_TOOLS.has(toolName)) return PASS2;
-  const kind = firstSpelling(filePath, assetKind);
+  const kind = firstSpelling(filePath, assetKind, configDirs);
   if (kind === null) return PASS2;
   if (toolName === "NotebookEdit") return { block: true, reason: `a Claude Code ${kind} file cannot be edited as a notebook` };
   const current = lf(read(filePath) ?? "");
@@ -5028,8 +5051,8 @@ function judgeClaudeAssetWrite(toolName, input, filePath, read = readOrNull) {
   }
   return PASS2;
 }
-function isClaudeSettingsFile(filePath) {
-  return anySpellingNames(filePath, namesSettingsFile);
+function isClaudeSettingsFile(filePath, configDirs = []) {
+  return anySpellingNames(filePath, namesSettingsFile, configDirs);
 }
 function applyEdit(applied, edit) {
   if (!edit || typeof edit !== "object") return applied;
@@ -5130,7 +5153,7 @@ function changedRsctEntry(before, after) {
 var DATABASE_SWITCH_KEYS = ["database_guard", "database_test_guard"];
 function judgeRsctConfigWrite(toolName, input, filePath, read = readOrNull) {
   if (!EDITOR_TOOLS.has(toolName)) return PASS2;
-  if (!anySpellingNames(filePath, namesRsctConfig)) return PASS2;
+  if (!anySpellingNames(filePath, namesRsctConfig, [])) return PASS2;
   if (toolName === "NotebookEdit") return { block: true, reason: ".rsct.json cannot be edited as a notebook" };
   const current = lf(read(filePath) ?? "");
   const applied = resultingText(toolName, input, current);
@@ -5154,9 +5177,9 @@ function judgeRsctConfigWrite(toolName, input, filePath, read = readOrNull) {
   }
   return PASS2;
 }
-function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
+function judgeSettingsWrite(toolName, input, filePath, read = readOrNull, configDirs = []) {
   if (!EDITOR_TOOLS.has(toolName)) return PASS2;
-  if (!isClaudeSettingsFile(filePath)) return PASS2;
+  if (!isClaudeSettingsFile(filePath, configDirs)) return PASS2;
   if (toolName === "NotebookEdit") return { block: true, reason: "a Claude Code settings file cannot be edited as a notebook" };
   const current = lf(read(filePath) ?? "");
   const applied = resultingText(toolName, input, current);
@@ -5225,6 +5248,13 @@ function judgeSettingsWrite(toolName, input, filePath, read = readOrNull) {
 function samePath(a, b) {
   return pathComponents(canonicalPath(a)).join("/") === pathComponents(canonicalPath(b)).join("/");
 }
+function configFolders(env, cwd2) {
+  const value = env.CLAUDE_CONFIG_DIR ?? "";
+  if (value === "") return [];
+  const forms = /^~(?=$|[\\/])/.test(value) ? [value, join(homedir(), value.slice(1))] : [value];
+  const bases = [cwd2, env.CLAUDE_PROJECT_DIR].filter((b) => typeof b === "string" && b.length > 0);
+  return [...new Set(forms.flatMap((form) => isAbsolute(form) ? [resolve(form)] : bases.map((b) => resolve(b, form))))];
+}
 function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
   try {
     const trimmed = rawStdin.trim();
@@ -5245,16 +5275,17 @@ function decide(rawStdin, env, cwd2, evaluate = evaluateEditGuard) {
     const cwdForResolve = typeof payload.cwd === "string" && payload.cwd.length > 0 ? payload.cwd : cwd2;
     const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
     const absolutes = paths.map((filePath) => isAbsolute(filePath) ? filePath : resolve(cwdForResolve, filePath));
+    const configDirs = configFolders(env, cwdForResolve);
     for (const absolute of absolutes) {
       const guarded = judgeProtectedPath(absolute);
       if (guarded.block) return { exitCode: 2, message: `[rsct] Edit blocked (protected_path): ${guarded.reason}` };
-      const configFile = judgeClaudeConfigFile(toolName, absolute);
+      const configFile = judgeClaudeConfigFile(toolName, absolute, configDirs);
       if (configFile.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${configFile.reason}` };
-      const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute);
+      const settingsWrite = judgeSettingsWrite(toolName, toolInput, absolute, void 0, configDirs);
       if (settingsWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${settingsWrite.reason}` };
       const configWrite = judgeRsctConfigWrite(toolName, toolInput, absolute);
       if (configWrite.block) return { exitCode: 2, message: `[rsct] Edit blocked (rsct_config): ${configWrite.reason}` };
-      const asset = judgeClaudeAssetWrite(toolName, toolInput, absolute);
+      const asset = judgeClaudeAssetWrite(toolName, toolInput, absolute, void 0, configDirs);
       if (asset.block) return { exitCode: 2, message: `[rsct] Edit blocked (claude_settings): ${asset.reason}` };
     }
     const projectRoot = resolveProjectRootFromArgs({ argv: [], env, cwd: cwdForResolve });
