@@ -22,14 +22,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - a hook only the incoming side changed is listed in that exact version;
   - a hook only your branch changed is not listed as brought by a merge or squash: git runs the version
     already on disk, which the dialog lists as a hook file;
-  - a hook changed on both sides, that differs between merge bases, or that receives content a rename
-    moves into it while the other side changed that content, is listed as merged while git runs: its
-    content is not known before git runs it;
+  - a hook changed on both sides, that differs between merge bases, or that git may fill with content
+    moved in from another file or folder (one side adds the hook and deletes a file the other side
+    changed, or the other side adds a file to a folder this side moved out of), is listed as merged
+    while git runs: its content is not known before git runs it;
   - a rebase also lists each version the replayed commits carry, and lists a hook as merged during the
     rebase when the upstream changed it too (even if it changed it back), a merge sits among the
-    replayed commits, or a rename moves changed content into it;
+    replayed commits, or content may move into it the same way;
   - the hooks folder is read the way git finds it: in any letter case where git ignores case, and as
-    written when it is a tracked link; a hooks folder that changes at one of those commits is listed;
+    written when it is a tracked link; a hooks folder the incoming side changes is listed;
   - with `merge.autoStash` or `rebase.autoStash` on, each tracked hook is also listed as committed at
     HEAD, the version git runs after it puts local changes aside;
   - unrelated histories no longer make the list unreadable.
@@ -45,10 +46,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The terminal guard reads planting variables everywhere `git init` or `git clone` runs** (ADR-045):
   nested shells, `eval` texts and the package scripts a command starts, names split by quotes or
   escapes, home folder variables set by `read`, `for`, `printf -v` or a declaring builtin, and
-  PowerShell names joined from quoted strings or set through `Env:`; `gh repo clone`, `scalar clone`
-  and `git-init` get the same check. In bash, a command that runs `git init` or `git clone` is refused
-  when it sets a variable whose name is built from a variable, a substitution, or a brace or glob
-  pattern.
+  PowerShell names joined from quoted strings or set through `Env:`; `git init-db`, `gh repo clone`
+  (and `fork`/`create --clone`), `scalar clone` and `git-init` get the same check. In bash, a command
+  that runs `git init` or `git clone` is refused when it glues part of a git or home folder variable
+  name to a variable, a substitution, or a brace or glob pattern.
 - **The contract gate reads the universe a linked project folder finds as written too** (ADR-045), and
   the dialog says when the folder as written and its real folder find different universes.
 
