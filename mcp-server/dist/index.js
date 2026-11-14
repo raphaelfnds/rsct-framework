@@ -3017,7 +3017,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve13.call(this, root, ref);
+      let _sch = resolve14.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -3044,7 +3044,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve13(root, ref) {
+    function resolve14(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3908,7 +3908,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve13(baseURI, relativeURI, options) {
+    function resolve14(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3944,50 +3944,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative9, options, skipNormalization) {
+    function resolveComponent(base, relative10, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative9 = parse4(serialize2(relative9, options), options);
+        relative10 = parse4(serialize2(relative10, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative9.scheme) {
-        target.scheme = relative9.scheme;
-        target.userinfo = relative9.userinfo;
-        target.host = relative9.host;
-        target.port = relative9.port;
-        target.path = removeDotSegments(relative9.path || "");
-        target.query = relative9.query;
+      if (!options.tolerant && relative10.scheme) {
+        target.scheme = relative10.scheme;
+        target.userinfo = relative10.userinfo;
+        target.host = relative10.host;
+        target.port = relative10.port;
+        target.path = removeDotSegments(relative10.path || "");
+        target.query = relative10.query;
       } else {
-        if (relative9.userinfo !== void 0 || relative9.host !== void 0 || relative9.port !== void 0) {
-          target.userinfo = relative9.userinfo;
-          target.host = relative9.host;
-          target.port = relative9.port;
-          target.path = removeDotSegments(relative9.path || "");
-          target.query = relative9.query;
+        if (relative10.userinfo !== void 0 || relative10.host !== void 0 || relative10.port !== void 0) {
+          target.userinfo = relative10.userinfo;
+          target.host = relative10.host;
+          target.port = relative10.port;
+          target.path = removeDotSegments(relative10.path || "");
+          target.query = relative10.query;
         } else {
-          if (!relative9.path) {
+          if (!relative10.path) {
             target.path = base.path;
-            if (relative9.query !== void 0) {
-              target.query = relative9.query;
+            if (relative10.query !== void 0) {
+              target.query = relative10.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative9.path[0] === "/") {
-              target.path = removeDotSegments(relative9.path);
+            if (relative10.path[0] === "/") {
+              target.path = removeDotSegments(relative10.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative9.path;
+                target.path = "/" + relative10.path;
               } else if (!base.path) {
-                target.path = relative9.path;
+                target.path = relative10.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative9.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative10.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative9.query;
+            target.query = relative10.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3995,7 +3995,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative9.fragment;
+      target.fragment = relative10.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4299,7 +4299,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve13,
+      resolve: resolve14,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -9280,7 +9280,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join40 } = __require("path");
+    var { join: join41 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9323,7 +9323,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join40(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join41(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9726,7 +9726,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join40, isAbsolute: isAbsolute11, sep: sep5 } = __require("path");
+    var { join: join41, isAbsolute: isAbsolute12, sep: sep5 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9789,7 +9789,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join40(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join41(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9807,7 +9807,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join40(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join41(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9825,11 +9825,11 @@ var require_transport = __commonJS({
       return buildStream(fixTarget(target), options, worker, sync);
       function fixTarget(origin) {
         origin = bundlerOverrides[origin] || origin;
-        if (isAbsolute11(origin) || origin.indexOf("file://") === 0) {
+        if (isAbsolute12(origin) || origin.indexOf("file://") === 0) {
           return origin;
         }
         if (origin === "pino/file") {
-          return join40(__dirname$1, "..", "file.js");
+          return join41(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10819,7 +10819,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join40 = ",";
+            let join41 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10833,7 +10833,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join40 = `,
+                join41 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10841,13 +10841,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join40;
+                res += join41;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join40}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10868,7 +10868,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join40 = `,
+              join41 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10882,13 +10882,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join40;
+                separator = join41;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join40;
+              separator = join41;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10929,7 +10929,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join40 = ",";
+            let join41 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10942,7 +10942,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join40 = `,
+                join41 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10950,13 +10950,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join40;
+                res += join41;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join40}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10969,7 +10969,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join40 = `,
+              join41 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10978,7 +10978,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join40;
+                separator = join41;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -11036,20 +11036,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join41 = `,
+              const join42 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join41;
+                res2 += join42;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join42}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11065,16 +11065,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join40 = `,
+            const join41 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join40, maximumBreadth);
+              res += stringifyTypedArray(value, join41, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join40;
+              separator = join41;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11085,13 +11085,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join40;
+                separator = join41;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join40;
+              separator = join41;
             }
             if (separator !== "") {
               res = `
@@ -19079,7 +19079,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve13) {
+function isRecursive(inst, stack, resolve14) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -24402,7 +24402,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve13) => setTimeout(resolve13, pollInterval));
+        await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -24419,7 +24419,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve13, reject2) => {
+    return new Promise((resolve14, reject2) => {
       const earlyReject = (error2) => {
         reject2(error2);
       };
@@ -24497,7 +24497,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject2(parseResult.error);
           } else {
-            resolve13(parseResult.data);
+            resolve14(parseResult.data);
           }
         } catch (error2) {
           reject2(error2);
@@ -24759,12 +24759,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve13, reject2) => {
+    return new Promise((resolve14, reject2) => {
       if (signal.aborted) {
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve13, interval);
+      const timeoutId = setTimeout(resolve14, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject2(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -25631,12 +25631,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve13) => {
+    return new Promise((resolve14) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve13();
+        resolve14();
       } else {
-        this._stdout.once("drain", resolve13);
+        this._stdout.once("drain", resolve14);
       }
     });
   }
@@ -27070,7 +27070,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.24.2";
+var RSCT_MCP_VERSION = "2.25.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -28491,6 +28491,36 @@ function readPlanFilePhases(path2) {
 
 // src/lib/decisions.ts
 init_esm_shims();
+
+// src/lib/placeholder-entries.ts
+init_esm_shims();
+var SHIPPED_EXAMPLE_SHA256 = /* @__PURE__ */ new Set([
+  "70400ede1b967d7f1719af91db1d1247f4e5b839833c3b6b13a27691d4e07769"
+]);
+var PLACEHOLDER2 = /^<[^<>]*>$/;
+var PLACEHOLDER_FIELD = /^(?:[-*]\s+)?\*\*[^*]+\*\*:?\s*<[^<>]*>$/;
+var STATUS_FIELD = /^\*\*Status\*\*:\s*[A-Za-z]+$/i;
+function isShippedPlaceholder(heading, title, bodyLines) {
+  const lines2 = [heading, ...bodyLines].map((line2) => line2.replace(/\r/g, ""));
+  while (lines2.length > 1 && lines2[lines2.length - 1]?.trim() === "") lines2.pop();
+  if (SHIPPED_EXAMPLE_SHA256.has(createHash("sha256").update(lines2.join("\n")).digest("hex"))) return true;
+  return title.startsWith("<TODO:") && placeholderBody(lines2.slice(1));
+}
+function placeholderBody(lines2) {
+  let inComment = false;
+  for (const raw of lines2) {
+    const line2 = raw.trim();
+    if (inComment || line2.startsWith("<!--")) {
+      inComment = !line2.includes("-->");
+      continue;
+    }
+    if (line2 === "" || PLACEHOLDER2.test(line2) || PLACEHOLDER_FIELD.test(line2) || STATUS_FIELD.test(line2)) continue;
+    return false;
+  }
+  return true;
+}
+
+// src/lib/decisions.ts
 var DECISION_STATUSES = [
   "active",
   "superseded",
@@ -28521,13 +28551,13 @@ function readDecisions(projectRoot) {
       read_error: true
     };
   }
-  const { premises, adrs } = extractDecisions(body2);
+  const { premises, adrs, residue } = scanDecisions(body2);
   return {
     exists: true,
     path: path2,
     premises,
     adrs,
-    has_decision_ids: DECISION_ID_TOKEN.test(body2),
+    has_decision_ids: DECISION_ID_TOKEN.test(residue),
     read_error: false
   };
 }
@@ -28538,21 +28568,26 @@ var PREMISE_HEADING = new RegExp(
 var ADR_HEADING = new RegExp(
   String.raw`^#{2,3}\s+(ADR-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
 );
-function extractDecisions(body2) {
+function scanDecisions(body2) {
   const lines2 = body2.split("\n");
   const premises = [];
   const adrs = [];
+  const kept = [];
   let current = null;
   const flush = () => {
     if (!current) return;
-    const entry = buildEntry(
-      current.kind,
-      current.id,
-      current.title,
-      current.bodyLines.join("\n")
-    );
-    if (current.kind === "premise") premises.push(entry);
-    else adrs.push(entry);
+    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) {
+      kept.length = current.start;
+    } else {
+      const entry = buildEntry(
+        current.kind,
+        current.id,
+        current.title,
+        current.bodyLines.join("\n")
+      );
+      if (current.kind === "premise") premises.push(entry);
+      else adrs.push(entry);
+    }
     current = null;
   };
   for (const line2 of lines2) {
@@ -28563,8 +28598,11 @@ function extractDecisions(body2) {
         kind: "premise",
         id: `#${premiseMatch[1]}`,
         title: premiseMatch[2].trim(),
+        heading: line2,
+        start: kept.length,
         bodyLines: []
       };
+      kept.push(line2);
       continue;
     }
     const adrMatch = line2.match(ADR_HEADING);
@@ -28574,18 +28612,23 @@ function extractDecisions(body2) {
         kind: "adr",
         id: adrMatch[1],
         title: adrMatch[2].trim(),
+        heading: line2,
+        start: kept.length,
         bodyLines: []
       };
+      kept.push(line2);
       continue;
     }
     if (current && (/^##\s/.test(line2) || /^###\s/.test(line2) || /^---\s*$/.test(line2))) {
       flush();
+      kept.push(line2);
       continue;
     }
     if (current) current.bodyLines.push(line2);
+    kept.push(line2);
   }
   flush();
-  return { premises, adrs };
+  return { premises, adrs, residue: kept.join("\n") };
 }
 function buildEntry(kind, id, title, section) {
   const meta2 = extractMeta(section);
@@ -30307,19 +30350,385 @@ function unregisteredNames(names, registered) {
   return issues;
 }
 
+// src/lib/contract-facts.ts
+init_esm_shims();
+var UNIVERSE_BASELINE_EVENT = "universe.baseline";
+var PIECE = 120;
+var ID_SHOWN = 12;
+var IDS_SHOWN = 400;
+function shortPath(path2) {
+  return specLabel(path2.replace(/\\/g, "/"), PIECE);
+}
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function str(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+function configFacts(text2, where, dir, written) {
+  if (text2 === null) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text2.replace(/^﻿/, ""));
+  } catch {
+    return { where, dir, written, mode: null, app: null, org: null, universeName: null, universeLocal: null };
+  }
+  const o = asObject(parsed);
+  return {
+    where,
+    dir,
+    written,
+    mode: str(asObject(o.topology).mode),
+    app: str(asObject(o.app).name),
+    org: str(asObject(o.app).org),
+    universeName: str(asObject(o.universe).name),
+    universeLocal: str(asObject(o.universe).local)
+  };
+}
+function git(executor, cwd2, args2) {
+  const r = executor(cwd2, args2);
+  return r.ok ? r.stdout : null;
+}
+function blobAt(executor, cwd2, rev, path2) {
+  const listed2 = executor(cwd2, ["ls-tree", "-z", rev, "--", path2]);
+  if (!listed2.ok) return { state: "failed" };
+  const entry = listed2.stdout.split("\0").find((e) => e.length > 0);
+  if (entry === void 0) return { state: "missing" };
+  const sha = /^\d+ blob ([0-9a-f]{40,64})\t/.exec(entry)?.[1];
+  if (sha === void 0) return { state: "missing" };
+  const blob = executor(cwd2, ["cat-file", "blob", sha]);
+  return blob.ok ? { state: "present", text: blob.stdout } : { state: "failed" };
+}
+function commitOf(executor, cwd2, rev) {
+  const out2 = git(executor, cwd2, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
+  const id = out2?.trim() ?? "";
+  return /^[0-9a-f]{40,64}$/.test(id) ? id : null;
+}
+function readConfigSources(projectRoot, config2, executor) {
+  const top = git(executor, projectRoot, ["rev-parse", "--show-toplevel"])?.trim() || null;
+  const root = canonicalPath(resolve(projectRoot));
+  const topDir = top !== null ? canonicalPath(resolve(top)) : root;
+  const dirs = [];
+  let current = root;
+  let written = resolve(projectRoot);
+  for (; ; ) {
+    dirs.push({ dir: current, written });
+    if (rootKey(current) === rootKey(topDir)) break;
+    const up = dirname(current);
+    if (up === current) break;
+    current = up;
+    const writtenUp = dirname(written);
+    written = rootKey(writtenUp) === rootKey(up) ? writtenUp : up;
+  }
+  const sources = [];
+  for (const { dir, written: writtenDir } of dirs) {
+    const file = join(dir, ".rsct.json");
+    let working = null;
+    try {
+      working = existsSync(file) ? readFileSync(file, "utf8") : null;
+    } catch {
+      working = null;
+    }
+    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || ".rsct.json")} (working tree)`, dir, writtenDir);
+    if (fromWorking !== null) sources.push(fromWorking);
+    if (top !== null) {
+      const rel = relative(topDir, file).replace(/\\/g, "/");
+      const blob = blobAt(executor, topDir, "HEAD", rel);
+      if (blob.state === "present") {
+        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir, writtenDir);
+        if (fromHead !== null) sources.push(fromHead);
+      }
+    }
+  }
+  if (sources.length === 0 && config2 !== null) {
+    sources.push({
+      where: ".rsct.json",
+      dir: root,
+      written: resolve(projectRoot),
+      mode: config2.topology?.mode ?? null,
+      app: config2.app?.name ?? null,
+      org: config2.app?.org ?? null,
+      universeName: config2.universe?.name ?? null,
+      universeLocal: config2.universe?.local ?? null
+    });
+  }
+  return sources;
+}
+function readRoot(path2, executor) {
+  const facts = { path: path2, branch: null, head: null, upstreamRef: null, upstream: null, notes: [], graphs: [] };
+  facts.graphs.push({ source: "working tree", graph: readContracts(path2) });
+  const locate2 = executor(path2, ["rev-parse", "--show-toplevel", "--show-prefix"]);
+  if (!locate2.ok) {
+    const why = (locate2.stderr || locate2.error || "").trim().split(/\r?\n/)[0] ?? "";
+    facts.notes.push(`not a git repository, or git refused to read it${why.length > 0 ? ` (${specLabel(why, PIECE)})` : ""}, so only its working tree is read`);
+    return facts;
+  }
+  const [top, prefix = ""] = locate2.stdout.split(/\r?\n/);
+  const gitTop = top && top.length > 0 ? top : path2;
+  const file = `${prefix}contracts.json`;
+  const symbolic = git(executor, path2, ["symbolic-ref", "-q", "HEAD"])?.trim() ?? "";
+  facts.branch = symbolic.startsWith("refs/heads/") ? symbolic : null;
+  if (facts.branch === null) facts.notes.push("detached HEAD");
+  facts.head = commitOf(executor, path2, "HEAD");
+  const head = blobAt(executor, gitTop, "HEAD", file);
+  if (head.state === "present") facts.graphs.push({ source: "HEAD", graph: parseContracts(head.text) });
+  else if (head.state === "failed" && facts.head !== null) facts.notes.push("its HEAD could not be read");
+  if (facts.branch !== null) {
+    const upstream = git(executor, path2, ["for-each-ref", "--format=%(upstream)", facts.branch])?.trim() ?? "";
+    if (upstream.length === 0) {
+      facts.notes.push("no upstream");
+    } else {
+      facts.upstreamRef = upstream;
+      facts.upstream = commitOf(executor, path2, upstream);
+      if (facts.upstream === null) facts.notes.push(`upstream ${shortPath(upstream)} not fetched`);
+      else {
+        const up = blobAt(executor, gitTop, facts.upstream, file);
+        if (up.state === "present") facts.graphs.push({ source: "upstream", graph: parseContracts(up.text) });
+        else if (up.state === "failed") facts.notes.push("its upstream could not be read");
+      }
+    }
+  }
+  return facts;
+}
+var CASE_BLIND = process.platform === "win32" || process.platform === "darwin";
+function rootKey(path2) {
+  const key = canonicalPath(path2).replace(/\\/g, "/").replace(/\/+$/, "");
+  return CASE_BLIND ? key.toLowerCase() : key;
+}
+function scopeRecord(value) {
+  const o = asObject(value);
+  if (typeof o.mode !== "boolean" || !Array.isArray(o.apps) || !Array.isArray(o.roots)) return null;
+  const apps = o.apps.filter((a) => typeof a === "string");
+  const roots = [];
+  for (const r of o.roots) {
+    const root = asObject(r);
+    if (typeof root.path !== "string") return null;
+    const id = (v) => typeof v === "string" ? v : null;
+    const contracts = {};
+    for (const [k, v] of Object.entries(asObject(root.contracts))) if (typeof v === "string") contracts[k] = v;
+    roots.push({ path: root.path, branch: id(root.branch), head: id(root.head), upstream_ref: id(root.upstream_ref), upstream: id(root.upstream), contracts });
+  }
+  return { mode: o.mode, apps, roots };
+}
+function contentHash(contract) {
+  const ordered = { id: contract.id, producer: contract.producer, surface: [...contract.surface].sort(), consumers: [...contract.consumers].sort() };
+  return createHash("sha256").update(JSON.stringify(ordered)).digest("hex").slice(0, 16);
+}
+function readBaseline(projectRoot, auditConfig) {
+  let raw = "";
+  try {
+    const path2 = decideAuditPath(projectRoot, auditConfig).path;
+    if (existsSync(path2)) raw = readFileSync(path2, "utf8");
+  } catch {
+    raw = "";
+  }
+  let newest = { scopes: {}, at: null };
+  for (const line2 of raw.split("\n")) {
+    if (!line2.includes(UNIVERSE_BASELINE_EVENT)) continue;
+    try {
+      const entry = JSON.parse(line2.replace(/\r$/, ""));
+      if (entry.event !== UNIVERSE_BASELINE_EVENT) continue;
+      const scopes = {};
+      for (const [key, value] of Object.entries(asObject(entry.scopes))) {
+        const scope = scopeRecord(value);
+        if (scope !== null) scopes[key] = scope;
+      }
+      newest = { scopes, at: typeof entry.ts === "string" ? entry.ts : null };
+    } catch {
+      continue;
+    }
+  }
+  return newest;
+}
+function isAncestor(executor, cwd2, older, newer) {
+  const r = executor(cwd2, ["merge-base", "--is-ancestor", older, newer]);
+  if (r.ok) return "yes";
+  return r.exitCode === 1 ? "no" : "unknown";
+}
+function disagreement(sources, field, label) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const s of sources) {
+    const value = s[field] ?? "(not set)";
+    seen.set(value, [...seen.get(value) ?? [], s.where]);
+  }
+  if (seen.size < 2) return null;
+  const parts2 = [...seen.entries()].map(([value, where]) => `${specLabel(value, PIECE)} in ${where.join(", ")}`);
+  return `\u26A0 The .rsct.json files the contract gate reads disagree on ${label}: ${parts2.join("; ")}. The gate uses the strictest reading.`;
+}
+function gatherContractFacts(args2) {
+  const { projectRoot, executor } = args2;
+  const scopeKey = rootKey(projectRoot);
+  const sources = readConfigSources(projectRoot, args2.config, executor);
+  const multiRepo = sources.some((s) => s.mode === "multi-repo");
+  const apps = [...new Set(sources.map((s) => s.app).filter((a) => a !== null))].sort();
+  const baseline = readBaseline(projectRoot, args2.auditConfig);
+  const recorded = baseline.scopes[scopeKey];
+  const since = baseline.at !== null ? ` since ${baseline.at.slice(0, 10)}` : "";
+  const lines2 = [];
+  const changes = [];
+  const change = (line2) => {
+    lines2.push(line2);
+    changes.push(line2);
+  };
+  for (const [field, label] of [["mode", "topology.mode"], ["app", "app.name"], ["universeLocal", "universe.local"]]) {
+    const line2 = disagreement(sources, field, label);
+    if (line2 !== null) lines2.push(line2);
+  }
+  if (recorded !== void 0 && recorded.mode && !multiRepo) change(`\u26A0 The contract gate was on (multi-repo)${since}, and no .rsct.json says multi-repo now.`);
+  if (recorded !== void 0 && recorded.apps.join("\n") !== apps.join("\n")) {
+    change(`\u26A0 The app name the contract gate matches changed${since}: ${specLabel(recorded.apps.join(", ") || "(none)", PIECE)} \u2192 ${specLabel(apps.join(", ") || "(none)", PIECE)}.`);
+  }
+  const empty = () => ({
+    multiRepo,
+    recordBaseline: recorded !== void 0,
+    apps,
+    note: null,
+    ids: [],
+    consumers: [],
+    hits: [],
+    contracts: [],
+    universeLinked: false,
+    inactive: false,
+    lines: lines2,
+    changes,
+    record: [],
+    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: [] })
+  });
+  if (!multiRepo && args2.always !== true) return empty();
+  const paths = args2.readPaths();
+  if (paths === null) return null;
+  const roots = /* @__PURE__ */ new Map();
+  const fromReal = /* @__PURE__ */ new Map();
+  const fromWritten = /* @__PURE__ */ new Map();
+  for (const s of sources) {
+    const mini = { app: { name: s.app ?? "", org: s.org ?? "" }, universe: { name: s.universeName ?? void 0, local: s.universeLocal ?? void 0 } };
+    for (const [dir, into] of [[s.dir, fromReal], [s.written, fromWritten]]) {
+      const found = resolveUniverseRoot(mini, dir, args2.home !== void 0 ? { home: args2.home } : {});
+      if (found.kind !== "found") continue;
+      roots.set(rootKey(found.path), found.path);
+      into.set(rootKey(found.path), found.path);
+    }
+  }
+  if ([...fromWritten.keys()].some((k) => !fromReal.has(k)) || [...fromReal.keys()].some((k) => !fromWritten.has(k))) {
+    const list = (m) => [...m.values()].map(shortPath).join(", ") || "(none)";
+    lines2.push(`\u26A0 The project folder is reached through a link, and its universe resolves differently from the folder as written (${list(fromWritten)}) and from its real folder (${list(fromReal)}); the contract gate reads both.`);
+  }
+  for (const r of recorded?.roots ?? []) {
+    if (!roots.has(rootKey(r.path)) && isUniverseDir(r.path)) roots.set(rootKey(r.path), r.path);
+  }
+  for (const r of recorded?.roots ?? []) {
+    if (!roots.has(rootKey(r.path))) change(`\u26A0 The universe at ${shortPath(r.path)}, read by the contract gate${since}, is no longer found.`);
+  }
+  for (const [key, path2] of roots) {
+    if (recorded !== void 0 && !recorded.roots.some((r) => rootKey(r.path) === key)) {
+      change(`\u26A0 The contract gate now also reads the universe at ${shortPath(path2)}, which it did not read${since}.`);
+    }
+  }
+  const facts = [...roots.values()].map((path2) => readRoot(path2, executor));
+  const all = [];
+  const hits2 = [];
+  const hitKeys = /* @__PURE__ */ new Set();
+  let readable = false;
+  for (const root of facts) {
+    for (const note of root.notes) lines2.push(`Universe ${shortPath(root.path)}: ${note}.`);
+    for (const { graph } of root.graphs) {
+      if (!graph.available) continue;
+      readable = true;
+      all.push(...graph.contracts);
+      for (const app of apps) {
+        for (const hit of contractsTouchingPaths(graph, app, paths)) {
+          const k = `${hit.id}\0${contentHash(hit)}`;
+          if (!hitKeys.has(k)) {
+            hitKeys.add(k);
+            hits2.push(hit);
+          }
+        }
+      }
+    }
+    const old = recorded?.roots.find((r) => rootKey(r.path) === rootKey(root.path));
+    if (old !== void 0) {
+      if (old.branch !== root.branch) {
+        change(`\u26A0 The universe at ${shortPath(root.path)} is on another branch${since}: ${specLabel(old.branch ?? "(none)", PIECE)} \u2192 ${specLabel(root.branch ?? "(none)", PIECE)}.`);
+      }
+      for (const [label, was, now] of [["HEAD", old.head, root.head], ["upstream", old.upstream, root.upstream]]) {
+        if (was === null || was === now) continue;
+        if (now === null) {
+          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} no longer resolves${since} (it was ${was.slice(0, ID_SHOWN)}).`);
+          continue;
+        }
+        const verdict = isAncestor(executor, root.path, was, now);
+        if (verdict !== "yes") {
+          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} moved backwards or to an unknown commit${since} (${was.slice(0, ID_SHOWN)} \u2192 ${now.slice(0, ID_SHOWN)}).`);
+        }
+      }
+      const nowIds = /* @__PURE__ */ new Map();
+      for (const { graph } of root.graphs) {
+        if (!graph.available) continue;
+        for (const c of graph.contracts) nowIds.set(c.id, /* @__PURE__ */ new Set([...nowIds.get(c.id) ?? [], contentHash(c)]));
+      }
+      const anyReadable = root.graphs.some((g) => g.graph.available);
+      if (anyReadable) {
+        const gone = Object.keys(old.contracts).filter((id) => !nowIds.has(id)).sort();
+        const changed = Object.entries(old.contracts).filter(([id, hash]) => nowIds.has(id) && !nowIds.get(id).has(hash)).map(([id]) => id).sort();
+        if (gone.length > 0) change(`\u26A0 Contracts gone from the universe at ${shortPath(root.path)}${since}: ${specLabel(gone.join(", "), IDS_SHOWN)}.`);
+        if (changed.length > 0) change(`\u26A0 Contracts changed in the universe at ${shortPath(root.path)}${since}: ${specLabel(changed.join(", "), IDS_SHOWN)}.`);
+      } else if (Object.keys(old.contracts).length > 0) {
+        change(`\u26A0 No contracts.json of the universe at ${shortPath(root.path)} can be read now; it held ${specLabel(Object.keys(old.contracts).sort().join(", "), IDS_SHOWN)}${since}.`);
+      }
+    }
+  }
+  if (recorded === void 0 && multiRepo) change("Universe contracts: first record of what the contract gate reads.");
+  const record2 = facts.map((r) => ({ root: r.path.replace(/\\/g, "/"), head: r.head, upstream: r.upstream }));
+  const rootRecords = facts.map((r) => {
+    const contracts = {};
+    for (const { graph } of r.graphs) if (graph.available) for (const c of graph.contracts) contracts[c.id] ??= contentHash(c);
+    return { path: r.path, branch: r.branch, head: r.head, upstream_ref: r.upstreamRef, upstream: r.upstream, contracts };
+  });
+  return {
+    multiRepo,
+    recordBaseline: multiRepo || recorded !== void 0,
+    apps,
+    note: readable ? null : facts.flatMap((r) => r.graphs.map((g) => g.graph.note)).find((n) => n !== null) ?? null,
+    ids: [...new Set(hits2.map((h) => h.id))].sort(),
+    consumers: affectedConsumers(hits2),
+    hits: hits2,
+    contracts: all,
+    universeLinked: roots.size > 0,
+    inactive: !readable,
+    lines: lines2,
+    changes,
+    record: record2,
+    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: rootRecords })
+  };
+}
+function baselineEntry(scopes, key, scope) {
+  return { event: UNIVERSE_BASELINE_EVENT, scopes: { ...scopes, [key]: scope } };
+}
+function universeFactsChanged(facts) {
+  return facts.changes.length > 0;
+}
+
 // src/tools/get-topology.ts
+var PATHS_DESCRIPTION = "Optional files or folders you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A path outside the project root is reported as such, never as untouched.";
 var getTopologyInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent.")
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
+  paths: external_exports.array(external_exports.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION)
 }).strict();
 var getTopologyTool = {
   name: "rsct_get_topology",
-  description: "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo \u2014 inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
+  description: "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo \u2014 inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
   inputSchema: {
     type: "object",
     properties: {
       project_root: {
         type: "string",
         description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
+      },
+      paths: {
+        type: "array",
+        items: { type: "string", minLength: 1 },
+        maxItems: 500,
+        description: PATHS_DESCRIPTION
       }
     },
     additionalProperties: false
@@ -30411,6 +30820,8 @@ async function getTopologyHandler(rawInput) {
     }
   }
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`);
+  const pathsCheck = input.paths === void 0 ? void 0 : checkPaths(resolution.root, resolution.config, input.paths);
+  if (pathsCheck !== void 0) hints.push(describePathsCheck(pathsCheck));
   return {
     rsct_installed: resolution.rsct_installed,
     app_name: appName,
@@ -30420,8 +30831,39 @@ async function getTopologyHandler(rawInput) {
     contracts,
     produced,
     consumed,
+    ...pathsCheck !== void 0 && { paths_check: pathsCheck },
     hints
   };
+}
+function checkPaths(root, config2, paths) {
+  const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))];
+  const outside = rel.filter((p) => p === ".." || p.startsWith("../") || isAbsolute(p));
+  const inside = rel.filter((p) => !outside.includes(p));
+  const facts = gatherContractFacts({
+    projectRoot: root,
+    config: config2,
+    readPaths: () => inside,
+    executor: defaultGitExecutor,
+    always: true,
+    ...config2?.audit !== void 0 && { auditConfig: config2.audit }
+  });
+  return {
+    paths: inside,
+    outside_root: outside,
+    universe_linked: facts?.universeLinked ?? false,
+    contracts_readable: facts !== null && facts.universeLinked && !facts.inactive,
+    contracts_touched: facts?.hits ?? [],
+    consumers: facts?.consumers ?? [],
+    notes: facts?.lines ?? []
+  };
+}
+function describePathsCheck(check) {
+  const outside = check.outside_root.length > 0 ? ` ${check.outside_root.length} path(s) are outside the project root and are not matched against any surface: ${check.outside_root.join(", ")}.` : "";
+  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${outside}`;
+  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${outside}`;
+  const ids = check.contracts_touched.map((c) => c.id).join(", ");
+  const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(", ") || "none listed"}.` : "No declared contract surface is touched by these paths.";
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${outside}`;
 }
 
 // src/tools/detect-onboarding.ts
@@ -30731,11 +31173,12 @@ function readAntiDecisions(projectRoot) {
   } catch {
     return { exists: true, path: path2, entries: [], has_entry_ids: false, read_error: true };
   }
+  const { entries, residue } = scanAntiDecisions(body2);
   return {
     exists: true,
     path: path2,
-    entries: extractAntiDecisions(body2),
-    has_entry_ids: AD_ID_TOKEN.test(body2),
+    entries,
+    has_entry_ids: AD_ID_TOKEN.test(residue),
     read_error: false
   };
 }
@@ -30743,30 +31186,35 @@ var AD_ID_TOKEN = /\bAD-\d+\b/;
 var AD_HEADING = new RegExp(
   String.raw`^#{2,3}\s+(AD-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
 );
-function extractAntiDecisions(body2) {
+function scanAntiDecisions(body2) {
   const lines2 = body2.split("\n");
   const out2 = [];
+  const kept = [];
   let current = null;
   const flush = () => {
     if (!current) return;
-    out2.push(buildEntry2(current.id, current.title, current.bodyLines.join("\n")));
+    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) kept.length = current.start;
+    else out2.push(buildEntry2(current.id, current.title, current.bodyLines.join("\n")));
     current = null;
   };
   for (const line2 of lines2) {
     const adMatch = line2.match(AD_HEADING);
     if (adMatch?.[1] && adMatch[2]) {
       flush();
-      current = { id: adMatch[1], title: adMatch[2].trim(), bodyLines: [] };
+      current = { id: adMatch[1], title: adMatch[2].trim(), heading: line2, start: kept.length, bodyLines: [] };
+      kept.push(line2);
       continue;
     }
     if (current && (/^##\s/.test(line2) || /^###\s/.test(line2) || /^---\s*$/.test(line2))) {
       flush();
+      kept.push(line2);
       continue;
     }
     if (current) current.bodyLines.push(line2);
+    kept.push(line2);
   }
   flush();
-  return out2;
+  return { entries: out2, residue: kept.join("\n") };
 }
 function buildEntry2(id, title, section) {
   const entry = {
@@ -42352,8 +42800,8 @@ var Module2 = (() => {
     var moduleRtn;
     var Module = moduleArg;
     var readyPromiseResolve, readyPromiseReject;
-    var readyPromise = new Promise((resolve13, reject2) => {
-      readyPromiseResolve = resolve13;
+    var readyPromise = new Promise((resolve14, reject2) => {
+      readyPromiseResolve = resolve14;
       readyPromiseReject = reject2;
     });
     var ENVIRONMENT_IS_WEB = typeof window == "object";
@@ -42435,13 +42883,13 @@ var Module2 = (() => {
         }
         readAsync = /* @__PURE__ */ __name(async (url) => {
           if (isFileURI(url)) {
-            return new Promise((resolve13, reject2) => {
+            return new Promise((resolve14, reject2) => {
               var xhr = new XMLHttpRequest();
               xhr.open("GET", url, true);
               xhr.responseType = "arraybuffer";
               xhr.onload = () => {
                 if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                  resolve13(xhr.response);
+                  resolve14(xhr.response);
                   return;
                 }
                 reject2(xhr.status);
@@ -42664,10 +43112,10 @@ var Module2 = (() => {
       __name(receiveInstantiationResult, "receiveInstantiationResult");
       var info2 = getWasmImports();
       if (Module["instantiateWasm"]) {
-        return new Promise((resolve13, reject2) => {
+        return new Promise((resolve14, reject2) => {
           Module["instantiateWasm"](info2, (mod, inst) => {
             receiveInstance(mod, inst);
-            resolve13(mod.exports);
+            resolve14(mod.exports);
           });
         });
       }
@@ -45902,16 +46350,23 @@ function walkReverseDeps(input) {
     uncovered_seeds: uncoveredSeeds
   };
 }
+function listSeeds(seeds) {
+  const overflow = seeds.length > 10 ? `, and ${seeds.length - 10} more` : "";
+  return `${seeds.slice(0, 10).join(", ")}${overflow}`;
+}
 function coverageHints(result) {
   if (result.coverage === "not-run") return [];
   const lines2 = [];
   const uncovered = result.uncovered_seeds;
   if (uncovered.length > 0) {
-    const shown2 = uncovered.slice(0, 10).join(", ");
-    const overflow = uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : "";
-    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
+    const reached = new Set(result.discovered.map((d) => d.via_paths[0]));
+    const found = uncovered.filter((seed) => reached.has(seed));
+    const blind = uncovered.filter((seed) => !reached.has(seed));
+    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 && found.length === 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
+    const foundText = found.length > 0 ? ` Importers of ${listSeeds(found)} were still found among the files it reads and are listed: a lower bound, since importers in other file types are not read.` : "";
+    const blindText = blind.length === 0 ? "" : found.length === 0 ? " For those paths the importer set is UNAVAILABLE, not empty." : ` For ${listSeeds(blind)} the importer set is UNAVAILABLE, not empty.`;
     lines2.push(
-      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown2}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`
+      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${listSeeds(uncovered)}.${foundText}${blindText}${whole}`
     );
   }
   if (result.stats.files_scanned === 0) {
@@ -46276,7 +46731,7 @@ function createModuleResolver(args2) {
     }
     return [...files];
   };
-  const resolve13 = (fromRel, specifier) => {
+  const resolve14 = (fromRel, specifier) => {
     const { path: path2, query } = splitQuery(specifier);
     if (path2.startsWith(".")) {
       const files = filesAt(fromRel, path2);
@@ -46362,7 +46817,7 @@ function createModuleResolver(args2) {
     const source = settingsFor(fromRel)?.jsxImportSource;
     return source ? [`${source}/jsx-runtime`, `${source}/jsx-dev-runtime`] : [];
   };
-  return { resolve: resolve13, prefixFiles, jsxFactories, jsxRuntimes };
+  return { resolve: resolve14, prefixFiles, jsxFactories, jsxRuntimes };
 }
 
 // src/lib/dead-code/references.ts
@@ -47729,7 +48184,7 @@ var LOOK_BACKS = 5;
 var LOOK_BACK_WAIT_MS = 20;
 var MAX_LOG_BYTES = 512 * 1024 * 1024;
 var NEWLINE = 10;
-var CASE_BLIND = process.platform === "win32" || process.platform === "darwin";
+var CASE_BLIND2 = process.platform === "win32" || process.platform === "darwin";
 var PLAN9_VOLUME = 16914839;
 var STRICT_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 var PRUNED_MARK = Buffer.from(`"event":"${AUDIT_PRUNED_EVENT}"`, "utf8");
@@ -47869,7 +48324,7 @@ function sameFile2(a, b) {
   }
 }
 function sameSpelling(a, b) {
-  return a === b || CASE_BLIND && a.toLowerCase() === b.toLowerCase();
+  return a === b || CASE_BLIND2 && a.toLowerCase() === b.toLowerCase();
 }
 function readRange(path2, from, to) {
   const length = Math.max(0, to - from);
@@ -49514,364 +49969,6 @@ function resolveMaxActions(input, configDefault) {
     PLAN_TOKEN_MAX_ACTIONS_MAX,
     Math.max(PLAN_TOKEN_MAX_ACTIONS_MIN, v)
   );
-}
-
-// src/lib/contract-facts.ts
-init_esm_shims();
-var UNIVERSE_BASELINE_EVENT = "universe.baseline";
-var PIECE = 120;
-var ID_SHOWN = 12;
-var IDS_SHOWN = 400;
-function shortPath(path2) {
-  return specLabel(path2.replace(/\\/g, "/"), PIECE);
-}
-function asObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-function str(value) {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-function configFacts(text2, where, dir, written) {
-  if (text2 === null) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(text2.replace(/^﻿/, ""));
-  } catch {
-    return { where, dir, written, mode: null, app: null, org: null, universeName: null, universeLocal: null };
-  }
-  const o = asObject(parsed);
-  return {
-    where,
-    dir,
-    written,
-    mode: str(asObject(o.topology).mode),
-    app: str(asObject(o.app).name),
-    org: str(asObject(o.app).org),
-    universeName: str(asObject(o.universe).name),
-    universeLocal: str(asObject(o.universe).local)
-  };
-}
-function git(executor, cwd2, args2) {
-  const r = executor(cwd2, args2);
-  return r.ok ? r.stdout : null;
-}
-function blobAt(executor, cwd2, rev, path2) {
-  const listed2 = executor(cwd2, ["ls-tree", "-z", rev, "--", path2]);
-  if (!listed2.ok) return { state: "failed" };
-  const entry = listed2.stdout.split("\0").find((e) => e.length > 0);
-  if (entry === void 0) return { state: "missing" };
-  const sha = /^\d+ blob ([0-9a-f]{40,64})\t/.exec(entry)?.[1];
-  if (sha === void 0) return { state: "missing" };
-  const blob = executor(cwd2, ["cat-file", "blob", sha]);
-  return blob.ok ? { state: "present", text: blob.stdout } : { state: "failed" };
-}
-function commitOf(executor, cwd2, rev) {
-  const out2 = git(executor, cwd2, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
-  const id = out2?.trim() ?? "";
-  return /^[0-9a-f]{40,64}$/.test(id) ? id : null;
-}
-function readConfigSources(projectRoot, config2, executor) {
-  const top = git(executor, projectRoot, ["rev-parse", "--show-toplevel"])?.trim() || null;
-  const root = canonicalPath(resolve(projectRoot));
-  const topDir = top !== null ? canonicalPath(resolve(top)) : root;
-  const dirs = [];
-  let current = root;
-  let written = resolve(projectRoot);
-  for (; ; ) {
-    dirs.push({ dir: current, written });
-    if (rootKey(current) === rootKey(topDir)) break;
-    const up = dirname(current);
-    if (up === current) break;
-    current = up;
-    const writtenUp = dirname(written);
-    written = rootKey(writtenUp) === rootKey(up) ? writtenUp : up;
-  }
-  const sources = [];
-  for (const { dir, written: writtenDir } of dirs) {
-    const file = join(dir, ".rsct.json");
-    let working = null;
-    try {
-      working = existsSync(file) ? readFileSync(file, "utf8") : null;
-    } catch {
-      working = null;
-    }
-    const fromWorking = configFacts(working, `${shortPath(relative(topDir, file) || ".rsct.json")} (working tree)`, dir, writtenDir);
-    if (fromWorking !== null) sources.push(fromWorking);
-    if (top !== null) {
-      const rel = relative(topDir, file).replace(/\\/g, "/");
-      const blob = blobAt(executor, topDir, "HEAD", rel);
-      if (blob.state === "present") {
-        const fromHead = configFacts(blob.text, `${shortPath(rel)} (HEAD)`, dir, writtenDir);
-        if (fromHead !== null) sources.push(fromHead);
-      }
-    }
-  }
-  if (sources.length === 0 && config2 !== null) {
-    sources.push({
-      where: ".rsct.json",
-      dir: root,
-      written: resolve(projectRoot),
-      mode: config2.topology?.mode ?? null,
-      app: config2.app?.name ?? null,
-      org: config2.app?.org ?? null,
-      universeName: config2.universe?.name ?? null,
-      universeLocal: config2.universe?.local ?? null
-    });
-  }
-  return sources;
-}
-function readRoot(path2, executor) {
-  const facts = { path: path2, branch: null, head: null, upstreamRef: null, upstream: null, notes: [], graphs: [] };
-  facts.graphs.push({ source: "working tree", graph: readContracts(path2) });
-  const locate2 = executor(path2, ["rev-parse", "--show-toplevel", "--show-prefix"]);
-  if (!locate2.ok) {
-    const why = (locate2.stderr || locate2.error || "").trim().split(/\r?\n/)[0] ?? "";
-    facts.notes.push(`not a git repository, or git refused to read it${why.length > 0 ? ` (${specLabel(why, PIECE)})` : ""}, so only its working tree is read`);
-    return facts;
-  }
-  const [top, prefix = ""] = locate2.stdout.split(/\r?\n/);
-  const gitTop = top && top.length > 0 ? top : path2;
-  const file = `${prefix}contracts.json`;
-  const symbolic = git(executor, path2, ["symbolic-ref", "-q", "HEAD"])?.trim() ?? "";
-  facts.branch = symbolic.startsWith("refs/heads/") ? symbolic : null;
-  if (facts.branch === null) facts.notes.push("detached HEAD");
-  facts.head = commitOf(executor, path2, "HEAD");
-  const head = blobAt(executor, gitTop, "HEAD", file);
-  if (head.state === "present") facts.graphs.push({ source: "HEAD", graph: parseContracts(head.text) });
-  else if (head.state === "failed" && facts.head !== null) facts.notes.push("its HEAD could not be read");
-  if (facts.branch !== null) {
-    const upstream = git(executor, path2, ["for-each-ref", "--format=%(upstream)", facts.branch])?.trim() ?? "";
-    if (upstream.length === 0) {
-      facts.notes.push("no upstream");
-    } else {
-      facts.upstreamRef = upstream;
-      facts.upstream = commitOf(executor, path2, upstream);
-      if (facts.upstream === null) facts.notes.push(`upstream ${shortPath(upstream)} not fetched`);
-      else {
-        const up = blobAt(executor, gitTop, facts.upstream, file);
-        if (up.state === "present") facts.graphs.push({ source: "upstream", graph: parseContracts(up.text) });
-        else if (up.state === "failed") facts.notes.push("its upstream could not be read");
-      }
-    }
-  }
-  return facts;
-}
-var CASE_BLIND2 = process.platform === "win32" || process.platform === "darwin";
-function rootKey(path2) {
-  const key = canonicalPath(path2).replace(/\\/g, "/").replace(/\/+$/, "");
-  return CASE_BLIND2 ? key.toLowerCase() : key;
-}
-function scopeRecord(value) {
-  const o = asObject(value);
-  if (typeof o.mode !== "boolean" || !Array.isArray(o.apps) || !Array.isArray(o.roots)) return null;
-  const apps = o.apps.filter((a) => typeof a === "string");
-  const roots = [];
-  for (const r of o.roots) {
-    const root = asObject(r);
-    if (typeof root.path !== "string") return null;
-    const id = (v) => typeof v === "string" ? v : null;
-    const contracts = {};
-    for (const [k, v] of Object.entries(asObject(root.contracts))) if (typeof v === "string") contracts[k] = v;
-    roots.push({ path: root.path, branch: id(root.branch), head: id(root.head), upstream_ref: id(root.upstream_ref), upstream: id(root.upstream), contracts });
-  }
-  return { mode: o.mode, apps, roots };
-}
-function contentHash(contract) {
-  const ordered = { id: contract.id, producer: contract.producer, surface: [...contract.surface].sort(), consumers: [...contract.consumers].sort() };
-  return createHash("sha256").update(JSON.stringify(ordered)).digest("hex").slice(0, 16);
-}
-function readBaseline(projectRoot, auditConfig) {
-  let raw = "";
-  try {
-    const path2 = decideAuditPath(projectRoot, auditConfig).path;
-    if (existsSync(path2)) raw = readFileSync(path2, "utf8");
-  } catch {
-    raw = "";
-  }
-  let newest = { scopes: {}, at: null };
-  for (const line2 of raw.split("\n")) {
-    if (!line2.includes(UNIVERSE_BASELINE_EVENT)) continue;
-    try {
-      const entry = JSON.parse(line2.replace(/\r$/, ""));
-      if (entry.event !== UNIVERSE_BASELINE_EVENT) continue;
-      const scopes = {};
-      for (const [key, value] of Object.entries(asObject(entry.scopes))) {
-        const scope = scopeRecord(value);
-        if (scope !== null) scopes[key] = scope;
-      }
-      newest = { scopes, at: typeof entry.ts === "string" ? entry.ts : null };
-    } catch {
-      continue;
-    }
-  }
-  return newest;
-}
-function isAncestor(executor, cwd2, older, newer) {
-  const r = executor(cwd2, ["merge-base", "--is-ancestor", older, newer]);
-  if (r.ok) return "yes";
-  return r.exitCode === 1 ? "no" : "unknown";
-}
-function disagreement(sources, field, label) {
-  const seen = /* @__PURE__ */ new Map();
-  for (const s of sources) {
-    const value = s[field] ?? "(not set)";
-    seen.set(value, [...seen.get(value) ?? [], s.where]);
-  }
-  if (seen.size < 2) return null;
-  const parts2 = [...seen.entries()].map(([value, where]) => `${specLabel(value, PIECE)} in ${where.join(", ")}`);
-  return `\u26A0 The .rsct.json files the contract gate reads disagree on ${label}: ${parts2.join("; ")}. The gate uses the strictest reading.`;
-}
-function gatherContractFacts(args2) {
-  const { projectRoot, executor } = args2;
-  const scopeKey = rootKey(projectRoot);
-  const sources = readConfigSources(projectRoot, args2.config, executor);
-  const multiRepo = sources.some((s) => s.mode === "multi-repo");
-  const apps = [...new Set(sources.map((s) => s.app).filter((a) => a !== null))].sort();
-  const baseline = readBaseline(projectRoot, args2.auditConfig);
-  const recorded = baseline.scopes[scopeKey];
-  const since = baseline.at !== null ? ` since ${baseline.at.slice(0, 10)}` : "";
-  const lines2 = [];
-  const changes = [];
-  const change = (line2) => {
-    lines2.push(line2);
-    changes.push(line2);
-  };
-  for (const [field, label] of [["mode", "topology.mode"], ["app", "app.name"], ["universeLocal", "universe.local"]]) {
-    const line2 = disagreement(sources, field, label);
-    if (line2 !== null) lines2.push(line2);
-  }
-  if (recorded !== void 0 && recorded.mode && !multiRepo) change(`\u26A0 The contract gate was on (multi-repo)${since}, and no .rsct.json says multi-repo now.`);
-  if (recorded !== void 0 && recorded.apps.join("\n") !== apps.join("\n")) {
-    change(`\u26A0 The app name the contract gate matches changed${since}: ${specLabel(recorded.apps.join(", ") || "(none)", PIECE)} \u2192 ${specLabel(apps.join(", ") || "(none)", PIECE)}.`);
-  }
-  const empty = () => ({
-    multiRepo,
-    recordBaseline: recorded !== void 0,
-    apps,
-    note: null,
-    ids: [],
-    consumers: [],
-    hits: [],
-    contracts: [],
-    universeLinked: false,
-    inactive: false,
-    lines: lines2,
-    changes,
-    record: [],
-    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: [] })
-  });
-  if (!multiRepo && args2.always !== true) return empty();
-  const paths = args2.readPaths();
-  if (paths === null) return null;
-  const roots = /* @__PURE__ */ new Map();
-  const fromReal = /* @__PURE__ */ new Map();
-  const fromWritten = /* @__PURE__ */ new Map();
-  for (const s of sources) {
-    const mini = { app: { name: s.app ?? "", org: s.org ?? "" }, universe: { name: s.universeName ?? void 0, local: s.universeLocal ?? void 0 } };
-    for (const [dir, into] of [[s.dir, fromReal], [s.written, fromWritten]]) {
-      const found = resolveUniverseRoot(mini, dir, args2.home !== void 0 ? { home: args2.home } : {});
-      if (found.kind !== "found") continue;
-      roots.set(rootKey(found.path), found.path);
-      into.set(rootKey(found.path), found.path);
-    }
-  }
-  if ([...fromWritten.keys()].some((k) => !fromReal.has(k)) || [...fromReal.keys()].some((k) => !fromWritten.has(k))) {
-    const list = (m) => [...m.values()].map(shortPath).join(", ") || "(none)";
-    lines2.push(`\u26A0 The project folder is reached through a link, and its universe resolves differently from the folder as written (${list(fromWritten)}) and from its real folder (${list(fromReal)}); the contract gate reads both.`);
-  }
-  for (const r of recorded?.roots ?? []) {
-    if (!roots.has(rootKey(r.path)) && isUniverseDir(r.path)) roots.set(rootKey(r.path), r.path);
-  }
-  for (const r of recorded?.roots ?? []) {
-    if (!roots.has(rootKey(r.path))) change(`\u26A0 The universe at ${shortPath(r.path)}, read by the contract gate${since}, is no longer found.`);
-  }
-  for (const [key, path2] of roots) {
-    if (recorded !== void 0 && !recorded.roots.some((r) => rootKey(r.path) === key)) {
-      change(`\u26A0 The contract gate now also reads the universe at ${shortPath(path2)}, which it did not read${since}.`);
-    }
-  }
-  const facts = [...roots.values()].map((path2) => readRoot(path2, executor));
-  const all = [];
-  const hits2 = [];
-  const hitKeys = /* @__PURE__ */ new Set();
-  let readable = false;
-  for (const root of facts) {
-    for (const note of root.notes) lines2.push(`Universe ${shortPath(root.path)}: ${note}.`);
-    for (const { graph } of root.graphs) {
-      if (!graph.available) continue;
-      readable = true;
-      all.push(...graph.contracts);
-      for (const app of apps) {
-        for (const hit of contractsTouchingPaths(graph, app, paths)) {
-          const k = `${hit.id}\0${contentHash(hit)}`;
-          if (!hitKeys.has(k)) {
-            hitKeys.add(k);
-            hits2.push(hit);
-          }
-        }
-      }
-    }
-    const old = recorded?.roots.find((r) => rootKey(r.path) === rootKey(root.path));
-    if (old !== void 0) {
-      if (old.branch !== root.branch) {
-        change(`\u26A0 The universe at ${shortPath(root.path)} is on another branch${since}: ${specLabel(old.branch ?? "(none)", PIECE)} \u2192 ${specLabel(root.branch ?? "(none)", PIECE)}.`);
-      }
-      for (const [label, was, now] of [["HEAD", old.head, root.head], ["upstream", old.upstream, root.upstream]]) {
-        if (was === null || was === now) continue;
-        if (now === null) {
-          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} no longer resolves${since} (it was ${was.slice(0, ID_SHOWN)}).`);
-          continue;
-        }
-        const verdict = isAncestor(executor, root.path, was, now);
-        if (verdict !== "yes") {
-          change(`\u26A0 The universe ${label} at ${shortPath(root.path)} moved backwards or to an unknown commit${since} (${was.slice(0, ID_SHOWN)} \u2192 ${now.slice(0, ID_SHOWN)}).`);
-        }
-      }
-      const nowIds = /* @__PURE__ */ new Map();
-      for (const { graph } of root.graphs) {
-        if (!graph.available) continue;
-        for (const c of graph.contracts) nowIds.set(c.id, /* @__PURE__ */ new Set([...nowIds.get(c.id) ?? [], contentHash(c)]));
-      }
-      const anyReadable = root.graphs.some((g) => g.graph.available);
-      if (anyReadable) {
-        const gone = Object.keys(old.contracts).filter((id) => !nowIds.has(id)).sort();
-        const changed = Object.entries(old.contracts).filter(([id, hash]) => nowIds.has(id) && !nowIds.get(id).has(hash)).map(([id]) => id).sort();
-        if (gone.length > 0) change(`\u26A0 Contracts gone from the universe at ${shortPath(root.path)}${since}: ${specLabel(gone.join(", "), IDS_SHOWN)}.`);
-        if (changed.length > 0) change(`\u26A0 Contracts changed in the universe at ${shortPath(root.path)}${since}: ${specLabel(changed.join(", "), IDS_SHOWN)}.`);
-      } else if (Object.keys(old.contracts).length > 0) {
-        change(`\u26A0 No contracts.json of the universe at ${shortPath(root.path)} can be read now; it held ${specLabel(Object.keys(old.contracts).sort().join(", "), IDS_SHOWN)}${since}.`);
-      }
-    }
-  }
-  if (recorded === void 0 && multiRepo) change("Universe contracts: first record of what the contract gate reads.");
-  const record2 = facts.map((r) => ({ root: r.path.replace(/\\/g, "/"), head: r.head, upstream: r.upstream }));
-  const rootRecords = facts.map((r) => {
-    const contracts = {};
-    for (const { graph } of r.graphs) if (graph.available) for (const c of graph.contracts) contracts[c.id] ??= contentHash(c);
-    return { path: r.path, branch: r.branch, head: r.head, upstream_ref: r.upstreamRef, upstream: r.upstream, contracts };
-  });
-  return {
-    multiRepo,
-    recordBaseline: multiRepo || recorded !== void 0,
-    apps,
-    note: readable ? null : facts.flatMap((r) => r.graphs.map((g) => g.graph.note)).find((n) => n !== null) ?? null,
-    ids: [...new Set(hits2.map((h) => h.id))].sort(),
-    consumers: affectedConsumers(hits2),
-    hits: hits2,
-    contracts: all,
-    universeLinked: roots.size > 0,
-    inactive: !readable,
-    lines: lines2,
-    changes,
-    record: record2,
-    baseline: baselineEntry(baseline.scopes, scopeKey, { mode: multiRepo, apps, roots: rootRecords })
-  };
-}
-function baselineEntry(scopes, key, scope) {
-  return { event: UNIVERSE_BASELINE_EVENT, scopes: { ...scopes, [key]: scope } };
-}
-function universeFactsChanged(facts) {
-  return facts.changes.length > 0;
 }
 
 // src/lib/git-programs.ts
@@ -53606,6 +53703,26 @@ init_esm_shims();
 
 // src/lib/verification-checklist.ts
 init_esm_shims();
+
+// src/lib/generated-marker.ts
+init_esm_shims();
+var MARKER2 = /^<!-- RSCT-GENERATED\b[^\n]*?\bsha256-body=([a-f0-9]{64})\b/;
+function isUntouchedTemplate(path2) {
+  let bytes;
+  try {
+    bytes = readFileSync(path2);
+  } catch {
+    return false;
+  }
+  const lf = bytes.indexOf(10);
+  if (lf < 0) return false;
+  const sha = MARKER2.exec(bytes.subarray(0, lf).toString("utf8"))?.[1];
+  if (sha === void 0) return false;
+  const body2 = Buffer.from(bytes.subarray(lf + 1).filter((byte) => byte !== 13));
+  return createHash("sha256").update(body2).digest("hex") === sha;
+}
+
+// src/lib/verification-checklist.ts
 function evidenceForSource(f) {
   if (f.source === "reverse-dep-walk") {
     return {
@@ -53662,6 +53779,12 @@ function evidenceForSource(f) {
     degraded_from: `unknown_source:${f.source}`
   };
 }
+function promptCategories(present, cap) {
+  return [...present].sort().filter((cat) => CATEGORY_PROMPTS[cat]).slice(0, cap);
+}
+function untouchedNote(projectRoot, file) {
+  return isUntouchedTemplate(join(projectRoot, file)) ? ` ${file} is still the untouched template: nothing has been captured in it yet.` : "";
+}
 var CATEGORY_PROMPTS = {
   "business-rules": "Did the spec consider business-rules.md? Check for invariants or compliance constraints.",
   "anti-decisions": "Did the spec consult anti-decisions.md? Avoid re-trying abandoned paths.",
@@ -53690,6 +53813,7 @@ function stripExt(p) {
 function runVerificationChecklist(input) {
   const findings = [];
   const hints = [];
+  const premiseAudit = {};
   const nextId = makeIdGenerator("v");
   const stats = {
     categories_run: [],
@@ -53706,7 +53830,7 @@ function runVerificationChecklist(input) {
     hints.push(
       `spec_tier=${input.specTier} \u2014 verification checklist skipped per tier table.`
     );
-    return { findings: [], stats, hints };
+    return { findings: [], stats, hints, premise_audit: premiseAudit };
   }
   const decisions = readDecisions(input.projectRoot);
   const antiDecisions = readAntiDecisions(input.projectRoot);
@@ -53748,43 +53872,50 @@ function runVerificationChecklist(input) {
   stats.categories_run.push("gap");
   if (input.specClaims && input.specClaims.length > 0) {
     const corpus = [...decisions.premises, ...decisions.adrs];
-    for (const claim2 of input.specClaims) {
+    for (const [claimIndex, claim2] of input.specClaims.entries()) {
       const result = checkPremise(claim2, corpus, antiDecisions.entries);
+      const matchCount = result.matches.length + result.anti_decision_matches.length;
+      const charged = result.matches.find((m) => m.negation_signal) ?? result.matches[0];
       const antiHit = result.anti_decision_matches[0];
       if (antiHit) {
+        const id2 = nextId("gap");
+        const alsoCharged = charged ? ` Without this anti-decision the claim would be charged with ${charged.entry.id} (${charged.entry.title}) \u2014 score ${charged.score}, shared: ${charged.shared_tokens.join(", ")}.` : "";
         findings.push({
-          id: nextId("gap"),
+          id: id2,
           category: "gap",
           severity: "block",
           title: `Anti-decision hit: ${antiHit.entry.id} \u2014 ${antiHit.entry.title}`,
-          detail: `Claim "${claim2}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(", ")}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.`,
+          detail: `Claim "${claim2}" overlaps an anti-decision (score ${antiHit.score}, shared: ${antiHit.shared_tokens.join(", ")}). Read ${antiHit.entry.id} before proceeding; require a revisit_reason if the dev wants to retry.${alsoCharged}`,
           affected_paths: [...input.declaredPaths],
           source: "premise-check"
         });
+        premiseAudit[id2] = { score: antiHit.score, shared_tokens: [...antiHit.shared_tokens], match_count: matchCount, claim_index: claimIndex };
         continue;
       }
-      const topMatch = result.matches[0];
-      if (result.recommendation === "conflict" && topMatch) {
+      if (!charged) continue;
+      const id = nextId("gap");
+      if (result.recommendation === "conflict") {
         findings.push({
-          id: nextId("gap"),
+          id,
           category: "gap",
           severity: "address-now",
-          title: `Conflict with ${topMatch.entry.id}: ${topMatch.entry.title}`,
-          detail: `Claim "${claim2}" matches a decision with rollback/rejection language (score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(", ")}). Surface ${topMatch.entry.id} to the dev and confirm the revisit is intentional.`,
+          title: `Conflict with ${charged.entry.id}: ${charged.entry.title}`,
+          detail: `Claim "${claim2}" matches a decision with rollback/rejection language (score ${charged.score}, shared: ${charged.shared_tokens.join(", ")}). Surface ${charged.entry.id} to the dev and confirm the revisit is intentional.`,
           affected_paths: [...input.declaredPaths],
           source: "premise-check"
         });
-      } else if (result.recommendation === "requires_revision" && topMatch) {
+      } else {
         findings.push({
-          id: nextId("gap"),
+          id,
           category: "gap",
           severity: "address-now",
-          title: `Requires revision: matches ${topMatch.entry.id}`,
-          detail: `Claim "${claim2}" shares vocabulary with ${topMatch.entry.id} (${topMatch.entry.title}) \u2014 score ${topMatch.score}, shared: ${topMatch.shared_tokens.join(", ")}. Read the entry and align the claim or surface an explicit override.`,
+          title: `Requires revision: matches ${charged.entry.id}`,
+          detail: `Claim "${claim2}" shares vocabulary with ${charged.entry.id} (${charged.entry.title}) \u2014 score ${charged.score}, shared: ${charged.shared_tokens.join(", ")}. Read the entry and align the claim or surface an explicit override.`,
           affected_paths: [...input.declaredPaths],
           source: "premise-check"
         });
       }
+      premiseAudit[id] = { score: charged.score, shared_tokens: [...charged.shared_tokens], match_count: matchCount, claim_index: claimIndex };
     }
   } else if (decisions.exists || antiDecisions.exists) {
     hints.push(
@@ -53896,21 +54027,17 @@ ${head}${overflow}`,
   }
   stats.categories_run.push("forgotten");
   const tierMaxPrompts = input.specTier === "complex" ? 10 : 5;
-  let promptedCount = 0;
-  for (const cat of knowledge.categories_present) {
-    if (promptedCount >= tierMaxPrompts) break;
-    const prompt = CATEGORY_PROMPTS[cat];
-    if (!prompt) continue;
+  for (const cat of promptCategories(knowledge.categories_present, tierMaxPrompts)) {
+    const file = `documentation/knowledge/${cat}.md`;
     findings.push({
       id: nextId("forgotten"),
       category: "forgotten",
       severity: "defer",
       title: `Checklist: ${cat}`,
-      detail: prompt,
+      detail: `${CATEGORY_PROMPTS[cat]}${untouchedNote(input.projectRoot, file)}`,
       affected_paths: [...input.declaredPaths],
       source: `knowledge-category:${cat}`
     });
-    promptedCount++;
   }
   if (architecture.exists && architecture.sections.length > 0) {
     findings.push({
@@ -53918,7 +54045,7 @@ ${head}${overflow}`,
       category: "forgotten",
       severity: "defer",
       title: "Checklist: architecture overview",
-      detail: `documentation/architecture.md has ${architecture.sections.length} sections. Confirm the spec aligns with the documented architecture before code-phase.`,
+      detail: `documentation/architecture.md has ${architecture.sections.length} sections. Confirm the spec aligns with the documented architecture before code-phase.${untouchedNote(input.projectRoot, "documentation/architecture.md")}`,
       affected_paths: [...input.declaredPaths],
       source: "architecture-overview"
     });
@@ -53938,7 +54065,7 @@ ${head}${overflow}`,
     ...f,
     evidence: evidenceForSource(f)
   }));
-  return { findings: classified, stats, hints };
+  return { findings: classified, stats, hints, premise_audit: premiseAudit };
 }
 
 // src/tools/phase-verification-start.ts
@@ -54245,6 +54372,7 @@ async function phaseVerificationStartHandler(rawInput) {
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk2.uncovered_seeds.length,
       unresolved_js_specifiers: walk2.stats.unresolved_js_specifiers,
+      claims_count: input.spec_claims?.length ?? 0,
       findings_count: checklist.findings.length,
       evidence_mix: summarizeEvidence(checklist.findings),
       phase_state_written: writeResult.ok
@@ -54263,7 +54391,8 @@ async function phaseVerificationStartHandler(rawInput) {
         severity: finding.severity,
         source: finding.source,
         title: finding.title,
-        evidence_kind: finding.evidence.kind
+        evidence_kind: finding.evidence.kind,
+        ...checklist.premise_audit[finding.id]
       },
       config2?.audit
     );
