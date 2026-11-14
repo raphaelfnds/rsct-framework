@@ -3157,6 +3157,71 @@ as a hook file). A rebase keeps listing it.
 the edit hook — update the server with the installer; the guards are hook scripts, so they reach a
 project through `/rsct-setup`.
 
+### ADR-046 — V findings say what they found; contracts touched are readable outside V; the contract fact is raised at two points on purpose (#79, #54, 2.25.0)
+**Status**: active
+**Tags**: v-phase, premise-check, blast-radius, contracts, knowledge
+
+**Context**: MEASURED on `main` @ `f85f301` (2.24.2):
+- the decisions and anti-decisions parsers read the shipped `### #1 — <TODO: name>`,
+  `### ADR-001 — <TODO: name> (…)` (status active) and the anti-decision example `### AD-003 — …`
+  as entries, so a fresh project's premise check matched placeholders and a fictional example;
+- a `conflict` finding named the top-scored match, while the conflict came from any match with
+  negation language — it could name a decision that says nothing against the claim;
+- an anti-decision hit hid the decision the claim matched;
+- the score of a premise finding was only in the tool result, so the #79 field data (317 findings,
+  two real pt-BR corpora) had to be read from session transcripts;
+- a declared path the walk cannot key on (a JSON file, a file outside the root) got its importers
+  listed next to "the importer set is UNAVAILABLE … no declared path is analyzable";
+- `rsct_get_topology` read only the universe's working tree, with one app name, while V and the
+  commit gate read HEAD, working tree and upstream for every `.rsct.json` app name;
+- Node's `readdirSync` returned the shipped lowercase knowledge names in the same order on NTFS and
+  ext4, so the order of the `forgotten` prompts was stable by accident, not by code.
+
+**Decision**:
+1. Both parsers skip a block that is the shipped anti-decision example (matched byte for byte after
+   removing CR; the block is identical in every shipped template version), or whose title starts
+   with `<TODO:` and whose body holds only placeholders, placeholder fields, a status line, blank
+   lines or comments. A real body under a `<TODO:` title stays an entry; an edited example is an
+   entry. The id counters behind the "ids present, none parsed" warning ignore skipped blocks. The
+   template example's id is `AD-EXAMPLE`, which no parser reads.
+2. A `conflict` finding names the matching decision that carries the negation; an anti-decision hit
+   also names the decision the claim would be charged with without it (the negation match, else the
+   top match). One finding per claim, same severities.
+3. `verification.finding` records `score`, `shared_tokens`, `match_count` and `claim_index` for
+   premise findings, and `verification.start` records `claims_count`. Never the claim text.
+4. The `forgotten` prompts are taken in name order by code. A knowledge prompt, and the architecture
+   overview prompt, say in their detail when the file is still the untouched template: its body (the
+   bytes after the first line, CR removed) matches its own `RSCT-GENERATED` `sha256-body`, the same
+   test `/rsct-setup` uses to decide a file was not edited. Titles and evidence are unchanged, so the
+   findings baseline is unchanged; every prompt is still raised and answered.
+5. The walk hint names the declared paths that are not files it can key on but still have
+   importers: those importers are listed and are a lower bound. "UNAVAILABLE" stays for the paths
+   with none, and "no declared path is analyzable" only for a walk that found nothing.
+   `walk_coverage`, `uncovered_seeds` and the importers are unchanged.
+6. `rsct_get_topology` takes optional `paths` and answers which contracts they touch through the
+   same contract reading V and the commit gate use. It never records the universe baseline (only an
+   approved commit does), so the commit dialog keeps comparing against the last approved commit.
+   A path outside the root is reported as such; no universe reads "contracts do not apply"; an
+   unreadable `contracts.json` reads UNKNOWN.
+7. The contract fact is raised at two points on purpose, and asymmetrically. V raises a
+   `contract-surface` finding for any project with a linked universe (`always: true`): the plan-level
+   early warning, answered like every finding. The commit gate refuses only in a confirmed multi-repo
+   project: the code-level gate, with its own exception in the commit dialog. A project with a
+   universe that is not multi-repo gets the warning and not the gate.
+
+**Direction**: stricter or neutral. Nothing a real decision raised stops being raised; what stops is
+what the shipped placeholders and the template example raised, which are not decisions. Item 1 also
+makes a malformed real id visible where the example used to hide it.
+
+**What is given up, by name**: the premise check still raises one finding per claim that shares two
+words with any entry (AD-009); importers in file types the walk does not read stay invisible, and
+the hint says so; the topology answer is a contract view, not an import graph.
+
+**Consequences**: `/rsct-setup` updates the knowledge templates a project never edited (the example
+id and the `rsct_check_premise` sentences changed); an edited `anti-decisions.md` that still holds
+the old example keeps it, and the parser skips it. The server changes reach a machine through the
+installer.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic
@@ -3223,6 +3288,21 @@ sanitizer instead of itself, with every unit test green because they imported th
 never launched the file. Launched by hand through a link, the same equality is false and the
 program does nothing, silently. ADR-022 removes the check: a file under `src/scripts/` always
 runs, and exports nothing that could tempt an import.
+
+### AD-009 — Do not cut premise-check findings by changing which words count or the threshold
+MEASURED on two real pt-BR projects (#79, 2026-10-27): 317 answered premise findings over 38 specs,
+a median of 9 per spec, 35 of them useful. Replayed against the real `checkPremise`: pt-BR grammar
+stopwords take the bill from 317 to 314 and send 5 useful findings to another entry; ignoring tokens
+present in 20% of the entries takes it to 304; requiring a rare shared token leaves it at 317;
+`MIN_SCORE = 3` takes it to 269 and drops 6% of the useful findings, `4` to 202 and 14%, `5` to 138
+and 43%. A claim matches a median of 26 entries, so removing words moves the finding to another
+entry instead of removing it. Every option that cuts what must be answered either barely moves the
+bill or drops useful findings, and cutting what must be answered makes the V gate more permissive.
+2.25.0 shipped the visibility instead: the score and shared words in the finding and in the audit
+log, the right decision named, and no finding from the shipped placeholders (ADR-046). Revisit only
+with a labelled corpus that shows an option removing coincidence findings with no useful finding
+gone or moved elsewhere, an English corpus included, and a developer decision to change what V
+requires.
 
 ---
 
