@@ -441,6 +441,11 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
   }
 }
 
+function listSeeds(seeds: readonly string[]): string {
+  const overflow = seeds.length > 10 ? `, and ${seeds.length - 10} more` : ''
+  return `${seeds.slice(0, 10).join(', ')}${overflow}`
+}
+
 export function coverageHints(result: ReverseDepResult): string[] {
   if (result.coverage === 'not-run') return []
 
@@ -448,16 +453,25 @@ export function coverageHints(result: ReverseDepResult): string[] {
   const uncovered = result.uncovered_seeds
 
   if (uncovered.length > 0) {
-    const shown = uncovered.slice(0, 10).join(', ')
-    const overflow =
-      uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : ''
-
+    const reached = new Set(result.discovered.map((d) => d.via_paths[0]))
+    const found = uncovered.filter((seed) => reached.has(seed))
+    const blind = uncovered.filter((seed) => !reached.has(seed))
     const whole =
-      result.coverage === 'uncovered' && result.stats.files_scanned > 0
+      result.coverage === 'uncovered' && result.stats.files_scanned > 0 && found.length === 0
         ? ' No declared path is analyzable here, so the breakage category had no import graph to work from.'
         : ''
+    const foundText =
+      found.length > 0
+        ? ` Importers of ${listSeeds(found)} were still found among the files it reads and are listed: a lower bound, since importers in other file types are not read.`
+        : ''
+    const blindText =
+      blind.length === 0
+        ? ''
+        : found.length === 0
+          ? ' For those paths the importer set is UNAVAILABLE, not empty.'
+          : ` For ${listSeeds(blind)} the importer set is UNAVAILABLE, not empty.`
     lines.push(
-      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on — it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${shown}${overflow}. For those paths the importer set is UNAVAILABLE, not empty.${whole}`,
+      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on — it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${listSeeds(uncovered)}.${foundText}${blindText}${whole}`,
     )
   }
 
