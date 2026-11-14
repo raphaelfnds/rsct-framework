@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 
-const MARKER = /^<!-- RSCT-GENERATED\b[^\n]*?\bsha256-body=([a-f0-9]{64})\b/
+const MARKER = /^<!-- RSCT-GENERATED\b[^\n]*\bsha256-body=([a-f0-9]{64})\b/
+const MAX_BYTES = 4 * 1024 * 1024
 
 export function isUntouchedTemplate(path: string): boolean {
   let bytes: Buffer
   try {
+    if (statSync(path).size > MAX_BYTES) return false
     bytes = readFileSync(path)
   } catch {
     return false

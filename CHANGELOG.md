@@ -19,10 +19,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Shipped placeholders and the template example are no longer read as decisions** (#79,
   ADR-046). A fresh `decisions.md` held `#1 — <TODO: name>` and `ADR-001 — <TODO: name>`, and
   `anti-decisions.md` held the example `AD-003`, and the premise check matched them like real
-  entries. Both parsers now skip a block whose title starts with `<TODO:` and whose body is only
-  placeholders, and the shipped anti-decision example, matched byte for byte. A real body under a
-  `<TODO:` title is still an entry, an edited example is an entry again, and a malformed real id is
-  no longer hidden by the example. The template example's id is now `AD-EXAMPLE`.
+  entries. Both parsers now skip a block only when it equals one of those three shipped blocks,
+  whatever its number (CR ignored). Any real text, in the title or the body, keeps it an entry, an
+  edited example is an entry again, and a malformed real id is no longer hidden by the example. The
+  template example's id is now `AD-EXAMPLE`.
 - **A conflict finding names the right decision** (#79, ADR-046): the matching decision that carries
   the negation, not the top-scored match. An anti-decision hit also names the decision the claim
   would be charged with without it.
@@ -38,9 +38,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`rsct_get_topology` takes `paths`** (#54, ADR-046) and answers which contracts the files you
   plan to change touch, read the way V and the commit gate read contracts (every `.rsct.json` app
-  name; each universe's working tree, HEAD and fetched upstream). It records nothing. A path outside
-  the project root, a project with no universe and an unreadable `contracts.json` are each said as
-  such, never as "none touched".
+  name; each universe's working tree, HEAD and fetched upstream). It never records the universe
+  baseline. A folder, a path outside the project root, a project with no universe or no `app.name`,
+  and an unreadable `contracts.json` are each said as such, never as "none touched".
 - **The premise audit fields** (#79, ADR-046): `verification.finding` records `score`,
   `shared_tokens`, `match_count` and `claim_index` for premise findings, and `verification.start`
   records `claims_count`, so the score distribution can be measured from the audit log. The claim

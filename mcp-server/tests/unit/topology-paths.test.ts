@@ -116,6 +116,40 @@ describe('2.25.0 — rsct_get_topology paths: contracts touched, read the way V 
     expect(readFileSync(log, 'utf8')).toBe('{"event":"marker"}\n')
   })
 
+  it('reports a folder as a folder to list files in, never as untouched', async () => {
+    const root = project(universeRepo([ORDERS]))
+    mkdirSync(join(root, 'api'), { recursive: true })
+    const out = await topology(root, ['api', 'api/', '.'])
+    expect(out.paths_check?.folders).toEqual(['api', '.'])
+    expect(out.paths_check?.paths).toEqual([])
+    const hint = out.hints.join('\n')
+    expect(hint).toContain('2 path(s) are folders, and surfaces are matched against files, so list the files you plan to change in them: api, ..')
+    expect(hint).toContain('No file was given to match.')
+    expect(hint).not.toContain('No declared contract surface is touched')
+  })
+
+  it('a planned file that does not exist yet is matched as a file', async () => {
+    const out = await topology(project(universeRepo([ORDERS])), ['api/new-endpoint.ts'])
+    expect(out.paths_check?.folders).toEqual([])
+    expect(out.paths_check?.contracts_touched.map((c) => c.id)).toEqual(['orders-api'])
+  })
+
+  it('does not echo the first-record line, since the query records nothing', async () => {
+    const out = await topology(project(universeRepo([ORDERS])), ['api/x.ts'])
+    expect(out.paths_check?.notes.join('\n')).not.toContain('first record')
+  })
+
+  it('says UNKNOWN when no .rsct.json names an app', async () => {
+    const dir = join(base, 'project')
+    mkdirSync(dir, { recursive: true })
+    git(dir, 'init', '-q', '-b', 'main')
+    writeFileSync(join(dir, '.rsct.json'), JSON.stringify({ rsct_version: '1.0.0', universe: { local: universeRepo([ORDERS]) } }))
+    commitAll(dir, 'project')
+    const out = await topology(dir, ['api/x.ts'])
+    expect(out.paths_check?.app_names).toEqual([])
+    expect(out.hints.join('\n')).toContain('no .rsct.json names an app.name, so no surface can match')
+  })
+
   it('without paths the answer has no paths_check, as before', async () => {
     const out = await topology(project(universeRepo([ORDERS])))
     expect(out.paths_check).toBeUndefined()

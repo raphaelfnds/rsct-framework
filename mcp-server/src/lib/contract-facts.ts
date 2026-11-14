@@ -66,6 +66,8 @@ export interface ContractFacts {
   baseline: AuditEntry
 }
 
+export const FIRST_RECORD_LINE = 'Universe contracts: first record of what the contract gate reads.'
+
 const PIECE = 120
 const ID_SHOWN = 12
 const IDS_SHOWN = 400
@@ -419,7 +421,7 @@ export function gatherContractFacts(args: {
       }
     }
   }
-  if (recorded === undefined && multiRepo) change('Universe contracts: first record of what the contract gate reads.')
+  if (recorded === undefined && multiRepo) change(FIRST_RECORD_LINE)
 
   const record = facts.map((r) => ({ root: r.path.replace(/\\/g, '/'), head: r.head, upstream: r.upstream }))
   const rootRecords: RootRecord[] = facts.map((r) => {

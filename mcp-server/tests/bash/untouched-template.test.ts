@@ -48,6 +48,14 @@ describe('2.25.0 — an untouched generated file is recognised exactly as /rsct-
     expect(isUntouchedTemplate(writeFile('documentation/knowledge/business-rules.md', content))).toBe(untouched)
   })
 
+  it('makes no claim on a file above 4 MB, and reads the last sha256-body on the line, as sed does', () => {
+    const big = generated(`${BODY}${'x'.repeat(4 * 1024 * 1024)}\n`)
+    expect(isUntouchedTemplate(writeFile('documentation/knowledge/big.md', big))).toBe(false)
+    const sha = createHash('sha256').update(BODY).digest('hex')
+    const twice = `<!-- RSCT-GENERATED v=1.0.0 created=x sha256-body=${'0'.repeat(64)} sha256-body=${sha} -->\n${BODY}`
+    expect(isUntouchedTemplate(writeFile('documentation/knowledge/twice.md', twice))).toBe(true)
+  })
+
   it.skipIf(!BASH)('agrees with the setup comparison (tail -n +2 | tr -d CR | sha256) on every case', () => {
     for (const [name, content, untouched] of CASES) {
       const file = writeFile('probe.md', content)
