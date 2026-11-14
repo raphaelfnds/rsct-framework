@@ -561,12 +561,12 @@ describe('edit-scope hook — Claude Code files in the folder CLAUDE_CONFIG_DIR 
     expect(exitOf(join(p, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: '' }, p)).toBe(0)
   })
 
-  it.skipIf(process.platform !== 'win32')('reads a file written through an administrative share of the folder\'s drive', () => {
+  const tmpShare = `\\\\localhost\\${tmpdir()[0]}$${tmpdir().slice(2)}`
+  it.skipIf(process.platform !== 'win32' || !existsSync(tmpShare))('reads a file written through an administrative share of the folder\'s drive', () => {
     const { root, cfg } = sandbox()
     const p = join(root, 'p')
     mkdirSync(cfg)
     const share = `\\\\localhost\\${cfg[0]}$${cfg.slice(2)}`
-    if (!existsSync(share)) return
     const env = { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: cfg }
     expect(exitOf(join(share, 'settings.json'), HOOKED, env, p)).toBe(2)
     expect(exitOf(join(cfg, 'settings.json'), HOOKED, { CLAUDE_PROJECT_DIR: p, CLAUDE_CONFIG_DIR: share }, p)).toBe(2)

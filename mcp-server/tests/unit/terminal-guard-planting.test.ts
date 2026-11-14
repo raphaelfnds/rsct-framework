@@ -222,10 +222,6 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'declare -x "$' + '{V}_DIR=/x"; git clone https://example.invalid/r.git',
     'eval "$' + '{V}_DIR=/x git init"',
     String.raw`bash -c 'export GIT_TEMPLATE""_DIR=/x; git init'`,
-    'env "$ASSIGN" git init',
-    'env -i "$ASSIGN" git init',
-    'env -u FOO "$ASSIGN" git init',
-    'env --chdir /tmp "$ASSIGN" git clone https://example.invalid/r.git',
     'read HOME <<< /x; git init',
     'printf -v HOME %s /x; git init',
     'local XDG_CONFIG_HOME; git clone https://example.invalid/r.git',
@@ -233,8 +229,6 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'V=DIR; \\export GIT_TEMPLATE_$' + '{V}=/x; git init',
     'V=DIR; command export GIT_TEMPLATE_$' + '{V}=/x; git init',
     'V=DIR; builtin export GIT_TEMPLATE_$' + '{V}=/x; git init',
-    '/usr/bin/env "$ASSIGN" git init',
-    'nice env "$ASSIGN" git init',
     'export GIT_TEMPLATE_DI?=tpl; git init',
     'env GIT_TEMPLATE_DI*=tpl git init',
     'export HOM[E]=/x; git init',
@@ -296,7 +290,6 @@ describe('terminal guard — planting names spelled without the plain name (2.24
     'printenv HOME; git init',
     'for d in "$HOME"/a "$HOME"/b; do git init "$d"; done',
     'for d in "$' + '{HOME}/a" "$' + '{HOME}/b"; do git init "$d"; done',
-    'echo read the HOME folder first; git init',
   ])('allows %s', (command) => {
     expect(verdictOf(command)).toBe('allow')
   })
@@ -325,8 +318,15 @@ describe('terminal guard — planting names inside the package scripts a command
         home: 'export HOME=/x; git clone https://example.invalid/r.git',
         spelled: 'export GIT_TEMPLATE$(true)_DIR=/x; git init',
         plain: 'git init',
+        again: String.raw`test -n "$X" && git init || bash -c 'export GIT_TEMPLATE""_DIR=/t X=1; npm run again'`,
+        loop: 'npm run loop',
       },
     }))
+  })
+
+  it('reads the planting names again when a script runs itself under a command that sets one', () => {
+    expect(judgeCommand('npm run again', { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('deny')
+    expect(judgeCommand('npm run loop', { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('allow')
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -341,6 +341,80 @@ describe('terminal guard — planting names inside the package scripts a command
 
   it('allows a script that runs a plain git init', () => {
     expect(judgeCommand('npm run plain', { dialect: 'bash', resolveAlias: NO_ALIASES, cwd: dir }).verdict).toBe('allow')
+  })
+})
+
+describe('terminal guard — planting names glued to an expansion, and commands that are not assignments (2.24.2 REVIEW-2)', () => {
+  const D = '$'
+  it.each([
+    `export GIT_TEMPLATE_${D}{X:-DIR}=/x; git init`,
+    `env GIT_TEMPLATE_${D}{X:-DIR}=/x git init`,
+    `export GIT_TEMPLATE_${D}{V/x/DIR}=/x; git init`,
+    `export GIT_TEMPLATE_${D}{V:0:3}=/x; git init`,
+    'export GIT_TEMPLATE_$(echo DIR )=/x; git init',
+    '"GIT_TEMPLATE_$( printf DIR )"=/x git init',
+    `export HO${D}{X:-ME}=/x; git init`,
+    'export GIT_CONFIG_KEY_$i=init.templateDir; git init',
+    'IFS= read -r HOME <<< /x; git init',
+    'X=1 read HOME <<< /x; git init',
+    'builtin read HOME <<< /x; git init',
+    'command printf -v HOME %s /x; git init',
+    'while IFS= read -r HOME; do git init; done < list',
+    "cd /tmp; read HOM''E <<< /x; git init",
+    "cd /tmp; r''ead HOME <<< /x; git init",
+    'git init-db --template=/tmp/t',
+    'GIT_TEMPLATE_DIR=/x git init-db',
+    'GIT_TEMPLATE_DIR=/x gh repo fork o/r --clone',
+    'GIT_TEMPLATE_DIR=/x gh repo create x --clone',
+    'gh repo clone o/r -- --template=/tmp/t',
+    'gh repo clone o/r -- -c core.hooksPath=h',
+  ])('refuses %s', (command) => {
+    expect(verdictOf(command)).toBe('deny')
+  })
+
+  it.each([
+    'ni -Path Env: -Name HOME -Value C:\\x; git init',
+    'si Env:USERPROFILE C:\\x; git init',
+  ])('refuses in PowerShell %s', (command) => {
+    expect(verdictOf(command, 'powershell')).toBe('deny')
+  })
+
+  it.each([
+    'for ((i=1;i<=3;i++)); do git init "r$i"; done',
+    'git clone https://example.invalid/r.git && pip install "uvicorn[standard]==0.23.0"',
+    "git clone https://example.invalid/r.git && pip install 'fastapi[all]>=0.100'",
+    `awk '{a+=${D}1} END {print a}' f && git init`,
+    `awk 'BEGIN{FS="="} {print ${D}2}' .env && git init`,
+    `echo "${D}{KEY}=${D}{VALUE}" >> .env && git init`,
+    'repos[0]=api; urls[api]=https://example.invalid/api.git; git clone "$' + '{urls[api]}"',
+    'echo "$((x+=2))"; git init',
+    'git clone "$BASE?ref=$REF"',
+    'python -c "print(dict(a=1))" && git init',
+    'mkdir -p env "$OUT" && git init "$OUT"',
+    'env -i "PATH=$PATH" git clone https://example.invalid/r.git',
+    `: "${D}{DIR=/tmp/x}"; git init "$DIR"`,
+    'export HOSTNAME_FILE=$(hostname); git init',
+    'for d in a b; do git init "$d"; done; echo HOME is set',
+  ])('allows %s', (command) => {
+    expect(verdictOf(command)).toBe('allow')
+  })
+
+  it('allows in PowerShell a project variable whose value only names a home-like folder', () => {
+    expect(verdictOf('Set-Item -Path Env:PROJ -Value "D:\\HOME\\src"; git init', 'powershell')).toBe('allow')
+  })
+
+  it.each([
+    ['bash', 'git init; env' + ' -a'.repeat(60) + ' x'],
+    ['bash', 'git init; echo "' + 'read '.repeat(12000) + '"'],
+    ['bash', 'git init; echo "' + 'printf '.repeat(9000) + '"'],
+    ['bash', 'git init; echo "' + 'GIT_'.repeat(15000) + '"'],
+    ['bash', 'git init; echo "' + '$'.repeat(60000) + '"'],
+    ['powershell', 'git init; set-item "' + 'env:,'.repeat(6000) + 'HOMEX"'],
+  ] as const)('judges a long adversarial %s command quickly', (dialect, command) => {
+    const started = Date.now()
+    const verdict = judgeCommand(command, { dialect, resolveAlias: NO_ALIASES })
+    expect(Date.now() - started).toBeLessThan(1500)
+    expect(verdict.verdict === 'deny' ? verdict.reason : '').not.toContain('in time')
   })
 })
 

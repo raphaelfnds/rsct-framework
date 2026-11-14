@@ -265,8 +265,15 @@ interface HookTree {
 }
 
 interface SideChanges {
+  added: Set<string>
+  deleted: Set<string>
   changed: Set<string>
-  renamedInto: Map<string, string>
+}
+
+interface LoggedVersion {
+  commit: string
+  name: string
+  blob: string
 }
 
 function treeRecords(stdout: string): TreeRecord[] {
@@ -325,37 +332,57 @@ function childOf(path: string, rel: string): string | null {
   return rest.includes('/') ? null : rest
 }
 
-function sideChanges(executor: GitExecutor, top: string, from: string, to: string, rels: readonly string[], caseBlind: boolean): SideChanges | null {
-  const r = executor(top, ['diff', '-z', '--name-status', '-M', '-l0', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', from, to, '--'])
+function parentOf(path: string): string {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+}
+
+function sideChanges(executor: GitExecutor, top: string, from: string, to: string, caseBlind: boolean): SideChanges | null {
+  const r = executor(top, ['diff', '-z', '--name-status', '--no-renames', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', from, to, '--'])
   if (!r.ok) return null
   const fold = folder(caseBlind)
   const fields = r.stdout.split('\0')
-  const changed = new Set<string>()
-  const renamedInto = new Map<string, string>()
-  for (let i = 0; i < fields.length; ) {
-    const status = fields[i]!
-    if (status === '') {
-      i++
+  const changes: SideChanges = { added: new Set(), deleted: new Set(), changed: new Set() }
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const path = fold(fields[i + 1]!)
+    if (fields[i] === 'A') changes.added.add(path)
+    if (fields[i] === 'D') changes.deleted.add(path)
+    changes.changed.add(path)
+  }
+  return changes
+}
+
+function movedIn(side: SideChanges, other: SideChanges, rels: readonly string[]): string[] {
+  const added = [...side.added].flatMap((p) => rels.map((rel) => childOf(p, rel)).filter((n): n is string => n !== null))
+  if (added.length === 0) return []
+  const names = new Set<string>()
+  if ([...side.deleted].some((p) => other.changed.has(p))) for (const name of added) names.add(name)
+  const emptied = new Set([...side.deleted].map(parentOf))
+  for (const p of other.added) if (emptied.has(parentOf(p))) names.add(p.slice(p.lastIndexOf('/') + 1))
+  return [...names]
+}
+
+function loggedVersions(executor: GitExecutor, top: string, range: string, pathspecs: readonly string[], rels: readonly string[], caseBlind: boolean): LoggedVersion[] | null {
+  const r = executor(top, ['log', '--raw', '-z', '--no-renames', '--no-abbrev', '--format=commit %H', range, '--', ...pathspecs])
+  if (!r.ok) return null
+  const fold = folder(caseBlind)
+  const versions: LoggedVersion[] = []
+  let commit = ''
+  const fields = r.stdout.split('\0')
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i]!.replace(/^\n/, '')
+    if (field.startsWith('commit ')) {
+      commit = field.slice('commit '.length).trim()
       continue
     }
-    if (status.startsWith('R') || status.startsWith('C')) {
-      const src = fold(fields[i + 1] ?? '')
-      const dst = fold(fields[i + 2] ?? '')
-      changed.add(src)
-      changed.add(dst)
-      if (status.startsWith('R')) {
-        for (const rel of rels) {
-          const name = childOf(dst, fold(rel))
-          if (name !== null) renamedInto.set(name, src)
-        }
-      }
-      i += 3
-    } else {
-      changed.add(fold(fields[i + 1] ?? ''))
-      i += 2
+    if (!field.startsWith(':')) continue
+    const [, newMode, , newOid] = field.slice(1).split(' ')
+    const path = fold(fields[++i] ?? '')
+    for (const rel of rels) {
+      const name = childOf(path, rel)
+      if (name !== null) versions.push({ commit, name, blob: /^0+$/.test(newOid ?? '') ? ABSENT : `${newMode} ${newOid}` })
     }
   }
-  return { changed, renamedInto }
+  return versions
 }
 
 function mergeBases(executor: GitExecutor, top: string, tip: string): string[] | null {
@@ -389,35 +416,33 @@ function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract
   if (!toplevel.ok || !head.ok) return null
   const headOid = head.stdout.trim()
   const top = canonicalPath(toplevel.stdout.trim())
-  if (!within(top, hooksDir)) return []
-  const rel = posix(relative(top, hooksDir))
+  const real = posix(relative(top, hooksDir))
   const configured = posix(relative(top, repo.hooksDir))
-  const rels = [...new Set([rel, ...(within(top, repo.hooksDir) && !configured.startsWith('..') ? [configured] : [])])]
+  const rels = [...new Set([...(within(top, hooksDir) ? [real] : []), ...(within(top, repo.hooksDir) && !configured.startsWith('..') ? [configured] : [])])]
+  if (rels.length === 0) return []
+  const rel = rels[0]!
   const caseBlind = CASE_BLIND || configTrue(executor, top, 'core.ignorecase')
   const fold = folder(caseBlind)
+  const foldedRels = rels.map(fold)
   const pathspecs = rels.map((r) => `:(${caseBlind ? 'icase,' : ''}literal)${r === '' ? '.' : r}`)
 
   const bases = mergeBases(executor, top, tip)
   if (bases === null) return null
-  const replayed = operation === 'rebase' ? revList(executor, top, ['--full-history', `${tip}..HEAD`, '--', ...pathspecs]) : []
-  const upstream = operation === 'rebase' ? revList(executor, top, ['--full-history', `HEAD..${tip}`, '--', ...pathspecs]) : []
+  const replayed = operation === 'rebase' ? loggedVersions(executor, top, `${tip}..HEAD`, pathspecs, foldedRels, caseBlind) : []
+  const upstream = operation === 'rebase' ? loggedVersions(executor, top, `HEAD..${tip}`, pathspecs, foldedRels, caseBlind) : []
   const merges = operation === 'rebase' ? revList(executor, top, ['--merges', '--max-count=1', `${tip}..HEAD`]) : []
   if (replayed === null || upstream === null || merges === null) return null
   const read = (rev: string): HookTree | null => hookTree(executor, top, rev, rels, caseBlind)
   const now = read('HEAD')
   const then = read(tip)
   const baseTrees = bases.map(read)
-  const replayedTrees = replayed.map((commit) => ({ commit, tree: read(commit) }))
-  const upstreamTrees = upstream.map(read)
-  if (now === null || then === null || baseTrees.some((t) => t === null) || replayedTrees.some((r) => r.tree === null) || upstreamTrees.some((t) => t === null)) return null
-  const renamed = new Set<string>()
+  if (now === null || then === null || baseTrees.some((t) => t === null)) return null
+  const moved = new Set<string>()
   for (const base of bases) {
-    const ours = sideChanges(executor, top, base, 'HEAD', rels, caseBlind)
-    const theirs = sideChanges(executor, top, base, tip, rels, caseBlind)
+    const ours = sideChanges(executor, top, base, 'HEAD', caseBlind)
+    const theirs = sideChanges(executor, top, base, tip, caseBlind)
     if (ours === null || theirs === null) return null
-    for (const [side, other] of [[ours, theirs], [theirs, ours]] as const) {
-      for (const [name, src] of side.renamedInto) if (other.changed.has(src)) renamed.add(name)
-    }
+    for (const name of [...movedIn(ours, theirs, foldedRels), ...movedIn(theirs, ours, foldedRels)]) moved.add(name)
   }
 
   const entries: ProgramEntry[] = []
@@ -427,16 +452,17 @@ function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract
     seenIds.add(entry.identity)
     entries.push(entry)
   }
-  const moved = [...bases.map((b, i) => [b, baseTrees[i]!] as const), [tip, then] as const, ...replayedTrees.map((r) => [r.commit, r.tree!] as const), ...upstream.map((u, i) => [u, upstreamTrees[i]!] as const)].find(([, t]) => t.links !== now.links)
-  if (moved !== undefined) {
+  const baseLinks = bases.length === 0 ? [''] : baseTrees.map((t) => t!.links)
+  if (then.links !== now.links && baseLinks.some((l) => l !== then.links)) {
     push({
       scopeKey: repo.scopeKey,
-      identity: digest('hooks-folder', ...rels, moved[0], moved[1].links),
-      label: `the hooks folder ${specLabel(`"${rels.join('", "')}"`)} changes at ${moved[0].slice(0, HASH_SHOWN)}: git may run hooks from a place this list cannot read`,
+      identity: digest('hooks-folder', ...rels, tip, then.links),
+      label: `the hooks folder ${specLabel(`"${rels.join('", "')}"`)} changes at ${tip.slice(0, HASH_SHOWN)}: git may run hooks from a place this list cannot read`,
     })
   }
 
-  const names = new Set([...then.hooks.keys(), ...now.hooks.keys(), ...baseTrees.flatMap((t) => [...t!.hooks.keys()]), ...replayedTrees.flatMap((r) => [...r.tree!.hooks.keys()]), ...upstreamTrees.flatMap((t) => [...t!.hooks.keys()])])
+  const upstreamTouched = new Set(upstream.map((v) => v.name))
+  const names = new Set([...then.hooks.keys(), ...now.hooks.keys(), ...baseTrees.flatMap((t) => [...t!.hooks.keys()]), ...replayed.map((v) => v.name), ...upstreamTouched, ...moved])
   for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
     const where = specLabel(rel === '' ? name : `${rel}/${name}`)
     const tipBlob = then.hooks.get(name) ?? ABSENT
@@ -459,8 +485,8 @@ function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract
       })
     }
 
-    if (renamed.has(fold(name))) {
-      merged(operation === 'rebase' ? 'is merged during the rebase with content a rename moves into it' : 'receives content a rename moves into it while the other side changed that content: git merges them while it runs')
+    if (moved.has(name)) {
+      merged(operation === 'rebase' ? 'is merged during the rebase with content another file or folder may move into it' : 'may receive content git moves in from another file or folder while it merges')
       continue
     }
     if (operation === 'merge') {
@@ -474,18 +500,16 @@ function incomingHooks(executor: GitExecutor, projectRoot: string, repo: Extract
     }
 
     if (tipBlob !== ABSENT && tipBlob !== headBlob) exact(tipBlob, tip, 'this operation brings it')
-    const carried = replayedTrees.filter((r) => (r.tree!.hooks.get(name) ?? ABSENT) !== base)
-    const upstreamTouched = upstreamTrees.some((t) => (t!.hooks.get(name) ?? ABSENT) !== base)
-    if (distinctBases.length > 1 || (carried.length > 0 && (merges.length > 0 || upstreamTouched))) {
+    const carried = replayed.filter((v) => v.name === name)
+    if (distinctBases.length > 1 || (carried.length > 0 && (merges.length > 0 || upstreamTouched.has(name)))) {
       merged('is merged during the rebase')
       continue
     }
     const seen = new Set([headBlob, tipBlob, ABSENT])
-    for (const r of carried) {
-      const blob = r.tree!.hooks.get(name) ?? ABSENT
-      if (seen.has(blob)) continue
-      seen.add(blob)
-      exact(blob, r.commit, 'a replayed commit brings it')
+    for (const v of carried) {
+      if (seen.has(v.blob)) continue
+      seen.add(v.blob)
+      exact(v.blob, v.commit, 'a replayed commit brings it')
     }
   }
 
