@@ -279,6 +279,22 @@ describe('contract facts — a project folder reached through a link (2.24.2)', 
     expect(f.lines.join('\n')).not.toContain('reached through a link')
   })
 
+  it('says nothing when the link is the project folder itself and the .rsct.json sits in a parent', () => {
+    const u = universeRepo(join(base, 'real', 'u'), [ORDERS])
+    const mono = join(base, 'real', 'mono')
+    mkdirSync(join(mono, 'sub'), { recursive: true })
+    git(mono, 'init', '-q', '-b', 'main')
+    writeFileSync(join(mono, '.rsct.json'), rsctJson({ universe: { local: '../u' } }))
+    writeFileSync(join(mono, 'sub', 'a.txt'), 'a\n')
+    commitAll(mono, 'mono')
+    mkdirSync(join(base, 'link'), { recursive: true })
+    symlinkSync(join(mono, 'sub'), join(base, 'link', 'proj'), 'junction')
+    const f = facts(join(base, 'link', 'proj'))
+    expect(f.ids).toEqual(['orders-api'])
+    expect(f.lines.join('\n')).not.toContain('reached through a link')
+    expect(u).toBeTruthy()
+  })
+
   it('says nothing for a project read through its real folder', () => {
     universeRepo(join(base, 'real', 'u'), [ORDERS])
     const { real } = linkedProject('../u')

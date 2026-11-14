@@ -138,7 +138,8 @@ function readConfigSources(projectRoot: string, config: RsctConfig | null, execu
     const up = dirname(current)
     if (up === current) break
     current = up
-    written = dirname(written)
+    const writtenUp = dirname(written)
+    written = rootKey(writtenUp) === rootKey(up) ? writtenUp : up
   }
   const sources: ConfigFacts[] = []
   for (const { dir, written: writtenDir } of dirs) {

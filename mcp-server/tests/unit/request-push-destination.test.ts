@@ -306,6 +306,8 @@ describe('push probe — the dry run never recurses into submodules (2.24.2)', (
     const out = defaultPushProbe(work, 'origin', 'main:refs/heads/main')
     expect(out.status).toBe('parsed')
     expect(existsSync(marker), 'the submodule pre-push hook ran inside the dry run').toBe(false)
+    git(work, 'push', '--dry-run', '--porcelain', '--no-verify', 'origin', 'main:refs/heads/main')
+    expect(existsSync(marker), 'positive control: the same dry run without the flag runs the submodule hook here').toBe(true)
   }, 60_000)
 })
 

@@ -579,3 +579,206 @@ describe('git-programs — the hook versions a merge, squash or rebase runs (2.2
     }
   })
 })
+
+describe('git-programs — hook versions: renames, letter case, links, autostash (2.24.2 REVIEW-1)', () => {
+  const BODY = Array.from({ length: 20 }, (_, i) => `echo line${i}`).join('\n')
+
+  function tracked(hooksPath = 'hooks'): string {
+    const r = repo()
+    git(r, 'config', 'user.email', 't@t.invalid')
+    git(r, 'config', 'user.name', 't')
+    git(r, 'config', 'core.hooksPath', hooksPath)
+    return r
+  }
+
+  function commitAll(r: string, message: string): string {
+    git(r, 'add', '-A')
+    git(r, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', message)
+    return git(r, 'rev-parse', 'HEAD').trim()
+  }
+
+  function put(r: string, rel: string, body: string): void {
+    mkdirSync(join(r, rel, '..'), { recursive: true })
+    writeFileSync(join(r, rel), body)
+  }
+
+  function brought(r: string, tip: string, operation: 'merge' | 'rebase'): string[] {
+    return labels(r, { incoming: { tip, operation } }).filter((l) => !/sha256/.test(l) && !l.startsWith('config '))
+  }
+
+  it('a sibling file next to a nested hooks folder is not read as the folder changing (.github/hooks, husky v9)', () => {
+    for (const [hooksPath, sibling] of [['.github/hooks', '.github/dependabot.yml'], ['.husky/_', '.husky/pre-commit']] as const) {
+      const r = tracked(hooksPath)
+      put(r, `${hooksPath}/post-merge`, '#!/bin/sh\necho a\n')
+      put(r, sibling, 'x\n')
+      commitAll(r, 'base')
+      git(r, 'branch', '-M', 'main')
+      git(r, 'checkout', '-q', '-b', 'feat')
+      put(r, 'f.txt', 'f\n')
+      const tip = commitAll(r, 'f')
+      git(r, 'checkout', '-q', 'main')
+      for (const operation of ['merge', 'rebase'] as const) {
+        expect(brought(r, tip, operation).some((l) => l.includes('hooks folder')), `${hooksPath} ${operation}`).toBe(false)
+      }
+      rmSync(r, { recursive: true, force: true })
+    }
+  })
+
+  it('merge: a hook the incoming side renames in from a file HEAD changed is listed as merged, not as one version', () => {
+    const r = tracked()
+    put(r, 'hooks/pre-push', '#!/bin/sh\nexit 0\n')
+    put(r, 'other/x', `#!/bin/sh\n${BODY}\n`)
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    git(r, 'mv', 'other/x', 'hooks/post-merge')
+    const tip = commitAll(r, 'rename into hooks')
+    git(r, 'checkout', '-q', 'main')
+    put(r, 'other/x', `#!/bin/sh\n${BODY.replace('echo line10', 'echo changed')}\n`)
+    commitAll(r, 'edit other/x')
+    const shown = brought(r, tip, 'merge').filter((l) => l.includes('"post-merge"'))
+    expect(shown.some((l) => l.includes('a rename moves into it'))).toBe(true)
+    expect(shown.some((l) => l.includes('as this operation brings it'))).toBe(false)
+  })
+
+  it('merge: a hook HEAD renames in from a file the incoming side changed is listed as merged', () => {
+    const r = tracked()
+    put(r, 'hooks/pre-push', '#!/bin/sh\nexit 0\n')
+    put(r, 'other/x', `#!/bin/sh\n${BODY}\n`)
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    put(r, 'other/x', `#!/bin/sh\n${BODY.replace('echo line10', 'echo changed')}\n`)
+    const tip = commitAll(r, 'edit other/x')
+    git(r, 'checkout', '-q', 'main')
+    git(r, 'mv', 'other/x', 'hooks/post-merge')
+    commitAll(r, 'rename into hooks')
+    expect(brought(r, tip, 'merge').some((l) => l.includes('"post-merge"') && l.includes('a rename moves into it'))).toBe(true)
+  })
+
+  it('rebase: a rename into the hooks folder whose source the other side changed is listed as merged during the rebase', () => {
+    const r = tracked()
+    put(r, 'hooks/pre-push', '#!/bin/sh\nexit 0\n')
+    put(r, 'other/x', `#!/bin/sh\n${BODY}\n`)
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    git(r, 'mv', 'other/x', 'hooks/post-rewrite')
+    commitAll(r, 'rename into hooks')
+    git(r, 'checkout', '-q', 'main')
+    put(r, 'other/x', `#!/bin/sh\n${BODY.replace('echo line10', 'echo changed')}\n`)
+    const tip = commitAll(r, 'edit other/x')
+    git(r, 'checkout', '-q', 'feat')
+    expect(brought(r, tip, 'rebase').some((l) => l.includes('"post-rewrite"') && l.includes('a rename moves into it'))).toBe(true)
+  })
+
+  it('merge: a rename in from a file the other side left alone is still one exact version', () => {
+    const r = tracked()
+    put(r, 'hooks/pre-push', '#!/bin/sh\nexit 0\n')
+    put(r, 'other/x', `#!/bin/sh\n${BODY}\n`)
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    git(r, 'mv', 'other/x', 'hooks/post-merge')
+    const tip = commitAll(r, 'rename into hooks')
+    git(r, 'checkout', '-q', 'main')
+    put(r, 'unrelated.txt', 'u\n')
+    commitAll(r, 'unrelated')
+    const shown = brought(r, tip, 'merge').filter((l) => l.includes('"post-merge"'))
+    expect(shown.some((l) => l.includes('as this operation brings it'))).toBe(true)
+    expect(shown.some((l) => l.includes('rename'))).toBe(false)
+  })
+
+  it('a hooks folder spelled in another letter case at the incoming commit is read where git ignores case', () => {
+    const r = tracked('.githooks')
+    git(r, 'config', 'core.ignorecase', 'true')
+    put(r, '.githooks/pre-push', '#!/bin/sh\nexit 0\n')
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    const blob = git(r, 'hash-object', '-w', join(r, '.githooks', 'pre-push')).trim()
+    git(r, 'update-index', '--add', '--cacheinfo', `100755,${blob},.GitHooks/post-merge`)
+    const tip = git(r, 'commit-tree', git(r, 'write-tree').trim(), '-p', 'HEAD', '-m', 'case').trim()
+    git(r, 'read-tree', 'HEAD')
+    expect(brought(r, tip, 'merge').some((l) => l.includes('"post-merge"') && l.includes('as this operation brings it'))).toBe(true)
+  })
+
+  it('a hooks folder that is a tracked link is reported when the incoming commit points it elsewhere', () => {
+    const r = tracked('.githooks')
+    put(r, 'tools/hooks/pre-push', '#!/bin/sh\nexit 0\n')
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    symlinkSync(join(r, 'tools', 'hooks'), join(r, '.githooks'), 'junction')
+    const target = (text: string): string => {
+      const file = join(base, `link-${text.replace(/\W/g, '')}`)
+      writeFileSync(file, text)
+      return git(r, 'hash-object', '-w', file).trim()
+    }
+    git(r, 'update-index', '--add', '--cacheinfo', `120000,${target('tools/hooks')},.githooks`)
+    const head = git(r, 'commit-tree', git(r, 'write-tree').trim(), '-p', 'HEAD', '-m', 'link').trim()
+    git(r, 'update-ref', 'refs/heads/main', head)
+    git(r, 'update-index', '--cacheinfo', `120000,${target('evil')},.githooks`)
+    const tip = git(r, 'commit-tree', git(r, 'write-tree').trim(), '-p', head, '-m', 'retarget').trim()
+    git(r, 'read-tree', head)
+    expect(brought(r, head, 'merge').some((l) => l.includes('hooks folder'))).toBe(false)
+    expect(brought(r, tip, 'merge').some((l) => l.includes('hooks folder') && l.includes(tip.slice(0, 12)))).toBe(true)
+  })
+
+  it('with autostash on, each tracked hook is also listed as committed at HEAD, the version git runs after stashing', () => {
+    const r = tracked()
+    put(r, 'hooks/post-merge', '#!/bin/sh\necho committed\n')
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    put(r, 'f.txt', 'f\n')
+    const tip = commitAll(r, 'f')
+    git(r, 'checkout', '-q', 'main')
+    expect(brought(r, tip, 'merge').some((l) => l.includes('committed at HEAD'))).toBe(false)
+    git(r, 'config', 'merge.autoStash', 'true')
+    expect(brought(r, tip, 'merge').some((l) => l.includes('"post-merge" as committed at HEAD'))).toBe(true)
+    git(r, 'config', 'rebase.autoStash', 'true')
+    expect(brought(r, tip, 'rebase').some((l) => l.includes('rebase.autoStash'))).toBe(true)
+  })
+
+  it('rebase: a merged label changes identity when only the replayed commits change', () => {
+    const r = tracked()
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho base\n')
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho mine\n')
+    commitAll(r, 'mine')
+    git(r, 'checkout', '-q', 'main')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho upstream\n')
+    const tip = commitAll(r, 'upstream')
+    git(r, 'checkout', '-q', 'feat')
+    const ids = (): string[] => {
+      const read = readGitPrograms(r, defaultGitExecutor, { incoming: { tip, operation: 'rebase' } })
+      if (!read.ok) throw new Error(read.reason)
+      return read.entries.filter((e) => e.label.includes('merged during the rebase')).map((e) => e.identity)
+    }
+    const before = ids()
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho injected\n')
+    commitAll(r, 'z')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho mine\n')
+    commitAll(r, 'restore')
+    expect(before).toHaveLength(1)
+    expect(ids()[0]).not.toBe(before[0])
+  })
+
+  it('rebase: a hook the upstream changed and changed back is still read as merged when the replayed commits change it', () => {
+    const r = tracked()
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho base\n')
+    commitAll(r, 'base')
+    git(r, 'branch', '-M', 'main')
+    git(r, 'checkout', '-q', '-b', 'feat')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho mine\n')
+    commitAll(r, 'mine')
+    git(r, 'checkout', '-q', 'main')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho mine\n')
+    commitAll(r, 'upstream applies the same change')
+    put(r, 'hooks/post-commit', '#!/bin/sh\necho base\n')
+    const tip = commitAll(r, 'upstream reverts it')
+    git(r, 'checkout', '-q', 'feat')
+    expect(brought(r, tip, 'rebase').some((l) => l.includes('"post-commit"') && l.includes('merged during the rebase'))).toBe(true)
+  })
+})
