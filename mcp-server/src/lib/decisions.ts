@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
-import { isShippedPlaceholder } from './placeholder-entries.js'
+import { isShippedPlaceholder, withoutShippedIdLines } from './placeholder-entries.js'
 
 export type DecisionStatus = 'active' | 'superseded' | 'deprecated'
 
@@ -148,7 +148,7 @@ function scanDecisions(body: string): {
 
   const flush = () => {
     if (!current) return
-    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) {
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) {
       kept.length = current.start
     } else {
       const entry = buildEntry(
@@ -205,7 +205,7 @@ function scanDecisions(body: string): {
   }
 
   flush()
-  return { premises, adrs, residue: kept.join('\n') }
+  return { premises, adrs, residue: withoutShippedIdLines(kept) }
 }
 
 function buildEntry(

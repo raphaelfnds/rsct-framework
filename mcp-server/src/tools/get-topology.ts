@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -13,13 +14,13 @@ import {
   type ContractGraph,
 } from '../lib/contracts.js'
 import { readUniverse } from '../lib/universe.js'
-import { gatherContractFacts } from '../lib/contract-facts.js'
+import { FIRST_RECORD_LINE, gatherContractFacts } from '../lib/contract-facts.js'
 import { defaultGitExecutor } from '../lib/git.js'
 import { toPosix } from '../lib/phase-scope.js'
 import type { RsctConfig } from '../lib/project-root.js'
 
 const PATHS_DESCRIPTION =
-  'Optional files or folders you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A path outside the project root is reported as such, never as untouched.'
+  'Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A folder and a path outside the project root are reported as such, never as untouched.'
 
 export const getTopologyInputSchema = z
   .object({
@@ -50,7 +51,9 @@ export interface GetTopologyOutput {
 
 export interface PathsCheck {
   paths: string[]
+  folders: string[]
   outside_root: string[]
+  app_names: string[]
   universe_linked: boolean
   contracts_readable: boolean
   contracts_touched: Contract[]
@@ -224,31 +227,50 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
 function checkPaths(root: string, config: RsctConfig | null, paths: readonly string[]): PathsCheck {
   const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))]
   const outside = rel.filter((p) => p === '..' || p.startsWith('../') || isAbsolute(p))
-  const inside = rel.filter((p) => !outside.includes(p))
+  const folders = rel.filter((p) => !outside.includes(p) && (p === '' || isFolder(resolve(root, p))))
+  const files = rel.filter((p) => !outside.includes(p) && !folders.includes(p))
   const facts = gatherContractFacts({
     projectRoot: root,
     config,
-    readPaths: () => inside,
+    readPaths: () => files,
     executor: defaultGitExecutor,
     always: true,
     ...(config?.audit !== undefined && { auditConfig: config.audit }),
   })
   return {
-    paths: inside,
+    paths: files,
+    folders: folders.map((p) => (p === '' ? '.' : p)),
     outside_root: outside,
+    app_names: facts?.apps ?? [],
     universe_linked: facts?.universeLinked ?? false,
     contracts_readable: facts !== null && facts.universeLinked && !facts.inactive,
     contracts_touched: facts?.hits ?? [],
     consumers: facts?.consumers ?? [],
-    notes: facts?.lines ?? [],
+    notes: (facts?.lines ?? []).filter((line) => line !== FIRST_RECORD_LINE),
+  }
+}
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
   }
 }
 
 function describePathsCheck(check: PathsCheck): string {
   const outside = check.outside_root.length > 0 ? ` ${check.outside_root.length} path(s) are outside the project root and are not matched against any surface: ${check.outside_root.join(', ')}.` : ''
-  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${outside}`
-  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${outside}`
+  const folders = check.folders.length > 0 ? ` ${check.folders.length} path(s) are folders, and surfaces are matched against files, so list the files you plan to change in them: ${check.folders.join(', ')}.` : ''
+  const unmatched = `${folders}${outside}`
+  if (!check.universe_linked) return `paths_check: no universe resolves for this project, so contracts do not apply here (not "none touched").${unmatched}`
+  if (!check.contracts_readable) return `paths_check: no contracts.json of the linked universe could be read, so whether these paths touch a contract is UNKNOWN.${unmatched}`
+  if (check.app_names.length === 0) return `paths_check: no .rsct.json names an app.name, so no surface can match and whether these paths touch a contract is UNKNOWN.${unmatched}`
   const ids = check.contracts_touched.map((c) => c.id).join(', ')
-  const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(', ') || 'none listed'}.` : 'No declared contract surface is touched by these paths.'
-  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${outside}`
+  const touched =
+    check.contracts_touched.length > 0
+      ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(', ') || 'none listed'}.`
+      : check.paths.length > 0
+        ? 'No declared contract surface is touched by the files given.'
+        : 'No file was given to match.'
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${unmatched}`
 }

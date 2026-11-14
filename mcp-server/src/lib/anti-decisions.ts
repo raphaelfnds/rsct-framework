@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
-import { isShippedPlaceholder } from './placeholder-entries.js'
+import { isShippedPlaceholder, withoutShippedIdLines } from './placeholder-entries.js'
 
 export interface AntiDecisionEntry {
   id: string
@@ -114,7 +114,7 @@ function scanAntiDecisions(body: string): { entries: AntiDecisionEntry[]; residu
 
   const flush = (): void => {
     if (!current) return
-    if (isShippedPlaceholder(current.heading, current.title, current.bodyLines)) kept.length = current.start
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) kept.length = current.start
     else out.push(buildEntry(current.id, current.title, current.bodyLines.join('\n')))
     current = null
   }
@@ -137,7 +137,7 @@ function scanAntiDecisions(body: string): { entries: AntiDecisionEntry[]; residu
   }
 
   flush()
-  return { entries: out, residue: kept.join('\n') }
+  return { entries: out, residue: withoutShippedIdLines(kept) }
 }
 
 function buildEntry(id: string, title: string, section: string): AntiDecisionEntry {
