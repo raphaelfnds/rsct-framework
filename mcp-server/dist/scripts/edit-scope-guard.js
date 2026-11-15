@@ -293,11 +293,9 @@ function readPhaseState(projectRoot) {
     };
   }
 }
-var globRegexCache = /* @__PURE__ */ new Map();
-function globToRegex(glob) {
-  const cached = globRegexCache.get(glob);
-  if (cached) return cached;
-  let out = "^";
+var globMatcherCache = /* @__PURE__ */ new Map();
+function globTokens(glob) {
+  const tokens = [];
   let i = 0;
   while (i < glob.length) {
     const ch = glob[i];
@@ -306,31 +304,72 @@ function globToRegex(glob) {
         const atSegmentStart = i === 0 || glob[i - 1] === "/";
         const followedBySlash = glob[i + 2] === "/";
         if (atSegmentStart && followedBySlash && i + 3 < glob.length) {
-          out += "(?:[^/]*/)*";
+          tokens.push({ kind: "segments" });
           i += 3;
         } else {
-          out += ".*";
+          tokens.push({ kind: "any" });
           i += followedBySlash ? 3 : 2;
         }
       } else {
-        out += "[^/]*";
+        tokens.push({ kind: "star" });
         i++;
       }
     } else if (ch === "?") {
-      out += "[^/]";
-      i++;
-    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
-      out += `\\${ch}`;
+      tokens.push({ kind: "one" });
       i++;
     } else {
-      out += ch;
+      tokens.push({ kind: "char", char: ch });
       i++;
     }
   }
-  out += "$";
-  const re = new RegExp(out);
-  globRegexCache.set(glob, re);
-  return re;
+  return tokens;
+}
+function isLineTerminator(ch) {
+  return LINE_TERMINATORS.includes(ch);
+}
+function matchTokens(tokens, path) {
+  const size = tokens.length + 1;
+  let current = new Uint8Array(size * 2);
+  let next = new Uint8Array(size * 2);
+  const close = (states) => {
+    for (let i = 0; i < tokens.length; i++) {
+      const kind = tokens[i].kind;
+      if (states[i * 2] === 1 && (kind === "star" || kind === "any" || kind === "segments")) states[(i + 1) * 2] = 1;
+    }
+  };
+  current[0] = 1;
+  close(current);
+  for (let p = 0; p < path.length; p++) {
+    const ch = path[p];
+    next.fill(0);
+    let alive = false;
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (current[i * 2] === 1) {
+        if (token.kind === "char" && token.char === ch) next[(i + 1) * 2] = 1;
+        else if (token.kind === "one" && ch !== "/") next[(i + 1) * 2] = 1;
+        else if (token.kind === "star" && ch !== "/") next[i * 2] = 1;
+        else if (token.kind === "any" && !isLineTerminator(ch)) next[i * 2] = 1;
+        else if (token.kind === "segments") next[i * 2 + (ch === "/" ? 0 : 1)] = 1;
+      }
+      if (token.kind === "segments" && current[i * 2 + 1] === 1) next[i * 2 + (ch === "/" ? 0 : 1)] = 1;
+    }
+    close(next);
+    for (let s = 0; s < next.length; s++) if (next[s] === 1) alive = true;
+    if (!alive) return false;
+    const swap = current;
+    current = next;
+    next = swap;
+  }
+  return current[tokens.length * 2] === 1;
+}
+function globToRegex(glob) {
+  const cached = globMatcherCache.get(glob);
+  if (cached) return cached;
+  const tokens = globTokens(glob);
+  const matcher = { test: (path) => matchTokens(tokens, path) };
+  globMatcherCache.set(glob, matcher);
+  return matcher;
 }
 var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
 function pathCarriesLineTerminator(path) {
