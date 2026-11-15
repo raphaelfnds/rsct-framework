@@ -28560,16 +28560,19 @@ init_esm_shims();
 
 // src/lib/applies-to.ts
 init_esm_shims();
-var APPLIES_TO_LINE = /^(?:-\s+)?\*\*applies\s+to(?::\*\*|\*\*\s*:)(.*)$/i;
+var APPLIES_TO_LINE = /^(?:[-*+]\s+)?\*\*applies\s+to(?::\*\*|\*\*\s*:)(.*)$/i;
+var NEAR_MISS = /^(?:(?:[-*+>|]|\d+[.)])\s*)*(?:\*\*|__|\*|_)?\s*applies[\s_-]*to(?![a-z0-9])/i;
 var GLOB_MAX_LENGTH = 256;
 var STARS_PER_SEGMENT_MAX = 4;
 var GLOBS_PER_ENTRY_MAX = 64;
 var HIDDEN2 = /[\p{Cc}\p{Cf}]/u;
+var FORMAT2 = new RegExp("\\p{Cf}", "gu");
 function checkGlob(item) {
   let glob = item.replace(/\\/g, "/");
   while (glob.startsWith("./")) glob = glob.slice(2);
   if (glob === "") return { reason: "empty" };
   if (HIDDEN2.test(glob)) return { reason: "a control or invisible character" };
+  if (/[{}]/.test(glob)) return { reason: "braces are not supported: list each path" };
   if (glob.startsWith("/") || /^[A-Za-z]:/.test(glob)) return { reason: "an absolute path" };
   if (glob.length > GLOB_MAX_LENGTH) return { reason: `longer than ${GLOB_MAX_LENGTH} characters` };
   const segments = [];
@@ -28601,17 +28604,27 @@ function readAppliesToLine(line2) {
 function isBindingAppliesToLine(line2) {
   return readAppliesToLine(line2)?.binds === true;
 }
+function nearMiss(line2) {
+  return NEAR_MISS.test(line2.replace(FORMAT2, "").trim());
+}
 function collectAppliesTo(section) {
   let found = false;
-  const out2 = { globs: [], rejected: [], unbound: [] };
+  const out2 = { globs: [], rejected: [], unbound: [], unread: [], lines: [] };
   for (const line2 of section.split("\n")) {
     const read = readAppliesToLine(line2);
-    if (read === null) continue;
+    if (read === null) {
+      if (nearMiss(line2)) {
+        found = true;
+        out2.unread.push(line2.trim());
+      }
+      continue;
+    }
     found = true;
     if (!read.binds) {
       out2.unbound.push(read.value);
       continue;
     }
+    out2.lines.push(line2.trim());
     for (const glob of read.globs) {
       if (out2.globs.includes(glob)) continue;
       if (out2.globs.length >= GLOBS_PER_ENTRY_MAX) out2.rejected.push(`${glob} (more than ${GLOBS_PER_ENTRY_MAX} globs on one entry)`);
@@ -29491,13 +29504,32 @@ function readHeadContent(repo, path2) {
   const id = readCommitBlobId(repo, repo.headCommit, path2);
   return id ? readBlob(repo, id) : null;
 }
+function headEntry(repo, commit, path2) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", commit, "--", path2]));
+  if (listed2 === null) return null;
+  for (const record2 of listed2) {
+    const tab = record2.indexOf("	");
+    if (tab < 0 || record2.slice(tab + 1) !== path2) continue;
+    const [mode, type, id] = record2.slice(0, tab).split(" ");
+    return mode && type && id ? { mode, type, id } : null;
+  }
+  return void 0;
+}
 function readHeadFile(repo, path2) {
   if (!repo.headCommit) return { state: "missing" };
-  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", repo.headCommit, "--", path2]));
-  if (listed2 === null) return { state: "failed" };
-  const blob = /^100(?:644|755) blob ([0-9a-f]{40,64})\t/.exec(listed2[0] ?? "")?.[1];
-  if (blob === void 0) return { state: "missing" };
-  const content = readBlob(repo, blob);
+  const entry = headEntry(repo, repo.headCommit, path2);
+  if (entry === null) return { state: "failed" };
+  if (entry === void 0) {
+    const parts2 = path2.split("/");
+    for (let i2 = parts2.length - 1; i2 >= 1; i2--) {
+      const parent = headEntry(repo, repo.headCommit, parts2.slice(0, i2).join("/"));
+      if (parent === null || parent !== void 0 && parent.type !== "tree") return { state: "failed" };
+      if (parent !== void 0) return { state: "missing" };
+    }
+    return { state: "missing" };
+  }
+  if (entry.type !== "blob" || entry.mode !== "100644" && entry.mode !== "100755") return { state: "failed" };
+  const content = readBlob(repo, entry.id);
   return content === null ? { state: "failed" } : { state: "present", text: content.toString("utf8") };
 }
 function readFilesUnderPrefix(repo) {
@@ -30375,8 +30407,10 @@ function coverageHints(result) {
 // src/lib/decision-scope.ts
 var DECISIONS_FILE = "documentation/decisions.md";
 var ANTI_DECISIONS_FILE = "documentation/knowledge/anti-decisions.md";
+var NO_GIT_EXCLUDES = ["**/node_modules/**", "**/.git/**"];
 var DETAIL_LINES_SHOWN = 20;
 var ISSUES_SHOWN = 10;
+var LABEL_LIMIT = 40;
 function decisionSide(parsed) {
   return [...parsed.premises, ...parsed.adrs].map((entry) => ({
     key: `${DECISIONS_FILE}\0${entry.id}`,
@@ -30395,43 +30429,69 @@ function antiSide(entries) {
     appliesTo: entry.applies_to
   }));
 }
-function merge2(working, head, side, headNotes) {
+function globsByKey(side) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const entry of side) {
+    const set = out2.get(entry.key) ?? /* @__PURE__ */ new Set();
+    for (const glob of entry.appliesTo?.globs ?? []) set.add(glob);
+    out2.set(entry.key, set);
+  }
+  return out2;
+}
+function lineIssues(entry) {
+  const appliesTo = entry.appliesTo;
+  if (appliesTo === void 0) return [];
+  return [
+    ...appliesTo.rejected.map((rejected) => `${entry.label}: ${specLabel(rejected, 120)} is refused`),
+    ...appliesTo.unbound.map((value) => `${entry.label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
+    ...appliesTo.unread.map((line2) => `${entry.label}: "${specLabel(line2, 80)}" is not read: write **Applies to**: <glob>, <glob>`)
+  ];
+}
+function merge2(working, head, side, headNotes, workingNotes) {
   const headKeys = new Set(head.map((entry) => entry.key));
+  const workingGlobs = globsByKey(working);
+  const headGlobs = globsByKey(head);
   const byKey = /* @__PURE__ */ new Map();
   const issues = /* @__PURE__ */ new Set();
   for (const entry of [...working, ...head]) {
-    if (entry.appliesTo === void 0) continue;
-    for (const rejected of entry.appliesTo.rejected) issues.add(`${entry.label}: ${specLabel(rejected, 120)} is not used`);
-    for (const value of entry.appliesTo.unbound) {
-      issues.add(`${entry.label}: "${specLabel(value, 80)}" is not a comma-separated list of paths, so the line binds nothing`);
-    }
-    if (entry.appliesTo.globs.length === 0) continue;
+    for (const issue2 of lineIssues(entry)) issues.add(issue2);
+    const globs = entry.appliesTo?.globs ?? [];
+    if (globs.length === 0) continue;
     const known = byKey.get(entry.key);
     if (known !== void 0) {
-      for (const glob of entry.appliesTo.globs) if (!known.globs.includes(glob)) known.globs.push(glob);
+      for (const glob of globs) if (!known.globs.includes(glob)) known.globs.push(glob);
       continue;
     }
+    const atHead = [...headGlobs.get(entry.key) ?? []];
     byKey.set(entry.key, {
       key: entry.key,
       label: entry.label,
       title: entry.title,
       file: entry.file,
-      globs: [...entry.appliesTo.globs],
-      added_since_head: side === "read" && !headKeys.has(entry.key)
+      globs: [...globs],
+      added_since_head: side === "read" && !headKeys.has(entry.key),
+      changed_since_head: side === "read" && !workingNotes.includes(entry.file) && atHead.some((glob) => !(workingGlobs.get(entry.key)?.has(glob) ?? false))
     });
   }
-  return { entries: [...byKey.values()], line_issues: [...issues], head: side, head_notes: headNotes };
+  const entries = [...byKey.values()];
+  const marked = entries.filter((entry) => entry.added_since_head || entry.changed_since_head);
+  const plain = entries.filter((entry) => !entry.added_since_head && !entry.changed_since_head);
+  return { entries: [...marked, ...plain], line_issues: [...issues], head: side, head_notes: headNotes, working_notes: workingNotes };
 }
 function boundDecisionsInFile(snapshot) {
-  return merge2(decisionSide(snapshot), [], "not_read", []);
+  return merge2(decisionSide(snapshot), [], "not_read", [], []);
 }
 function readBoundCorpus(projectRoot, options = {}) {
   const decisions = options.decisions ?? readDecisions(projectRoot);
   const antiDecisions = options.antiDecisions ?? readAntiDecisions(projectRoot);
   const working = [...decisionSide(decisions), ...antiSide(antiDecisions.entries)];
+  const workingNotes = [
+    ...decisions.read_error ? [DECISIONS_FILE] : [],
+    ...antiDecisions.read_error ? [ANTI_DECISIONS_FILE] : []
+  ];
   const repo = options.repo !== void 0 ? options.repo : openSweepRepo(projectRoot);
-  if (repo === null) return merge2(working, [], "no_git", []);
-  if (repo.headCommit === null) return merge2(working, [], "no_commit", []);
+  if (repo === null) return merge2(working, [], "no_git", [], workingNotes);
+  if (repo.headCommit === null) return merge2(working, [], "no_commit", [], workingNotes);
   const head = [];
   const notes = [];
   const decisionsAtHead = readHeadFile(repo, `${repo.prefix}${DECISIONS_FILE}`);
@@ -30440,11 +30500,11 @@ function readBoundCorpus(projectRoot, options = {}) {
   const antiAtHead = readHeadFile(repo, `${repo.prefix}${ANTI_DECISIONS_FILE}`);
   if (antiAtHead.state === "present") head.push(...antiSide(extractAntiDecisions(antiAtHead.text)));
   if (antiAtHead.state === "failed") notes.push(ANTI_DECISIONS_FILE);
-  return merge2(working, head, notes.length > 0 ? "unreadable" : "read", notes);
+  return merge2(working, head, notes.length > 0 ? "unreadable" : "read", notes, workingNotes);
 }
 function listProjectFiles(projectRoot, repo) {
   if (repo !== null) return readFilesUnderPrefix(repo);
-  return walkFiles(projectRoot, ["**"], DEFAULT_EXCLUDE_GLOBS).map((abs) => toPosix(relative(projectRoot, abs)));
+  return walkFiles(projectRoot, ["**"], NO_GIT_EXCLUDES).map((abs) => toPosix(relative(projectRoot, abs)));
 }
 function declaredCandidates(declared, files) {
   const out2 = /* @__PURE__ */ new Set();
@@ -30458,9 +30518,9 @@ function declaredCandidates(declared, files) {
     }
     out2.add(path2);
     out2.add(`${path2}/`);
-    const glob = /[*?]/.test(path2);
+    const glob = /[*?]/.test(path2) ? globToRegex(path2) : null;
     for (const file of files) {
-      if (file === path2 || file.startsWith(`${path2}/`) || glob && matchesAnyGlob(file, [path2]).matched) out2.add(file);
+      if (file === path2 || file.startsWith(`${path2}/`) || glob !== null && glob.test(file)) out2.add(file);
     }
   }
   return [...out2];
@@ -30468,10 +30528,11 @@ function declaredCandidates(declared, files) {
 function decisionsCovering(entries, paths) {
   const hits2 = [];
   for (const entry of entries) {
+    const matchers = entry.globs.map((glob) => ({ glob, matcher: globToRegex(glob) }));
     for (const path2 of paths) {
-      const match = matchesAnyGlob(path2, entry.globs);
-      if (match.matched) {
-        hits2.push({ entry, path: path2, glob: match.matched_glob ?? "" });
+      const match = matchers.find((m) => m.matcher.test(path2));
+      if (match !== void 0) {
+        hits2.push({ entry, path: path2, glob: match.glob });
         break;
       }
     }
@@ -30482,7 +30543,8 @@ function unmatchedGlobs(corpus, files) {
   const lines2 = [];
   for (const entry of corpus.entries) {
     for (const glob of entry.globs) {
-      if (files.some((file) => matchesAnyGlob(file, [glob]).matched)) continue;
+      const matcher = globToRegex(glob);
+      if (files.some((file) => matcher.test(file))) continue;
       const folder2 = glob.replace(/\/+$/, "");
       const names = !/[*?]/.test(glob) && files.some((file) => file.startsWith(`${folder2}/`));
       lines2.push(`${entry.label}: ${specLabel(glob, 120)} matches no file${names ? ` (it names a folder: ${specLabel(folder2, 120)}/** covers the files in it)` : ""}`);
@@ -30497,7 +30559,7 @@ function appliesToHints(corpus, files) {
     const shown2 = lines2.slice(0, ISSUES_SHOWN).join("; ");
     const more = lines2.length > ISSUES_SHOWN ? ` \u2026 and ${lines2.length - ISSUES_SHOWN} more` : "";
     hints.push(
-      `"Applies to" lines that bind nothing (${lines2.length}): ${shown2}${more}. Such a decision is listed for no change by path; it still applies everywhere, like a decision without the line.`
+      `"Applies to" problems (${lines2.length}): ${shown2}${more}. A refused glob, or one that matches no file, is not used; an entry left with no usable glob is listed for no change by path, and still applies everywhere, like a decision without the line.`
     );
   }
   if (files === null && corpus.entries.length > 0) {
@@ -30508,17 +30570,22 @@ function appliesToHints(corpus, files) {
   }
   return hints;
 }
-var LABEL_LIMIT = 40;
 function shortLabel(hit) {
   return specLabel(hit.entry.label, LABEL_LIMIT);
+}
+function markedLabel(hit) {
+  const mark = hit.entry.added_since_head ? " (added since HEAD)" : hit.entry.changed_since_head ? " (line removed or changed since HEAD)" : "";
+  return `${shortLabel(hit)}${mark}`;
 }
 function hitLabels(hits2) {
   const shown2 = hits2.slice(0, DIALOG_LIST_SHOWN).map(shortLabel).join(", ");
   return hits2.length > DIALOG_LIST_SHOWN ? `${shown2} \u2026 and ${hits2.length - DIALOG_LIST_SHOWN} more` : shown2;
 }
 function hitDetailLines(hits2) {
-  const lines2 = hits2.slice(0, DETAIL_LINES_SHOWN).map((hit) => `- ${shortLabel(hit)} \u2014 ${specLabel(hit.entry.title, 120)}: ${specLabel(hit.path, 200)} matches ${specLabel(hit.glob, 120)}`);
-  if (hits2.length > DETAIL_LINES_SHOWN) lines2.push(`... and ${hits2.length - DETAIL_LINES_SHOWN} more`);
+  const lines2 = hits2.slice(0, DETAIL_LINES_SHOWN).map((hit) => `- ${markedLabel(hit)} \u2014 ${specLabel(hit.entry.title, 120)}: ${specLabel(hit.path, 200)} matches ${specLabel(hit.glob, 120)}`);
+  if (hits2.length > DETAIL_LINES_SHOWN) {
+    lines2.push(`... and ${hits2.length - DETAIL_LINES_SHOWN} more; every id: ${hits2.map(shortLabel).join(", ")}`);
+  }
   return lines2.join("\n");
 }
 function declaredDecisionCoverage(projectRoot, declared, working) {
@@ -30536,29 +30603,33 @@ function reviewDecisionCoverage(projectRoot, repo) {
   if (corpus.head === "unreadable") {
     facts.push(`\u26A0 ${corpus.head_notes.join(" and ")} could not be read at HEAD: the decisions below come from the working tree only, and none is marked as added since HEAD.`);
   }
+  if (corpus.working_notes.length > 0) {
+    facts.push(`\u26A0 ${corpus.working_notes.join(" and ")} could not be read in the working tree: the decisions below come from HEAD only.`);
+  }
   const touched = readTouchedPaths(repo);
   if (touched === null) {
     facts.push('\u26A0 The changed files could not be read, so the decisions whose "Applies to" line covers them are not listed.');
-    return { ids: [], added_since_head: [], report: null, facts, agent: [] };
+    return { ids: null, added_since_head: [], changed_since_head: [], report: null, facts, agent: [] };
   }
   const paths = touched.filter((t) => t.path.startsWith(repo.prefix)).map((t) => t.path.slice(repo.prefix.length));
   const hits2 = decisionsCovering(corpus.entries, paths);
   const ids = hits2.map((hit) => hit.entry.label);
   const added = hits2.filter((hit) => hit.entry.added_since_head).map((hit) => hit.entry.label);
-  if (hits2.length === 0) return { ids, added_since_head: added, report: null, facts, agent: [] };
-  const marked = (hit) => `${shortLabel(hit)}${hit.entry.added_since_head ? " (added since HEAD)" : ""}`;
+  const changed = hits2.filter((hit) => hit.entry.changed_since_head).map((hit) => hit.entry.label);
+  if (hits2.length === 0) return { ids, added_since_head: added, changed_since_head: changed, report: null, facts, agent: [] };
   const report = hits2.length > DIALOG_LIST_SHOWN ? writeListReport(
     projectRoot,
     "review",
     "decisions",
     'Decisions whose "Applies to" line covers the changed files',
-    hits2.map((hit) => `${marked(hit)} \u2014 ${hit.entry.title} \u2014 ${hit.path} matches ${hit.glob}`)
+    hits2.map((hit) => `${markedLabel(hit)} \u2014 ${hit.entry.title} \u2014 ${hit.path} matches ${hit.glob}`)
   ) : null;
   const shown2 = hits2.slice(0, DIALOG_LIST_SHOWN);
-  facts.push(`Decisions whose "Applies to" line covers the changed files (${hits2.length}): ${shown2.map(marked).join(", ")}`);
+  facts.push(`Decisions whose "Applies to" line covers the changed files (${hits2.length}): ${shown2.map(markedLabel).join(", ")}`);
   if (shown2.length < hits2.length) facts.push(`\u2026 and ${hits2.length - shown2.length} more \u2014 full list: ${report ?? "the report could not be written"}`);
+  if (corpus.head === "no_commit") facts.push("No commit yet: nothing can be marked as added since HEAD.");
   const agent = ["Titles of those decisions, from the decisions files:", ...shown2.map((hit) => `${shortLabel(hit)} \u2014 ${specLabel(hit.entry.title, 80)}`)];
-  return { ids, added_since_head: added, report, facts, agent };
+  return { ids, added_since_head: added, changed_since_head: changed, report, facts, agent };
 }
 
 // src/tools/get-decisions.ts
@@ -30573,7 +30644,7 @@ var getDecisionsInputSchema = external_exports.object({
 }).strict();
 var getDecisionsTool = {
   name: "rsct_get_decisions",
-  description: 'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused and the lines that bind nothing; hints name the globs that match no file. The line only adds visibility: every decision still applies everywhere.',
+  description: 'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused, the lines that bind nothing, the spellings not read, and the binding lines, whose words still count in the premise check; hints name the globs that match no file and the other problems. The line only adds visibility: every decision still applies everywhere.',
   inputSchema: {
     type: "object",
     properties: {
@@ -32321,7 +32392,6 @@ init_esm_shims();
 // src/lib/premise-check.ts
 init_esm_shims();
 var STOPWORDS = /* @__PURE__ */ new Set([
-  // English filler
   "the",
   "and",
   "for",
@@ -32356,7 +32426,6 @@ var STOPWORDS = /* @__PURE__ */ new Set([
   "while",
   "than",
   "then",
-  // pt-BR filler
   "que",
   "para",
   "pelo",
@@ -32415,8 +32484,11 @@ function checkPremise(claim2, entries, antiDecisions = []) {
     reason: explain(matches, antiMatches, entries.length, antiDecisions.length)
   };
 }
+function scoredText(entry) {
+  return [entry.title, entry.excerpt, ...entry.applies_to?.lines ?? []].join(" ");
+}
 function scoreEntry(claimTokens, entry) {
-  const entryText = `${entry.title} ${entry.excerpt}`;
+  const entryText = scoredText(entry);
   const entryTokens = new Set(tokenize(entryText));
   const shared = [];
   for (const t of claimTokens) {
@@ -32432,7 +32504,7 @@ function scoreEntry(claimTokens, entry) {
   };
 }
 function scoreAntiDecision(claimTokens, entry) {
-  const entryText = `${entry.title} ${entry.excerpt}`;
+  const entryText = scoredText(entry);
   const entryTokens = new Set(tokenize(entryText));
   const shared = [];
   for (const t of claimTokens) {
@@ -57106,7 +57178,7 @@ var phaseReviewCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. The \xA7C dialog also lists, among the framework lines, the decisions whose optional "Applies to" line (read at HEAD and in the working tree) covers a changed file, with the ids added since HEAD marked (more than 10: the first 10 and a report under .rsct/reports/); the ids come back in decisions_covering and are recorded on review.complete. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. The \xA7C dialog also lists, among the framework lines, the decisions whose optional "Applies to" line (read at HEAD and in the working tree) covers a changed file, with the ids added since HEAD, and those whose line was removed or changed since HEAD, marked and listed first (more than 10: the first 10 and a report under .rsct/reports/); the ids come back in decisions_covering (ids null when the changed files could not be read) and are recorded on review.complete. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -57569,7 +57641,11 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
       dialogDetail: detailParts.filter(Boolean).join("\n"),
       ...forceReason !== null && { forceDialog: true, forceDialogReason: forceReason },
       ...coverage !== null && {
-        completeAuditFields: { decisions_covering: coverage.ids, decisions_added_since_head: coverage.added_since_head }
+        completeAuditFields: {
+          decisions_covering: coverage.ids,
+          decisions_added_since_head: coverage.added_since_head,
+          decisions_changed_since_head: coverage.changed_since_head
+        }
       }
     }
   );
@@ -57579,7 +57655,7 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
     evidence_mix,
     head_stale: staleness.head_stale,
     comment_sweep: summary,
-    decisions_covering: coverage === null ? null : { ids: coverage.ids, added_since_head: coverage.added_since_head, report: coverage.report }
+    decisions_covering: coverage === null ? null : { ids: coverage.ids, added_since_head: coverage.added_since_head, changed_since_head: coverage.changed_since_head, report: coverage.report }
   };
   if (result.status !== "completed") {
     output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);
