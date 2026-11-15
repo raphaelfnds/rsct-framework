@@ -202,6 +202,47 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
   return id ? readBlob(repo, id) : null
 }
 
+export type HeadFile = { state: 'present'; text: string } | { state: 'missing' } | { state: 'failed' }
+
+function headEntry(repo: SweepRepo, commit: string, path: string): { mode: string; type: string; id: string } | null | undefined {
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', commit, '--', path]))
+  if (listed === null) return null
+  for (const record of listed) {
+    const tab = record.indexOf('\t')
+    if (tab < 0 || record.slice(tab + 1) !== path) continue
+    const [mode, type, id] = record.slice(0, tab).split(' ')
+    return mode && type && id ? { mode, type, id } : null
+  }
+  return undefined
+}
+
+export function readHeadFile(repo: SweepRepo, path: string): HeadFile {
+  if (!repo.headCommit) return { state: 'missing' }
+  const entry = headEntry(repo, repo.headCommit, path)
+  if (entry === null) return { state: 'failed' }
+  if (entry === undefined) {
+    const parts = path.split('/')
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const parent = headEntry(repo, repo.headCommit, parts.slice(0, i).join('/'))
+      if (parent === null || (parent !== undefined && parent.type !== 'tree')) return { state: 'failed' }
+      if (parent !== undefined) return { state: 'missing' }
+    }
+    return { state: 'missing' }
+  }
+  if (entry.type !== 'blob' || (entry.mode !== '100644' && entry.mode !== '100755')) return { state: 'failed' }
+  const content = readBlob(repo, entry.id)
+  return content === null ? { state: 'failed' } : { state: 'present', text: content.toString('utf8') }
+}
+
+export function readFilesUnderPrefix(repo: SweepRepo): string[] | null {
+  const scope = repo.prefix === '' ? [] : ['--', repo.prefix]
+  const listed = nulList(
+    safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--full-name', ...scope]),
+  )
+  if (listed === null) return null
+  return [...new Set(listed.filter((path) => path.startsWith(repo.prefix)).map((path) => path.slice(repo.prefix.length)))]
+}
+
 const REGULAR_FILE_MODES: ReadonlySet<string> = new Set(['100644', '100755'])
 const CAT_FILE_BATCH = 1000
 const CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024

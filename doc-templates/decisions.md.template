@@ -40,3 +40,10 @@
   the `rsct_get_decisions` tool's `filter.status` / `filter.tag` arguments.
   Status values: `active`, `superseded`, `deprecated`. Tags are
   comma-separated free-form strings.
+- Optional `**Applies to**: <glob>, <glob>` line on any entry (paths relative to
+  the project root, e.g. `src/billing/**, src/ledger/*.ts`) binds it to the files
+  it governs: the V phase lists it when a plan declares those paths, and the
+  REVIEW dialog lists it when a change touches them. It only adds visibility; an
+  entry without it still applies everywhere. Write paths only: a line that is not
+  a comma-separated list of paths binds nothing. Adding or fixing this line on an
+  existing entry is not a rewrite of the entry.

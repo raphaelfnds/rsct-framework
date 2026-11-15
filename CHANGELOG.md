@@ -12,6 +12,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-11-15
+
+### Added
+
+- **Decisions bound to code** (#152, ADR-048). A premise, an ADR or an anti-decision may carry
+  `**Applies to**: <glob>, <glob>`, paths relative to the project root. The line binds only when
+  every item is a path; a sentence binds nothing and stays part of the entry. It only adds
+  visibility: a decision without it still applies everywhere, and the premise check reads every
+  decision as before.
+  - **V** raises one finding, after every other finding, listing the decisions whose globs match a
+    declared path or a file under a declared folder, read at HEAD and in the working tree.
+  - **REVIEW** lists, in the approval dialog, the decisions whose globs cover the changed files,
+    with the ones added since HEAD, and the ones whose line was removed or changed since HEAD,
+    marked and listed first; the ids also come back in `decisions_covering` and are recorded on
+    `review.complete`.
+  - **`rsct_get_decisions`** and the V start hints name globs that match no file, refused globs and
+    lines not read, so a moved folder does not unbind a decision in silence.
+  - The line stays out of the 3-line excerpt, where it pushed out a `never …` line and turned a
+    premise check from `conflict` into `requires_revision`; its words still count in the premise
+    check, so a line a project wrote before 2.26.0 keeps every match.
+
+### Changed
+
+- §H, the `decisions.md` and `anti-decisions.md` templates and the ADR memory entry document the
+  line; adding or fixing it on an existing entry is metadata, not a rewrite.
+
+### Fixed
+
+- ADR-047's context said zenity 4 read no user GTK file in the tested cases; before 2.25.1 it did
+  read the user's GTK 4 style file, which 2.25.1 already covers. ADR-048 records the correction.
+
+### Upgrading
+
+1. Run the installer from an updated clone and restart the IDE: V, REVIEW and
+   `rsct_get_decisions` live in `rsct-mcp`.
+2. Run `/rsct-setup` in every project to get the updated §H and templates (files and sections you
+   did not edit).
+
 ## [2.25.1] - 2026-11-15
 
 ### Security

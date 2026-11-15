@@ -74,6 +74,12 @@ incidents, other anti-decisions>
 
 Numbering: AD-NNN, sequential, append-only.
 
+Optional: `- **Applies to:** <glob>, <glob>` (paths relative to the project root,
+e.g. `src/billing/**`) binds an entry to the files it is about, so the V phase and
+the REVIEW dialog list it when a plan or a change touches them. It only adds
+visibility. Write paths only: a sentence binds nothing. Adding or fixing this
+line on an existing entry is not a rewrite of the entry.
+
 ---
 
 ## Example entry (✅ good — keep this style)

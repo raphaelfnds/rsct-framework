@@ -3944,50 +3944,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative10, options, skipNormalization) {
+    function resolveComponent(base, relative11, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize2(base, options), options);
-        relative10 = parse4(serialize2(relative10, options), options);
+        relative11 = parse4(serialize2(relative11, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative10.scheme) {
-        target.scheme = relative10.scheme;
-        target.userinfo = relative10.userinfo;
-        target.host = relative10.host;
-        target.port = relative10.port;
-        target.path = removeDotSegments(relative10.path || "");
-        target.query = relative10.query;
+      if (!options.tolerant && relative11.scheme) {
+        target.scheme = relative11.scheme;
+        target.userinfo = relative11.userinfo;
+        target.host = relative11.host;
+        target.port = relative11.port;
+        target.path = removeDotSegments(relative11.path || "");
+        target.query = relative11.query;
       } else {
-        if (relative10.userinfo !== void 0 || relative10.host !== void 0 || relative10.port !== void 0) {
-          target.userinfo = relative10.userinfo;
-          target.host = relative10.host;
-          target.port = relative10.port;
-          target.path = removeDotSegments(relative10.path || "");
-          target.query = relative10.query;
+        if (relative11.userinfo !== void 0 || relative11.host !== void 0 || relative11.port !== void 0) {
+          target.userinfo = relative11.userinfo;
+          target.host = relative11.host;
+          target.port = relative11.port;
+          target.path = removeDotSegments(relative11.path || "");
+          target.query = relative11.query;
         } else {
-          if (!relative10.path) {
+          if (!relative11.path) {
             target.path = base.path;
-            if (relative10.query !== void 0) {
-              target.query = relative10.query;
+            if (relative11.query !== void 0) {
+              target.query = relative11.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative10.path[0] === "/") {
-              target.path = removeDotSegments(relative10.path);
+            if (relative11.path[0] === "/") {
+              target.path = removeDotSegments(relative11.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative10.path;
+                target.path = "/" + relative11.path;
               } else if (!base.path) {
-                target.path = relative10.path;
+                target.path = relative11.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative10.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative11.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative10.query;
+            target.query = relative11.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3995,7 +3995,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative10.fragment;
+      target.fragment = relative11.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -19106,7 +19106,7 @@ function isRecursive(inst, stack, resolve14) {
     }
     return answer;
   };
-  const merge2 = (answer) => {
+  const merge3 = (answer) => {
     if (answer > result)
       result = answer;
   };
@@ -19115,7 +19115,7 @@ function isRecursive(inst, stack, resolve14) {
   switch (kind) {
     case "object": {
       const raw = rawShape(def);
-      merge2(raw ? shape(raw) : ASSUMED);
+      merge3(raw ? shape(raw) : ASSUMED);
       check(def.catchall);
       break;
     }
@@ -19165,7 +19165,7 @@ function isRecursive(inst, stack, resolve14) {
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
       const inner = def._cachedInner ?? (void 0);
-      merge2(inner ? isRecursive(inner, stack) : ASSUMED);
+      merge3(inner ? isRecursive(inner, stack) : ASSUMED);
       break;
     }
     // a leaf by choice: `parts` are regex fragments, not data positions
@@ -27136,7 +27136,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.25.1";
+var RSCT_MCP_VERSION = "2.26.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -28558,6 +28558,83 @@ function readPlanFilePhases(path2) {
 // src/lib/decisions.ts
 init_esm_shims();
 
+// src/lib/applies-to.ts
+init_esm_shims();
+var APPLIES_TO_LINE = /^(?:[-*+]\s+)?\*\*applies\s+to(?::\*\*|\*\*\s*:)(.*)$/i;
+var NEAR_MISS = /^(?:(?:[-*+>|]|\d+[.)])\s*)*(?:\*\*|__|\*|_)?\s*applies[\s_-]*to(?![a-z0-9])/i;
+var GLOB_MAX_LENGTH = 256;
+var STARS_PER_SEGMENT_MAX = 4;
+var GLOBS_PER_ENTRY_MAX = 64;
+var HIDDEN2 = /[\p{Cc}\p{Cf}]/u;
+var FORMAT2 = new RegExp("\\p{Cf}", "gu");
+function checkGlob(item) {
+  let glob = item.replace(/\\/g, "/");
+  while (glob.startsWith("./")) glob = glob.slice(2);
+  if (glob === "") return { reason: "empty" };
+  if (HIDDEN2.test(glob)) return { reason: "a control or invisible character" };
+  if (/[{}]/.test(glob)) return { reason: "braces are not supported: list each path" };
+  if (glob.startsWith("/") || /^[A-Za-z]:/.test(glob)) return { reason: "an absolute path" };
+  if (glob.length > GLOB_MAX_LENGTH) return { reason: `longer than ${GLOB_MAX_LENGTH} characters` };
+  const segments = [];
+  for (const segment of glob.split("/")) {
+    if (segment === "..") return { reason: "leaves the project folder" };
+    if (segment === "**" && segments[segments.length - 1] === "**") continue;
+    if (segment !== "**" && segment.split("*").length - 1 > STARS_PER_SEGMENT_MAX) {
+      return { reason: `more than ${STARS_PER_SEGMENT_MAX} '*' in one segment` };
+    }
+    segments.push(segment);
+  }
+  return { glob: segments.join("/") };
+}
+function readAppliesToLine(line2) {
+  const match = APPLIES_TO_LINE.exec(line2.trim());
+  if (!match) return null;
+  const value = (match[1] ?? "").trim();
+  const items = value.split(",").map((item) => item.replace(/`/g, "").trim());
+  if (value === "" || items.some((item) => item === "" || /\s/.test(item))) return { binds: false, value };
+  const globs = [];
+  const rejected = [];
+  for (const item of items) {
+    const checked = checkGlob(item);
+    if ("glob" in checked) globs.push(checked.glob);
+    else rejected.push(`${item} (${checked.reason})`);
+  }
+  return { binds: true, globs, rejected };
+}
+function isBindingAppliesToLine(line2) {
+  return readAppliesToLine(line2)?.binds === true;
+}
+function nearMiss(line2) {
+  return NEAR_MISS.test(line2.replace(FORMAT2, "").trim());
+}
+function collectAppliesTo(section) {
+  let found = false;
+  const out2 = { globs: [], rejected: [], unbound: [], unread: [], lines: [] };
+  for (const line2 of section.split("\n")) {
+    const read = readAppliesToLine(line2);
+    if (read === null) {
+      if (nearMiss(line2)) {
+        found = true;
+        out2.unread.push(line2.trim());
+      }
+      continue;
+    }
+    found = true;
+    if (!read.binds) {
+      out2.unbound.push(read.value);
+      continue;
+    }
+    out2.lines.push(line2.trim());
+    for (const glob of read.globs) {
+      if (out2.globs.includes(glob)) continue;
+      if (out2.globs.length >= GLOBS_PER_ENTRY_MAX) out2.rejected.push(`${glob} (more than ${GLOBS_PER_ENTRY_MAX} globs on one entry)`);
+      else out2.globs.push(glob);
+    }
+    out2.rejected.push(...read.rejected);
+  }
+  return found ? out2 : void 0;
+}
+
 // src/lib/placeholder-entries.ts
 init_esm_shims();
 var SHIPPED_PLACEHOLDER_SHA256 = /* @__PURE__ */ new Set([
@@ -28624,6 +28701,10 @@ var PREMISE_HEADING = new RegExp(
 var ADR_HEADING = new RegExp(
   String.raw`^#{2,3}\s+(ADR-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
 );
+function extractDecisions(body2) {
+  const { premises, adrs } = scanDecisions(body2);
+  return { premises, adrs };
+}
 function scanDecisions(body2) {
   const lines2 = body2.split("\n");
   const premises = [];
@@ -28696,6 +28777,8 @@ function buildEntry(kind, id, title, section) {
   };
   if (meta2.status) entry.status = meta2.status;
   if (meta2.tags && meta2.tags.length > 0) entry.tags = meta2.tags;
+  const appliesTo = collectAppliesTo(section);
+  if (appliesTo) entry.applies_to = appliesTo;
   return entry;
 }
 var META_LINE_REGEX = /^\s*\*\*(Status|Tags)\*\*\s*:/i;
@@ -28716,7 +28799,7 @@ function extractMeta(section) {
   return out2;
 }
 function extractExcerpt(section) {
-  return makeExcerpt(section, { skipLine: (line2) => META_LINE_REGEX.test(line2) });
+  return makeExcerpt(section, { skipLine: (line2) => META_LINE_REGEX.test(line2) || isBindingAppliesToLine(line2) });
 }
 
 // src/lib/corpus-health.ts
@@ -29269,205 +29352,437 @@ function buildHints({
 
 // src/tools/get-decisions.ts
 init_esm_shims();
-var filterSchema = external_exports.object({
-  kind: external_exports.enum(["premise", "adr"]).optional(),
-  tag: external_exports.string().min(1).optional(),
-  status: external_exports.enum(["active", "superseded", "deprecated"]).optional()
-}).strict();
-var getDecisionsInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
-  filter: filterSchema.optional()
-}).strict();
-var getDecisionsTool = {
-  name: "rsct_get_decisions",
-  description: "Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      project_root: {
-        type: "string",
-        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
-      },
-      filter: {
-        type: "object",
-        description: "Optional filter \u2014 all fields combined as AND.",
-        properties: {
-          kind: {
-            type: "string",
-            enum: ["premise", "adr"],
-            description: "Restrict to firm premises (#N) or durable ADRs."
-          },
-          tag: {
-            type: "string",
-            description: "Match entries whose **Tags** line includes this exact tag (case-sensitive)."
-          },
-          status: {
-            type: "string",
-            enum: ["active", "superseded", "deprecated"],
-            description: "Match entries whose **Status** line equals this value."
-          }
-        },
-        additionalProperties: false
-      }
-    },
-    additionalProperties: false
-  }
-};
-async function getDecisionsHandler(rawInput) {
-  const input = getDecisionsInputSchema.parse(rawInput ?? {});
-  const resolution = resolveProjectRoot(input.project_root);
-  const snapshot = readDecisions(resolution.root);
-  const all = [...snapshot.premises, ...snapshot.adrs];
-  const filtered = applyFilter(all, input.filter);
-  return {
-    rsct_installed: resolution.rsct_installed,
-    decisions_file: { exists: snapshot.exists, path: snapshot.path },
-    total: all.length,
-    filtered_count: filtered.length,
-    decisions: filtered,
-    hints: buildHints2(snapshot, input.filter, filtered.length)
-  };
-}
-function applyFilter(entries, filter) {
-  if (!filter) return entries;
-  return entries.filter((entry) => {
-    if (filter.kind && entry.kind !== filter.kind) return false;
-    if (filter.status && entry.status !== filter.status) return false;
-    if (filter.tag && !(entry.tags ?? []).includes(filter.tag)) return false;
-    return true;
-  });
-}
-function buildHints2(snapshot, filter, filteredCount) {
-  const hints = [];
-  if (!snapshot.exists) {
-    hints.push(
-      "documentation/decisions.md not found \u2014 run /rsct-setup to scaffold the file before proposing decisions-dependent work."
-    );
-    return hints;
-  }
-  const miss = corpusMiss({
-    read_error: snapshot.read_error,
-    has_ids: snapshot.has_decision_ids,
-    parsed_count: snapshot.premises.length + snapshot.adrs.length
-  });
-  if (miss === "unreadable") {
-    hints.push(
-      `${snapshot.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`
-    );
-  } else if (miss === "ids-unparsed") {
-    hints.push(
-      `${snapshot.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
-    );
-  }
-  if (filter && filteredCount === 0) {
-    hints.push(
-      "Filter matched zero decisions. Re-run without the filter to see everything, or verify spelling of tag/status values."
-    );
-  }
-  return hints;
-}
 
-// src/tools/get-knowledge.ts
+// src/lib/comment-sweep/git-reads.ts
 init_esm_shims();
-var getKnowledgeInputSchema = external_exports.object({
-  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
-  category: external_exports.string().min(1).describe(
-    "Knowledge category file slug, matching documentation/knowledge/<category>.md. Canonical categories: " + KNOWN_CATEGORIES.join(", ")
-  ),
-  query: external_exports.string().min(1).optional().describe(
-    "Optional case-insensitive substring filter; matches sections whose heading or body contain the query."
-  )
-}).strict();
-var getKnowledgeTool = {
-  name: "rsct_get_knowledge",
-  description: "Reads documentation/knowledge/<category>.md and returns its sections (split by ## and ### headings). Optional query performs a case-insensitive substring filter across heading and body. Use to recall business rules, anti-decisions, incidents, vendor history, or any other knowledge-graph category before making design choices that depend on institutional context. Returns empty sections (not an error) when the file is missing.",
-  inputSchema: {
-    type: "object",
-    required: ["category"],
-    properties: {
-      project_root: {
-        type: "string",
-        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
-      },
-      category: {
-        type: "string",
-        description: "Knowledge category file slug \u2014 documentation/knowledge/<category>.md. Canonical: " + KNOWN_CATEGORIES.join(", ")
-      },
-      query: {
-        type: "string",
-        description: "Optional case-insensitive substring; only sections whose heading or body matches are returned."
-      }
-    },
-    additionalProperties: false
-  }
-};
-async function getKnowledgeHandler(rawInput) {
-  const input = getKnowledgeInputSchema.parse(rawInput ?? {});
-  const resolution = resolveProjectRoot(input.project_root);
-  const index = readKnowledgeIndex(resolution.root);
-  const file = readKnowledgeFile(resolution.root, input.category);
-  const isCanonical = KNOWN_CATEGORIES.includes(input.category);
-  const sections = filterSectionsByQuery(file.sections, input.query);
-  return {
-    rsct_installed: resolution.rsct_installed,
-    category: input.category,
-    is_canonical_category: isCanonical,
-    file: { exists: file.exists, path: file.path },
-    query: input.query ?? null,
-    sections_total: file.sections.length,
-    sections_returned: sections.length,
-    sections,
-    available_categories: index.categories_present,
-    hints: buildHints3({
-      rsctInstalled: resolution.rsct_installed,
-      category: input.category,
-      isCanonical,
-      fileExists: file.exists,
-      sectionsTotal: file.sections.length,
-      sectionsReturned: sections.length,
-      query: input.query,
-      availableCategories: index.categories_present
-    })
-  };
+var GITLINK_MODE = "160000";
+var SYMLINK_MODE = "120000";
+var ADD_BATCH = 50;
+function text(buf) {
+  return buf === null ? null : buf.toString("utf8");
 }
-function buildHints3(args2) {
-  const hints = [];
-  if (!args2.rsctInstalled) {
-    hints.push(
-      "Project is not rsct-managed \u2014 knowledge graph likely absent. Run /rsct-setup before relying on this tool."
-    );
-    return hints;
+function line(buf) {
+  const out2 = text(buf);
+  return out2 === null ? null : out2.trim();
+}
+function nulList(buf) {
+  const out2 = text(buf);
+  return out2 === null ? null : out2.split("\0").filter((p) => p.length > 0);
+}
+function openSweepRepo(projectRoot) {
+  const toplevel = line(safeGitBuffer(projectRoot, ["rev-parse", "--show-toplevel"]));
+  if (!toplevel) return null;
+  const prefix = line(safeGitBuffer(projectRoot, ["rev-parse", "--show-prefix"])) ?? "";
+  const headCommit = line(safeGitBuffer(toplevel, ["rev-parse", "-q", "--verify", "HEAD^{commit}"]));
+  return { toplevel, prefix, headCommit: headCommit && headCommit.length > 0 ? headCommit : null };
+}
+function emptyTree(repo) {
+  return line(safeGitBuffer(repo.toplevel, ["hash-object", "-t", "tree", "--stdin"], ""));
+}
+function readRaw(repo, args2) {
+  const tokens = nulList(safeGitBuffer(repo.toplevel, ["diff", "--raw", "--no-abbrev", "-z", "--no-renames", ...args2]));
+  if (tokens === null) return null;
+  const out2 = [];
+  for (let i2 = 0; i2 + 1 < tokens.length; i2 += 2) {
+    const header = tokens[i2].replace(/^:/, "").split(" ");
+    const code = header[4] ?? "";
+    out2.push({
+      path: tokens[i2 + 1],
+      status: code === "D" ? "deleted" : code === "A" ? "added" : "modified",
+      oldMode: header[0] ?? "",
+      newMode: header[1] ?? "",
+      oldBlob: header[2] ?? ""
+    });
   }
-  if (!args2.fileExists) {
-    if (!args2.isCanonical) {
-      hints.push(
-        `Category '${args2.category}' is not canonical and the file does not exist. Canonical categories: ${KNOWN_CATEGORIES.join(", ")}.`
-      );
-    } else {
-      hints.push(
-        `documentation/knowledge/${args2.category}.md does not exist yet. Available now: ${args2.availableCategories.length > 0 ? args2.availableCategories.join(", ") : "(none)"}. Bootstrap with /rsct-setup or capture inline during conversation.`
-      );
+  return out2;
+}
+function effectiveMode(entry) {
+  return entry.status === "deleted" ? entry.oldMode : entry.newMode;
+}
+function hasContent(entry) {
+  return effectiveMode(entry) !== GITLINK_MODE;
+}
+function isSymlink(entry) {
+  return effectiveMode(entry) === SYMLINK_MODE;
+}
+function readTouchedPaths(repo) {
+  const base = repo.headCommit ?? emptyTree(repo);
+  if (!base) return null;
+  const diff = readRaw(repo, [base]);
+  const others = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z"]));
+  if (diff === null || others === null) return null;
+  const byPath = /* @__PURE__ */ new Map();
+  for (const entry of diff) {
+    if (!hasContent(entry)) continue;
+    byPath.set(entry.path, { path: entry.path, status: entry.status, symlink: isSymlink(entry) });
+  }
+  for (const path2 of others) byPath.set(path2, { path: path2, status: "added", symlink: false });
+  return [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+function readStagedEntries(repo, tree = null) {
+  const base = repo.headCommit ?? emptyTree(repo) ?? "";
+  const entries = readRaw(repo, tree !== null ? [base, tree] : ["--cached", ...repo.headCommit ? [] : [base]]);
+  if (entries === null) return null;
+  return entries.filter(hasContent).map((e) => ({
+    path: e.path,
+    status: e.oldMode === SYMLINK_MODE && e.newMode !== SYMLINK_MODE && e.status !== "deleted" ? "modified" : e.status,
+    headBlob: /^0+$/.test(e.oldBlob) ? null : e.oldBlob,
+    symlink: isSymlink(e)
+  }));
+}
+function readWorkingBlobIds(repo, paths) {
+  const ids = /* @__PURE__ */ new Map();
+  if (paths.length === 0) return ids;
+  const indexOut = line(safeGitBuffer(repo.toplevel, ["rev-parse", "--git-path", "index"]));
+  if (!indexOut) return null;
+  const realIndex = isAbsolute(indexOut) ? indexOut : join(repo.toplevel, indexOut);
+  const dir = mkdtempSync(join(tmpdir(), "rsct-sweep-index-"));
+  const tempIndex = join(dir, "index");
+  const noHooks = join(dir, "no-hooks");
+  try {
+    mkdirSync(noHooks, { recursive: true });
+    if (existsSync(realIndex)) {
+      copyFileSync(realIndex, tempIndex);
+      const stats = statSync(realIndex);
+      utimesSync(tempIndex, stats.atime, stats.mtime);
     }
-    return hints;
-  }
-  if (args2.sectionsTotal === 0) {
-    hints.push(
-      `${args2.category}.md exists but has no ## or ### sections \u2014 file may only contain a top-level intro. Consider capturing structured entries.`
+    const env = { GIT_INDEX_FILE: tempIndex };
+    const config2 = [
+      "-c",
+      `core.hooksPath=${noHooks}`,
+      "-c",
+      "core.splitIndex=false",
+      "-c",
+      "core.safecrlf=false",
+      "-c",
+      "core.fsmonitor=false"
+    ];
+    const addPaths = (batch) => safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "add", "-f", "--", ...batch], "", env) !== null;
+    const failed2 = [];
+    for (let i2 = 0; i2 < paths.length; i2 += ADD_BATCH) {
+      const batch = paths.slice(i2, i2 + ADD_BATCH);
+      if (addPaths(batch)) continue;
+      for (const path2 of batch) if (!addPaths([path2])) failed2.push(path2);
+    }
+    const listing = nulList(
+      safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "ls-files", "-s", "-z", "--", ...paths], "", env)
     );
-    return hints;
+    if (listing === null) return null;
+    for (const record2 of listing) {
+      const tab = record2.indexOf("	");
+      if (tab < 0) continue;
+      const [mode, blob, stage] = record2.slice(0, tab).split(" ");
+      const path2 = record2.slice(tab + 1);
+      if (stage === "0" && blob && mode && mode !== GITLINK_MODE) ids.set(path2, blob);
+    }
+    for (const path2 of paths) {
+      if (ids.has(path2)) continue;
+      if (failed2.includes(path2)) continue;
+      const fallback = line(safeGitBuffer(repo.toplevel, ["hash-object", `--path=${path2}`, "--", path2]));
+      if (fallback) ids.set(path2, fallback);
+    }
+    return ids;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  if (args2.query && args2.sectionsReturned === 0) {
-    hints.push(
-      `Query '${args2.query}' did not match any section in ${args2.category}.md (${args2.sectionsTotal} sections scanned). Try a broader term or call without query to see all sections.`
-    );
+}
+function verifyObject(repo, spec) {
+  const id = line(safeGitBuffer(repo.toplevel, ["rev-parse", "-q", "--verify", spec]));
+  return id && id.length > 0 ? id : null;
+}
+function readStagedBlobId(repo, path2, tree = null) {
+  return verifyObject(repo, tree !== null ? `${tree}:${path2}` : `:0:${path2}`);
+}
+function readCommitBlobId(repo, commit, path2) {
+  return verifyObject(repo, `${commit}:${path2}`);
+}
+function readBlob(repo, blobId) {
+  return safeGitBuffer(repo.toplevel, ["cat-file", "blob", blobId]);
+}
+function readHeadContent(repo, path2) {
+  if (!repo.headCommit) return null;
+  const id = readCommitBlobId(repo, repo.headCommit, path2);
+  return id ? readBlob(repo, id) : null;
+}
+function headEntry(repo, commit, path2) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", commit, "--", path2]));
+  if (listed2 === null) return null;
+  for (const record2 of listed2) {
+    const tab = record2.indexOf("	");
+    if (tab < 0 || record2.slice(tab + 1) !== path2) continue;
+    const [mode, type, id] = record2.slice(0, tab).split(" ");
+    return mode && type && id ? { mode, type, id } : null;
   }
-  return hints;
+  return void 0;
+}
+function readHeadFile(repo, path2) {
+  if (!repo.headCommit) return { state: "missing" };
+  const entry = headEntry(repo, repo.headCommit, path2);
+  if (entry === null) return { state: "failed" };
+  if (entry === void 0) {
+    const parts2 = path2.split("/");
+    for (let i2 = parts2.length - 1; i2 >= 1; i2--) {
+      const parent = headEntry(repo, repo.headCommit, parts2.slice(0, i2).join("/"));
+      if (parent === null || parent !== void 0 && parent.type !== "tree") return { state: "failed" };
+      if (parent !== void 0) return { state: "missing" };
+    }
+    return { state: "missing" };
+  }
+  if (entry.type !== "blob" || entry.mode !== "100644" && entry.mode !== "100755") return { state: "failed" };
+  const content = readBlob(repo, entry.id);
+  return content === null ? { state: "failed" } : { state: "present", text: content.toString("utf8") };
+}
+function readFilesUnderPrefix(repo) {
+  const scope = repo.prefix === "" ? [] : ["--", repo.prefix];
+  const listed2 = nulList(
+    safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--full-name", ...scope])
+  );
+  if (listed2 === null) return null;
+  return [...new Set(listed2.filter((path2) => path2.startsWith(repo.prefix)).map((path2) => path2.slice(repo.prefix.length)))];
+}
+var REGULAR_FILE_MODES = /* @__PURE__ */ new Set(["100644", "100755"]);
+var CAT_FILE_BATCH = 1e3;
+var CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024;
+var BLOB_READ_MAX_BUFFER = 64 * 1024 * 1024;
+var BLOB_TEXT_CACHE_MAX = 4e3;
+var blobTextCache = /* @__PURE__ */ new Map();
+var blobReadLimits = { batchCount: CAT_FILE_BATCH, batchBytes: CAT_FILE_BATCH_BYTES, maxBuffer: BLOB_READ_MAX_BUFFER };
+function readIndexEntries(repo) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]));
+  if (listed2 === null) return null;
+  const paths = /* @__PURE__ */ new Set();
+  const blobs = /* @__PURE__ */ new Map();
+  for (const entry of listed2) {
+    const tab = entry.indexOf("	");
+    if (tab < 0) continue;
+    const [mode, oid, stage] = entry.slice(0, tab).split(" ");
+    const path2 = entry.slice(tab + 1);
+    paths.add(path2);
+    if (stage === "0" && oid && mode && REGULAR_FILE_MODES.has(mode)) blobs.set(path2, oid);
+  }
+  return { paths, blobs };
+}
+function rememberBlobText(oid, text2) {
+  while (blobTextCache.size >= BLOB_TEXT_CACHE_MAX) {
+    const oldest = blobTextCache.keys().next().value;
+    if (oldest === void 0) break;
+    blobTextCache.delete(oldest);
+  }
+  blobTextCache.set(oid, text2);
+}
+function readBlobSizes(repo, oids) {
+  const listed2 = text(safeGitBuffer(repo.toplevel, ["cat-file", "--batch-check"], `${oids.join("\n")}
+`));
+  if (listed2 === null) return null;
+  const sizes = /* @__PURE__ */ new Map();
+  for (const entry of listed2.split("\n")) {
+    const [oid, type, size] = entry.split(" ");
+    if (oid && type === "blob" && size !== void 0 && Number.isInteger(Number(size))) sizes.set(oid, Number(size));
+  }
+  return sizes;
+}
+function blobBatches(oids, sizes) {
+  const batches = [];
+  let current = [];
+  let bytes = 0;
+  for (const oid of oids) {
+    const size = sizes.get(oid);
+    if (size === void 0) continue;
+    if (current.length > 0 && (current.length >= blobReadLimits.batchCount || bytes + size > blobReadLimits.batchBytes)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(oid);
+    bytes += size;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+function readBlobTexts(repo, oids) {
+  const texts = /* @__PURE__ */ new Map();
+  const failed2 = /* @__PURE__ */ new Set();
+  const missing = [];
+  for (const oid of new Set(oids)) {
+    const cached2 = blobTextCache.get(oid);
+    if (cached2 === void 0) missing.push(oid);
+    else texts.set(oid, cached2);
+  }
+  if (missing.length === 0) return { texts, failed: failed2 };
+  const sizes = readBlobSizes(repo, missing);
+  if (sizes === null) return null;
+  for (const chunk of blobBatches(missing, sizes)) {
+    const batch = safeGitBuffer(repo.toplevel, ["cat-file", "--batch"], `${chunk.join("\n")}
+`, void 0, blobReadLimits.maxBuffer);
+    if (batch === null) {
+      if (chunk.length > 1) return null;
+      for (const oid of chunk) failed2.add(oid);
+      continue;
+    }
+    let offset = 0;
+    for (const oid of chunk) {
+      const newline = batch.indexOf(10, offset);
+      if (newline < 0) return null;
+      const header = batch.subarray(offset, newline).toString("utf8").split(" ");
+      offset = newline + 1;
+      if (header[1] === "missing" || header.length < 3) continue;
+      const size = Number(header[2]);
+      if (!Number.isInteger(size) || offset + size > batch.length) return null;
+      const content = batch.subarray(offset, offset + size).toString("utf8");
+      texts.set(oid, content);
+      rememberBlobText(oid, content);
+      offset += size + 1;
+    }
+  }
+  return { texts, failed: failed2 };
+}
+function readUntrackedPaths(repo) {
+  return nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"]));
+}
+function readSkipWorktreePaths(repo) {
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-v", "-z", "--full-name"]));
+  if (listed2 === null) return null;
+  const paths = /* @__PURE__ */ new Set();
+  for (const entry of listed2) {
+    const tag = entry.slice(0, 1);
+    if (tag === "S" || tag !== "" && tag === tag.toLowerCase() && tag !== tag.toUpperCase()) paths.add(entry.slice(2));
+  }
+  return paths;
+}
+function readWorktreeChangedPaths(repo) {
+  return nulList(safeGitBuffer(repo.toplevel, ["diff", "--name-only", "--no-renames", "-z"]));
+}
+function readIndexFingerprint(repo) {
+  const listed2 = safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]);
+  return listed2 === null ? null : createHash("sha256").update(listed2).digest("hex");
+}
+function readKnownPaths(repo) {
+  const index = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-z", "--full-name"]));
+  if (index === null) return null;
+  const known = new Set(index);
+  if (repo.headCommit) {
+    const tree = nulList(safeGitBuffer(repo.toplevel, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", repo.headCommit]));
+    if (tree === null) return null;
+    for (const p of tree) known.add(p);
+  }
+  return known;
+}
+function readCommitPaths(repo, before, after) {
+  const base = before ?? emptyTree(repo);
+  if (!base) return null;
+  const entries = readRaw(repo, [base, after]);
+  if (entries === null) return null;
+  return entries.filter((e) => e.status !== "deleted" && hasContent(e)).map((e) => ({ path: e.path, symlink: isSymlink(e) }));
+}
+function looksLikeLinkTarget(bytes) {
+  return bytes.length > 0 && bytes.length <= 4096 && !bytes.includes(10) && !bytes.includes(0);
+}
+function hasGitFilter(repo, path2) {
+  const out2 = nulList(safeGitBuffer(repo.toplevel, ["check-attr", "-z", "filter", "--", path2]));
+  if (out2 === null) return null;
+  const value = out2[2];
+  return value !== void 0 && value !== "unspecified" && value !== "unset";
 }
 
-// src/tools/get-environments.ts
+// src/lib/decision-scope.ts
 init_esm_shims();
 
-// src/lib/env-files.ts
+// src/lib/anti-decisions.ts
+init_esm_shims();
+function readAntiDecisions(projectRoot) {
+  const path2 = join(
+    projectRoot,
+    "documentation",
+    "knowledge",
+    "anti-decisions.md"
+  );
+  if (!existsSync(path2)) {
+    return { exists: false, path: null, entries: [], has_entry_ids: false, read_error: false };
+  }
+  let body2;
+  try {
+    body2 = readFileSync(path2, "utf8");
+  } catch {
+    return { exists: true, path: path2, entries: [], has_entry_ids: false, read_error: true };
+  }
+  const { entries, residue } = scanAntiDecisions(body2);
+  return {
+    exists: true,
+    path: path2,
+    entries,
+    has_entry_ids: AD_ID_TOKEN.test(residue),
+    read_error: false
+  };
+}
+var AD_ID_TOKEN = /\bAD-\d+\b/;
+var AD_HEADING = new RegExp(
+  String.raw`^#{2,3}\s+(AD-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
+);
+function extractAntiDecisions(body2) {
+  return scanAntiDecisions(body2).entries;
+}
+function scanAntiDecisions(body2) {
+  const lines2 = body2.split("\n");
+  const out2 = [];
+  const kept = [];
+  let current = null;
+  const flush = () => {
+    if (!current) return;
+    if (isShippedPlaceholder(current.heading, current.bodyLines)) kept.length = current.start;
+    else out2.push(buildEntry2(current.id, current.title, current.bodyLines.join("\n")));
+    current = null;
+  };
+  for (const line2 of lines2) {
+    const adMatch = line2.match(AD_HEADING);
+    if (adMatch?.[1] && adMatch[2]) {
+      flush();
+      current = { id: adMatch[1], title: adMatch[2].trim(), heading: line2, start: kept.length, bodyLines: [] };
+      kept.push(line2);
+      continue;
+    }
+    if (current && (/^##\s/.test(line2) || /^###\s/.test(line2) || /^---\s*$/.test(line2))) {
+      flush();
+      kept.push(line2);
+      continue;
+    }
+    if (current) current.bodyLines.push(line2);
+    kept.push(line2);
+  }
+  flush();
+  return { entries: out2, residue: withoutShippedIdLines(kept) };
+}
+function buildEntry2(id, title, section) {
+  const entry = {
+    id,
+    title,
+    excerpt: extractExcerpt2(section)
+  };
+  const related = extractRelated(section);
+  if (related.length > 0) entry.related = related;
+  const captured = extractCaptured(section);
+  if (captured) entry.captured = captured;
+  const appliesTo = collectAppliesTo(section);
+  if (appliesTo) entry.applies_to = appliesTo;
+  return entry;
+}
+function extractExcerpt2(section) {
+  return makeExcerpt(section, {
+    maxLines: 4,
+    maxChars: 320,
+    skipLine: (line2) => line2.startsWith("<TODO:") || line2.startsWith("```") || isBindingAppliesToLine(line2)
+  });
+}
+function extractRelated(section) {
+  const match = section.match(/^\s*-\s*\*\*Related:?\*\*:?\s*(.+?)\s*$/im);
+  if (!match?.[1]) return [];
+  return match[1].split(/[,;]/).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function extractCaptured(section) {
+  const match = section.match(/^\s*-\s*\*\*Captured:?\*\*:?\s*(\d{4}-\d{2}-\d{2})/im);
+  return match?.[1];
+}
+
+// src/lib/gate-exceptions.ts
 init_esm_shims();
 
 // src/lib/secrets.ts
@@ -29673,7 +29988,856 @@ function createDiffScanner(extraPatterns = []) {
   return { line: line2, findings };
 }
 
+// src/lib/gate-exceptions.ts
+var DIALOG_LIST_SHOWN = 10;
+function writeListReport(projectRoot, tool, kind, title, entries) {
+  const content = [`# ${title}`, "", ...entries.map((e) => `- ${e}`), ""].join("\n");
+  const rel = join(".rsct", "reports", `${tool}-${kind}-${createHash("sha256").update(content).digest("hex").slice(0, 16)}.md`);
+  try {
+    mkdirSync(join(projectRoot, ".rsct", "reports"), { recursive: true });
+    writeFileSync(join(projectRoot, rel), content, "utf8");
+    return rel.replace(/\\/g, "/");
+  } catch {
+    return null;
+  }
+}
+function quoted(text2) {
+  return `"${specLabel(text2)}"`;
+}
+function inlineList(items, limit) {
+  const shown2 = items.slice(0, limit).map(quoted).join(", ");
+  return items.length > limit ? `${shown2} \u2026 and ${items.length - limit} more` : shown2;
+}
+function shownLimit(report) {
+  return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN;
+}
+function findingRule(finding) {
+  return finding.reason === "extra-pattern" ? `extra pattern ${finding.pattern_id ?? "?"}` : finding.reason;
+}
+function findingLabel(finding) {
+  const commit = finding.commit !== void 0 ? ` (commit ${finding.commit.slice(0, 12)})` : "";
+  return `"${finding.file}":${finding.line_number ?? "?"} \u2014 ${findingRule(finding)}${commit}`;
+}
+function findingIdentity(finding) {
+  return JSON.stringify([finding.file, findingRule(finding), findingLineKey(finding) ?? finding.excerpt]);
+}
+function protectedBranchLine(branchLabel, doing) {
+  return `\u26A0 '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: ${doing} needs your exception.`;
+}
+function secretFindingLines(projectRoot, tool, findings) {
+  if (findings.length === 0) return [];
+  const lines2 = [`\u26A0 The secrets scan found ${findings.length} line(s) that look like a credential (file:line \u2014 rule; values are never shown):`];
+  const report = findings.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "secrets", `Secret scan findings for one ${tool} approval`, findings.map((f) => `${findingLabel(f)} \u2014 ${f.excerpt}`)) : null;
+  lines2.push(dialogList(findings.map(findingLabel), shownLimit(report)));
+  if (report !== null) lines2.push(`Full list: ${report}`);
+  return lines2;
+}
+function findingActionLines(projectRoot, tool, actions, titleOf) {
+  if (actions.length === 0) return { facts: [], agent: [] };
+  const full = (a, i2) => {
+    const title = titleOf(a.finding_id);
+    return `#${i2 + 1} ${a.finding_id} [${a.action}]${title ? ` ${title}` : ""}${a.note ? ` \u2014 note: ${a.note}` : ""}`;
+  };
+  const report = actions.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "findings", `Findings and the agent's actions for one ${tool} approval`, actions.map(full)) : null;
+  const shown2 = report === null ? actions : actions.slice(0, DIALOG_LIST_SHOWN);
+  const facts = [`Findings and the action the agent proposes for each (${actions.length}):`, ...shown2.map((a, i2) => `#${i2 + 1} [${a.action}]`)];
+  if (shown2.length < actions.length) facts.push(`\u2026 and ${actions.length - shown2.length} more \u2014 full list: ${report}`);
+  const agent = shown2.map((a, i2) => {
+    const title = titleOf(a.finding_id);
+    return `#${i2 + 1} ${specLabel(a.finding_id, 60)}${title ? ` \u2014 ${specLabel(title, 80)}` : ""}${a.note ? ` \u2014 note: ${specLabel(a.note, 80)}` : ""}`;
+  });
+  return { facts, agent: ["What the agent wrote for each finding:", ...agent] };
+}
+function agentReasonLine(what, override) {
+  return override === void 0 ? [] : [`Agent's reason for ${what}: ${quoted(override.reason)}`];
+}
+
+// src/lib/reverse-dep-walk.ts
+init_esm_shims();
+var DEFAULT_LANG_GLOBS = [
+  "**/*.ts",
+  "**/*.tsx",
+  "**/*.js",
+  "**/*.jsx",
+  "**/*.mjs",
+  "**/*.cjs",
+  "**/*.mts",
+  "**/*.cts"
+];
+var DEFAULT_EXCLUDE_GLOBS = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.git/**",
+  "**/coverage/**"
+];
+var DEFAULT_MAX_DEPTH = 2;
+var DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf("*") + 1)).join(", ");
+var JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/;
+var RESOLVE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts"
+];
+var INDEX_RESOLUTIONS = [
+  "/index.ts",
+  "/index.tsx",
+  "/index.js",
+  "/index.jsx",
+  "/index.mjs",
+  "/index.cjs",
+  "/index.mts",
+  "/index.cts"
+];
+var IMPORT_PATTERNS = [
+  /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
+  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g
+];
+var DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/;
+var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
+var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
+function relPosix(projectRoot, abs) {
+  return toPosix(relative(projectRoot, abs));
+}
+function seedIsCoverable(rel, langGlobs = DEFAULT_LANG_GLOBS) {
+  if (isAbsolute(rel) || rel.startsWith("../")) return false;
+  return matchesAnyGlob(rel, langGlobs).matched;
+}
+function walkFiles(root, langGlobs, excludeGlobs) {
+  const results = [];
+  const recurse = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      const rel = relPosix(root, full);
+      if (entry.isDirectory()) {
+        if (matchesAnyGlob(`${rel}/probe`, excludeGlobs).matched) continue;
+        recurse(full);
+      } else if (entry.isFile()) {
+        if (matchesAnyGlob(rel, excludeGlobs).matched) continue;
+        if (matchesAnyGlob(rel, langGlobs).matched) results.push(full);
+      }
+    }
+  };
+  recurse(root);
+  return results;
+}
+function extractImports(content) {
+  const imports = /* @__PURE__ */ new Set();
+  for (const re of IMPORT_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      const spec = m[1];
+      if (spec) imports.add(spec);
+    }
+  }
+  return [...imports];
+}
+var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
+  [".js", [".ts", ".tsx"]],
+  [".mjs", [".mts"]],
+  [".cjs", [".cts"]]
+]);
+function hasExactEntry(path2, entries) {
+  const dir = dirname(path2);
+  let names = entries.get(dir);
+  if (!names) {
+    try {
+      names = new Set(readdirSync(dir));
+    } catch {
+      names = /* @__PURE__ */ new Set();
+    }
+    entries.set(dir, names);
+  }
+  return names.has(basename(path2));
+}
+function hasExactPath(projectRoot, candidate, entries) {
+  const rel = relPosix(projectRoot, candidate);
+  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
+  let walked = projectRoot;
+  for (const segment of rel.split("/")) {
+    walked = join(walked, segment);
+    if (!hasExactEntry(walked, entries)) return false;
+  }
+  return true;
+}
+function diskProbe(projectRoot, entries) {
+  const stat = (abs) => {
+    try {
+      return statSync(abs, { throwIfNoEntry: false }) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    exists: (abs) => existsSync(abs),
+    isFile: (abs) => stat(abs)?.isFile() ?? false,
+    isDirectory: (abs) => stat(abs)?.isDirectory() ?? false,
+    hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries)
+  };
+}
+function resolveNodeNextSource(target, probe) {
+  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
+  if (!sourceExtensions) return null;
+  const stem = target.slice(0, target.lastIndexOf("."));
+  for (const ext of sourceExtensions) {
+    const candidate = stem + ext;
+    if (probe.hasExactPath(candidate)) return candidate;
+  }
+  return null;
+}
+function resolveImport(projectRoot, importerAbs, spec, entries, probe = diskProbe(projectRoot, entries)) {
+  if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
+  const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec);
+  if (!directoryOnly && probe.isFile(target)) return target;
+  for (const ext of directoryOnly ? [] : RESOLVE_EXTENSIONS) {
+    const candidate = target + ext;
+    if (probe.exists(candidate)) return candidate;
+  }
+  if (probe.isDirectory(target)) {
+    for (const idx of INDEX_RESOLUTIONS) {
+      const candidate = target + idx;
+      if (probe.exists(candidate)) return candidate;
+    }
+  }
+  return resolveNodeNextSource(target, probe);
+}
+function resolveImportCandidates(projectRoot, importerAbs, spec, entries, probe) {
+  const primary = resolveImport(projectRoot, importerAbs, spec, entries, probe);
+  if (!primary) return [];
+  const source = resolveNodeNextSource(primary, probe);
+  return source && source !== primary ? [primary, source] : [primary];
+}
+function walkReverseDeps(input) {
+  const projectRoot = input.projectRoot;
+  const langGlobs = input.langGlobs ?? DEFAULT_LANG_GLOBS;
+  const excludeGlobs = input.excludeGlobs ?? DEFAULT_EXCLUDE_GLOBS;
+  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const declared = input.seedPaths.map((p) => {
+    const abs = isAbsolute(p) ? p : resolve(projectRoot, p);
+    return relPosix(projectRoot, abs);
+  });
+  const hints = [];
+  const stats = {
+    files_scanned: 0,
+    files_parsed: 0,
+    parse_errors: 0,
+    cycles_skipped: 0,
+    unresolved_js_specifiers: 0
+  };
+  const notRun = () => ({
+    declared,
+    discovered: [],
+    stats,
+    hints,
+    coverage: "not-run",
+    uncovered_seeds: []
+  });
+  if (declared.length === 0) {
+    hints.push("No seed paths provided \u2014 reverse-dep walk skipped.");
+    return notRun();
+  }
+  if (!existsSync(projectRoot)) {
+    hints.push(
+      `projectRoot '${projectRoot}' does not exist \u2014 reverse-dep walk skipped.`
+    );
+    return notRun();
+  }
+  let rootIsDirectory = false;
+  try {
+    rootIsDirectory = statSync(projectRoot).isDirectory();
+  } catch {
+    rootIsDirectory = false;
+  }
+  if (!rootIsDirectory) {
+    hints.push(
+      `projectRoot '${projectRoot}' is not a directory \u2014 reverse-dep walk skipped.`
+    );
+    return notRun();
+  }
+  if (maxDepth < 1) {
+    hints.push(
+      `maxDepth=${maxDepth} < 1 \u2014 reverse-dep walk has no depth budget; returning declared only.`
+    );
+    return notRun();
+  }
+  const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
+  const directoryEntries = /* @__PURE__ */ new Map();
+  stats.files_scanned = candidates.length;
+  const reverseDeps = /* @__PURE__ */ new Map();
+  for (const candidateAbs of candidates) {
+    let content;
+    try {
+      content = readFileSync(candidateAbs, "utf8");
+      stats.files_parsed++;
+    } catch {
+      stats.parse_errors++;
+      continue;
+    }
+    const candidateRel = relPosix(projectRoot, candidateAbs);
+    const imports = extractImports(content);
+    for (const spec of imports) {
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
+      if (!resolvedAbs) {
+        if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
+          stats.unresolved_js_specifiers++;
+        }
+        continue;
+      }
+      const resolvedRel = relPosix(projectRoot, resolvedAbs);
+      if (resolvedRel === candidateRel) continue;
+      let set = reverseDeps.get(resolvedRel);
+      if (!set) {
+        set = /* @__PURE__ */ new Set();
+        reverseDeps.set(resolvedRel, set);
+      }
+      set.add(candidateRel);
+    }
+  }
+  const seen = new Set(declared);
+  const discoveredMap = /* @__PURE__ */ new Map();
+  const queue = declared.map((d) => ({ file: d, depth: 0, via: [d] }));
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item.depth >= maxDepth) continue;
+    const importers = reverseDeps.get(item.file);
+    if (!importers) continue;
+    for (const importer of importers) {
+      if (seen.has(importer)) {
+        if (declared.includes(importer)) stats.cycles_skipped++;
+        continue;
+      }
+      seen.add(importer);
+      const nextDepth = item.depth + 1;
+      const nextVia = [...item.via, importer];
+      discoveredMap.set(importer, {
+        file: importer,
+        via_paths: nextVia,
+        depth: nextDepth
+      });
+      if (nextDepth < maxDepth) {
+        queue.push({ file: importer, depth: nextDepth, via: nextVia });
+      }
+    }
+  }
+  const discovered = [...discoveredMap.values()].sort((a, b) => {
+    if (a.depth !== b.depth) return a.depth - b.depth;
+    return a.file.localeCompare(b.file);
+  });
+  const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs));
+  const coverage = uncoveredSeeds.length === 0 ? "analyzed" : uncoveredSeeds.length === declared.length ? "uncovered" : "partial";
+  if (discovered.length === 0 && stats.files_scanned > 0) {
+    if (coverage === "uncovered") {
+      hints.push(
+        `${ZERO_IMPORTER_HINT_PREFIX}: none of the ${declared.length} declared path(s) is a file this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root. The importer set is UNAVAILABLE, not empty.`
+      );
+    } else if (stats.unresolved_js_specifiers === 0) {
+      hints.push(
+        `${ZERO_IMPORTER_HINT_PREFIX} across ${stats.files_scanned} scanned files. If you expected importers, check that seed paths use project-relative posix form (e.g., 'src/lib/foo.ts') and that the project does not rely on tsconfig path aliases (not resolved in v1).`
+      );
+    }
+  }
+  if (stats.unresolved_js_specifiers > 0) {
+    hints.push(
+      `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE \u2014 treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`
+    );
+  }
+  if (stats.parse_errors > 0) {
+    hints.push(
+      `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`
+    );
+  }
+  if (stats.cycles_skipped > 0) {
+    hints.push(
+      `${stats.cycles_skipped} cycle path(s) skipped where a seed is also an importer of another seed.`
+    );
+  }
+  return {
+    declared,
+    discovered,
+    stats,
+    hints,
+    coverage,
+    uncovered_seeds: uncoveredSeeds
+  };
+}
+function listSeeds(seeds) {
+  const overflow = seeds.length > 10 ? `, and ${seeds.length - 10} more` : "";
+  return `${seeds.slice(0, 10).join(", ")}${overflow}`;
+}
+function coverageHints(result) {
+  if (result.coverage === "not-run") return [];
+  const lines2 = [];
+  const uncovered = result.uncovered_seeds;
+  if (uncovered.length > 0) {
+    const reached = new Set(result.discovered.map((d) => d.via_paths[0]));
+    const found = uncovered.filter((seed) => reached.has(seed));
+    const blind = uncovered.filter((seed) => !reached.has(seed));
+    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 && found.length === 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
+    const foundText = found.length > 0 ? ` Importers of ${listSeeds(found)} were still found among the files it reads and are listed: a lower bound, since importers in other file types are not read.` : "";
+    const blindText = blind.length === 0 ? "" : found.length === 0 ? " For those paths the importer set is UNAVAILABLE, not empty." : ` For ${listSeeds(blind)} the importer set is UNAVAILABLE, not empty.`;
+    lines2.push(
+      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${listSeeds(uncovered)}.${foundText}${blindText}${whole}`
+    );
+  }
+  if (result.stats.files_scanned === 0) {
+    lines2.push(
+      `${COVERAGE_HINT_PREFIX} 0 files matched the walk's file-type list (${DEFAULT_LANG_SUFFIXES}) under the project root after the default exclusions (node_modules, dist, build, coverage). No import graph was built, so an empty importer set here means UNKNOWN, not clean. Candidate causes: the project is written in another language; its sources sit under an excluded directory; project_root points somewhere unexpected.`
+    );
+  }
+  return lines2;
+}
+
+// src/lib/decision-scope.ts
+var DECISIONS_FILE = "documentation/decisions.md";
+var ANTI_DECISIONS_FILE = "documentation/knowledge/anti-decisions.md";
+var NO_GIT_EXCLUDES = ["**/node_modules/**", "**/.git/**"];
+var DETAIL_LINES_SHOWN = 20;
+var ISSUES_SHOWN = 10;
+var LABEL_LIMIT = 40;
+function decisionSide(parsed) {
+  return [...parsed.premises, ...parsed.adrs].map((entry) => ({
+    key: `${DECISIONS_FILE}\0${entry.id}`,
+    label: entry.kind === "premise" ? `premise ${entry.id}` : entry.id,
+    title: entry.title,
+    file: DECISIONS_FILE,
+    appliesTo: entry.applies_to
+  }));
+}
+function antiSide(entries) {
+  return entries.map((entry) => ({
+    key: `${ANTI_DECISIONS_FILE}\0${entry.id}`,
+    label: entry.id,
+    title: entry.title,
+    file: ANTI_DECISIONS_FILE,
+    appliesTo: entry.applies_to
+  }));
+}
+function globsByKey(side) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const entry of side) {
+    const set = out2.get(entry.key) ?? /* @__PURE__ */ new Set();
+    for (const glob of entry.appliesTo?.globs ?? []) set.add(glob);
+    out2.set(entry.key, set);
+  }
+  return out2;
+}
+function lineIssues(entry) {
+  const appliesTo = entry.appliesTo;
+  if (appliesTo === void 0) return [];
+  return [
+    ...appliesTo.rejected.map((rejected) => `${entry.label}: ${specLabel(rejected, 120)} is refused`),
+    ...appliesTo.unbound.map((value) => `${entry.label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
+    ...appliesTo.unread.map((line2) => `${entry.label}: "${specLabel(line2, 80)}" is not read: write **Applies to**: <glob>, <glob>`)
+  ];
+}
+function merge2(working, head, side, headNotes, workingNotes) {
+  const headKeys = new Set(head.map((entry) => entry.key));
+  const workingGlobs = globsByKey(working);
+  const headGlobs = globsByKey(head);
+  const byKey = /* @__PURE__ */ new Map();
+  const issues = /* @__PURE__ */ new Set();
+  for (const entry of [...working, ...head]) {
+    for (const issue2 of lineIssues(entry)) issues.add(issue2);
+    const globs = entry.appliesTo?.globs ?? [];
+    if (globs.length === 0) continue;
+    const known = byKey.get(entry.key);
+    if (known !== void 0) {
+      for (const glob of globs) if (!known.globs.includes(glob)) known.globs.push(glob);
+      continue;
+    }
+    const atHead = [...headGlobs.get(entry.key) ?? []];
+    byKey.set(entry.key, {
+      key: entry.key,
+      label: entry.label,
+      title: entry.title,
+      file: entry.file,
+      globs: [...globs],
+      added_since_head: side === "read" && !headKeys.has(entry.key),
+      changed_since_head: side === "read" && !workingNotes.includes(entry.file) && atHead.some((glob) => !(workingGlobs.get(entry.key)?.has(glob) ?? false))
+    });
+  }
+  const entries = [...byKey.values()];
+  const marked = entries.filter((entry) => entry.added_since_head || entry.changed_since_head);
+  const plain = entries.filter((entry) => !entry.added_since_head && !entry.changed_since_head);
+  return { entries: [...marked, ...plain], line_issues: [...issues], head: side, head_notes: headNotes, working_notes: workingNotes };
+}
+function boundDecisionsInFile(snapshot) {
+  return merge2(decisionSide(snapshot), [], "not_read", [], []);
+}
+function readBoundCorpus(projectRoot, options = {}) {
+  const decisions = options.decisions ?? readDecisions(projectRoot);
+  const antiDecisions = options.antiDecisions ?? readAntiDecisions(projectRoot);
+  const working = [...decisionSide(decisions), ...antiSide(antiDecisions.entries)];
+  const workingNotes = [
+    ...decisions.read_error ? [DECISIONS_FILE] : [],
+    ...antiDecisions.read_error ? [ANTI_DECISIONS_FILE] : []
+  ];
+  const repo = options.repo !== void 0 ? options.repo : openSweepRepo(projectRoot);
+  if (repo === null) return merge2(working, [], "no_git", [], workingNotes);
+  if (repo.headCommit === null) return merge2(working, [], "no_commit", [], workingNotes);
+  const head = [];
+  const notes = [];
+  const decisionsAtHead = readHeadFile(repo, `${repo.prefix}${DECISIONS_FILE}`);
+  if (decisionsAtHead.state === "present") head.push(...decisionSide(extractDecisions(decisionsAtHead.text)));
+  if (decisionsAtHead.state === "failed") notes.push(DECISIONS_FILE);
+  const antiAtHead = readHeadFile(repo, `${repo.prefix}${ANTI_DECISIONS_FILE}`);
+  if (antiAtHead.state === "present") head.push(...antiSide(extractAntiDecisions(antiAtHead.text)));
+  if (antiAtHead.state === "failed") notes.push(ANTI_DECISIONS_FILE);
+  return merge2(working, head, notes.length > 0 ? "unreadable" : "read", notes, workingNotes);
+}
+function listProjectFiles(projectRoot, repo) {
+  if (repo !== null) return readFilesUnderPrefix(repo);
+  return walkFiles(projectRoot, ["**"], NO_GIT_EXCLUDES).map((abs) => toPosix(relative(projectRoot, abs)));
+}
+function declaredCandidates(declared, files) {
+  const out2 = /* @__PURE__ */ new Set();
+  for (const raw of declared) {
+    let path2 = toPosix(raw).replace(/\/+$/, "");
+    while (path2.startsWith("./")) path2 = path2.slice(2);
+    if (path2 === ".." || path2.startsWith("../") || path2.startsWith("/") || /^[A-Za-z]:/.test(path2)) continue;
+    if (path2 === "" || path2 === ".") {
+      for (const file of files) out2.add(file);
+      continue;
+    }
+    out2.add(path2);
+    out2.add(`${path2}/`);
+    const glob = /[*?]/.test(path2) ? globToRegex(path2) : null;
+    for (const file of files) {
+      if (file === path2 || file.startsWith(`${path2}/`) || glob !== null && glob.test(file)) out2.add(file);
+    }
+  }
+  return [...out2];
+}
+function decisionsCovering(entries, paths) {
+  const hits2 = [];
+  for (const entry of entries) {
+    const matchers = entry.globs.map((glob) => ({ glob, matcher: globToRegex(glob) }));
+    for (const path2 of paths) {
+      const match = matchers.find((m) => m.matcher.test(path2));
+      if (match !== void 0) {
+        hits2.push({ entry, path: path2, glob: match.glob });
+        break;
+      }
+    }
+  }
+  return hits2;
+}
+function unmatchedGlobs(corpus, files) {
+  const lines2 = [];
+  for (const entry of corpus.entries) {
+    for (const glob of entry.globs) {
+      const matcher = globToRegex(glob);
+      if (files.some((file) => matcher.test(file))) continue;
+      const folder2 = glob.replace(/\/+$/, "");
+      const names = !/[*?]/.test(glob) && files.some((file) => file.startsWith(`${folder2}/`));
+      lines2.push(`${entry.label}: ${specLabel(glob, 120)} matches no file${names ? ` (it names a folder: ${specLabel(folder2, 120)}/** covers the files in it)` : ""}`);
+    }
+  }
+  return lines2;
+}
+function appliesToHints(corpus, files) {
+  const hints = [];
+  const lines2 = [...files === null ? [] : unmatchedGlobs(corpus, files), ...corpus.line_issues];
+  if (lines2.length > 0) {
+    const shown2 = lines2.slice(0, ISSUES_SHOWN).join("; ");
+    const more = lines2.length > ISSUES_SHOWN ? ` \u2026 and ${lines2.length - ISSUES_SHOWN} more` : "";
+    hints.push(
+      `"Applies to" problems (${lines2.length}): ${shown2}${more}. A refused glob, or one that matches no file, is not used; an entry left with no usable glob is listed for no change by path, and still applies everywhere, like a decision without the line.`
+    );
+  }
+  if (files === null && corpus.entries.length > 0) {
+    hints.push('The project file list could not be read: the "Applies to" globs were not checked against files, and declared folders were not expanded.');
+  }
+  if (corpus.head === "unreadable") {
+    hints.push(`\u26A0 ${corpus.head_notes.join(" and ")} could not be read at HEAD: the decisions bound to paths come from the working tree only.`);
+  }
+  return hints;
+}
+function shortLabel(hit) {
+  return specLabel(hit.entry.label, LABEL_LIMIT);
+}
+function markedLabel(hit) {
+  const mark = hit.entry.added_since_head ? " (added since HEAD)" : hit.entry.changed_since_head ? " (line removed or changed since HEAD)" : "";
+  return `${shortLabel(hit)}${mark}`;
+}
+function hitLabels(hits2) {
+  const shown2 = hits2.slice(0, DIALOG_LIST_SHOWN).map(shortLabel).join(", ");
+  return hits2.length > DIALOG_LIST_SHOWN ? `${shown2} \u2026 and ${hits2.length - DIALOG_LIST_SHOWN} more` : shown2;
+}
+function hitDetailLines(hits2) {
+  const lines2 = hits2.slice(0, DETAIL_LINES_SHOWN).map((hit) => `- ${markedLabel(hit)} \u2014 ${specLabel(hit.entry.title, 120)}: ${specLabel(hit.path, 200)} matches ${specLabel(hit.glob, 120)}`);
+  if (hits2.length > DETAIL_LINES_SHOWN) {
+    lines2.push(`... and ${hits2.length - DETAIL_LINES_SHOWN} more; every id: ${hits2.map(shortLabel).join(", ")}`);
+  }
+  return lines2.join("\n");
+}
+function declaredDecisionCoverage(projectRoot, declared, working) {
+  const repo = openSweepRepo(projectRoot);
+  const corpus = readBoundCorpus(projectRoot, { repo, ...working });
+  if (corpus.entries.length === 0 && corpus.line_issues.length === 0 && corpus.head !== "unreadable") return { hits: [], hints: [] };
+  const files = listProjectFiles(projectRoot, repo);
+  const hits2 = decisionsCovering(corpus.entries, declaredCandidates(declared, files ?? []));
+  return { hits: hits2, hints: appliesToHints(corpus, files) };
+}
+function reviewDecisionCoverage(projectRoot, repo) {
+  const corpus = readBoundCorpus(projectRoot, { repo });
+  if (corpus.entries.length === 0 && corpus.head !== "unreadable") return null;
+  const facts = [];
+  if (corpus.head === "unreadable") {
+    facts.push(`\u26A0 ${corpus.head_notes.join(" and ")} could not be read at HEAD: the decisions below come from the working tree only, and none is marked as added since HEAD.`);
+  }
+  if (corpus.working_notes.length > 0) {
+    facts.push(`\u26A0 ${corpus.working_notes.join(" and ")} could not be read in the working tree: the decisions below come from HEAD only.`);
+  }
+  const touched = readTouchedPaths(repo);
+  if (touched === null) {
+    facts.push('\u26A0 The changed files could not be read, so the decisions whose "Applies to" line covers them are not listed.');
+    return { ids: null, added_since_head: [], changed_since_head: [], report: null, facts, agent: [] };
+  }
+  const paths = touched.filter((t) => t.path.startsWith(repo.prefix)).map((t) => t.path.slice(repo.prefix.length));
+  const hits2 = decisionsCovering(corpus.entries, paths);
+  const ids = hits2.map((hit) => hit.entry.label);
+  const added = hits2.filter((hit) => hit.entry.added_since_head).map((hit) => hit.entry.label);
+  const changed = hits2.filter((hit) => hit.entry.changed_since_head).map((hit) => hit.entry.label);
+  if (hits2.length === 0) return { ids, added_since_head: added, changed_since_head: changed, report: null, facts, agent: [] };
+  const report = hits2.length > DIALOG_LIST_SHOWN ? writeListReport(
+    projectRoot,
+    "review",
+    "decisions",
+    'Decisions whose "Applies to" line covers the changed files',
+    hits2.map((hit) => `${markedLabel(hit)} \u2014 ${hit.entry.title} \u2014 ${hit.path} matches ${hit.glob}`)
+  ) : null;
+  const shown2 = hits2.slice(0, DIALOG_LIST_SHOWN);
+  facts.push(`Decisions whose "Applies to" line covers the changed files (${hits2.length}): ${shown2.map(markedLabel).join(", ")}`);
+  if (shown2.length < hits2.length) facts.push(`\u2026 and ${hits2.length - shown2.length} more \u2014 full list: ${report ?? "the report could not be written"}`);
+  if (corpus.head === "no_commit") facts.push("No commit yet: nothing can be marked as added since HEAD.");
+  const agent = ["Titles of those decisions, from the decisions files:", ...shown2.map((hit) => `${shortLabel(hit)} \u2014 ${specLabel(hit.entry.title, 80)}`)];
+  return { ids, added_since_head: added, changed_since_head: changed, report, facts, agent };
+}
+
+// src/tools/get-decisions.ts
+var filterSchema = external_exports.object({
+  kind: external_exports.enum(["premise", "adr"]).optional(),
+  tag: external_exports.string().min(1).optional(),
+  status: external_exports.enum(["active", "superseded", "deprecated"]).optional()
+}).strict();
+var getDecisionsInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
+  filter: filterSchema.optional()
+}).strict();
+var getDecisionsTool = {
+  name: "rsct_get_decisions",
+  description: 'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused, the lines that bind nothing, the spellings not read, and the binding lines, whose words still count in the premise check; hints name the globs that match no file and the other problems. The line only adds visibility: every decision still applies everywhere.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
+      },
+      filter: {
+        type: "object",
+        description: "Optional filter \u2014 all fields combined as AND.",
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["premise", "adr"],
+            description: "Restrict to firm premises (#N) or durable ADRs."
+          },
+          tag: {
+            type: "string",
+            description: "Match entries whose **Tags** line includes this exact tag (case-sensitive)."
+          },
+          status: {
+            type: "string",
+            enum: ["active", "superseded", "deprecated"],
+            description: "Match entries whose **Status** line equals this value."
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    additionalProperties: false
+  }
+};
+async function getDecisionsHandler(rawInput) {
+  const input = getDecisionsInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const snapshot = readDecisions(resolution.root);
+  const all = [...snapshot.premises, ...snapshot.adrs];
+  const filtered = applyFilter(all, input.filter);
+  return {
+    rsct_installed: resolution.rsct_installed,
+    decisions_file: { exists: snapshot.exists, path: snapshot.path },
+    total: all.length,
+    filtered_count: filtered.length,
+    decisions: filtered,
+    hints: [...buildHints2(snapshot, input.filter, filtered.length), ...appliesToFileHints(resolution.root, snapshot)]
+  };
+}
+function appliesToFileHints(projectRoot, snapshot) {
+  const corpus = boundDecisionsInFile(snapshot);
+  if (corpus.entries.length === 0 && corpus.line_issues.length === 0) return [];
+  return appliesToHints(corpus, listProjectFiles(projectRoot, openSweepRepo(projectRoot)));
+}
+function applyFilter(entries, filter) {
+  if (!filter) return entries;
+  return entries.filter((entry) => {
+    if (filter.kind && entry.kind !== filter.kind) return false;
+    if (filter.status && entry.status !== filter.status) return false;
+    if (filter.tag && !(entry.tags ?? []).includes(filter.tag)) return false;
+    return true;
+  });
+}
+function buildHints2(snapshot, filter, filteredCount) {
+  const hints = [];
+  if (!snapshot.exists) {
+    hints.push(
+      "documentation/decisions.md not found \u2014 run /rsct-setup to scaffold the file before proposing decisions-dependent work."
+    );
+    return hints;
+  }
+  const miss = corpusMiss({
+    read_error: snapshot.read_error,
+    has_ids: snapshot.has_decision_ids,
+    parsed_count: snapshot.premises.length + snapshot.adrs.length
+  });
+  if (miss === "unreadable") {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} exists but could not be read \u2014 treat the zero counts as UNKNOWN, not as "no decisions". Check it is a readable file (not a directory) and that permissions allow reading it.`
+    );
+  } else if (miss === "ids-unparsed") {
+    hints.push(
+      `${snapshot.path ?? "documentation/decisions.md"} mentions decision ids but no premise or ADR heading could be parsed. A heading must be '## ' or '### ' followed by '#N' or 'ADR-NNN', a separator (one of \u2014 \u2013 - :) and a title \u2014 e.g. '### ADR-001 \u2014 Title'. Check the file before concluding the project has no recorded decisions.`
+    );
+  }
+  if (filter && filteredCount === 0) {
+    hints.push(
+      "Filter matched zero decisions. Re-run without the filter to see everything, or verify spelling of tag/status values."
+    );
+  }
+  return hints;
+}
+
+// src/tools/get-knowledge.ts
+init_esm_shims();
+var getKnowledgeInputSchema = external_exports.object({
+  project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
+  category: external_exports.string().min(1).describe(
+    "Knowledge category file slug, matching documentation/knowledge/<category>.md. Canonical categories: " + KNOWN_CATEGORIES.join(", ")
+  ),
+  query: external_exports.string().min(1).optional().describe(
+    "Optional case-insensitive substring filter; matches sections whose heading or body contain the query."
+  )
+}).strict();
+var getKnowledgeTool = {
+  name: "rsct_get_knowledge",
+  description: "Reads documentation/knowledge/<category>.md and returns its sections (split by ## and ### headings). Optional query performs a case-insensitive substring filter across heading and body. Use to recall business rules, anti-decisions, incidents, vendor history, or any other knowledge-graph category before making design choices that depend on institutional context. Returns empty sections (not an error) when the file is missing.",
+  inputSchema: {
+    type: "object",
+    required: ["category"],
+    properties: {
+      project_root: {
+        type: "string",
+        description: "Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."
+      },
+      category: {
+        type: "string",
+        description: "Knowledge category file slug \u2014 documentation/knowledge/<category>.md. Canonical: " + KNOWN_CATEGORIES.join(", ")
+      },
+      query: {
+        type: "string",
+        description: "Optional case-insensitive substring; only sections whose heading or body matches are returned."
+      }
+    },
+    additionalProperties: false
+  }
+};
+async function getKnowledgeHandler(rawInput) {
+  const input = getKnowledgeInputSchema.parse(rawInput ?? {});
+  const resolution = resolveProjectRoot(input.project_root);
+  const index = readKnowledgeIndex(resolution.root);
+  const file = readKnowledgeFile(resolution.root, input.category);
+  const isCanonical = KNOWN_CATEGORIES.includes(input.category);
+  const sections = filterSectionsByQuery(file.sections, input.query);
+  return {
+    rsct_installed: resolution.rsct_installed,
+    category: input.category,
+    is_canonical_category: isCanonical,
+    file: { exists: file.exists, path: file.path },
+    query: input.query ?? null,
+    sections_total: file.sections.length,
+    sections_returned: sections.length,
+    sections,
+    available_categories: index.categories_present,
+    hints: buildHints3({
+      rsctInstalled: resolution.rsct_installed,
+      category: input.category,
+      isCanonical,
+      fileExists: file.exists,
+      sectionsTotal: file.sections.length,
+      sectionsReturned: sections.length,
+      query: input.query,
+      availableCategories: index.categories_present
+    })
+  };
+}
+function buildHints3(args2) {
+  const hints = [];
+  if (!args2.rsctInstalled) {
+    hints.push(
+      "Project is not rsct-managed \u2014 knowledge graph likely absent. Run /rsct-setup before relying on this tool."
+    );
+    return hints;
+  }
+  if (!args2.fileExists) {
+    if (!args2.isCanonical) {
+      hints.push(
+        `Category '${args2.category}' is not canonical and the file does not exist. Canonical categories: ${KNOWN_CATEGORIES.join(", ")}.`
+      );
+    } else {
+      hints.push(
+        `documentation/knowledge/${args2.category}.md does not exist yet. Available now: ${args2.availableCategories.length > 0 ? args2.availableCategories.join(", ") : "(none)"}. Bootstrap with /rsct-setup or capture inline during conversation.`
+      );
+    }
+    return hints;
+  }
+  if (args2.sectionsTotal === 0) {
+    hints.push(
+      `${args2.category}.md exists but has no ## or ### sections \u2014 file may only contain a top-level intro. Consider capturing structured entries.`
+    );
+    return hints;
+  }
+  if (args2.query && args2.sectionsReturned === 0) {
+    hints.push(
+      `Query '${args2.query}' did not match any section in ${args2.category}.md (${args2.sectionsTotal} sections scanned). Try a broader term or call without query to see all sections.`
+    );
+  }
+  return hints;
+}
+
+// src/tools/get-environments.ts
+init_esm_shims();
+
 // src/lib/env-files.ts
+init_esm_shims();
 var SEARCH_PATHS = [
   "",
   "src/main/resources",
@@ -31225,100 +32389,9 @@ async function detectOnboardingHandler(rawInput) {
 // src/tools/check-premise.ts
 init_esm_shims();
 
-// src/lib/anti-decisions.ts
-init_esm_shims();
-function readAntiDecisions(projectRoot) {
-  const path2 = join(
-    projectRoot,
-    "documentation",
-    "knowledge",
-    "anti-decisions.md"
-  );
-  if (!existsSync(path2)) {
-    return { exists: false, path: null, entries: [], has_entry_ids: false, read_error: false };
-  }
-  let body2;
-  try {
-    body2 = readFileSync(path2, "utf8");
-  } catch {
-    return { exists: true, path: path2, entries: [], has_entry_ids: false, read_error: true };
-  }
-  const { entries, residue } = scanAntiDecisions(body2);
-  return {
-    exists: true,
-    path: path2,
-    entries,
-    has_entry_ids: AD_ID_TOKEN.test(residue),
-    read_error: false
-  };
-}
-var AD_ID_TOKEN = /\bAD-\d+\b/;
-var AD_HEADING = new RegExp(
-  String.raw`^#{2,3}\s+(AD-\d+)` + ENTRY_HEADING_SEPARATOR + String.raw`(.+?)\s*$`
-);
-function scanAntiDecisions(body2) {
-  const lines2 = body2.split("\n");
-  const out2 = [];
-  const kept = [];
-  let current = null;
-  const flush = () => {
-    if (!current) return;
-    if (isShippedPlaceholder(current.heading, current.bodyLines)) kept.length = current.start;
-    else out2.push(buildEntry2(current.id, current.title, current.bodyLines.join("\n")));
-    current = null;
-  };
-  for (const line2 of lines2) {
-    const adMatch = line2.match(AD_HEADING);
-    if (adMatch?.[1] && adMatch[2]) {
-      flush();
-      current = { id: adMatch[1], title: adMatch[2].trim(), heading: line2, start: kept.length, bodyLines: [] };
-      kept.push(line2);
-      continue;
-    }
-    if (current && (/^##\s/.test(line2) || /^###\s/.test(line2) || /^---\s*$/.test(line2))) {
-      flush();
-      kept.push(line2);
-      continue;
-    }
-    if (current) current.bodyLines.push(line2);
-    kept.push(line2);
-  }
-  flush();
-  return { entries: out2, residue: withoutShippedIdLines(kept) };
-}
-function buildEntry2(id, title, section) {
-  const entry = {
-    id,
-    title,
-    excerpt: extractExcerpt2(section)
-  };
-  const related = extractRelated(section);
-  if (related.length > 0) entry.related = related;
-  const captured = extractCaptured(section);
-  if (captured) entry.captured = captured;
-  return entry;
-}
-function extractExcerpt2(section) {
-  return makeExcerpt(section, {
-    maxLines: 4,
-    maxChars: 320,
-    skipLine: (line2) => line2.startsWith("<TODO:") || line2.startsWith("```")
-  });
-}
-function extractRelated(section) {
-  const match = section.match(/^\s*-\s*\*\*Related:?\*\*:?\s*(.+?)\s*$/im);
-  if (!match?.[1]) return [];
-  return match[1].split(/[,;]/).map((s) => s.trim()).filter((s) => s.length > 0);
-}
-function extractCaptured(section) {
-  const match = section.match(/^\s*-\s*\*\*Captured:?\*\*:?\s*(\d{4}-\d{2}-\d{2})/im);
-  return match?.[1];
-}
-
 // src/lib/premise-check.ts
 init_esm_shims();
 var STOPWORDS = /* @__PURE__ */ new Set([
-  // English filler
   "the",
   "and",
   "for",
@@ -31353,7 +32426,6 @@ var STOPWORDS = /* @__PURE__ */ new Set([
   "while",
   "than",
   "then",
-  // pt-BR filler
   "que",
   "para",
   "pelo",
@@ -31412,8 +32484,11 @@ function checkPremise(claim2, entries, antiDecisions = []) {
     reason: explain(matches, antiMatches, entries.length, antiDecisions.length)
   };
 }
+function scoredText(entry) {
+  return [entry.title, entry.excerpt, ...entry.applies_to?.lines ?? []].join(" ");
+}
 function scoreEntry(claimTokens, entry) {
-  const entryText = `${entry.title} ${entry.excerpt}`;
+  const entryText = scoredText(entry);
   const entryTokens = new Set(tokenize(entryText));
   const shared = [];
   for (const t of claimTokens) {
@@ -31429,7 +32504,7 @@ function scoreEntry(claimTokens, entry) {
   };
 }
 function scoreAntiDecision(claimTokens, entry) {
-  const entryText = `${entry.title} ${entry.excerpt}`;
+  const entryText = scoredText(entry);
   const entryTokens = new Set(tokenize(entryText));
   const shared = [];
   for (const t of claimTokens) {
@@ -32175,301 +33250,6 @@ function deriveAuditCeiling(projectRoot, config2) {
 
 // src/lib/comment-sweep/review.ts
 init_esm_shims();
-
-// src/lib/comment-sweep/git-reads.ts
-init_esm_shims();
-var GITLINK_MODE = "160000";
-var SYMLINK_MODE = "120000";
-var ADD_BATCH = 50;
-function text(buf) {
-  return buf === null ? null : buf.toString("utf8");
-}
-function line(buf) {
-  const out2 = text(buf);
-  return out2 === null ? null : out2.trim();
-}
-function nulList(buf) {
-  const out2 = text(buf);
-  return out2 === null ? null : out2.split("\0").filter((p) => p.length > 0);
-}
-function openSweepRepo(projectRoot) {
-  const toplevel = line(safeGitBuffer(projectRoot, ["rev-parse", "--show-toplevel"]));
-  if (!toplevel) return null;
-  const prefix = line(safeGitBuffer(projectRoot, ["rev-parse", "--show-prefix"])) ?? "";
-  const headCommit = line(safeGitBuffer(toplevel, ["rev-parse", "-q", "--verify", "HEAD^{commit}"]));
-  return { toplevel, prefix, headCommit: headCommit && headCommit.length > 0 ? headCommit : null };
-}
-function emptyTree(repo) {
-  return line(safeGitBuffer(repo.toplevel, ["hash-object", "-t", "tree", "--stdin"], ""));
-}
-function readRaw(repo, args2) {
-  const tokens = nulList(safeGitBuffer(repo.toplevel, ["diff", "--raw", "--no-abbrev", "-z", "--no-renames", ...args2]));
-  if (tokens === null) return null;
-  const out2 = [];
-  for (let i2 = 0; i2 + 1 < tokens.length; i2 += 2) {
-    const header = tokens[i2].replace(/^:/, "").split(" ");
-    const code = header[4] ?? "";
-    out2.push({
-      path: tokens[i2 + 1],
-      status: code === "D" ? "deleted" : code === "A" ? "added" : "modified",
-      oldMode: header[0] ?? "",
-      newMode: header[1] ?? "",
-      oldBlob: header[2] ?? ""
-    });
-  }
-  return out2;
-}
-function effectiveMode(entry) {
-  return entry.status === "deleted" ? entry.oldMode : entry.newMode;
-}
-function hasContent(entry) {
-  return effectiveMode(entry) !== GITLINK_MODE;
-}
-function isSymlink(entry) {
-  return effectiveMode(entry) === SYMLINK_MODE;
-}
-function readTouchedPaths(repo) {
-  const base = repo.headCommit ?? emptyTree(repo);
-  if (!base) return null;
-  const diff = readRaw(repo, [base]);
-  const others = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z"]));
-  if (diff === null || others === null) return null;
-  const byPath = /* @__PURE__ */ new Map();
-  for (const entry of diff) {
-    if (!hasContent(entry)) continue;
-    byPath.set(entry.path, { path: entry.path, status: entry.status, symlink: isSymlink(entry) });
-  }
-  for (const path2 of others) byPath.set(path2, { path: path2, status: "added", symlink: false });
-  return [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-}
-function readStagedEntries(repo, tree = null) {
-  const base = repo.headCommit ?? emptyTree(repo) ?? "";
-  const entries = readRaw(repo, tree !== null ? [base, tree] : ["--cached", ...repo.headCommit ? [] : [base]]);
-  if (entries === null) return null;
-  return entries.filter(hasContent).map((e) => ({
-    path: e.path,
-    status: e.oldMode === SYMLINK_MODE && e.newMode !== SYMLINK_MODE && e.status !== "deleted" ? "modified" : e.status,
-    headBlob: /^0+$/.test(e.oldBlob) ? null : e.oldBlob,
-    symlink: isSymlink(e)
-  }));
-}
-function readWorkingBlobIds(repo, paths) {
-  const ids = /* @__PURE__ */ new Map();
-  if (paths.length === 0) return ids;
-  const indexOut = line(safeGitBuffer(repo.toplevel, ["rev-parse", "--git-path", "index"]));
-  if (!indexOut) return null;
-  const realIndex = isAbsolute(indexOut) ? indexOut : join(repo.toplevel, indexOut);
-  const dir = mkdtempSync(join(tmpdir(), "rsct-sweep-index-"));
-  const tempIndex = join(dir, "index");
-  const noHooks = join(dir, "no-hooks");
-  try {
-    mkdirSync(noHooks, { recursive: true });
-    if (existsSync(realIndex)) {
-      copyFileSync(realIndex, tempIndex);
-      const stats = statSync(realIndex);
-      utimesSync(tempIndex, stats.atime, stats.mtime);
-    }
-    const env = { GIT_INDEX_FILE: tempIndex };
-    const config2 = [
-      "-c",
-      `core.hooksPath=${noHooks}`,
-      "-c",
-      "core.splitIndex=false",
-      "-c",
-      "core.safecrlf=false",
-      "-c",
-      "core.fsmonitor=false"
-    ];
-    const addPaths = (batch) => safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "add", "-f", "--", ...batch], "", env) !== null;
-    const failed2 = [];
-    for (let i2 = 0; i2 < paths.length; i2 += ADD_BATCH) {
-      const batch = paths.slice(i2, i2 + ADD_BATCH);
-      if (addPaths(batch)) continue;
-      for (const path2 of batch) if (!addPaths([path2])) failed2.push(path2);
-    }
-    const listing = nulList(
-      safeGitBuffer(repo.toplevel, [...config2, "--literal-pathspecs", "ls-files", "-s", "-z", "--", ...paths], "", env)
-    );
-    if (listing === null) return null;
-    for (const record2 of listing) {
-      const tab = record2.indexOf("	");
-      if (tab < 0) continue;
-      const [mode, blob, stage] = record2.slice(0, tab).split(" ");
-      const path2 = record2.slice(tab + 1);
-      if (stage === "0" && blob && mode && mode !== GITLINK_MODE) ids.set(path2, blob);
-    }
-    for (const path2 of paths) {
-      if (ids.has(path2)) continue;
-      if (failed2.includes(path2)) continue;
-      const fallback = line(safeGitBuffer(repo.toplevel, ["hash-object", `--path=${path2}`, "--", path2]));
-      if (fallback) ids.set(path2, fallback);
-    }
-    return ids;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-function verifyObject(repo, spec) {
-  const id = line(safeGitBuffer(repo.toplevel, ["rev-parse", "-q", "--verify", spec]));
-  return id && id.length > 0 ? id : null;
-}
-function readStagedBlobId(repo, path2, tree = null) {
-  return verifyObject(repo, tree !== null ? `${tree}:${path2}` : `:0:${path2}`);
-}
-function readCommitBlobId(repo, commit, path2) {
-  return verifyObject(repo, `${commit}:${path2}`);
-}
-function readBlob(repo, blobId) {
-  return safeGitBuffer(repo.toplevel, ["cat-file", "blob", blobId]);
-}
-function readHeadContent(repo, path2) {
-  if (!repo.headCommit) return null;
-  const id = readCommitBlobId(repo, repo.headCommit, path2);
-  return id ? readBlob(repo, id) : null;
-}
-var REGULAR_FILE_MODES = /* @__PURE__ */ new Set(["100644", "100755"]);
-var CAT_FILE_BATCH = 1e3;
-var CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024;
-var BLOB_READ_MAX_BUFFER = 64 * 1024 * 1024;
-var BLOB_TEXT_CACHE_MAX = 4e3;
-var blobTextCache = /* @__PURE__ */ new Map();
-var blobReadLimits = { batchCount: CAT_FILE_BATCH, batchBytes: CAT_FILE_BATCH_BYTES, maxBuffer: BLOB_READ_MAX_BUFFER };
-function readIndexEntries(repo) {
-  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]));
-  if (listed2 === null) return null;
-  const paths = /* @__PURE__ */ new Set();
-  const blobs = /* @__PURE__ */ new Map();
-  for (const entry of listed2) {
-    const tab = entry.indexOf("	");
-    if (tab < 0) continue;
-    const [mode, oid, stage] = entry.slice(0, tab).split(" ");
-    const path2 = entry.slice(tab + 1);
-    paths.add(path2);
-    if (stage === "0" && oid && mode && REGULAR_FILE_MODES.has(mode)) blobs.set(path2, oid);
-  }
-  return { paths, blobs };
-}
-function rememberBlobText(oid, text2) {
-  while (blobTextCache.size >= BLOB_TEXT_CACHE_MAX) {
-    const oldest = blobTextCache.keys().next().value;
-    if (oldest === void 0) break;
-    blobTextCache.delete(oldest);
-  }
-  blobTextCache.set(oid, text2);
-}
-function readBlobSizes(repo, oids) {
-  const listed2 = text(safeGitBuffer(repo.toplevel, ["cat-file", "--batch-check"], `${oids.join("\n")}
-`));
-  if (listed2 === null) return null;
-  const sizes = /* @__PURE__ */ new Map();
-  for (const entry of listed2.split("\n")) {
-    const [oid, type, size] = entry.split(" ");
-    if (oid && type === "blob" && size !== void 0 && Number.isInteger(Number(size))) sizes.set(oid, Number(size));
-  }
-  return sizes;
-}
-function blobBatches(oids, sizes) {
-  const batches = [];
-  let current = [];
-  let bytes = 0;
-  for (const oid of oids) {
-    const size = sizes.get(oid);
-    if (size === void 0) continue;
-    if (current.length > 0 && (current.length >= blobReadLimits.batchCount || bytes + size > blobReadLimits.batchBytes)) {
-      batches.push(current);
-      current = [];
-      bytes = 0;
-    }
-    current.push(oid);
-    bytes += size;
-  }
-  if (current.length > 0) batches.push(current);
-  return batches;
-}
-function readBlobTexts(repo, oids) {
-  const texts = /* @__PURE__ */ new Map();
-  const failed2 = /* @__PURE__ */ new Set();
-  const missing = [];
-  for (const oid of new Set(oids)) {
-    const cached2 = blobTextCache.get(oid);
-    if (cached2 === void 0) missing.push(oid);
-    else texts.set(oid, cached2);
-  }
-  if (missing.length === 0) return { texts, failed: failed2 };
-  const sizes = readBlobSizes(repo, missing);
-  if (sizes === null) return null;
-  for (const chunk of blobBatches(missing, sizes)) {
-    const batch = safeGitBuffer(repo.toplevel, ["cat-file", "--batch"], `${chunk.join("\n")}
-`, void 0, blobReadLimits.maxBuffer);
-    if (batch === null) {
-      if (chunk.length > 1) return null;
-      for (const oid of chunk) failed2.add(oid);
-      continue;
-    }
-    let offset = 0;
-    for (const oid of chunk) {
-      const newline = batch.indexOf(10, offset);
-      if (newline < 0) return null;
-      const header = batch.subarray(offset, newline).toString("utf8").split(" ");
-      offset = newline + 1;
-      if (header[1] === "missing" || header.length < 3) continue;
-      const size = Number(header[2]);
-      if (!Number.isInteger(size) || offset + size > batch.length) return null;
-      const content = batch.subarray(offset, offset + size).toString("utf8");
-      texts.set(oid, content);
-      rememberBlobText(oid, content);
-      offset += size + 1;
-    }
-  }
-  return { texts, failed: failed2 };
-}
-function readUntrackedPaths(repo) {
-  return nulList(safeGitBuffer(repo.toplevel, ["ls-files", "--others", "--exclude-standard", "-z", "--full-name"]));
-}
-function readSkipWorktreePaths(repo) {
-  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-v", "-z", "--full-name"]));
-  if (listed2 === null) return null;
-  const paths = /* @__PURE__ */ new Set();
-  for (const entry of listed2) {
-    const tag = entry.slice(0, 1);
-    if (tag === "S" || tag !== "" && tag === tag.toLowerCase() && tag !== tag.toUpperCase()) paths.add(entry.slice(2));
-  }
-  return paths;
-}
-function readWorktreeChangedPaths(repo) {
-  return nulList(safeGitBuffer(repo.toplevel, ["diff", "--name-only", "--no-renames", "-z"]));
-}
-function readIndexFingerprint(repo) {
-  const listed2 = safeGitBuffer(repo.toplevel, ["ls-files", "-s", "-z", "--full-name"]);
-  return listed2 === null ? null : createHash("sha256").update(listed2).digest("hex");
-}
-function readKnownPaths(repo) {
-  const index = nulList(safeGitBuffer(repo.toplevel, ["ls-files", "-z", "--full-name"]));
-  if (index === null) return null;
-  const known = new Set(index);
-  if (repo.headCommit) {
-    const tree = nulList(safeGitBuffer(repo.toplevel, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", repo.headCommit]));
-    if (tree === null) return null;
-    for (const p of tree) known.add(p);
-  }
-  return known;
-}
-function readCommitPaths(repo, before, after) {
-  const base = before ?? emptyTree(repo);
-  if (!base) return null;
-  const entries = readRaw(repo, [base, after]);
-  if (entries === null) return null;
-  return entries.filter((e) => e.status !== "deleted" && hasContent(e)).map((e) => ({ path: e.path, symlink: isSymlink(e) }));
-}
-function looksLikeLinkTarget(bytes) {
-  return bytes.length > 0 && bytes.length <= 4096 && !bytes.includes(10) && !bytes.includes(0);
-}
-function hasGitFilter(repo, path2) {
-  const out2 = nulList(safeGitBuffer(repo.toplevel, ["check-attr", "-z", "filter", "--", path2]));
-  if (out2 === null) return null;
-  const value = out2[2];
-  return value !== void 0 && value !== "unspecified" && value !== "unset";
-}
 
 // src/lib/comment-sweep/index.ts
 init_esm_shims();
@@ -46095,358 +46875,6 @@ init_esm_shims();
 // src/lib/dead-code/references.ts
 init_esm_shims();
 
-// src/lib/reverse-dep-walk.ts
-init_esm_shims();
-var DEFAULT_LANG_GLOBS = [
-  "**/*.ts",
-  "**/*.tsx",
-  "**/*.js",
-  "**/*.jsx",
-  "**/*.mjs",
-  "**/*.cjs",
-  "**/*.mts",
-  "**/*.cts"
-];
-var DEFAULT_EXCLUDE_GLOBS = [
-  "**/node_modules/**",
-  "**/dist/**",
-  "**/build/**",
-  "**/.git/**",
-  "**/coverage/**"
-];
-var DEFAULT_MAX_DEPTH = 2;
-var DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf("*") + 1)).join(", ");
-var JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/;
-var RESOLVE_EXTENSIONS = [
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".mts",
-  ".cts"
-];
-var INDEX_RESOLUTIONS = [
-  "/index.ts",
-  "/index.tsx",
-  "/index.js",
-  "/index.jsx",
-  "/index.mjs",
-  "/index.cjs",
-  "/index.mts",
-  "/index.cts"
-];
-var IMPORT_PATTERNS = [
-  /import\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
-  /import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g,
-  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  /export\s+(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g,
-  /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g
-];
-var DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/;
-var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
-var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
-function relPosix(projectRoot, abs) {
-  return toPosix(relative(projectRoot, abs));
-}
-function seedIsCoverable(rel, langGlobs = DEFAULT_LANG_GLOBS) {
-  if (isAbsolute(rel) || rel.startsWith("../")) return false;
-  return matchesAnyGlob(rel, langGlobs).matched;
-}
-function walkFiles(root, langGlobs, excludeGlobs) {
-  const results = [];
-  const recurse = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry.name);
-      const rel = relPosix(root, full);
-      if (entry.isDirectory()) {
-        if (matchesAnyGlob(`${rel}/probe`, excludeGlobs).matched) continue;
-        recurse(full);
-      } else if (entry.isFile()) {
-        if (matchesAnyGlob(rel, excludeGlobs).matched) continue;
-        if (matchesAnyGlob(rel, langGlobs).matched) results.push(full);
-      }
-    }
-  };
-  recurse(root);
-  return results;
-}
-function extractImports(content) {
-  const imports = /* @__PURE__ */ new Set();
-  for (const re of IMPORT_PATTERNS) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(content)) !== null) {
-      const spec = m[1];
-      if (spec) imports.add(spec);
-    }
-  }
-  return [...imports];
-}
-var NODENEXT_SOURCE_EXTENSIONS = /* @__PURE__ */ new Map([
-  [".js", [".ts", ".tsx"]],
-  [".mjs", [".mts"]],
-  [".cjs", [".cts"]]
-]);
-function hasExactEntry(path2, entries) {
-  const dir = dirname(path2);
-  let names = entries.get(dir);
-  if (!names) {
-    try {
-      names = new Set(readdirSync(dir));
-    } catch {
-      names = /* @__PURE__ */ new Set();
-    }
-    entries.set(dir, names);
-  }
-  return names.has(basename(path2));
-}
-function hasExactPath(projectRoot, candidate, entries) {
-  const rel = relPosix(projectRoot, candidate);
-  if (rel.startsWith("../") || isAbsolute(rel)) return hasExactEntry(candidate, entries);
-  let walked = projectRoot;
-  for (const segment of rel.split("/")) {
-    walked = join(walked, segment);
-    if (!hasExactEntry(walked, entries)) return false;
-  }
-  return true;
-}
-function diskProbe(projectRoot, entries) {
-  const stat = (abs) => {
-    try {
-      return statSync(abs, { throwIfNoEntry: false }) ?? null;
-    } catch {
-      return null;
-    }
-  };
-  return {
-    exists: (abs) => existsSync(abs),
-    isFile: (abs) => stat(abs)?.isFile() ?? false,
-    isDirectory: (abs) => stat(abs)?.isDirectory() ?? false,
-    hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries)
-  };
-}
-function resolveNodeNextSource(target, probe) {
-  const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
-  if (!sourceExtensions) return null;
-  const stem = target.slice(0, target.lastIndexOf("."));
-  for (const ext of sourceExtensions) {
-    const candidate = stem + ext;
-    if (probe.hasExactPath(candidate)) return candidate;
-  }
-  return null;
-}
-function resolveImport(projectRoot, importerAbs, spec, entries, probe = diskProbe(projectRoot, entries)) {
-  if (!spec.startsWith(".") && !isAbsolute(spec)) return null;
-  const target = isAbsolute(spec) ? spec : resolve(dirname(importerAbs), spec);
-  const directoryOnly = DIRECTORY_SPECIFIER.test(spec);
-  if (!directoryOnly && probe.isFile(target)) return target;
-  for (const ext of directoryOnly ? [] : RESOLVE_EXTENSIONS) {
-    const candidate = target + ext;
-    if (probe.exists(candidate)) return candidate;
-  }
-  if (probe.isDirectory(target)) {
-    for (const idx of INDEX_RESOLUTIONS) {
-      const candidate = target + idx;
-      if (probe.exists(candidate)) return candidate;
-    }
-  }
-  return resolveNodeNextSource(target, probe);
-}
-function resolveImportCandidates(projectRoot, importerAbs, spec, entries, probe) {
-  const primary = resolveImport(projectRoot, importerAbs, spec, entries, probe);
-  if (!primary) return [];
-  const source = resolveNodeNextSource(primary, probe);
-  return source && source !== primary ? [primary, source] : [primary];
-}
-function walkReverseDeps(input) {
-  const projectRoot = input.projectRoot;
-  const langGlobs = input.langGlobs ?? DEFAULT_LANG_GLOBS;
-  const excludeGlobs = input.excludeGlobs ?? DEFAULT_EXCLUDE_GLOBS;
-  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
-  const declared = input.seedPaths.map((p) => {
-    const abs = isAbsolute(p) ? p : resolve(projectRoot, p);
-    return relPosix(projectRoot, abs);
-  });
-  const hints = [];
-  const stats = {
-    files_scanned: 0,
-    files_parsed: 0,
-    parse_errors: 0,
-    cycles_skipped: 0,
-    unresolved_js_specifiers: 0
-  };
-  const notRun = () => ({
-    declared,
-    discovered: [],
-    stats,
-    hints,
-    coverage: "not-run",
-    uncovered_seeds: []
-  });
-  if (declared.length === 0) {
-    hints.push("No seed paths provided \u2014 reverse-dep walk skipped.");
-    return notRun();
-  }
-  if (!existsSync(projectRoot)) {
-    hints.push(
-      `projectRoot '${projectRoot}' does not exist \u2014 reverse-dep walk skipped.`
-    );
-    return notRun();
-  }
-  let rootIsDirectory = false;
-  try {
-    rootIsDirectory = statSync(projectRoot).isDirectory();
-  } catch {
-    rootIsDirectory = false;
-  }
-  if (!rootIsDirectory) {
-    hints.push(
-      `projectRoot '${projectRoot}' is not a directory \u2014 reverse-dep walk skipped.`
-    );
-    return notRun();
-  }
-  if (maxDepth < 1) {
-    hints.push(
-      `maxDepth=${maxDepth} < 1 \u2014 reverse-dep walk has no depth budget; returning declared only.`
-    );
-    return notRun();
-  }
-  const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
-  const directoryEntries = /* @__PURE__ */ new Map();
-  stats.files_scanned = candidates.length;
-  const reverseDeps = /* @__PURE__ */ new Map();
-  for (const candidateAbs of candidates) {
-    let content;
-    try {
-      content = readFileSync(candidateAbs, "utf8");
-      stats.files_parsed++;
-    } catch {
-      stats.parse_errors++;
-      continue;
-    }
-    const candidateRel = relPosix(projectRoot, candidateAbs);
-    const imports = extractImports(content);
-    for (const spec of imports) {
-      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
-      if (!resolvedAbs) {
-        if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
-          stats.unresolved_js_specifiers++;
-        }
-        continue;
-      }
-      const resolvedRel = relPosix(projectRoot, resolvedAbs);
-      if (resolvedRel === candidateRel) continue;
-      let set = reverseDeps.get(resolvedRel);
-      if (!set) {
-        set = /* @__PURE__ */ new Set();
-        reverseDeps.set(resolvedRel, set);
-      }
-      set.add(candidateRel);
-    }
-  }
-  const seen = new Set(declared);
-  const discoveredMap = /* @__PURE__ */ new Map();
-  const queue = declared.map((d) => ({ file: d, depth: 0, via: [d] }));
-  while (queue.length > 0) {
-    const item = queue.shift();
-    if (item.depth >= maxDepth) continue;
-    const importers = reverseDeps.get(item.file);
-    if (!importers) continue;
-    for (const importer of importers) {
-      if (seen.has(importer)) {
-        if (declared.includes(importer)) stats.cycles_skipped++;
-        continue;
-      }
-      seen.add(importer);
-      const nextDepth = item.depth + 1;
-      const nextVia = [...item.via, importer];
-      discoveredMap.set(importer, {
-        file: importer,
-        via_paths: nextVia,
-        depth: nextDepth
-      });
-      if (nextDepth < maxDepth) {
-        queue.push({ file: importer, depth: nextDepth, via: nextVia });
-      }
-    }
-  }
-  const discovered = [...discoveredMap.values()].sort((a, b) => {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.file.localeCompare(b.file);
-  });
-  const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs));
-  const coverage = uncoveredSeeds.length === 0 ? "analyzed" : uncoveredSeeds.length === declared.length ? "uncovered" : "partial";
-  if (discovered.length === 0 && stats.files_scanned > 0) {
-    if (coverage === "uncovered") {
-      hints.push(
-        `${ZERO_IMPORTER_HINT_PREFIX}: none of the ${declared.length} declared path(s) is a file this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root. The importer set is UNAVAILABLE, not empty.`
-      );
-    } else if (stats.unresolved_js_specifiers === 0) {
-      hints.push(
-        `${ZERO_IMPORTER_HINT_PREFIX} across ${stats.files_scanned} scanned files. If you expected importers, check that seed paths use project-relative posix form (e.g., 'src/lib/foo.ts') and that the project does not rely on tsconfig path aliases (not resolved in v1).`
-      );
-    }
-  }
-  if (stats.unresolved_js_specifiers > 0) {
-    hints.push(
-      `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE \u2014 treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`
-    );
-  }
-  if (stats.parse_errors > 0) {
-    hints.push(
-      `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`
-    );
-  }
-  if (stats.cycles_skipped > 0) {
-    hints.push(
-      `${stats.cycles_skipped} cycle path(s) skipped where a seed is also an importer of another seed.`
-    );
-  }
-  return {
-    declared,
-    discovered,
-    stats,
-    hints,
-    coverage,
-    uncovered_seeds: uncoveredSeeds
-  };
-}
-function listSeeds(seeds) {
-  const overflow = seeds.length > 10 ? `, and ${seeds.length - 10} more` : "";
-  return `${seeds.slice(0, 10).join(", ")}${overflow}`;
-}
-function coverageHints(result) {
-  if (result.coverage === "not-run") return [];
-  const lines2 = [];
-  const uncovered = result.uncovered_seeds;
-  if (uncovered.length > 0) {
-    const reached = new Set(result.discovered.map((d) => d.via_paths[0]));
-    const found = uncovered.filter((seed) => reached.has(seed));
-    const blind = uncovered.filter((seed) => !reached.has(seed));
-    const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 && found.length === 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
-    const foundText = found.length > 0 ? ` Importers of ${listSeeds(found)} were still found among the files it reads and are listed: a lower bound, since importers in other file types are not read.` : "";
-    const blindText = blind.length === 0 ? "" : found.length === 0 ? " For those paths the importer set is UNAVAILABLE, not empty." : ` For ${listSeeds(blind)} the importer set is UNAVAILABLE, not empty.`;
-    lines2.push(
-      `${COVERAGE_HINT_PREFIX} ${uncovered.length} of ${result.declared.length} declared path(s) are not files this walk can key on \u2014 it resolves imports to individual ${DEFAULT_LANG_SUFFIXES} files inside the project root: ${listSeeds(uncovered)}.${foundText}${blindText}${whole}`
-    );
-  }
-  if (result.stats.files_scanned === 0) {
-    lines2.push(
-      `${COVERAGE_HINT_PREFIX} 0 files matched the walk's file-type list (${DEFAULT_LANG_SUFFIXES}) under the project root after the default exclusions (node_modules, dist, build, coverage). No import graph was built, so an empty importer set here means UNKNOWN, not clean. Candidate causes: the project is written in another language; its sources sit under an excluded directory; project_root points somewhere unexpected.`
-    );
-  }
-  return lines2;
-}
-
 // src/lib/dead-code/module-resolution.ts
 init_esm_shims();
 var DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
@@ -47847,73 +48275,6 @@ async function checkStagedDeadCode(args2) {
 
 // src/lib/integration-gate.ts
 init_esm_shims();
-
-// src/lib/gate-exceptions.ts
-init_esm_shims();
-var DIALOG_LIST_SHOWN = 10;
-function writeListReport(projectRoot, tool, kind, title, entries) {
-  const content = [`# ${title}`, "", ...entries.map((e) => `- ${e}`), ""].join("\n");
-  const rel = join(".rsct", "reports", `${tool}-${kind}-${createHash("sha256").update(content).digest("hex").slice(0, 16)}.md`);
-  try {
-    mkdirSync(join(projectRoot, ".rsct", "reports"), { recursive: true });
-    writeFileSync(join(projectRoot, rel), content, "utf8");
-    return rel.replace(/\\/g, "/");
-  } catch {
-    return null;
-  }
-}
-function quoted(text2) {
-  return `"${specLabel(text2)}"`;
-}
-function inlineList(items, limit) {
-  const shown2 = items.slice(0, limit).map(quoted).join(", ");
-  return items.length > limit ? `${shown2} \u2026 and ${items.length - limit} more` : shown2;
-}
-function shownLimit(report) {
-  return report === null ? DIALOG_UNCUT : DIALOG_LIST_SHOWN;
-}
-function findingRule(finding) {
-  return finding.reason === "extra-pattern" ? `extra pattern ${finding.pattern_id ?? "?"}` : finding.reason;
-}
-function findingLabel(finding) {
-  const commit = finding.commit !== void 0 ? ` (commit ${finding.commit.slice(0, 12)})` : "";
-  return `"${finding.file}":${finding.line_number ?? "?"} \u2014 ${findingRule(finding)}${commit}`;
-}
-function findingIdentity(finding) {
-  return JSON.stringify([finding.file, findingRule(finding), findingLineKey(finding) ?? finding.excerpt]);
-}
-function protectedBranchLine(branchLabel, doing) {
-  return `\u26A0 '${specLabel(branchLabel, DIALOG_PATH_LIMIT)}' is a protected branch: ${doing} needs your exception.`;
-}
-function secretFindingLines(projectRoot, tool, findings) {
-  if (findings.length === 0) return [];
-  const lines2 = [`\u26A0 The secrets scan found ${findings.length} line(s) that look like a credential (file:line \u2014 rule; values are never shown):`];
-  const report = findings.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "secrets", `Secret scan findings for one ${tool} approval`, findings.map((f) => `${findingLabel(f)} \u2014 ${f.excerpt}`)) : null;
-  lines2.push(dialogList(findings.map(findingLabel), shownLimit(report)));
-  if (report !== null) lines2.push(`Full list: ${report}`);
-  return lines2;
-}
-function findingActionLines(projectRoot, tool, actions, titleOf) {
-  if (actions.length === 0) return { facts: [], agent: [] };
-  const full = (a, i2) => {
-    const title = titleOf(a.finding_id);
-    return `#${i2 + 1} ${a.finding_id} [${a.action}]${title ? ` ${title}` : ""}${a.note ? ` \u2014 note: ${a.note}` : ""}`;
-  };
-  const report = actions.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, tool, "findings", `Findings and the agent's actions for one ${tool} approval`, actions.map(full)) : null;
-  const shown2 = report === null ? actions : actions.slice(0, DIALOG_LIST_SHOWN);
-  const facts = [`Findings and the action the agent proposes for each (${actions.length}):`, ...shown2.map((a, i2) => `#${i2 + 1} [${a.action}]`)];
-  if (shown2.length < actions.length) facts.push(`\u2026 and ${actions.length - shown2.length} more \u2014 full list: ${report}`);
-  const agent = shown2.map((a, i2) => {
-    const title = titleOf(a.finding_id);
-    return `#${i2 + 1} ${specLabel(a.finding_id, 60)}${title ? ` \u2014 ${specLabel(title, 80)}` : ""}${a.note ? ` \u2014 note: ${specLabel(a.note, 80)}` : ""}`;
-  });
-  return { facts, agent: ["What the agent wrote for each finding:", ...agent] };
-}
-function agentReasonLine(what, override) {
-  return override === void 0 ? [] : [`Agent's reason for ${what}: ${quoted(override.reason)}`];
-}
-
-// src/lib/integration-gate.ts
 function readDriftLock(projectRoot) {
   const read = readPhaseState(projectRoot);
   const refusal = refuseUnreadableState(projectRoot, read);
@@ -49606,7 +49967,8 @@ Spec: '${specLabel(input.specRef, DIALOG_UNCUT)}'`
       fabrication_signals: gate.fabrication_signals,
       next_recommended_phase: recommended,
       completed_at: completedAt,
-      phase_state_written: writeResult.ok
+      phase_state_written: writeResult.ok,
+      ...internal.completeAuditFields
     },
     config2?.audit
   );
@@ -52753,9 +53115,9 @@ ${reasons.join("\n")}` : "")
   if (!programsNow.ok) return reject2(programsNow.kind, `${programsNow.reason}. The approval was not used.`, { ...after, protected: targetProtected });
   appendAudit(projectRoot, baselineEntry2(programs.read, programs.baseline), config2?.audit);
   const branchCheck = { protected: targetProtected, override_used: targetProtected || allow_unrelated_histories };
-  const merge2 = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor);
-  if (!merge2.ok) {
-    const reason = merge2.error ?? merge2.stderr ?? "git merge failed";
+  const merge3 = gitMerge(projectRoot, pinned, { no_ff, allow_unrelated_histories, message: mergeMessage(input.source_branch, targetBranch) }, gitExecutor);
+  if (!merge3.ok) {
+    const reason = merge3.error ?? merge3.stderr ?? "git merge failed";
     const audit2 = appendAudit(
       projectRoot,
       {
@@ -52777,7 +53139,7 @@ ${reasons.join("\n")}` : "")
       reject_kind: null,
       reason,
       fabrication_signals: gate.fabrication_signals,
-      sha_before: merge2.sha_before,
+      sha_before: merge3.sha_before,
       sha_after: null,
       branch_check: branchCheck,
       secrets_check: secretsCheck(findings.length > 0),
@@ -52789,9 +53151,9 @@ ${reasons.join("\n")}` : "")
   }
   const record2 = recordApproval(approval, { projectRoot, now, auditConfig: config2?.audit });
   const hints = [
-    `Merged '${input.source_branch}' into '${targetLabel}' (${merge2.sha_after ?? "<unknown sha>"}).`
+    `Merged '${input.source_branch}' into '${targetLabel}' (${merge3.sha_after ?? "<unknown sha>"}).`
   ];
-  const landed = merge2.sha_after ?? "HEAD";
+  const landed = merge3.sha_after ?? "HEAD";
   const rescan = await rescanLanded({
     projectRoot,
     what: "merge",
@@ -52816,8 +53178,8 @@ ${reasons.join("\n")}` : "")
       source_sha: pinned,
       target_branch: targetBranch,
       channel: gate.channel,
-      sha_before: merge2.sha_before,
-      sha_after: merge2.sha_after,
+      sha_before: merge3.sha_before,
+      sha_after: merge3.sha_after,
       no_ff,
       allow_unrelated_histories,
       fabrication_signals: gate.fabrication_signals,
@@ -52857,7 +53219,7 @@ ${reasons.join("\n")}` : "")
         age_ms: bootstrap.age_ms,
         source_branch: input.source_branch,
         target_branch: targetBranch,
-        sha_after: merge2.sha_after
+        sha_after: merge3.sha_after
       },
       config2?.audit
     );
@@ -52878,8 +53240,8 @@ ${reasons.join("\n")}` : "")
     reject_kind: null,
     reason: null,
     fabrication_signals: gate.fabrication_signals,
-    sha_before: merge2.sha_before,
-    sha_after: merge2.sha_after,
+    sha_before: merge3.sha_before,
+    sha_after: merge3.sha_after,
     branch_check: branchCheck,
     secrets_check: secretsCheck(findings.length > 0, afterMerge),
     bootstrap_marker: bootstrap,
@@ -53850,6 +54212,14 @@ function evidenceForSource(f) {
       how_to_falsify: "Open the referenced entry. The matcher scores SHARED TOKENS over title+excerpt, so if the shared words are generic domain nouns rather than the terms carrying the claim, this is vocabulary coincidence and the finding is false. Two shared tokens is enough to match."
     };
   }
+  if (f.source === "decision-scope") {
+    return {
+      kind: "measured",
+      command: 'matchesAnyGlob(declared_paths and the files under them, the "Applies to" globs of documentation/decisions.md and documentation/knowledge/anti-decisions.md at HEAD and in the working tree)',
+      output_excerpt: f.title,
+      also_explained_by: "The globs are written by hand: a stale or too-wide glob binds a decision to files it no longer governs. And a decision without the line still applies everywhere, so a decision missing from this list is not a decision that does not apply."
+    };
+  }
   if (f.source === "basename-overlap") {
     return {
       kind: "hypothesis",
@@ -54140,6 +54510,20 @@ ${head}${overflow}`,
       source: "architecture-overview"
     });
   }
+  const scope = declaredDecisionCoverage(input.projectRoot, input.declaredPaths, { decisions, antiDecisions });
+  hints.push(...scope.hints);
+  if (scope.hits.length > 0) {
+    findings.push({
+      id: nextId("gap"),
+      category: "gap",
+      severity: "address-now",
+      title: `Decisions bound to the declared paths (${scope.hits.length}): ${hitLabels(scope.hits)}`,
+      detail: `Their "Applies to" line binds these decisions to the paths this spec declares, so they govern the change even when no claim shares words with them. Read each entry before code-phase:
+${hitDetailLines(scope.hits)}`,
+      affected_paths: [...new Set(scope.hits.map((hit) => hit.path))],
+      source: "decision-scope"
+    });
+  }
   if (findings.length === 0) {
     if (!decisions.exists && !antiDecisions.exists && knowledge.categories_present.length === 0 && !architecture.exists) {
       hints.push(
@@ -54175,7 +54559,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: "Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints.",
+  description: 'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints. Decisions and anti-decisions whose optional "Applies to" line (read at HEAD and in the working tree) matches a declared path, or a file under a declared folder or glob, come back as ONE gap finding listing their ids, emitted after every other finding; "Applies to" globs that match no file and lines that bind nothing come back in hints.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -56794,7 +57178,7 @@ var phaseReviewCompleteInputSchema = external_exports.object({
 }).strict();
 var phaseReviewCompleteTool = {
   name: "rsct_phase_review_complete",
-  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. Suggested action_scope: "review_complete:spec_ref=<X>".',
+  description: '\xA7C-gated REVIEW phase closure \u2014 the last phase of the cycle (R\u2192S\u2192V\u2192C\u2192T\u2192REVIEW), mandatory at every tier. RUN ALONE: when phases closed with no dialog wait in run_alone.pending, it first shows one forced dialog per pending phase, in order, before any sweep or file change; a No sends the work back to that phase (reject_kind run_alone_rejected: it and every later phase are redone, with dialogs). The run-alone record ends when this REVIEW is approved with nothing pending. Before any dialog it recomputes the files this change touched (git, against HEAD, untracked included) and sweeps them for comments: a code file that still carries a comment rejects (comments_remaining); every comment the change removed (renamed and deleted files included) needs one entry in comment_dispositions \u2014 "discarded", or "migrated" with a destination among documentation/decisions.md, documentation/knowledge/anti-decisions.md, docs/decisions.md where the comment text must appear in the lines added to that file (dispositions_missing returns pending_dispositions). Functional comments (shebang, licence header, tool directives) are kept by a closed allowlist. Files the sweep cannot verify (unsupported or unknown language, undeclared sql_dialect, parse error, git filter) and files you list in exempt_files as generated, vendored or legacy_baseline (the first commit of a branch only, refused as legacy_baseline_refused otherwise) go to a forced OS dialog: Yes makes those exact file versions committable without a mechanical check, No rejects the REVIEW. When comments were removed, files are unverified or an allowlisted comment changed, the \xA7C dialog is forced (trust_allowed_for ignored) and names a report under .rsct/reports/. Reasons a file is unverified: unsupported_language, unknown_extension, sql_dialect_missing, parse_error, binary_or_encoding, engine_unavailable, git_filter, head_unverified (its HEAD version could not be scanned), generated, vendored, legacy_baseline. It also scans the touched JavaScript/TypeScript files for dead code \u2014 a declared symbol referenced nowhere in the project, its own file included, following imports, aliases, default and namespace imports and re-exports to the end (dead_code_remaining returns pending_dead_code with each declaration and its declaration_sha256). The DEVELOPER decides per symbol: remove it, or keep it by passing dead_code_keeps (path, name, declaration_sha256, the reason they gave). A new keep forces the developer dialog (trust_allowed_for ignored), is written to the audit log, and holds only for those exact declaration bytes (dead_code_keep_stale once they change); exports that .rsct.json public_api exempts are listed in the same dialog. What the scan cannot settle \u2014 an importer it cannot parse, an import() or require(), a file nothing imports \u2014 is left unknown and named in hints, never reported dead and never passed silently. On success it stamps a sweep ledger (path + git blob id; deleted files included) that rsct_request_commit requires for every staged code file; paths a previous commit left as review_drift are re-checked here even when unchanged. A behaviour fix made during this REVIEW changes the stamped bytes: re-run the tests (rsct_phase_test_start / _complete), then this REVIEW again. Pass findings_actions[] with a decision for EVERY finding declared at rsct_phase_review_start \u2014 leaving any unanswered rejects completion and returns open_findings. Any entry with action="block" aborts completion BEFORE the \xA7C dialog. The \xA7C dialog also lists, among the framework lines, the decisions whose optional "Applies to" line (read at HEAD and in the working tree) covers a changed file, with the ids added since HEAD, and those whose line was removed or changed since HEAD, marked and listed first (more than 10: the first 10 and a report under .rsct/reports/); the ids come back in decisions_covering (ids null when the changed files could not be read) and are recorded on review.complete. Suggested action_scope: "review_complete:spec_ref=<X>".',
   inputSchema: {
     type: "object",
     required: ["spec_ref", "dev_approval"],
@@ -57236,15 +57620,17 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
   const listed2 = findingActionLines(projectRoot, "review", input.findings_actions, (id) => titles.get(id));
   const driftSecrets = driftBefore?.secrets ?? [];
   const driftReport = driftSecrets.length > DIALOG_LIST_SHOWN ? writeListReport(projectRoot, "review", "drift-secrets", "Secret findings behind the review_drift lock", driftSecrets) : null;
+  const coverage = reviewDecisionCoverage(projectRoot, sweep.repo);
   const factParts = [
     ...listed2.facts,
     ...driftSecrets.length > 0 ? [
       `\u26A0 This REVIEW releases a review_drift lock that a commit, merge or rebase armed with ${driftSecrets.length} secret finding(s) no dialog showed (file:line \u2014 rule; values are never shown):`,
       dialogList(driftSecrets, shownLimit(driftReport)),
       ...driftReport !== null ? [`Full list: ${driftReport}`] : []
-    ] : []
+    ] : [],
+    ...coverage?.facts ?? []
   ];
-  detailParts.push(...listed2.agent);
+  detailParts.push(...listed2.agent, ...coverage?.agent ?? []);
   const forceReason = mustForce ? commentForce ? "this REVIEW removed comments, allows unverified files or changes allowlisted comments" : "this REVIEW keeps dead code at your request or exempts exports through public_api" : driftSecrets.length > 0 ? "this REVIEW releases a review_drift lock armed by secret findings no dialog showed" : null;
   const result = await gatePhaseComplete(
     { projectRoot, phase: "review", specRef: input.spec_ref, devApproval: input.dev_approval },
@@ -57253,7 +57639,14 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
       ...internal,
       ...factParts.length > 0 && { dialogFacts: factParts.join("\n") },
       dialogDetail: detailParts.filter(Boolean).join("\n"),
-      ...forceReason !== null && { forceDialog: true, forceDialogReason: forceReason }
+      ...forceReason !== null && { forceDialog: true, forceDialogReason: forceReason },
+      ...coverage !== null && {
+        completeAuditFields: {
+          decisions_covering: coverage.ids,
+          decisions_added_since_head: coverage.added_since_head,
+          decisions_changed_since_head: coverage.changed_since_head
+        }
+      }
     }
   );
   const output = {
@@ -57261,7 +57654,8 @@ Spec: '${specLabel(input.spec_ref, DIALOG_UNCUT)}'`
     actions_summary,
     evidence_mix,
     head_stale: staleness.head_stale,
-    comment_sweep: summary
+    comment_sweep: summary,
+    decisions_covering: coverage === null ? null : { ids: coverage.ids, added_since_head: coverage.added_since_head, changed_since_head: coverage.changed_since_head, report: coverage.report }
   };
   if (result.status !== "completed") {
     output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`);

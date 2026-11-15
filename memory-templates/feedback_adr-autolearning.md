@@ -26,7 +26,9 @@ anti-decisions.md.
 
 decisions.md format: firm premises (#N) for non-negotiable constraints,
 or durable ADRs (ADR-NNN, append-only) with context, alternatives,
-decision, consequences. Never rewrite — append. anti-decisions.md
+decision, consequences. Never rewrite — append (an entry's optional
+`**Applies to**: <glob>, <glob>` line is metadata: adding or fixing it is
+not a rewrite). anti-decisions.md
 format: entries are headed `### AD-NNN — <title>`, sequential and
 append-only, carrying what was tried, why it failed and the date. The
 heading shape is not optional — it is what the abandoned-path
