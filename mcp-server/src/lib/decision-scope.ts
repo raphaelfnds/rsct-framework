@@ -193,15 +193,21 @@ export function appliesToHints(corpus: BoundCorpus, files: readonly string[] | n
   return hints
 }
 
+const LABEL_LIMIT = 40
+
+function shortLabel(hit: DecisionHit): string {
+  return specLabel(hit.entry.label, LABEL_LIMIT)
+}
+
 export function hitLabels(hits: readonly DecisionHit[]): string {
-  const shown = hits.slice(0, DIALOG_LIST_SHOWN).map((hit) => hit.entry.label).join(', ')
+  const shown = hits.slice(0, DIALOG_LIST_SHOWN).map(shortLabel).join(', ')
   return hits.length > DIALOG_LIST_SHOWN ? `${shown} … and ${hits.length - DIALOG_LIST_SHOWN} more` : shown
 }
 
 export function hitDetailLines(hits: readonly DecisionHit[]): string {
   const lines = hits
     .slice(0, DETAIL_LINES_SHOWN)
-    .map((hit) => `- ${hit.entry.label} — ${specLabel(hit.entry.title, 120)}: ${specLabel(hit.path, 200)} matches ${specLabel(hit.glob, 120)}`)
+    .map((hit) => `- ${shortLabel(hit)} — ${specLabel(hit.entry.title, 120)}: ${specLabel(hit.path, 200)} matches ${specLabel(hit.glob, 120)}`)
   if (hits.length > DETAIL_LINES_SHOWN) lines.push(`... and ${hits.length - DETAIL_LINES_SHOWN} more`)
   return lines.join('\n')
 }
@@ -249,7 +255,7 @@ export function reviewDecisionCoverage(projectRoot: string, repo: SweepRepo): De
   const ids = hits.map((hit) => hit.entry.label)
   const added = hits.filter((hit) => hit.entry.added_since_head).map((hit) => hit.entry.label)
   if (hits.length === 0) return { ids, added_since_head: added, report: null, facts, agent: [] }
-  const marked = (hit: DecisionHit): string => `${hit.entry.label}${hit.entry.added_since_head ? ' (added since HEAD)' : ''}`
+  const marked = (hit: DecisionHit): string => `${shortLabel(hit)}${hit.entry.added_since_head ? ' (added since HEAD)' : ''}`
   const report =
     hits.length > DIALOG_LIST_SHOWN
       ? writeListReport(
@@ -263,6 +269,6 @@ export function reviewDecisionCoverage(projectRoot: string, repo: SweepRepo): De
   const shown = hits.slice(0, DIALOG_LIST_SHOWN)
   facts.push(`Decisions whose "Applies to" line covers the changed files (${hits.length}): ${shown.map(marked).join(', ')}`)
   if (shown.length < hits.length) facts.push(`… and ${hits.length - shown.length} more — full list: ${report ?? 'the report could not be written'}`)
-  const agent = ['Titles of those decisions, from the decisions files:', ...shown.map((hit) => `${hit.entry.label} — ${specLabel(hit.entry.title, 80)}`)]
+  const agent = ['Titles of those decisions, from the decisions files:', ...shown.map((hit) => `${shortLabel(hit)} — ${specLabel(hit.entry.title, 80)}`)]
   return { ids, added_since_head: added, report, facts, agent }
 }

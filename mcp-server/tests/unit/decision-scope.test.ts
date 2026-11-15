@@ -445,6 +445,19 @@ describe('REVIEW — decisions covering the changed files (6.3, V adjustments 2,
     expect(gate!.message.indexOf(line)).toBeLessThan(gate!.message.search(/\n(?:Repository|Folder): /))
   })
 
+  it('cuts an absurdly long id in the dialog and in the V title', async () => {
+    const id = `ADR-${'9'.repeat(500)}`
+    corpus(decisionsMd({ premiseLine: '', adrLine: '', extra: `### ${id} — Long id\n**Applies to**: src/long/**\nText.\n` }), null)
+    commitAll(root, 'decisions')
+    write('src/long/a.ts', 'export const a = 1\n')
+    const cut = `${id.slice(0, 39)}…`
+    expect(checklist(['src/long/a.ts']).findings.at(-1)?.title).toBe(`Decisions bound to the declared paths (1): ${cut}`)
+    const { out, gate } = await review()
+    expect(out.decisions_covering?.ids).toEqual([id])
+    expect(gate!.message).toContain(`covers the changed files (1): ${cut}\n`)
+    expect(gate!.message).not.toContain(id)
+  })
+
   it('no bound decision: no line, no output', async () => {
     corpus(decisionsMd({ premiseLine: '', adrLine: '' }), null)
     commitAll(root, 'decisions')
