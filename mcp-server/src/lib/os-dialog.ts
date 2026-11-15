@@ -65,6 +65,7 @@ export const LINUX_ZENITY_GTK_ENV: Readonly<Record<string, string>> = {
   XDG_CONFIG_DIRS: '/etc/xdg',
   GTK_MODULES: '',
   GTK3_MODULES: '',
+  GTK_THEME: '',
 }
 
 export const LINUX_ZENITY_GTK3_THEME: Readonly<Record<string, string>> = { GTK_THEME: 'Adwaita' }

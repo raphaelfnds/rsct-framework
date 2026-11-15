@@ -18,10 +18,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The Linux approval dialog no longer reads GTK settings files from your configuration folders**
   (ADR-047). zenity runs with its own configuration path, the system configuration list only
-  (`/etc/xdg`) and no extra GTK module; zenity 3 uses GTK's built-in Adwaita theme. The dialog may
-  not follow a custom desktop theme or text scaling. Windows and macOS are unchanged.
-- **Glob matching runs in linear time** (ADR-047): the scope globs of the edit guard, contract
-  surfaces and the import walk answer as before, without the exponential cost some globs had.
+  (`/etc/xdg`) and empty GTK module and theme variables; zenity 3 uses GTK's built-in Adwaita theme.
+  The dialog may not follow a custom desktop theme or text scaling. Windows and macOS are unchanged.
+
+### Fixed
+
+- **Glob matching runs in linear time** (ADR-047); scope globs, contract surfaces and the import walk
+  answer as before.
 
 ### Upgrading
 

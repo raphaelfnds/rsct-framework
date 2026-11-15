@@ -1443,8 +1443,8 @@ of a script:
   as written. A `zenity` installed anywhere else is not used, so the
   dialog is unavailable there. Since 2.25.1 zenity does not read GTK
   settings files from your configuration folders (`XDG_CONFIG_HOME` points
-  at a path that cannot exist, `XDG_CONFIG_DIRS` is `/etc/xdg`, and no extra
-  GTK module is named); zenity 3 also uses GTK's built-in Adwaita theme, so
+  at a path that cannot exist, `XDG_CONFIG_DIRS` is `/etc/xdg`, and the GTK
+  module and theme variables are empty); zenity 3 also uses GTK's built-in Adwaita theme, so
   the dialog may not follow a custom desktop theme or text scaling.
 
 A NUL character in the text is shown as `␀`. A title and text longer than
