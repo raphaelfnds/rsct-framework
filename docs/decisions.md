@@ -3237,30 +3237,32 @@ Ubuntu 22.04 and Debian 12 (zenity 3, GTK 3), Ubuntu 24.04 and Fedora 39 (zenity
   the tested cases;
 - with `XDG_CONFIG_HOME` set to a path that cannot exist and `XDG_CONFIG_DIRS=/etc/xdg`, zenity 3
   reads none of them and the dialog opens normally, with no new error output;
-- `GTK_THEME=Adwaita` makes zenity 3 use GTK's built-in theme, but makes zenity 4 look for that theme
-  in the user's folders first, so it is right for one version and wrong for the other;
+- `GTK_THEME=Adwaita` makes zenity 3 use GTK's built-in theme but changes the theme zenity 4 loads,
+  so it is right for one version and wrong for the other; an empty `GTK_THEME` leaves zenity 4 on its
+  default theme;
 - `zenity --version` prints its version reliably when a display is present (3.42, 3.44, 4.0.x), in
   16–106 ms.
-Separately, `globToRegex` built a regular expression whose runs of `[^/]*` take exponential time on
-some globs (MEASURED: doubling with each `*a` in `*a*a…*b` against a 30-character path).
+Separately, `globToRegex` built a backtracking regular expression, and some long globs were slow.
 
 **Decision**:
 1. `runLinuxDialog` gives zenity `XDG_CONFIG_HOME=/dev/null/rsct` (a path that can never exist, so
-   nothing is created), `XDG_CONFIG_DIRS=/etc/xdg`, and empty `GTK_MODULES` / `GTK3_MODULES`. The
-   full path, the text passed as data and the exit-code mapping are unchanged.
-2. Before the dialog, `zenity --version` runs with the same values; only a major version 3 adds
-   `GTK_THEME=Adwaita`. Version 4 or an unknown version adds nothing.
+   nothing is created), `XDG_CONFIG_DIRS=/etc/xdg`, and empty `GTK_MODULES`, `GTK3_MODULES` and
+   `GTK_THEME`. The full path, the text passed as data and the exit-code mapping are unchanged.
+2. Before the dialog, `zenity --version` runs with the same values; only a major version 3 sets
+   `GTK_THEME=Adwaita`. Version 4 or an unknown version keeps it empty.
 3. `globToRegex` compiles the glob into tokens and matches by simulating every position at once, in
-   time proportional to the path length times the glob length. The semantics are those of ADR-015,
-   proved by a comparison with the previous regular expression on 40 000 random globs and paths.
+   time proportional to the path length times the glob length, after a check of what any match needs
+   (the literal prefix and suffix, and the literal runs in order) that keeps bulk matching close to
+   its former cost. The semantics are those of ADR-015, proved by a comparison with the previous
+   regular expression on 40 000 random globs and paths.
 
 **Direction**: stricter. The dialog reads less from the user's account; glob answers are unchanged.
 
-**What is given up, by name**: the dialog no longer follows a custom desktop theme on zenity 3, nor
-the user's text scaling; the limits ADR-027 and ADR-034 name stay as they are.
+**What is given up, by name**: the dialog may not follow a custom desktop theme or the user's text
+scaling; the limits ADR-027 and ADR-034 name stay as they are.
 
-**Consequences**: the edit and terminal guards are hook scripts, so the new matcher reaches a project
-through `/rsct-setup`; the dialog change reaches a machine through the installer.
+**Consequences**: the edit guard is a hook script, so the new matcher reaches a project through
+`/rsct-setup`; the dialog change reaches a machine through the installer.
 
 ## Anti-decisions (tried, rejected, do not retry)
 
