@@ -24,12 +24,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **V** raises one finding, after every other finding, listing the decisions whose globs match a
     declared path or a file under a declared folder, read at HEAD and in the working tree.
   - **REVIEW** lists, in the approval dialog, the decisions whose globs cover the changed files,
-    with the ones added since HEAD marked; the ids also come back in `decisions_covering` and are
-    recorded on `review.complete`.
-  - **`rsct_get_decisions`** and the V start hints name globs that match no file, so a moved folder
-    does not unbind a decision in silence.
-  - Both excerpt parsers skip the line: inside the 3-line excerpt it pushed out a `never …` line and
-    turned a premise check from `conflict` into `requires_revision`.
+    with the ones added since HEAD, and the ones whose line was removed or changed since HEAD,
+    marked and listed first; the ids also come back in `decisions_covering` and are recorded on
+    `review.complete`.
+  - **`rsct_get_decisions`** and the V start hints name globs that match no file, refused globs and
+    lines not read, so a moved folder does not unbind a decision in silence.
+  - The line stays out of the 3-line excerpt, where it pushed out a `never …` line and turned a
+    premise check from `conflict` into `requires_revision`; its words still count in the premise
+    check, so a line a project wrote before 2.26.0 keeps every match.
 
 ### Changed
 
