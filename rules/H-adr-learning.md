@@ -73,8 +73,16 @@ For durable ADRs (append-only, chronological order):
 For out-of-scope items:
 Add to the "Out of scope" section with 1 descriptive line.
 
+**Binding an entry to the code it governs (optional):** any entry in either
+file may carry `**Applies to**: <glob>, <glob>` (paths relative to the project
+root, e.g. `src/billing/**`). The V phase then lists the entry when a plan
+declares those paths, and the REVIEW dialog when a change touches them. Paths
+only: a sentence binds nothing. The line only adds visibility; an entry without
+it still applies everywhere.
+
 **Execution rules:**
-- Never rewrite an existing ADR — append only.
+- Never rewrite an existing ADR — append only. Adding or fixing an entry's
+  `**Applies to**:` line is metadata, not a rewrite.
 - Chronological history lives in git log, not in this file.
 - Editing decisions.md follows §B exception (it is .md — no plan required),
   but commit/push follow §C (updated OK).
