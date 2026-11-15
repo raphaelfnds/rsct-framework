@@ -12,6 +12,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.25.1] - 2026-11-15
+
+### Security
+
+- **The Linux approval dialog no longer reads GTK settings files from your configuration folders**
+  (ADR-047). zenity runs with its own configuration path, the system configuration list only
+  (`/etc/xdg`) and no extra GTK module; zenity 3 uses GTK's built-in Adwaita theme. The dialog may
+  not follow a custom desktop theme or text scaling. Windows and macOS are unchanged.
+- **Glob matching runs in linear time** (ADR-047): the scope globs of the edit guard, contract
+  surfaces and the import walk answer as before, without the exponential cost some globs had.
+
+### Upgrading
+
+1. Run the installer from an updated clone and restart the IDE.
+2. Run `/rsct-setup` in every project: the guards are hook scripts each project keeps its own copy of.
+
 ## [2.25.0] - 2026-11-14
 
 ### Fixed
