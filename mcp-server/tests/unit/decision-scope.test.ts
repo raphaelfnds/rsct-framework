@@ -238,6 +238,17 @@ describe('V — one aggregated finding (6.2, V adjustments 9 and 10)', () => {
     expect(unbound.findings.some((f) => f.source === 'decision-scope')).toBe(false)
   })
 
+  it('names the first ten ids in the title and counts the rest', () => {
+    const adrs = Array.from({ length: 12 }, (_, i) => `### ADR-${100 + i} — Rule ${i}\n**Applies to**: src/many/**\nText ${i}.\n`).join('\n')
+    corpus(decisionsMd({ premiseLine: '', adrLine: '', extra: adrs }), null)
+    write('src/many/a.ts', 'x\n')
+    const finding = checklist(['src/many/a.ts']).findings.at(-1)!
+    expect(finding.title).toBe(
+      'Decisions bound to the declared paths (12): ADR-100, ADR-101, ADR-102, ADR-103, ADR-104, ADR-105, ADR-106, ADR-107, ADR-108, ADR-109 … and 2 more',
+    )
+    expect(finding.detail).toContain('- ADR-111 — Rule 11: src/many/a.ts matches src/many/**')
+  })
+
   it('trivial and small tiers get no finding', () => {
     corpus()
     write('src/money/a.ts', 'x\n')
@@ -288,12 +299,13 @@ describe('V and REVIEW read HEAD and the working tree (V adjustments 3 and 6)', 
     write('apps/web/.rsct.json', JSON.stringify({ rsct_version: '1.0.0', app: { name: 'web', org: 'o' } }))
     write('apps/web/documentation/decisions.md', decisionsMd())
     write('apps/web/src/money/a.ts', 'x\n')
+    write('apps/web/src/http/client.ts', 'x\n')
     commitAll(root, 'web app')
     write('apps/web/documentation/decisions.md', decisionsMd({ premiseLine: '' }))
     const corpusRead = readBoundCorpus(join(root, 'apps', 'web'))
     expect(corpusRead.head).toBe('read')
     expect(corpusRead.entries.map((e) => e.label).sort()).toEqual(['ADR-002', 'premise #1'])
-    expect(checklist(['src/money'], 'complex', join(root, 'apps', 'web')).findings.at(-1)?.title).toBe('Decisions bound to the declared paths (1): premise #1')
+    expect(checklist(['src'], 'complex', join(root, 'apps', 'web')).findings.at(-1)?.title).toBe('Decisions bound to the declared paths (2): ADR-002, premise #1')
   })
 
   it('an unreadable HEAD side is said in a hint', () => {
@@ -416,6 +428,21 @@ describe('REVIEW — decisions covering the changed files (6.3, V adjustments 2,
     write('apps/web/src/money/a.ts', 'export const a = 1\n')
     const own = await review(web)
     expect(own.out.decisions_covering?.ids).toEqual(['premise #1'])
+  })
+
+  it('says among the framework lines when HEAD could not be read', async () => {
+    corpus()
+    commitAll(root, 'decisions')
+    const blob = git(root, 'rev-parse', 'HEAD:documentation/decisions.md').trim()
+    const object = join(root, '.git', 'objects', blob.slice(0, 2), blob.slice(2))
+    chmodSync(object, 0o644)
+    unlinkSync(object)
+    write('src/money/a.ts', 'export const a = 1\n')
+    const { out, gate } = await review()
+    expect(out.decisions_covering?.ids).toEqual(['premise #1'])
+    const line = '⚠ documentation/decisions.md could not be read at HEAD: the decisions below come from the working tree only, and none is marked as added since HEAD.'
+    expect(gate!.message.indexOf(line)).toBeGreaterThan(-1)
+    expect(gate!.message.indexOf(line)).toBeLessThan(gate!.message.search(/\n(?:Repository|Folder): /))
   })
 
   it('no bound decision: no line, no output', async () => {
