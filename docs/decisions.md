@@ -3264,6 +3264,63 @@ scaling; the limits ADR-027 and ADR-034 name stay as they are.
 **Consequences**: the edit guard is a hook script, so the new matcher reaches a project through
 `/rsct-setup`; the dialog change reaches a machine through the installer.
 
+### ADR-048 — Decisions bound to code: an optional "Applies to" line adds visibility in V and the REVIEW (#152, 2.26.0)
+**Status**: active
+**Tags**: v-phase, review, decisions, premise-check, globs
+
+**Context**: MEASURED on `main` @ `f80b22d` (2.25.1):
+- a decision reached V only through `rsct_check_premise`, which matches the plan's words against a
+  title and a 3-line excerpt; nothing tied a decision to the files it governs, so a change to those
+  files could pass V and REVIEW without the decision being shown;
+- with the shipped parsers, an `**Applies to**` line inside the excerpt pushed out a `Never …` line
+  and turned a premise check from `conflict` into `requires_revision`; in an anti-decision it pushed
+  out the fourth excerpt line;
+- the REVIEW sweep's file list holds code files only; `readTouchedPaths` holds every touched file,
+  deleted ones included, repo-relative;
+- `HEAD:<path>` is repo-relative, so a project in a subfolder reads HEAD at its prefix;
+- no reader parses universe decisions (`universe-content.ts` reads `docs/governance` sections).
+
+Corrects ADR-047's Context: before 2.25.1, zenity 4 did read the user's GTK 4 style file
+(`gtk-4.0/gtk.css` under the configuration folder), measured as one parse error before the fix and
+none after; ADR-047's decision covers it.
+
+**Decision**:
+1. Decisions and anti-decisions may carry `**Applies to**: <glob>, <glob>` (also `**Applies to:**`,
+   with an optional `- `, in any case). The line binds only when every comma item is a path token
+   (backticks removed, no whitespace); otherwise it binds nothing and stays in the entry's text.
+   Globs are relative to the project root and use `matchesAnyGlob` (ADR-015). Refused and reported:
+   absolute paths, `..` segments, more than 256 characters, more than 4 `*` in one segment, control
+   or invisible characters, globs past 64 on one entry. A repeated `**/` is collapsed.
+2. Both excerpt parsers skip a binding line, through the one reader that decides binding, so the
+   premise check reads the text it read without the line.
+3. V reads the decisions at HEAD (at the project's prefix) and in the working tree, and joins them.
+   Declared paths outside the project are dropped; each declared path is tested as written, with
+   `/` appended, and expanded to the files under it (`git ls-files --cached --others
+   --exclude-standard` under the prefix, a disk walk without git). The decisions whose globs match
+   raise ONE `gap` finding, `address-now`, evidence `measured`, emitted after every other finding so
+   no earlier id moves; trivial and small tiers raise none.
+4. The REVIEW matches the touched files under the project's prefix, prefix stripped, with no root —
+   never absolute paths, which a junction, a case difference or a sibling app would change. The
+   dialog lists the count and the first 10 ids among the framework lines, ids added since HEAD
+   marked, the rest in a report under `.rsct/reports/`; titles go in the agent part, cut. An
+   unreadable HEAD side is said there. The ids come back in `decisions_covering` and are recorded on
+   `review.complete`, so the `trust` channel keeps them.
+5. Globs that match no file (a folder written without `/**` is named) and lines that bind nothing are
+   hints in the V start result and in `rsct_get_decisions`, never findings.
+6. §H states that adding or fixing an entry's `Applies to` line is metadata, not a rewrite.
+
+**Direction**: stricter or neutral. The line only adds what is shown: a decision without it still
+applies everywhere, the premise check reads every decision, and a line removed in the working tree
+is still read from HEAD.
+
+**What is given up, by name**: V costs one more finding to answer when a bound decision matches; a
+glob is hand-written and can go stale, which the no-match report shows but cannot fix; universe
+decisions do not take the line.
+
+**Consequences**: the server change reaches a machine through the installer; the template, §H and
+memory-entry text reach a project through `/rsct-setup`, for files and sections the project did not
+edit.
+
 ## Anti-decisions (tried, rejected, do not retry)
 
 ### AD-001 — Do not detect stale comments by diff heuristic

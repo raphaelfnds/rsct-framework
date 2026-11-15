@@ -591,6 +591,46 @@ corpus carries that reporting: `rsct_load_context` in `next_action_hints`,
 The parser also recognises optional `**Status**:` and `**Tags**:` lines
 inside any premise or ADR section.
 
+#### Decisions bound to code — `**Applies to**` (#152, 2.26.0)
+
+A premise, an ADR or an anti-decision may carry one line naming the files it
+governs, paths and globs relative to the project root:
+
+```
+**Applies to**: src/billing/**, src/ledger/*.ts
+```
+
+`- **Applies to:** …` (the anti-decision field style) reads the same, in any case.
+The line **binds only when every comma-separated item is a path token** (backticks
+removed, no spaces); a sentence such as `**Applies to**: all money code` binds
+nothing and stays part of the entry's text. Globs use the phase-scope matcher
+(ADR-015). A glob that is absolute, leaves the project folder (`..`), is longer than
+256 characters or has more than 4 `*` in one segment is refused and reported; a
+repeated `**/` is collapsed; an entry keeps at most 64 globs.
+
+- **The line only adds visibility.** A decision without it still applies everywhere,
+  and `rsct_check_premise` reads every decision as before. Both excerpt parsers skip
+  a binding line, so the premise check reads the same text it read without it.
+- **V** (`rsct_phase_verification_start`, complex and standard tiers): one `gap`
+  finding, `address-now`, `measured`, emitted after every other finding, lists the
+  decisions whose globs match a declared path or a file under a declared folder or
+  glob (files from `git ls-files --cached --others --exclude-standard`; declared paths
+  outside the project are dropped). Decisions are read at HEAD and in the working
+  tree, so removing a line in the working tree does not hide it.
+- **REVIEW** (`rsct_phase_review_complete`): the §C dialog lists, among the framework
+  lines, the decisions whose globs cover a changed file (every file the change
+  touches, deleted ones included, matched repo-relative with the project's folder
+  stripped), ids added since HEAD marked; past 10, the first 10, the count and a
+  report under `.rsct/reports/`. Titles appear in the agent part, cut. The ids come
+  back in `decisions_covering` and are recorded on `review.complete`, so the `trust`
+  channel keeps them too.
+- **No-match report:** `rsct_get_decisions` and the V start `hints` name globs that
+  match no file (a folder written without `/**` is called out) and lines that bind
+  nothing, so a moved folder does not unbind a decision in silence.
+
+Universe decisions do not take the line. Entries returned by `rsct_get_decisions`
+carry `applies_to: { globs, rejected, unbound }` when they have the line.
+
 ### `rsct_get_knowledge`
 
 Reads `documentation/knowledge/<category>.md` and splits it into `##` / `###` sections.
@@ -709,7 +749,7 @@ Heuristic check: tokenises a claim, scores against decisions AND anti-decisions 
 - a matched decision contains rollback / rejection language (`rolled back`, `superseded`, `deprecated`, `do not`, `rejected`, `anti-pattern`, `never`, `revogado`, `não usar`, etc.), OR
 - the claim matches an anti-decision entry in `documentation/knowledge/anti-decisions.md` — the team explicitly abandoned that path. Anti-decision hits ALWAYS dominate the recommendation, even when an active premise also matches.
 
-**Shipped placeholders are not entries (2.25.0).** A block equal to one of the blocks the templates shipped — the `#1` and `ADR-001` placeholders and the anti-decision example shipped before 2.25.0 — is skipped by both parsers, whatever its number; any real text in the title or the body keeps it an entry. In the V phase, a `conflict` finding names the matching decision that carries the negation, and an anti-decision hit also names the decision the claim would be charged with without it.
+**Shipped placeholders are not entries (2.25.0).** A block equal to one of the blocks the templates shipped — the `#1` and `ADR-001` placeholders and the anti-decision example shipped before 2.25.0 — is skipped by both parsers, whatever its number; any real text in the title or the body keeps it an entry. In the V phase, a `conflict` finding names the matching decision that carries the negation, and an anti-decision hit also names the decision the claim would be charged with without it. A binding `**Applies to**` line (2.26.0) never enters either excerpt: inside the 3-line decision excerpt it would push out a `never …` line and turn a `conflict` into `requires_revision`.
 
 Anti-decision headings parse at `##` or `###` with `—`, `–`, `-` or `:` as the
 separator; §H prescribes `### AD-NNN — <title>` as the one shape to write, and the

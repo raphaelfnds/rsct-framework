@@ -53,6 +53,11 @@ the phase never raised is refused. V's findings come from its checklist;
 the Review's are the ones the agent declares, so that half is a
 commitment the agent makes rather than one the machine can impose.
 
+**Decisions bound to code (2.26.0).** A decision or anti-decision can name the
+files it governs with an `**Applies to**: <glob>, <glob>` line: V lists it when a
+plan declares those paths, and the Review dialog when a change touches them. It
+only adds visibility; a decision without the line still applies everywhere.
+
 ## Documentation
 
 The end-user guides live in [`docs/`](docs/):

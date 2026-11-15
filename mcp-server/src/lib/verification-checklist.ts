@@ -10,6 +10,7 @@ import {
   readArchitectureModules,
 } from './architecture.js'
 import { checkPremise } from './premise-check.js'
+import { declaredDecisionCoverage, hitDetailLines, hitLabels } from './decision-scope.js'
 import { makeIdGenerator, type FindingEvidence, type FindingSeverity } from './findings.js'
 import type { DiscoveredImporter as DiscoveredImporterRef } from './reverse-dep-walk.js'
 import {
@@ -74,6 +75,15 @@ export function evidenceForSource(f: RawFinding): FindingEvidence {
       kind: 'hypothesis',
       how_to_falsify:
         'Open the referenced entry. The matcher scores SHARED TOKENS over title+excerpt, so if the shared words are generic domain nouns rather than the terms carrying the claim, this is vocabulary coincidence and the finding is false. Two shared tokens is enough to match.',
+    }
+  }
+  if (f.source === 'decision-scope') {
+    return {
+      kind: 'measured',
+      command: 'matchesAnyGlob(declared_paths and the files under them, the "Applies to" globs of documentation/decisions.md and documentation/knowledge/anti-decisions.md at HEAD and in the working tree)',
+      output_excerpt: f.title,
+      also_explained_by:
+        'The globs are written by hand: a stale or too-wide glob binds a decision to files it no longer governs. And a decision without the line still applies everywhere, so a decision missing from this list is not a decision that does not apply.',
     }
   }
   if (f.source === 'basename-overlap') {
@@ -453,6 +463,20 @@ export function runVerificationChecklist(
       detail: `documentation/architecture.md has ${architecture.sections.length} sections. Confirm the spec aligns with the documented architecture before code-phase.${untouchedNote(input.projectRoot, 'documentation/architecture.md')}`,
       affected_paths: [...input.declaredPaths],
       source: 'architecture-overview',
+    })
+  }
+
+  const scope = declaredDecisionCoverage(input.projectRoot, input.declaredPaths, { decisions, antiDecisions })
+  hints.push(...scope.hints)
+  if (scope.hits.length > 0) {
+    findings.push({
+      id: nextId('gap'),
+      category: 'gap',
+      severity: 'address-now',
+      title: `Decisions bound to the declared paths (${scope.hits.length}): ${hitLabels(scope.hits)}`,
+      detail: `Their "Applies to" line binds these decisions to the paths this spec declares, so they govern the change even when no claim shares words with them. Read each entry before code-phase:\n${hitDetailLines(scope.hits)}`,
+      affected_paths: [...new Set(scope.hits.map((hit) => hit.path))],
+      source: 'decision-scope',
     })
   }
 

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { collectAppliesTo, isBindingAppliesToLine, type AppliesTo } from './applies-to.js'
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
 import { isShippedPlaceholder, withoutShippedIdLines } from './placeholder-entries.js'
 
@@ -10,6 +11,7 @@ export interface AntiDecisionEntry {
   excerpt: string
   related?: string[]
   captured?: string
+  applies_to?: AppliesTo
 }
 
 export interface AntiDecisionsSnapshot {
@@ -110,6 +112,8 @@ function buildEntry(id: string, title: string, section: string): AntiDecisionEnt
   if (related.length > 0) entry.related = related
   const captured = extractCaptured(section)
   if (captured) entry.captured = captured
+  const appliesTo = collectAppliesTo(section)
+  if (appliesTo) entry.applies_to = appliesTo
   return entry
 }
 
@@ -117,7 +121,7 @@ function extractExcerpt(section: string): string {
   return makeExcerpt(section, {
     maxLines: 4,
     maxChars: 320,
-    skipLine: (line) => line.startsWith('<TODO:') || line.startsWith('```'),
+    skipLine: (line) => line.startsWith('<TODO:') || line.startsWith('```') || isBindingAppliesToLine(line),
   })
 }
 

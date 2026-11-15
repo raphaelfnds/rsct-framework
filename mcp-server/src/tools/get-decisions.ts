@@ -2,6 +2,8 @@ import { z } from 'zod/v3'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { resolveProjectRoot } from '../lib/project-root.js'
 import { corpusMiss } from '../lib/corpus-health.js'
+import { openSweepRepo } from '../lib/comment-sweep/git-reads.js'
+import { appliesToHints, boundDecisionsInFile, listProjectFiles } from '../lib/decision-scope.js'
 import {
   readDecisions,
   type DecisionEntry,
@@ -44,7 +46,7 @@ export interface GetDecisionsOutput {
 export const getDecisionsTool: Tool = {
   name: 'rsct_get_decisions',
   description:
-    'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing.',
+    'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused and the lines that bind nothing; hints name the globs that match no file. The line only adds visibility: every decision still applies everywhere.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -95,8 +97,14 @@ export async function getDecisionsHandler(
     total: all.length,
     filtered_count: filtered.length,
     decisions: filtered,
-    hints: buildHints(snapshot, input.filter, filtered.length),
+    hints: [...buildHints(snapshot, input.filter, filtered.length), ...appliesToFileHints(resolution.root, snapshot)],
   }
+}
+
+function appliesToFileHints(projectRoot: string, snapshot: ReturnType<typeof readDecisions>): string[] {
+  const corpus = boundDecisionsInFile(snapshot)
+  if (corpus.entries.length === 0 && corpus.line_issues.length === 0) return []
+  return appliesToHints(corpus, listProjectFiles(projectRoot, openSweepRepo(projectRoot)))
 }
 
 function applyFilter(
