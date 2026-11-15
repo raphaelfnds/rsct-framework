@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { collectAppliesTo, isBindingAppliesToLine, type AppliesTo } from './applies-to.js'
 import { ENTRY_HEADING_SEPARATOR, makeExcerpt } from './markdown.js'
 import { isShippedPlaceholder, withoutShippedIdLines } from './placeholder-entries.js'
 
@@ -19,6 +20,7 @@ export interface DecisionEntry {
   excerpt: string
   status?: DecisionStatus
   tags?: string[]
+  applies_to?: AppliesTo
 }
 
 export interface DecisionsSnapshot {
@@ -182,6 +184,8 @@ function buildEntry(
   }
   if (meta.status) entry.status = meta.status
   if (meta.tags && meta.tags.length > 0) entry.tags = meta.tags
+  const appliesTo = collectAppliesTo(section)
+  if (appliesTo) entry.applies_to = appliesTo
   return entry
 }
 
@@ -211,5 +215,5 @@ function extractMeta(section: string): { status?: DecisionStatus; tags?: string[
 }
 
 function extractExcerpt(section: string): string {
-  return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) })
+  return makeExcerpt(section, { skipLine: (line) => META_LINE_REGEX.test(line) || isBindingAppliesToLine(line) })
 }

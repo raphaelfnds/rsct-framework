@@ -202,6 +202,27 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
   return id ? readBlob(repo, id) : null
 }
 
+export type HeadFile = { state: 'present'; text: string } | { state: 'missing' } | { state: 'failed' }
+
+export function readHeadFile(repo: SweepRepo, path: string): HeadFile {
+  if (!repo.headCommit) return { state: 'missing' }
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', repo.headCommit, '--', path]))
+  if (listed === null) return { state: 'failed' }
+  const blob = /^100(?:644|755) blob ([0-9a-f]{40,64})\t/.exec(listed[0] ?? '')?.[1]
+  if (blob === undefined) return { state: 'missing' }
+  const content = readBlob(repo, blob)
+  return content === null ? { state: 'failed' } : { state: 'present', text: content.toString('utf8') }
+}
+
+export function readFilesUnderPrefix(repo: SweepRepo): string[] | null {
+  const scope = repo.prefix === '' ? [] : ['--', repo.prefix]
+  const listed = nulList(
+    safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--full-name', ...scope]),
+  )
+  if (listed === null) return null
+  return [...new Set(listed.filter((path) => path.startsWith(repo.prefix)).map((path) => path.slice(repo.prefix.length)))]
+}
+
 const REGULAR_FILE_MODES: ReadonlySet<string> = new Set(['100644', '100755'])
 const CAT_FILE_BATCH = 1000
 const CAT_FILE_BATCH_BYTES = 32 * 1024 * 1024

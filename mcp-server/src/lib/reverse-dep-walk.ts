@@ -110,7 +110,7 @@ export function seedIsCoverable(
   return matchesAnyGlob(rel, langGlobs).matched
 }
 
-function walkFiles(
+export function walkFiles(
   root: string,
   langGlobs: readonly string[],
   excludeGlobs: readonly string[],

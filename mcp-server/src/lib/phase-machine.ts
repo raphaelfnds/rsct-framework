@@ -337,6 +337,7 @@ export interface CompletePhaseInternal {
   dialogDetail?: string
   forceDialog?: boolean
   forceDialogReason?: string
+  completeAuditFields?: Record<string, unknown>
 }
 
 export function precheckPhaseComplete(
@@ -537,6 +538,7 @@ export async function gatePhaseComplete(
       next_recommended_phase: recommended,
       completed_at: completedAt,
       phase_state_written: writeResult.ok,
+      ...internal.completeAuditFields,
     },
     config?.audit,
   )
