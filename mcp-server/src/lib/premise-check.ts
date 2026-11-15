@@ -2,7 +2,6 @@ import type { DecisionEntry } from './decisions.js'
 import type { AntiDecisionEntry } from './anti-decisions.js'
 
 const STOPWORDS = new Set<string>([
-  // English filler
   'the',
   'and',
   'for',
@@ -37,7 +36,6 @@ const STOPWORDS = new Set<string>([
   'while',
   'than',
   'then',
-  // pt-BR filler
   'que',
   'para',
   'pelo',

@@ -134,8 +134,6 @@ function buildHints(
     return hints
   }
 
-  // #49 — zero entries only means "none" when the file was READ and holds nothing
-  // id-shaped. The other two cases are parser/IO misses and get reported.
   const miss = corpusMiss({
     read_error: snapshot.read_error,
     has_ids: snapshot.has_decision_ids,
