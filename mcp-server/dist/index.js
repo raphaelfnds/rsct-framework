@@ -26865,11 +26865,9 @@ function readPhaseState(projectRoot) {
     };
   }
 }
-var globRegexCache = /* @__PURE__ */ new Map();
-function globToRegex(glob) {
-  const cached2 = globRegexCache.get(glob);
-  if (cached2) return cached2;
-  let out2 = "^";
+var globMatcherCache = /* @__PURE__ */ new Map();
+function globTokens(glob) {
+  const tokens = [];
   let i2 = 0;
   while (i2 < glob.length) {
     const ch = glob[i2];
@@ -26878,31 +26876,99 @@ function globToRegex(glob) {
         const atSegmentStart = i2 === 0 || glob[i2 - 1] === "/";
         const followedBySlash = glob[i2 + 2] === "/";
         if (atSegmentStart && followedBySlash && i2 + 3 < glob.length) {
-          out2 += "(?:[^/]*/)*";
+          tokens.push({ kind: "segments" });
           i2 += 3;
         } else {
-          out2 += ".*";
+          tokens.push({ kind: "any" });
           i2 += followedBySlash ? 3 : 2;
         }
       } else {
-        out2 += "[^/]*";
+        tokens.push({ kind: "star" });
         i2++;
       }
     } else if (ch === "?") {
-      out2 += "[^/]";
-      i2++;
-    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
-      out2 += `\\${ch}`;
+      tokens.push({ kind: "one" });
       i2++;
     } else {
-      out2 += ch;
+      tokens.push({ kind: "char", char: ch });
       i2++;
     }
   }
-  out2 += "$";
-  const re = new RegExp(out2);
-  globRegexCache.set(glob, re);
-  return re;
+  return tokens;
+}
+function isLineTerminator(ch) {
+  return LINE_TERMINATORS.includes(ch);
+}
+function matchTokens(tokens, path2) {
+  const size = tokens.length + 1;
+  let current = new Uint8Array(size * 2);
+  let next = new Uint8Array(size * 2);
+  const close = (states) => {
+    for (let i2 = 0; i2 < tokens.length; i2++) {
+      const kind = tokens[i2].kind;
+      if (states[i2 * 2] === 1 && (kind === "star" || kind === "any" || kind === "segments")) states[(i2 + 1) * 2] = 1;
+    }
+  };
+  current[0] = 1;
+  close(current);
+  for (let p = 0; p < path2.length; p++) {
+    const ch = path2[p];
+    next.fill(0);
+    let alive = false;
+    for (let i2 = 0; i2 < tokens.length; i2++) {
+      const token = tokens[i2];
+      if (current[i2 * 2] === 1) {
+        if (token.kind === "char" && token.char === ch) next[(i2 + 1) * 2] = 1;
+        else if (token.kind === "one" && ch !== "/") next[(i2 + 1) * 2] = 1;
+        else if (token.kind === "star" && ch !== "/") next[i2 * 2] = 1;
+        else if (token.kind === "any" && !isLineTerminator(ch)) next[i2 * 2] = 1;
+        else if (token.kind === "segments") next[i2 * 2 + (ch === "/" ? 0 : 1)] = 1;
+      }
+      if (token.kind === "segments" && current[i2 * 2 + 1] === 1) next[i2 * 2 + (ch === "/" ? 0 : 1)] = 1;
+    }
+    close(next);
+    for (let s = 0; s < next.length; s++) if (next[s] === 1) alive = true;
+    if (!alive) return false;
+    const swap = current;
+    current = next;
+    next = swap;
+  }
+  return current[tokens.length * 2] === 1;
+}
+function literalRuns(tokens) {
+  const runs = [];
+  let run2 = "";
+  for (const token of tokens) {
+    if (token.kind === "char") {
+      run2 += token.char;
+    } else {
+      if (run2 !== "") runs.push(run2);
+      run2 = "";
+    }
+  }
+  if (run2 !== "") runs.push(run2);
+  const prefix = tokens[0]?.kind === "char" ? runs[0] ?? "" : "";
+  const suffix = tokens[tokens.length - 1]?.kind === "char" ? runs[runs.length - 1] ?? "" : "";
+  return { prefix, suffix, runs };
+}
+function mayMatch(literals, path2) {
+  if (!path2.startsWith(literals.prefix) || !path2.endsWith(literals.suffix)) return false;
+  let from = 0;
+  for (const run2 of literals.runs) {
+    const at = path2.indexOf(run2, from);
+    if (at < 0) return false;
+    from = at + run2.length;
+  }
+  return true;
+}
+function globToRegex(glob) {
+  const cached2 = globMatcherCache.get(glob);
+  if (cached2) return cached2;
+  const tokens = globTokens(glob);
+  const literals = literalRuns(tokens);
+  const matcher = { test: (path2) => mayMatch(literals, path2) && matchTokens(tokens, path2) };
+  globMatcherCache.set(glob, matcher);
+  return matcher;
 }
 var LINE_TERMINATORS = [10, 13, 8232, 8233].map((code) => String.fromCharCode(code));
 function pathCarriesLineTerminator(path2) {
@@ -27070,7 +27136,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.25.0";
+var RSCT_MCP_VERSION = "2.25.1";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -48834,6 +48900,20 @@ var LINUX_ZENITY_EXIT_CODES = {
   ZENITY_ERROR: "255",
   ZENITY_TIMEOUT: "5"
 };
+var LINUX_ZENITY_GTK_ENV = {
+  XDG_CONFIG_HOME: "/dev/null/rsct",
+  XDG_CONFIG_DIRS: "/etc/xdg",
+  GTK_MODULES: "",
+  GTK3_MODULES: "",
+  GTK_THEME: ""
+};
+var LINUX_ZENITY_GTK3_THEME = { GTK_THEME: "Adwaita" };
+function zenityMajorVersion(executor) {
+  const exec = executor(LINUX_ZENITY, ["--version"], { ...LINUX_ZENITY_GTK_ENV });
+  if (exec.exitCode !== 0) return null;
+  const major = /^(\d+)\./.exec(exec.stdout.trim())?.[1];
+  return major === void 0 ? null : Number(major);
+}
 var MAC_SCRIPT_LINES = [
   "ObjC.import('Foundation')",
   "const env = $.NSProcessInfo.processInfo.environment",
@@ -48966,7 +49046,11 @@ function runLinuxDialog(options, executor) {
   const exec = executor(
     LINUX_ZENITY,
     ["--question", `--title=${options.title}`, `--text=${options.message}`, "--no-wrap", "--no-markup"],
-    { ...LINUX_ZENITY_EXIT_CODES }
+    {
+      ...LINUX_ZENITY_GTK_ENV,
+      ...zenityMajorVersion(executor) === 3 && LINUX_ZENITY_GTK3_THEME,
+      ...LINUX_ZENITY_EXIT_CODES
+    }
   );
   if (programMissing(exec)) {
     return { response: "no-channel", channel: "none", error: exec.error ?? "zenity not found" };

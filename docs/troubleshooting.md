@@ -548,6 +548,12 @@ undecided (at `rsct_phase_code_start` the audit line is `run_alone.declined` wit
 
 The reason in the reply says what the dialog program reported.
 
+## The Linux approval dialog looks different from other windows
+
+Since 2.25.1 the dialog does not read GTK settings files from your configuration
+folders, so its theme or text size may differ from your desktop's (zenity 3 uses
+GTK's built-in Adwaita theme). The text and the Yes/No buttons are the same.
+
 ## The batch token is refused or does not count
 
 - **`not_multi_phase`** — the token is only for a plan with two or more phases:

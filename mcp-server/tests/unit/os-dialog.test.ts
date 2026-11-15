@@ -12,6 +12,7 @@ import {
   DIALOG_TITLE_VARIABLE,
   DIALOG_TEXT_LIMIT,
   LINUX_ZENITY_EXIT_CODES,
+  LINUX_ZENITY_GTK_ENV,
   WINDOWS_NO_DESKTOP,
   WINDOWS_SCRIPT,
   WINDOWS_SCRIPT_PREFIX,
@@ -102,7 +103,7 @@ describe('promptYesNo — text checks before any dialog', () => {
       { platform: 'linux', executor },
     )
     expect(r).toEqual({ response: 'yes', channel: 'linux-zenity' })
-    expect(calls.length).toBe(1)
+    expect(calls.filter((c) => c.args[0] === '--question')).toHaveLength(1)
   })
 })
 
@@ -335,8 +336,9 @@ describe('runLinuxDialog', () => {
   it('runs zenity by absolute path with markup off and the text as its own --text argument', () => {
     const { executor, calls } = recording({ exitCode: 0, stdout: '', stderr: '' })
     runLinuxDialog({ title: 'a < b', message: 'x & y <z>' }, executor)
-    expect(calls[0]?.cmd).toBe('/usr/bin/zenity')
-    expect(calls[0]?.args).toEqual([
+    expect(calls.map((c) => c.cmd)).toEqual(['/usr/bin/zenity', '/usr/bin/zenity'])
+    expect(calls[0]?.args).toEqual(['--version'])
+    expect(calls[1]?.args).toEqual([
       '--question',
       '--title=a < b',
       '--text=x & y <z>',
@@ -345,12 +347,46 @@ describe('runLinuxDialog', () => {
     ])
   })
 
-  it('passes zenity its exit codes explicitly', () => {
+  it('passes zenity its exit codes explicitly, next to the GTK values that keep the user GTK settings files out', () => {
     const { executor, calls } = recording({ exitCode: 1, stdout: '', stderr: '' })
     runLinuxDialog(OPTS, executor)
     const expected = { ZENITY_OK: '0', ZENITY_CANCEL: '1', ZENITY_ESC: '1', ZENITY_ERROR: '255', ZENITY_TIMEOUT: '5' }
-    expect(calls[0]?.env).toEqual(expected)
+    const gtk = { XDG_CONFIG_HOME: '/dev/null/rsct', XDG_CONFIG_DIRS: '/etc/xdg', GTK_MODULES: '', GTK3_MODULES: '', GTK_THEME: '' }
+    expect(calls[1]?.env).toEqual({ ...gtk, ...expected })
     expect(LINUX_ZENITY_EXIT_CODES).toEqual(expected)
+    expect(LINUX_ZENITY_GTK_ENV).toEqual(gtk)
+  })
+
+  function scripted(version: ExecResult, dialog: ExecResult): { executor: Executor; calls: Call[] } {
+    const calls: Call[] = []
+    return {
+      calls,
+      executor: (cmd, args, env) => {
+        calls.push({ cmd, args, env })
+        return args[0] === '--version' ? version : dialog
+      },
+    }
+  }
+
+  it('asks the zenity version with the same pinned GTK values, so GTK 3 reads no user GTK settings file there either', () => {
+    const { executor, calls } = scripted({ exitCode: 0, stdout: '3.42.1\n', stderr: '' }, { exitCode: 0, stdout: '', stderr: '' })
+    runLinuxDialog(OPTS, executor)
+    expect(calls[0]?.env).toEqual(LINUX_ZENITY_GTK_ENV)
+  })
+
+  it('forces the Adwaita theme for zenity 3 and clears any inherited theme otherwise', () => {
+    for (const [stdout, theme] of [['3.42.1\n', 'Adwaita'], ['3.44.0', 'Adwaita'], ['4.0.1\n', ''], ['4.0.2', ''], ['', ''], ['zenity\n', '']] as const) {
+      const { executor, calls } = scripted({ exitCode: 0, stdout, stderr: '' }, { exitCode: 0, stdout: '', stderr: '' })
+      expect(runLinuxDialog(OPTS, executor), stdout).toEqual({ response: 'yes', channel: 'linux-zenity' })
+      expect(calls[1]?.env?.GTK_THEME, stdout).toBe(theme)
+      expect(calls[1]?.env?.XDG_CONFIG_HOME, stdout).toBe('/dev/null/rsct')
+    }
+  })
+
+  it('a version check that fails sets no theme and still runs the dialog', () => {
+    const { executor, calls } = scripted({ exitCode: 255, stdout: '3.42.1', stderr: 'cannot open display' }, { exitCode: 1, stdout: '', stderr: '' })
+    expect(runLinuxDialog(OPTS, executor)).toEqual({ response: 'no', channel: 'linux-zenity' })
+    expect(calls[1]?.env?.GTK_THEME).toBe('')
   })
 
   it('maps zenity exit 0 to yes', () => {

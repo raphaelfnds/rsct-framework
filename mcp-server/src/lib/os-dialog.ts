@@ -60,6 +60,23 @@ export const LINUX_ZENITY_EXIT_CODES: Readonly<Record<string, string>> = {
   ZENITY_TIMEOUT: '5',
 }
 
+export const LINUX_ZENITY_GTK_ENV: Readonly<Record<string, string>> = {
+  XDG_CONFIG_HOME: '/dev/null/rsct',
+  XDG_CONFIG_DIRS: '/etc/xdg',
+  GTK_MODULES: '',
+  GTK3_MODULES: '',
+  GTK_THEME: '',
+}
+
+export const LINUX_ZENITY_GTK3_THEME: Readonly<Record<string, string>> = { GTK_THEME: 'Adwaita' }
+
+function zenityMajorVersion(executor: Executor): number | null {
+  const exec = executor(LINUX_ZENITY, ['--version'], { ...LINUX_ZENITY_GTK_ENV })
+  if (exec.exitCode !== 0) return null
+  const major = /^(\d+)\./.exec(exec.stdout.trim())?.[1]
+  return major === undefined ? null : Number(major)
+}
+
 const MAC_SCRIPT_LINES: readonly string[] = [
   "ObjC.import('Foundation')",
   'const env = $.NSProcessInfo.processInfo.environment',
@@ -216,7 +233,11 @@ export function runLinuxDialog(options: DialogOptions, executor: Executor): Dial
   const exec = executor(
     LINUX_ZENITY,
     ['--question', `--title=${options.title}`, `--text=${options.message}`, '--no-wrap', '--no-markup'],
-    { ...LINUX_ZENITY_EXIT_CODES },
+    {
+      ...LINUX_ZENITY_GTK_ENV,
+      ...(zenityMajorVersion(executor) === 3 && LINUX_ZENITY_GTK3_THEME),
+      ...LINUX_ZENITY_EXIT_CODES,
+    },
   )
 
   if (programMissing(exec)) {
