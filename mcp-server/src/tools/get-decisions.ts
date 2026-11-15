@@ -46,7 +46,7 @@ export interface GetDecisionsOutput {
 export const getDecisionsTool: Tool = {
   name: 'rsct_get_decisions',
   description:
-    'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused and the lines that bind nothing; hints name the globs that match no file. The line only adds visibility: every decision still applies everywhere.',
+    'Returns architectural decisions (firm premises + ADRs) from documentation/decisions.md, optionally filtered by kind, tag, or status. Use this to verify whether a proposed change conflicts with existing premises, surface the rationale behind a prior choice, or sweep for superseded ADRs. Returns an empty list (not an error) when the file is missing. An entry with an optional "**Applies to**: <glob>, <glob>" line (paths relative to the project root) carries applies_to: the globs it binds, the ones refused, the lines that bind nothing, the spellings not read, and the binding lines, whose words still count in the premise check; hints name the globs that match no file and the other problems. The line only adds visibility: every decision still applies everywhere.',
   inputSchema: {
     type: 'object',
     properties: {
