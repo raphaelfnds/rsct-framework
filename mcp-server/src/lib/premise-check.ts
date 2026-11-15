@@ -136,11 +136,15 @@ export function checkPremise(
   }
 }
 
+function scoredText(entry: DecisionEntry | AntiDecisionEntry): string {
+  return [entry.title, entry.excerpt, ...(entry.applies_to?.lines ?? [])].join(' ')
+}
+
 function scoreEntry(
   claimTokens: Set<string>,
   entry: DecisionEntry,
 ): PremiseMatch | null {
-  const entryText = `${entry.title} ${entry.excerpt}`
+  const entryText = scoredText(entry)
   const entryTokens = new Set(tokenize(entryText))
   const shared: string[] = []
   for (const t of claimTokens) {
@@ -161,7 +165,7 @@ function scoreAntiDecision(
   claimTokens: Set<string>,
   entry: AntiDecisionEntry,
 ): AntiDecisionMatch | null {
-  const entryText = `${entry.title} ${entry.excerpt}`
+  const entryText = scoredText(entry)
   const entryTokens = new Set(tokenize(entryText))
   const shared: string[] = []
   for (const t of claimTokens) {

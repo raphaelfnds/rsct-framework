@@ -2,11 +2,15 @@ export interface AppliesTo {
   globs: string[]
   rejected: string[]
   unbound: string[]
+  unread: string[]
+  lines: string[]
 }
 
 export type AppliesToLine = { binds: true; globs: string[]; rejected: string[] } | { binds: false; value: string }
 
-const APPLIES_TO_LINE = /^(?:-\s+)?\*\*applies\s+to(?::\*\*|\*\*\s*:)(.*)$/i
+const APPLIES_TO_LINE = /^(?:[-*+]\s+)?\*\*applies\s+to(?::\*\*|\*\*\s*:)(.*)$/i
+
+const NEAR_MISS = /^(?:(?:[-*+>|]|\d+[.)])\s*)*(?:\*\*|__|\*|_)?\s*applies[\s_-]*to(?![a-z0-9])/i
 
 export const GLOB_MAX_LENGTH = 256
 
@@ -16,11 +20,14 @@ export const GLOBS_PER_ENTRY_MAX = 64
 
 const HIDDEN = /[\p{Cc}\p{Cf}]/u
 
+const FORMAT = /\p{Cf}/gu
+
 function checkGlob(item: string): { glob: string } | { reason: string } {
   let glob = item.replace(/\\/g, '/')
   while (glob.startsWith('./')) glob = glob.slice(2)
   if (glob === '') return { reason: 'empty' }
   if (HIDDEN.test(glob)) return { reason: 'a control or invisible character' }
+  if (/[{}]/.test(glob)) return { reason: 'braces are not supported: list each path' }
   if (glob.startsWith('/') || /^[A-Za-z]:/.test(glob)) return { reason: 'an absolute path' }
   if (glob.length > GLOB_MAX_LENGTH) return { reason: `longer than ${GLOB_MAX_LENGTH} characters` }
   const segments: string[] = []
@@ -55,17 +62,28 @@ export function isBindingAppliesToLine(line: string): boolean {
   return readAppliesToLine(line)?.binds === true
 }
 
+function nearMiss(line: string): boolean {
+  return NEAR_MISS.test(line.replace(FORMAT, '').trim())
+}
+
 export function collectAppliesTo(section: string): AppliesTo | undefined {
   let found = false
-  const out: AppliesTo = { globs: [], rejected: [], unbound: [] }
+  const out: AppliesTo = { globs: [], rejected: [], unbound: [], unread: [], lines: [] }
   for (const line of section.split('\n')) {
     const read = readAppliesToLine(line)
-    if (read === null) continue
+    if (read === null) {
+      if (nearMiss(line)) {
+        found = true
+        out.unread.push(line.trim())
+      }
+      continue
+    }
     found = true
     if (!read.binds) {
       out.unbound.push(read.value)
       continue
     }
+    out.lines.push(line.trim())
     for (const glob of read.globs) {
       if (out.globs.includes(glob)) continue
       if (out.globs.length >= GLOBS_PER_ENTRY_MAX) out.rejected.push(`${glob} (more than ${GLOBS_PER_ENTRY_MAX} globs on one entry)`)

@@ -204,13 +204,33 @@ export function readHeadContent(repo: SweepRepo, path: string): Buffer | null {
 
 export type HeadFile = { state: 'present'; text: string } | { state: 'missing' } | { state: 'failed' }
 
+function headEntry(repo: SweepRepo, commit: string, path: string): { mode: string; type: string; id: string } | null | undefined {
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', commit, '--', path]))
+  if (listed === null) return null
+  for (const record of listed) {
+    const tab = record.indexOf('\t')
+    if (tab < 0 || record.slice(tab + 1) !== path) continue
+    const [mode, type, id] = record.slice(0, tab).split(' ')
+    return mode && type && id ? { mode, type, id } : null
+  }
+  return undefined
+}
+
 export function readHeadFile(repo: SweepRepo, path: string): HeadFile {
   if (!repo.headCommit) return { state: 'missing' }
-  const listed = nulList(safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', repo.headCommit, '--', path]))
-  if (listed === null) return { state: 'failed' }
-  const blob = /^100(?:644|755) blob ([0-9a-f]{40,64})\t/.exec(listed[0] ?? '')?.[1]
-  if (blob === undefined) return { state: 'missing' }
-  const content = readBlob(repo, blob)
+  const entry = headEntry(repo, repo.headCommit, path)
+  if (entry === null) return { state: 'failed' }
+  if (entry === undefined) {
+    const parts = path.split('/')
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const parent = headEntry(repo, repo.headCommit, parts.slice(0, i).join('/'))
+      if (parent === null || (parent !== undefined && parent.type !== 'tree')) return { state: 'failed' }
+      if (parent !== undefined) return { state: 'missing' }
+    }
+    return { state: 'missing' }
+  }
+  if (entry.type !== 'blob' || (entry.mode !== '100644' && entry.mode !== '100755')) return { state: 'failed' }
+  const content = readBlob(repo, entry.id)
   return content === null ? { state: 'failed' } : { state: 'present', text: content.toString('utf8') }
 }
 

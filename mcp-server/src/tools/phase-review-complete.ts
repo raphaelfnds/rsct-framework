@@ -190,7 +190,7 @@ export type PhaseReviewCompleteOutput = Omit<CompletePhaseResult, 'reject_kind'>
   pending_dispositions?: PendingDisposition[]
   pending_dead_code?: PendingDeadSymbol[]
   comment_sweep: CommentSweepSummary | null
-  decisions_covering?: { ids: string[]; added_since_head: string[]; report: string | null } | null
+  decisions_covering?: { ids: string[] | null; added_since_head: string[]; changed_since_head: string[]; report: string | null } | null
 }
 
 export const phaseReviewCompleteTool: Tool = {
@@ -757,7 +757,11 @@ export async function phaseReviewCompleteHandler(
       dialogDetail: detailParts.filter(Boolean).join('\n'),
       ...(forceReason !== null && { forceDialog: true, forceDialogReason: forceReason }),
       ...(coverage !== null && {
-        completeAuditFields: { decisions_covering: coverage.ids, decisions_added_since_head: coverage.added_since_head },
+        completeAuditFields: {
+          decisions_covering: coverage.ids,
+          decisions_added_since_head: coverage.added_since_head,
+          decisions_changed_since_head: coverage.changed_since_head,
+        },
       }),
     },
   )
@@ -769,7 +773,9 @@ export async function phaseReviewCompleteHandler(
     head_stale: staleness.head_stale,
     comment_sweep: summary,
     decisions_covering:
-      coverage === null ? null : { ids: coverage.ids, added_since_head: coverage.added_since_head, report: coverage.report },
+      coverage === null
+        ? null
+        : { ids: coverage.ids, added_since_head: coverage.added_since_head, changed_since_head: coverage.changed_since_head, report: coverage.report },
   }
   if (result.status !== 'completed') {
     output.hints.push(`Evidence: ${describeEvidenceMix(evidence_mix)}.`)
