@@ -26935,11 +26935,38 @@ function matchTokens(tokens, path2) {
   }
   return current[tokens.length * 2] === 1;
 }
+function literalRuns(tokens) {
+  const runs = [];
+  let run2 = "";
+  for (const token of tokens) {
+    if (token.kind === "char") {
+      run2 += token.char;
+    } else {
+      if (run2 !== "") runs.push(run2);
+      run2 = "";
+    }
+  }
+  if (run2 !== "") runs.push(run2);
+  const prefix = tokens[0]?.kind === "char" ? runs[0] ?? "" : "";
+  const suffix = tokens[tokens.length - 1]?.kind === "char" ? runs[runs.length - 1] ?? "" : "";
+  return { prefix, suffix, runs };
+}
+function mayMatch(literals, path2) {
+  if (!path2.startsWith(literals.prefix) || !path2.endsWith(literals.suffix)) return false;
+  let from = 0;
+  for (const run2 of literals.runs) {
+    const at = path2.indexOf(run2, from);
+    if (at < 0) return false;
+    from = at + run2.length;
+  }
+  return true;
+}
 function globToRegex(glob) {
   const cached2 = globMatcherCache.get(glob);
   if (cached2) return cached2;
   const tokens = globTokens(glob);
-  const matcher = { test: (path2) => matchTokens(tokens, path2) };
+  const literals = literalRuns(tokens);
+  const matcher = { test: (path2) => mayMatch(literals, path2) && matchTokens(tokens, path2) };
   globMatcherCache.set(glob, matcher);
   return matcher;
 }
@@ -48877,7 +48904,8 @@ var LINUX_ZENITY_GTK_ENV = {
   XDG_CONFIG_HOME: "/dev/null/rsct",
   XDG_CONFIG_DIRS: "/etc/xdg",
   GTK_MODULES: "",
-  GTK3_MODULES: ""
+  GTK3_MODULES: "",
+  GTK_THEME: ""
 };
 var LINUX_ZENITY_GTK3_THEME = { GTK_THEME: "Adwaita" };
 function zenityMajorVersion(executor) {

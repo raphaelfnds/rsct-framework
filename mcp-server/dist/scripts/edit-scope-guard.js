@@ -363,11 +363,38 @@ function matchTokens(tokens, path) {
   }
   return current[tokens.length * 2] === 1;
 }
+function literalRuns(tokens) {
+  const runs = [];
+  let run = "";
+  for (const token of tokens) {
+    if (token.kind === "char") {
+      run += token.char;
+    } else {
+      if (run !== "") runs.push(run);
+      run = "";
+    }
+  }
+  if (run !== "") runs.push(run);
+  const prefix = tokens[0]?.kind === "char" ? runs[0] ?? "" : "";
+  const suffix = tokens[tokens.length - 1]?.kind === "char" ? runs[runs.length - 1] ?? "" : "";
+  return { prefix, suffix, runs };
+}
+function mayMatch(literals, path) {
+  if (!path.startsWith(literals.prefix) || !path.endsWith(literals.suffix)) return false;
+  let from = 0;
+  for (const run of literals.runs) {
+    const at = path.indexOf(run, from);
+    if (at < 0) return false;
+    from = at + run.length;
+  }
+  return true;
+}
 function globToRegex(glob) {
   const cached = globMatcherCache.get(glob);
   if (cached) return cached;
   const tokens = globTokens(glob);
-  const matcher = { test: (path) => matchTokens(tokens, path) };
+  const literals = literalRuns(tokens);
+  const matcher = { test: (path) => mayMatch(literals, path) && matchTokens(tokens, path) };
   globMatcherCache.set(glob, matcher);
   return matcher;
 }
