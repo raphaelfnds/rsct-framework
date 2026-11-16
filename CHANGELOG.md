@@ -12,6 +12,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-11-16
+
+### Added
+
+- **Impact docs bound to code** (#158, ADR-049). A file in `documentation/impact/` may carry the
+  same `**Applies to**: <glob>, <glob>` line as a decision. V reads the impact docs at HEAD and in
+  the working tree and matches a doc by its file name, as before, or by its globs against the
+  declared paths and the files under declared folders. A doc matched only by its globs, or present
+  only at HEAD, gets its own finding after every other finding, marked when it was added, deleted,
+  changed or cannot be read. Deleting a doc or its line in the working tree no longer hides it. Your
+  impact files stay yours: the framework reads them and never writes them.
+- **Importers and impact docs outside a phase.** `rsct_get_topology` takes `impact: true` with
+  `paths` and returns `paths_impact`: the files that import each path (first 10 per file, at most
+  200 in total), the walk coverage and the impact docs bound to the paths. It writes nothing.
+- **Imports that work only because the disk ignores letter case** are counted
+  (`walk_stats.case_inexact_specifiers`, also recorded on `verification.start`) and named in a hint,
+  the same on Windows, macOS and Linux: an import spelled `./Widget.js` for `widget.js` reaches the
+  file on Windows and macOS and nothing on Linux.
+
+### Changed
+
+- **Every declared path lists all its importers.** A file that imports two declared paths was
+  listed under the first only, and a declared path whose importers were all listed under another
+  one got no finding. V now gives each path its full list; a path that had no finding gets one after
+  every other finding, so the ids V already used do not move.
+- **The import walk is faster**: it remembers what it asked the disk during one walk. Same result;
+  measured 290 ms → 128 ms on this repository, 12.7 s → 8.5 s on 10,000 files, 20 s → 4.8 s from WSL
+  over `/mnt/c`. No dependency graph is stored between runs.
+- The impact README template documents the optional line.
+
+### Upgrading
+
+1. Run the installer from an updated clone and restart the IDE: V and `rsct_get_topology` live in
+   `rsct-mcp`.
+2. Run `/rsct-setup` in every project to get the updated impact README template (if you did not
+   edit it). The hooks did not change.
+
 ## [2.26.0] - 2026-11-15
 
 ### Added

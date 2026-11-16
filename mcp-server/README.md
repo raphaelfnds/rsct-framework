@@ -362,7 +362,7 @@ file content on disk.
 | 3 | "List the firm premises in this project." | `rsct_get_decisions` with `filter.kind=premise` | At least one entry from `documentation/decisions.md`. |
 | 4 | "Show me business rules captured in the knowledge graph." | `rsct_get_knowledge` with `category="business-rules"` | Sections from `documentation/knowledge/business-rules.md`. |
 | 5 | "What's the delta between prod and base profiles?" | `rsct_get_environments` with `scope="profiles"` | Per-profile added/modified lists; secret-shaped values masked as `***MASKED***`. |
-| 6 | "What's the impact of changing the orders module?" | `rsct_get_architecture` with `scope="impact"`, `module_name="orders"` | Returns `documentation/impact/orders.md` parsed into sections. |
+| 6 | "What's the impact of changing the orders module?" | `rsct_get_architecture` with `scope="impact"`, `module_name="orders"`; or `rsct_get_topology` with `paths` and `impact: true` | Returns `documentation/impact/orders.md` parsed into sections; the topology call lists the files that import the paths and the impact docs bound to them. |
 | 7 | "Check whether 'use DynamoDB for orders' conflicts with existing decisions." | `rsct_check_premise` with that claim | Returns `recommendation` (one of proceed / conflict / requires_revision) and matched entries with `shared_tokens`. |
 
 ### Resource checks (5)
@@ -616,8 +616,8 @@ miss (`__Applies to__:`, a table row, `Applies-to`) is reported as not read.
   check still scores its words with the title and the excerpt, so a line a project
   wrote before 2.26.0 keeps every match.
 - **V** (`rsct_phase_verification_start`, complex and standard tiers): one `gap`
-  finding, `address-now`, `measured`, emitted after every other finding, lists the
-  decisions whose globs match a declared path or a file under a declared folder or
+  finding, `address-now`, `measured`, emitted after every finding V raised before
+  2.26.0, lists the decisions whose globs match a declared path or a file under a declared folder or
   glob (files from `git ls-files --cached --others --exclude-standard`; without git,
   a disk walk that skips only `node_modules` and `.git`; declared paths outside the
   project are dropped). Its title names the first 10 ids, its detail every id.
@@ -642,6 +642,31 @@ miss (`__Applies to__:`, a table row, `Applies-to`) is reported as not read.
 
 Universe decisions do not take the line. Entries returned by `rsct_get_decisions`
 carry `applies_to: { globs, rejected, unbound, unread, lines }` when they have the line.
+
+#### Impact docs bound to code, and the import walk in V (#158, 2.27.0)
+
+- **Impact docs** (`documentation/impact/*.md`, `README.md` excluded) may carry the same
+  `**Applies to**:` line, with the same rules. V reads them at HEAD and in the working tree. A doc
+  whose name is the base name of a declared path raises `Impact doc exists for <name>`, as
+  before. A doc matched only by its globs (against the declared paths and the files under
+  declared folders), or present only at HEAD, raises one `breakage` / `impact-doc` finding,
+  `address-now`, after every other finding (so the decision-scope finding above is no longer
+  always last), listing the matched paths and marked "added since HEAD", "line removed or changed
+  since HEAD", "deleted in the working tree" or "unreadable in the working tree". A doc read from
+  HEAD only carries `reported` evidence against the HEAD commit. The impact files are the
+  developer's: the framework reads them and never writes them, and V lists the walk's importers
+  beside them.
+- **Every declared path lists all its importers.** Each declared path is walked on its own over
+  one import index, so an importer of two declared paths appears under both; a declared path
+  whose importers were all listed under another one, and so had no finding before, gets one after
+  every other finding. `discovered_importers` is unchanged.
+- **Letter case.** `walk_stats.case_inexact_specifiers` (also on `verification.start`) counts
+  relative imports that reach a file only when letter case is ignored, or reach a different file
+  when it is not, decided from the directory listings so every system counts the same imports; a
+  hint names up to five. Resolution does not change, so the importer lists can still differ
+  between a disk that ignores case (Windows, macOS) and one that does not (Linux): the hint says
+  to treat them as a lower bound.
+- **Speed.** One walk remembers what it asked the disk; nothing is stored between runs.
 
 ### `rsct_get_knowledge`
 
@@ -693,11 +718,13 @@ path globs in the producer repo (`openapi/*.yaml`, `src/api/**`, `proto/**`) tha
 apps depend on.
 
 - Input: `project_root?`, `paths?` (files you plan to change, relative to the project root or
-  absolute, at most 500)
+  absolute, at most 500), `impact?` (boolean, used with `paths`)
 - Output: `topology` block, `contracts` graph (`{ available, contracts[], note }`), `produced[]`,
   `consumed[]`, `app_name`, `universe_path` + hints; with `paths`, also `paths_check`
   (`{ paths[], folders[], outside_root[], app_names[], universe_linked, contracts_readable,
-  contracts_touched[], consumers[], notes[] }`)
+  contracts_touched[], consumers[], notes[] }`); with `paths` and `impact: true`, also
+  `paths_impact` (`{ importers[]: { path, count, direct, listed[]: { file, depth } },
+  walk_coverage, impact_docs[]: { doc, mark, matches[]: { path, via } }, truncated, hints[] }`)
 
 **Contracts touched by planned paths (2.25.0).** With `paths`, the answer lists the contracts
 whose surface those paths touch and their declared consumers, read the way V and the commit gate
@@ -706,7 +733,15 @@ fetched upstream. It never records the universe baseline, so the commit dialog k
 against the last approved commit. A folder is listed in `folders` (surfaces match files, so list
 the files), a path outside the project root in `outside_root`; a project with no universe reads
 "contracts do not apply", and no `app.name` or an unreadable `contracts.json` reads UNKNOWN — never
-"none touched". Importers and impact docs stay in the V phase (`rsct_phase_verification_start`).
+"none touched". Without `impact`, a hint names the flag.
+
+**Importers and impact docs outside a phase (2.27.0).** With `paths` and `impact: true`,
+`paths_impact` lists, for each file, the files that import it (the V-phase walk, depth 2; first 10
+per file, at most 200 in total, the rest counted, `truncated` when cut), the walk coverage and its
+hints, and the impact docs matched by file name or by their `**Applies to**` line over the files
+and folders given, read at HEAD and in the working tree like V. It reads every source file of the
+project, so it is off by default; `impact: true` without `paths` runs nothing and says so. The tool
+writes nothing.
 
 In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks** a commit that
 touches a produced surface (listing the affected consumers) unless
