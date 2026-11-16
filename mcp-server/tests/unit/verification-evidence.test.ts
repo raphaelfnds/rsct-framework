@@ -45,7 +45,7 @@ function writeFile(rel: string, content: string): void {
 function seedFullCorpus(): void {
   writeFile(
     'documentation/decisions.md',
-    '## ADR-1 — Pessimistic lock closes the read-SUM-write race\n\nWe took a pessimistic lock on the stock record.\n',
+    '## ADR-1 — Pessimistic lock closes the read-SUM-write race\n\nWe took a pessimistic lock on the stock record.\n\n## ADR-2 — Module boundary\n**Applies to**: src/**\n\nEach module owns its folder.\n',
   )
   writeFile(
     'documentation/knowledge/anti-decisions.md',
@@ -173,6 +173,7 @@ describe('runVerificationChecklist — every emitted source is classified', () =
       'architecture-overview',
       'basename-overlap',
       'contract-surface',
+      'decision-scope',
       'impact-doc',
       'knowledge-category:*',
       'premise-check',
