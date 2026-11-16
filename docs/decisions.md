@@ -3367,16 +3367,19 @@ edit.
    truth that decision wanted to avoid.
 2. An impact doc may carry the ADR-048 `**Applies to**:` line (same reader, limits and refusals).
    Impact docs are read at HEAD (at the project's prefix, the folder listed with `ls-tree`, not
-   recursive, regular files only, blobs in one batch) and in the working tree, joined by the exact,
-   case-sensitive path; `README.md` is never a doc. A doc matches when it has the base name of a
-   declared path or when one of its globs matches a declared path or a file under a declared folder
-   or glob. The base-name finding on a working-tree doc is unchanged; any other match raises one
-   `breakage` / `impact-doc` / `address-now` finding per doc, after every other finding (after the
-   decision-scope finding, which is therefore no longer always last), docs in code-unit path order,
-   marked "added since HEAD", "line removed or changed since HEAD", "deleted in the working tree" or
-   "unreadable in the working tree"; a doc read from HEAD only carries `reported` evidence against
-   the HEAD commit. A link or a non-tree on the way to the folder, or a doc that is a link at HEAD,
-   makes the HEAD side unreadable, said in a hint. `impact_docs_consulted` counts the joined docs.
+   recursive, folders skipped, blobs in one batch) and in the working tree, joined by the exact,
+   case-sensitive path in Unicode NFC form; `README.md` is never a doc. A doc matches when it has the
+   base name of a declared path or when one of its globs matches a declared path or a file under a
+   declared folder or glob. The base-name finding on a working-tree doc is unchanged, and only the
+   doc it actually raised is skipped afterwards; any other match raises one `breakage` /
+   `impact-doc` / `address-now` finding per doc, last of all (after the decision-scope finding and
+   the findings of point 4), docs in code-unit path order, listing the first 20 matched paths and the
+   count, marked "added since HEAD", "line removed or changed since HEAD", "deleted in the working
+   tree" or "unreadable in the working tree"; a doc read from HEAD only carries `reported` evidence
+   against the HEAD commit. A link or a non-tree on the way to the folder, or a doc that is a link at
+   HEAD, makes the HEAD side unreadable, said in a hint. In an impact doc a "not read" near miss is
+   reported only when `applies to` is followed by `:`, `**` or `__`, so prose and table rows that start
+   with those words stay quiet. `impact_docs_consulted` counts the joined docs.
 3. No dependency graph is persisted (this changes #158's stage 3, by the maintainer's choice): a
    stale cache would list fewer importers. The walk keeps one probe per walk and remembers
    `exists` / `isFile` / `isDirectory` per exact absolute path (`memoProbe`), never across walks;
@@ -3385,21 +3388,30 @@ edit.
    macOS Unicode and case folding, permission cases). The walk still runs before the tier skip, so
    `walk_coverage` is audited on every return path.
 4. Each declared path gets its own breadth-first search over the same reverse index (`by_seed`), a
-   declared path never counted as an importer; `discovered` and `cycles_skipped` are unchanged. V
-   gives each existing importer finding the full list; a declared path that had no finding gets one
-   after every other finding, so no earlier id moves; the coverage hint decides "found" from the full
-   lists.
+   declared path never counted as an importer; each entry keeps the count, the direct count and the
+   first 10 importers, not the whole list (REVIEW MEASURED 668 MB and 55 MB of findings for 500
+   declared paths sharing 5,000 importers when the whole list was kept). `discovered` and
+   `cycles_skipped` are unchanged. V titles each importer finding with the full count and severity;
+   its `affected_paths` holds the importers the shared walk gave it, as before, plus the first 10 of
+   its own, so every importer still appears in some finding as in 2.26.0; a declared path that had no
+   finding gets one after the decision-scope finding, so no earlier id moves; the coverage hint
+   decides "found" from the counts.
 5. `case_inexact_specifiers` counts relative imports whose first candidate, in `resolveImport`'s
    order, matches only when letter case is ignored, decided from memoised directory listings so the
-   same imports count on every system: segments below the longest exact prefix shared with the root
-   as passed are compared, the root's own spelling never. Resolution and edges do not change; a hint
-   names up to five and says the importer set is a lower bound; the zero-importer and incomplete
-   hints keep their conditions. The count is audited on `verification.start`. ADR-020's open
-   consequence is now visible on every system instead of resolved one way.
+   same imports count on every system. The project root is first respelled as stored on disk (read
+   from the listings from the filesystem root down) and the importer paths are rebased onto it, so
+   the count does not depend on how the root was spelled; segments below the longest exact prefix
+   shared with that root are compared. A linked entry is judged by what it points to. A specifier
+   holding a backslash is skipped, because only Windows reads it as a path. Resolution and edges do
+   not change; a hint names up to five and says the importer set is a lower bound; the zero-importer
+   and incomplete hints keep their conditions. The count is audited on `verification.start`.
+   ADR-020's open consequence is now visible on every system instead of resolved one way.
 6. `rsct_get_topology` takes `impact: true` with `paths` and returns `paths_impact`: each file's
    importers (first 10, at most 200 in total, the rest counted), the walk coverage and hints, and the
-   impact docs matched over files and folders. Without the flag the fields are unchanged and a hint
-   names it; the tool writes nothing.
+   impact docs matched over files and folders (first 20 paths each, with `match_count`);
+   `truncated` is true when any list was cut, and the summary hint says how many notes sit in
+   `paths_impact.hints`. Without the flag the fields are unchanged and a hint names it; the tool
+   writes nothing.
 
 **Direction**: stricter or neutral. Every impact finding raised before is still raised with the same
 id; more docs match; a doc removed or changed in the working tree is still read from HEAD; importer
@@ -3408,7 +3420,9 @@ lists only grow; the case hint is new on every system and removes nothing.
 **What is given up, by name**: V can raise more findings to answer (one per newly matched doc, one
 per declared path that only shared importers); the walk is still a full scan per V run, about 0.85
 ms per file on native Windows after the change; a doc's globs are hand-written and can go stale,
-which the no-match hint shows; the case count classifies, it does not make the importer lists equal
+which the no-match hint shows; a doc matched by name for two declared paths raises two findings while
+it is in the working tree and one finding listing both once it is gone from it; a folder listing
+that cannot be read leaves the case check silent for imports under it; the case count classifies, it does not make the importer lists equal
 across systems.
 
 **Consequences**: the server change reaches a machine through the installer; the impact README

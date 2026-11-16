@@ -650,20 +650,24 @@ carry `applies_to: { globs, rejected, unbound, unread, lines }` when they have t
   whose name is the base name of a declared path raises `Impact doc exists for <name>`, as
   before. A doc matched only by its globs (against the declared paths and the files under
   declared folders), or present only at HEAD, raises one `breakage` / `impact-doc` finding,
-  `address-now`, after every other finding (so the decision-scope finding above is no longer
-  always last), listing the matched paths and marked "added since HEAD", "line removed or changed
-  since HEAD", "deleted in the working tree" or "unreadable in the working tree". A doc read from
-  HEAD only carries `reported` evidence against the HEAD commit. The impact files are the
-  developer's: the framework reads them and never writes them, and V lists the walk's importers
-  beside them.
-- **Every declared path lists all its importers.** Each declared path is walked on its own over
-  one import index, so an importer of two declared paths appears under both; a declared path
-  whose importers were all listed under another one, and so had no finding before, gets one after
-  every other finding. `discovered_importers` is unchanged.
+  `address-now`, at the very end (so the decision-scope finding above is no longer always last),
+  listing the first 20 matched paths and the count, and marked "added since HEAD", "line removed or
+  changed since HEAD", "deleted in the working tree" or "unreadable in the working tree". A doc
+  read from HEAD only carries `reported` evidence against the HEAD commit. In an impact doc, a
+  "not read" spelling is reported only when `applies to` is followed by `:`, `**` or `__`, so prose
+  and table rows starting with those words stay quiet. The impact files are the developer's: the
+  framework reads them and never writes them, and V lists the walk's importers beside them.
+- **Every declared path counts all its importers.** Each declared path is walked on its own over
+  one import index, so an importer of two declared paths counts under both. The finding's title
+  carries the full count, its detail the first 10, and its `affected_paths` the importers the
+  shared walk gave it plus those 10, so every importer still appears in some finding. A declared
+  path whose importers were all listed under another one, and so had no finding before, gets one
+  after the decision-scope finding. `discovered_importers` is unchanged.
 - **Letter case.** `walk_stats.case_inexact_specifiers` (also on `verification.start`) counts
   relative imports that reach a file only when letter case is ignored, or reach a different file
-  when it is not, decided from the directory listings so every system counts the same imports; a
-  hint names up to five. Resolution does not change, so the importer lists can still differ
+  when it is not, decided from the directory listings so every system counts the same imports,
+  whatever letter case the project root was given in; a specifier with a backslash is not counted;
+  a hint names up to five. Resolution does not change, so the importer lists can still differ
   between a disk that ignores case (Windows, macOS) and one that does not (Linux): the hint says
   to treat them as a lower bound.
 - **Speed.** One walk remembers what it asked the disk; nothing is stored between runs.
@@ -724,7 +728,8 @@ apps depend on.
   (`{ paths[], folders[], outside_root[], app_names[], universe_linked, contracts_readable,
   contracts_touched[], consumers[], notes[] }`); with `paths` and `impact: true`, also
   `paths_impact` (`{ importers[]: { path, count, direct, listed[]: { file, depth } },
-  walk_coverage, impact_docs[]: { doc, mark, matches[]: { path, via } }, truncated, hints[] }`)
+  walk_coverage, impact_docs[]: { doc, mark, matches[]: { path, via }, match_count }, truncated,
+  hints[] }`)
 
 **Contracts touched by planned paths (2.25.0).** With `paths`, the answer lists the contracts
 whose surface those paths touch and their declared consumers, read the way V and the commit gate
@@ -737,11 +742,12 @@ the files), a path outside the project root in `outside_root`; a project with no
 
 **Importers and impact docs outside a phase (2.27.0).** With `paths` and `impact: true`,
 `paths_impact` lists, for each file, the files that import it (the V-phase walk, depth 2; first 10
-per file, at most 200 in total, the rest counted, `truncated` when cut), the walk coverage and its
-hints, and the impact docs matched by file name or by their `**Applies to**` line over the files
-and folders given, read at HEAD and in the working tree like V. It reads every source file of the
-project, so it is off by default; `impact: true` without `paths` runs nothing and says so. The tool
-writes nothing.
+per file, at most 200 in total, all of them in `count`), the walk coverage and its hints, and the
+impact docs matched by file name or by their `**Applies to**` line over the files and folders
+given (first 20 matched paths per doc, all of them in `match_count`), read at HEAD and in the
+working tree like V. `truncated` is true when any list was cut, and the summary hint says how many
+notes sit in `paths_impact.hints`. It reads every source file of the project, so it is off by
+default; `impact: true` without `paths` runs nothing and says so. The tool writes nothing.
 
 In **multi-repo** mode, [`rsct_request_commit`](#rsct_request_commit) **blocks** a commit that
 touches a produced surface (listing the affected consumers) unless

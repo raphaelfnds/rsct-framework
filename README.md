@@ -60,9 +60,10 @@ only adds visibility; a decision without the line still applies everywhere.
 
 **Impact docs bound to code (2.27.0).** The impact files you write in
 `documentation/impact/` can carry the same line, and V reads them at HEAD and in
-the working tree, so deleting one does not hide it. Each planned file lists every
-file that imports it, and `rsct_get_topology` with `impact: true` shows the same
-importers and impact docs outside a phase.
+the working tree, so deleting one does not hide it. Each planned file counts every
+file the import walk finds importing it, even one shared with another planned
+file, and `rsct_get_topology` with `impact: true` shows those importers and the
+impact docs outside a phase.
 
 ## Documentation
 
