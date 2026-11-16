@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire, builtinModules } from 'module';
-import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, win32, posix, normalize } from 'path';
+import path, { join, dirname, sep, resolve, relative, isAbsolute, basename, parse, win32, posix, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import process2, { cwd } from 'process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, realpathSync, unlinkSync, lstatSync, mkdtempSync, copyFileSync, utimesSync, rmSync, openSync, fchmodSync, fsyncSync, closeSync, statfsSync, linkSync, writeSync, readSync, rmdirSync, readlinkSync, fstatSync } from 'fs';
@@ -3904,7 +3904,7 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse4(serialize2(uri, options), options);
+        parse5(serialize2(uri, options), options);
       }
       return uri;
     }
@@ -3947,8 +3947,8 @@ var require_fast_uri = __commonJS({
     function resolveComponent(base, relative11, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse4(serialize2(base, options), options);
-        relative11 = parse4(serialize2(relative11, options), options);
+        base = parse5(serialize2(base, options), options);
+        relative11 = parse5(serialize2(relative11, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative11.scheme) {
@@ -4266,7 +4266,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme };
     }
-    function parse4(uri, opts) {
+    function parse5(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -4303,7 +4303,7 @@ var require_fast_uri = __commonJS({
       resolveComponent,
       equal,
       serialize: serialize2,
-      parse: parse4
+      parse: parse5
     };
     module2.exports = fastUri;
     module2.exports.default = fastUri;
@@ -9280,7 +9280,7 @@ var require_thread_stream = __commonJS({
     var { version: version2 } = require_package();
     var { EventEmitter } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join41 } = __require("path");
+    var { join: join42 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -9323,7 +9323,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join41(__dirname$1, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join42(__dirname$1, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         trackUnmanagedFds: false,
@@ -9726,7 +9726,7 @@ var require_transport = __commonJS({
     init_esm_shims();
     var { createRequire } = __require("module");
     var getCallers = require_caller();
-    var { join: join41, isAbsolute: isAbsolute12, sep: sep5 } = __require("path");
+    var { join: join42, isAbsolute: isAbsolute12, sep: sep5 } = __require("path");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -9789,7 +9789,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join41(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join42(__dirname$1, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -9807,7 +9807,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join41(__dirname$1, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join42(__dirname$1, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -9829,7 +9829,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join41(__dirname$1, "..", "file.js");
+          return join42(__dirname$1, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -10819,7 +10819,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join41 = ",";
+            let join42 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -10833,7 +10833,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join41 = `,
+                join42 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10841,13 +10841,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join41;
+                res += join42;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join42}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10868,7 +10868,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join41 = `,
+              join42 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10882,13 +10882,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join41;
+                separator = join42;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join41;
+              separator = join42;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -10929,7 +10929,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join41 = ",";
+            let join42 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -10942,7 +10942,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join41 = `,
+                join42 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -10950,13 +10950,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join41;
+                res += join42;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join41}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join42}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -10969,7 +10969,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join41 = `,
+              join42 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -10978,7 +10978,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join41;
+                separator = join42;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -11036,20 +11036,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join42 = `,
+              const join43 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join42;
+                res2 += join43;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join42}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join43}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -11065,16 +11065,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join41 = `,
+            const join42 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join41, maximumBreadth);
+              res += stringifyTypedArray(value, join42, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join41;
+              separator = join42;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -11085,13 +11085,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join41;
+                separator = join42;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join41;
+              separator = join42;
             }
             if (separator !== "") {
               res = `
@@ -16912,17 +16912,17 @@ var validateAsync = async (schema, value, _ctx) => {
   return result.issues.length === 0;
 };
 var _encode = (_Err) => {
-  const parse4 = _parse(_Err);
+  const parse5 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse4(schema, value, ctx, finalizeParams(fn, _params));
+    return parse5(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var _decode = (_Err) => {
-  const parse4 = _parse(_Err);
+  const parse5 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
-    return parse4(schema, value, _ctx, finalizeParams(fn, _params));
+    return parse5(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
@@ -17968,7 +17968,7 @@ function capSize(inst, size) {
   if (!caps.length)
     return;
   const cap = Math.min(...caps.map((c) => c[0]));
-  const parse4 = inst._zod.parse;
+  const parse5 = inst._zod.parse;
   inst._zod.parse = (payload, ctx) => {
     const n = size(payload.value);
     if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
@@ -17982,7 +17982,7 @@ function capSize(inst, size) {
         }
       }
     }
-    return parse4(payload, ctx);
+    return parse5(payload, ctx);
   };
 }
 var arraySize = (input) => Array.isArray(input) ? input.length : -1;
@@ -27136,7 +27136,7 @@ function readPlanDisposition(state, slug) {
 
 // src/lib/version.ts
 init_esm_shims();
-var RSCT_MCP_VERSION = "2.26.0";
+var RSCT_MCP_VERSION = "2.27.0";
 
 // src/lib/universe.ts
 init_esm_shims();
@@ -29515,22 +29515,48 @@ function headEntry(repo, commit, path2) {
   }
   return void 0;
 }
+function absentAtHead(repo, commit, path2) {
+  const parts2 = path2.split("/");
+  for (let i2 = parts2.length - 1; i2 >= 1; i2--) {
+    const parent = headEntry(repo, commit, parts2.slice(0, i2).join("/"));
+    if (parent === null || parent !== void 0 && parent.type !== "tree") return "failed";
+    if (parent !== void 0) return "missing";
+  }
+  return "missing";
+}
 function readHeadFile(repo, path2) {
   if (!repo.headCommit) return { state: "missing" };
   const entry = headEntry(repo, repo.headCommit, path2);
   if (entry === null) return { state: "failed" };
-  if (entry === void 0) {
-    const parts2 = path2.split("/");
-    for (let i2 = parts2.length - 1; i2 >= 1; i2--) {
-      const parent = headEntry(repo, repo.headCommit, parts2.slice(0, i2).join("/"));
-      if (parent === null || parent !== void 0 && parent.type !== "tree") return { state: "failed" };
-      if (parent !== void 0) return { state: "missing" };
-    }
-    return { state: "missing" };
-  }
+  if (entry === void 0) return { state: absentAtHead(repo, repo.headCommit, path2) };
   if (entry.type !== "blob" || entry.mode !== "100644" && entry.mode !== "100755") return { state: "failed" };
   const content = readBlob(repo, entry.id);
   return content === null ? { state: "failed" } : { state: "present", text: content.toString("utf8") };
+}
+function readHeadFolder(repo, path2) {
+  if (!repo.headCommit) return { state: "missing" };
+  const entry = headEntry(repo, repo.headCommit, path2);
+  if (entry === null) return { state: "failed" };
+  if (entry === void 0) return { state: absentAtHead(repo, repo.headCommit, path2) };
+  if (entry.type !== "tree") return { state: "failed" };
+  const listed2 = nulList(safeGitBuffer(repo.toplevel, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", repo.headCommit, "--", `${path2}/`]));
+  if (listed2 === null) return { state: "failed" };
+  const entries = [];
+  for (const record2 of listed2) {
+    const tab = record2.indexOf("	");
+    if (tab < 0) return { state: "failed" };
+    const child = record2.slice(tab + 1);
+    if (!child.startsWith(`${path2}/`)) continue;
+    const name2 = child.slice(path2.length + 1);
+    if (name2 === "" || name2.includes("/")) continue;
+    const [mode, type, id] = record2.slice(0, tab).split(" ");
+    if (!mode || !type || !id) return { state: "failed" };
+    entries.push({ name: name2, mode, type, id });
+  }
+  return { state: "present", entries };
+}
+function isRegularFileMode(mode) {
+  return REGULAR_FILE_MODES.has(mode);
 }
 function readFilesUnderPrefix(repo) {
   const scope = repo.prefix === "" ? [] : ["--", repo.prefix];
@@ -30103,6 +30129,7 @@ var IMPORT_PATTERNS = [
   /export\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g
 ];
 var DIRECTORY_SPECIFIER = /(?:^|\/)\.{0,2}$/;
+var SEED_IMPORTERS_LISTED = 10;
 var COVERAGE_HINT_PREFIX = "Reverse-dep coverage:";
 var ZERO_IMPORTER_HINT_PREFIX = "Reverse-dep walk found 0 importers";
 function relPosix(projectRoot, abs) {
@@ -30177,12 +30204,17 @@ function hasExactPath(projectRoot, candidate, entries) {
   return true;
 }
 function diskProbe(projectRoot, entries) {
+  const stats = /* @__PURE__ */ new Map();
   const stat = (abs) => {
+    if (stats.has(abs)) return stats.get(abs) ?? null;
+    let answer;
     try {
-      return statSync(abs, { throwIfNoEntry: false }) ?? null;
+      answer = statSync(abs, { throwIfNoEntry: false }) ?? null;
     } catch {
-      return null;
+      answer = null;
     }
+    stats.set(abs, answer);
+    return answer;
   };
   return {
     exists: (abs) => existsSync(abs),
@@ -30191,6 +30223,178 @@ function diskProbe(projectRoot, entries) {
     hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries)
   };
 }
+function memoProbe(probe) {
+  const remember = (ask) => {
+    const answers = /* @__PURE__ */ new Map();
+    return (abs) => {
+      const known = answers.get(abs);
+      if (known !== void 0) return known;
+      const answer = ask(abs);
+      answers.set(abs, answer);
+      return answer;
+    };
+  };
+  return {
+    exists: remember((abs) => probe.exists(abs)),
+    isFile: remember((abs) => probe.isFile(abs)),
+    isDirectory: remember((abs) => probe.isDirectory(abs)),
+    hasExactPath: (abs) => probe.hasExactPath(abs)
+  };
+}
+function pathSegments(path2) {
+  return path2.split(/[\\/]+/).filter((segment) => segment !== "");
+}
+function entryKind(dir, entry) {
+  if (entry.isFile()) return "file";
+  if (entry.isDirectory()) return "dir";
+  if (!entry.isSymbolicLink()) return "other";
+  try {
+    const target = statSync(join(dir, entry.name));
+    return target.isFile() ? "file" : target.isDirectory() ? "dir" : "other";
+  } catch {
+    return "missing";
+  }
+}
+function readListing(dir, memo2) {
+  const known = memo2.listings.get(dir);
+  if (known !== void 0) return known;
+  let listing;
+  try {
+    const kinds = /* @__PURE__ */ new Map();
+    const folded = /* @__PURE__ */ new Map();
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      kinds.set(entry.name, entryKind(dir, entry));
+      const key = entry.name.toLowerCase();
+      const names = folded.get(key);
+      if (names) names.push(entry.name);
+      else folded.set(key, [entry.name]);
+    }
+    listing = { kinds, folded };
+  } catch {
+    listing = null;
+  }
+  memo2.listings.set(dir, listing);
+  return listing;
+}
+function kindFits(kind, wanted) {
+  if (kind === void 0 || kind === "missing") return false;
+  return wanted === "any" || kind === wanted;
+}
+function matchName(listing, name2, wanted) {
+  if (kindFits(listing.kinds.get(name2), wanted)) return { state: "exact", name: name2 };
+  const other = (listing.folded.get(name2.toLowerCase()) ?? []).find(
+    (candidate) => candidate !== name2 && kindFits(listing.kinds.get(candidate), wanted)
+  );
+  return other === void 0 ? { state: "absent", name: name2 } : { state: "inexact", name: other };
+}
+function folderCase(folder2, memo2) {
+  const known = memo2.folders.get(folder2);
+  if (known !== void 0) return known;
+  const segments = pathSegments(folder2);
+  let shared = 0;
+  while (shared < segments.length && shared < memo2.rootSegments.length && segments[shared] === memo2.rootSegments[shared]) shared++;
+  shared = Math.max(shared, 1);
+  const names = [];
+  let base = folder2;
+  for (let i2 = segments.length; i2 > shared; i2--) {
+    names.unshift(basename(base));
+    base = dirname(base);
+  }
+  let result = { state: "exact", real: base };
+  for (const name2 of names) {
+    const listing = readListing(result.real, memo2);
+    if (listing === null) {
+      result = { state: "unknown", real: result.real };
+      break;
+    }
+    const match = matchName(listing, name2, "dir");
+    if (match.state === "absent") {
+      result = { state: "absent", real: result.real };
+      break;
+    }
+    result = { state: match.state === "inexact" ? "inexact" : result.state, real: join(result.real, match.name) };
+  }
+  memo2.folders.set(folder2, result);
+  return result;
+}
+function firstFolded(listing, names, wanted) {
+  for (const name2 of names) {
+    const match = matchName(listing, name2, wanted);
+    if (match.state !== "absent") return match.state;
+  }
+  return "absent";
+}
+function storedSpelling(path2, memo2) {
+  const absolute = resolve(path2);
+  const top = parse(absolute).root;
+  let spelled = top;
+  for (const name2 of pathSegments(absolute.slice(top.length))) {
+    const listing = readListing(spelled, memo2);
+    const match = listing === null ? null : matchName(listing, name2, "dir");
+    spelled = join(spelled, match === null || match.state === "absent" ? name2 : match.name);
+  }
+  return spelled;
+}
+function resolvesByCaseOnly(importerAbs, spec, memo2) {
+  if (!spec.startsWith(".") || spec.includes("\\")) return false;
+  const target = resolve(dirname(importerAbs), spec);
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec);
+  const parent = folderCase(dirname(target), memo2);
+  if (parent.state !== "exact" && parent.state !== "inexact") return false;
+  const listing = readListing(parent.real, memo2);
+  if (listing === null) return false;
+  const name2 = basename(target);
+  const folderInexact = parent.state === "inexact";
+  if (!directoryOnly) {
+    const asFile = firstFolded(listing, [name2], "file");
+    if (asFile !== "absent") return asFile === "inexact" || folderInexact;
+    const withExtension = firstFolded(listing, RESOLVE_EXTENSIONS.map((ext) => name2 + ext), "any");
+    if (withExtension !== "absent") return withExtension === "inexact" || folderInexact;
+  }
+  const asFolder = matchName(listing, name2, "dir");
+  if (asFolder.state !== "absent") {
+    const inner = readListing(join(parent.real, asFolder.name), memo2);
+    if (inner !== null) {
+      const index = firstFolded(inner, INDEX_RESOLUTIONS.map((idx) => idx.slice(1)), "any");
+      if (index !== "absent") return index === "inexact" || asFolder.state === "inexact" || folderInexact;
+    }
+  }
+  const dot = name2.lastIndexOf(".");
+  const sourceExtensions = directoryOnly || dot < 0 ? void 0 : NODENEXT_SOURCE_EXTENSIONS.get(name2.slice(dot));
+  if (sourceExtensions === void 0) return false;
+  const source = firstFolded(listing, sourceExtensions.map((ext) => name2.slice(0, dot) + ext), "any");
+  return source !== "absent" && (source === "inexact" || folderInexact);
+}
+function byDepthThenFile(a, b) {
+  if (a.depth !== b.depth) return a.depth - b.depth;
+  return a.file.localeCompare(b.file);
+}
+function importersOfSeed(seed, declared, reverseDeps, maxDepth) {
+  const seen = new Set(declared);
+  const found = [];
+  const queue = [{ file: seed, depth: 0 }];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item.depth >= maxDepth) continue;
+    const importers = reverseDeps.get(item.file);
+    if (!importers) continue;
+    for (const importer of importers) {
+      if (seen.has(importer)) continue;
+      seen.add(importer);
+      const next = { file: importer, depth: item.depth + 1 };
+      found.push(next);
+      if (next.depth < maxDepth) queue.push(next);
+    }
+  }
+  found.sort(byDepthThenFile);
+  return {
+    seed,
+    count: found.length,
+    direct: found.filter((importer) => importer.depth === 1).length,
+    listed: found.slice(0, SEED_IMPORTERS_LISTED)
+  };
+}
+var CASE_EXAMPLES_SHOWN = 5;
 function resolveNodeNextSource(target, probe) {
   const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf(".")));
   if (!sourceExtensions) return null;
@@ -30239,11 +30443,13 @@ function walkReverseDeps(input) {
     files_parsed: 0,
     parse_errors: 0,
     cycles_skipped: 0,
-    unresolved_js_specifiers: 0
+    unresolved_js_specifiers: 0,
+    case_inexact_specifiers: 0
   };
   const notRun = () => ({
     declared,
     discovered: [],
+    by_seed: [],
     stats,
     hints,
     coverage: "not-run",
@@ -30279,6 +30485,11 @@ function walkReverseDeps(input) {
   }
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs);
   const directoryEntries = /* @__PURE__ */ new Map();
+  const probe = memoProbe(input.probe ?? diskProbe(projectRoot, directoryEntries));
+  const caseMemo = { rootSegments: [], listings: /* @__PURE__ */ new Map(), folders: /* @__PURE__ */ new Map() };
+  const caseRoot = storedSpelling(projectRoot, caseMemo);
+  caseMemo.rootSegments = pathSegments(caseRoot);
+  const caseExamples = [];
   stats.files_scanned = candidates.length;
   const reverseDeps = /* @__PURE__ */ new Map();
   for (const candidateAbs of candidates) {
@@ -30291,9 +30502,14 @@ function walkReverseDeps(input) {
       continue;
     }
     const candidateRel = relPosix(projectRoot, candidateAbs);
+    const caseImporter = join(caseRoot, relative(projectRoot, candidateAbs));
     const imports = extractImports(content);
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries);
+      if (resolvesByCaseOnly(caseImporter, spec, caseMemo)) {
+        stats.case_inexact_specifiers++;
+        if (caseExamples.length < CASE_EXAMPLES_SHOWN) caseExamples.push(`${candidateRel} -> '${spec}'`);
+      }
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries, probe);
       if (!resolvedAbs) {
         if (spec.startsWith(".") && JS_RUNTIME_SUFFIX.test(spec)) {
           stats.unresolved_js_specifiers++;
@@ -30336,10 +30552,9 @@ function walkReverseDeps(input) {
       }
     }
   }
-  const discovered = [...discoveredMap.values()].sort((a, b) => {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.file.localeCompare(b.file);
-  });
+  const discovered = [...discoveredMap.values()].sort(byDepthThenFile);
+  const declaredSet = new Set(declared);
+  const bySeed = [...declaredSet].map((seed) => importersOfSeed(seed, declaredSet, reverseDeps, maxDepth));
   const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs));
   const coverage = uncoveredSeeds.length === 0 ? "analyzed" : uncoveredSeeds.length === declared.length ? "uncovered" : "partial";
   if (discovered.length === 0 && stats.files_scanned > 0) {
@@ -30358,6 +30573,12 @@ function walkReverseDeps(input) {
       `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE \u2014 treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`
     );
   }
+  if (stats.case_inexact_specifiers > 0) {
+    const more = stats.case_inexact_specifiers > caseExamples.length ? `, and ${stats.case_inexact_specifiers - caseExamples.length} more` : "";
+    hints.push(
+      `${stats.case_inexact_specifiers} relative import(s) reach a file only when letter case is ignored, or reach a different file when it is not: ${caseExamples.join("; ")}${more}. Windows and macOS disks usually ignore letter case and Linux disks do not, so this import graph differs between systems. Treat the importer set as a lower bound on every system, and fix the spelling to match the file on disk.`
+    );
+  }
   if (stats.parse_errors > 0) {
     hints.push(
       `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`
@@ -30371,6 +30592,7 @@ function walkReverseDeps(input) {
   return {
     declared,
     discovered,
+    by_seed: bySeed,
     stats,
     hints,
     coverage,
@@ -30386,7 +30608,7 @@ function coverageHints(result) {
   const lines2 = [];
   const uncovered = result.uncovered_seeds;
   if (uncovered.length > 0) {
-    const reached = new Set(result.discovered.map((d) => d.via_paths[0]));
+    const reached = new Set(result.by_seed.filter((s) => s.count > 0).map((s) => s.seed));
     const found = uncovered.filter((seed) => reached.has(seed));
     const blind = uncovered.filter((seed) => !reached.has(seed));
     const whole = result.coverage === "uncovered" && result.stats.files_scanned > 0 && found.length === 0 ? " No declared path is analyzable here, so the breakage category had no import graph to work from." : "";
@@ -30438,14 +30660,16 @@ function globsByKey(side) {
   }
   return out2;
 }
-function lineIssues(entry) {
-  const appliesTo = entry.appliesTo;
+function appliesToLineIssues(label, appliesTo) {
   if (appliesTo === void 0) return [];
   return [
-    ...appliesTo.rejected.map((rejected) => `${entry.label}: ${specLabel(rejected, 120)} is refused`),
-    ...appliesTo.unbound.map((value) => `${entry.label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
-    ...appliesTo.unread.map((line2) => `${entry.label}: "${specLabel(line2, 80)}" is not read: write **Applies to**: <glob>, <glob>`)
+    ...appliesTo.rejected.map((rejected) => `${label}: ${specLabel(rejected, 120)} is refused`),
+    ...appliesTo.unbound.map((value) => `${label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
+    ...appliesTo.unread.map((line2) => `${label}: "${specLabel(line2, 80)}" is not read: write **Applies to**: <glob>, <glob>`)
   ];
+}
+function lineIssues(entry) {
+  return appliesToLineIssues(entry.label, entry.appliesTo);
 }
 function merge2(working, head, side, headNotes, workingNotes) {
   const headKeys = new Set(head.map((entry) => entry.key));
@@ -30588,11 +30812,21 @@ function hitDetailLines(hits2) {
   }
   return lines2.join("\n");
 }
-function declaredDecisionCoverage(projectRoot, declared, working) {
+function scopeContext(projectRoot) {
   const repo = openSweepRepo(projectRoot);
-  const corpus = readBoundCorpus(projectRoot, { repo, ...working });
+  let files;
+  return {
+    repo,
+    files: () => {
+      if (files === void 0) files = listProjectFiles(projectRoot, repo);
+      return files;
+    }
+  };
+}
+function declaredDecisionCoverage(projectRoot, declared, working, context = scopeContext(projectRoot)) {
+  const corpus = readBoundCorpus(projectRoot, { repo: context.repo, ...working });
   if (corpus.entries.length === 0 && corpus.line_issues.length === 0 && corpus.head !== "unreadable") return { hits: [], hints: [] };
-  const files = listProjectFiles(projectRoot, repo);
+  const files = context.files();
   const hits2 = decisionsCovering(corpus.entries, declaredCandidates(declared, files ?? []));
   return { hits: hits2, hints: appliesToHints(corpus, files) };
 }
@@ -30952,12 +31186,12 @@ function parseEnvFileAt(projectRoot, relPath) {
   } catch {
     return null;
   }
-  const basename4 = relPath.split("/").pop() ?? relPath;
-  const isProperties = /\.properties$/i.test(basename4);
-  const isEnv = /^\.env/.test(basename4);
+  const basename5 = relPath.split("/").pop() ?? relPath;
+  const isProperties = /\.properties$/i.test(basename5);
+  const isEnv = /^\.env/.test(basename5);
   if (!isProperties && !isEnv) return null;
   const format = isProperties ? "properties" : "env";
-  const profile = isProperties ? getProfileFromBasename(basename4) : null;
+  const profile = isProperties ? getProfileFromBasename(basename5) : null;
   const entries = isProperties ? parseProperties(content) : parseDotEnv(content);
   return { path: relPath, format, profile, entries };
 }
@@ -31929,15 +32163,201 @@ function universeFactsChanged(facts) {
   return facts.changes.length > 0;
 }
 
+// src/lib/impact-scope.ts
+init_esm_shims();
+var IMPACT_DIR = "documentation/impact";
+var ISSUES_SHOWN2 = 10;
+var IMPACT_MATCHES_KEPT = 20;
+var STYLED_NEAR_MISS = /applies[\s_-]*to\s*(?::|\*\*|__)/i;
+function isImpactDocName(name2) {
+  return /\.md$/i.test(name2) && !/^README\.md$/i.test(name2);
+}
+function sideDoc(fileName, text2) {
+  const appliesTo = text2 === null ? void 0 : collectAppliesTo(text2);
+  return {
+    path: `${IMPACT_DIR}/${fileName}`,
+    name: fileName.replace(/\.md$/i, ""),
+    text: text2,
+    appliesTo: appliesTo === void 0 ? void 0 : { ...appliesTo, unread: appliesTo.unread.filter((line2) => STYLED_NEAR_MISS.test(line2)) }
+  };
+}
+function workingSide(projectRoot) {
+  const dir = join(projectRoot, IMPACT_DIR);
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (err2) {
+    const code = err2.code;
+    return { docs: [], failed: code !== "ENOENT" && code !== "ENOTDIR" };
+  }
+  const docs = [];
+  for (const entry of entries) {
+    if (!isImpactDocName(entry.name) || entry.isDirectory()) continue;
+    let text2;
+    try {
+      text2 = readFileSync(join(dir, entry.name), "utf8");
+    } catch {
+      text2 = null;
+    }
+    docs.push(sideDoc(entry.name, text2));
+  }
+  return { docs, failed: false };
+}
+function headSide(repo) {
+  if (repo === null) return { side: "no_git", docs: [], notes: [] };
+  if (repo.headCommit === null) return { side: "no_commit", docs: [], notes: [] };
+  const folder2 = readHeadFolder(repo, `${repo.prefix}${IMPACT_DIR}`);
+  if (folder2.state === "failed") return { side: "unreadable", docs: [], notes: [IMPACT_DIR] };
+  if (folder2.state === "missing") return { side: "read", docs: [], notes: [] };
+  const wanted = folder2.entries.filter((entry) => isImpactDocName(entry.name) && entry.type !== "tree");
+  const regular = wanted.filter((entry) => entry.type === "blob" && isRegularFileMode(entry.mode));
+  const notes = wanted.filter((entry) => !regular.includes(entry)).map((entry) => `${IMPACT_DIR}/${entry.name}`);
+  const blobs = regular.length > 0 ? readBlobTexts(repo, regular.map((entry) => entry.id)) : { texts: /* @__PURE__ */ new Map()};
+  if (blobs === null) return { side: "unreadable", docs: [], notes: [IMPACT_DIR] };
+  const docs = [];
+  for (const entry of regular) {
+    const text2 = blobs.texts.get(entry.id);
+    if (text2 === void 0) notes.push(`${IMPACT_DIR}/${entry.name}`);
+    else docs.push(sideDoc(entry.name, text2));
+  }
+  return { side: notes.length > 0 ? "unreadable" : "read", docs, notes };
+}
+function readImpactCorpus(projectRoot, repo) {
+  const working = workingSide(projectRoot);
+  const head = headSide(repo);
+  const issues = /* @__PURE__ */ new Set();
+  const byPath = /* @__PURE__ */ new Map();
+  const key = (path2) => path2.normalize("NFC");
+  for (const doc of working.docs) {
+    for (const issue2 of appliesToLineIssues(doc.path, doc.appliesTo)) issues.add(issue2);
+    byPath.set(key(doc.path), {
+      path: doc.path,
+      name: doc.name,
+      globs: [...doc.appliesTo?.globs ?? []],
+      in_working_tree: true,
+      at_head: false,
+      working_unreadable: doc.text === null,
+      added_since_head: head.side === "read",
+      changed_since_head: false
+    });
+  }
+  for (const doc of head.docs) {
+    for (const issue2 of appliesToLineIssues(doc.path, doc.appliesTo)) issues.add(issue2);
+    const headGlobs = doc.appliesTo?.globs ?? [];
+    const known = byPath.get(key(doc.path));
+    if (known === void 0) {
+      byPath.set(key(doc.path), {
+        path: doc.path,
+        name: doc.name,
+        globs: [...headGlobs],
+        in_working_tree: false,
+        at_head: true,
+        working_unreadable: working.failed,
+        added_since_head: false,
+        changed_since_head: false
+      });
+      continue;
+    }
+    known.at_head = true;
+    known.added_since_head = false;
+    known.changed_since_head = !known.working_unreadable && headGlobs.some((glob) => !known.globs.includes(glob));
+    for (const glob of headGlobs) if (!known.globs.includes(glob)) known.globs.push(glob);
+  }
+  const docs = [...byPath.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return { docs, line_issues: [...issues], head: head.side, head_notes: head.notes, working_listing_failed: working.failed };
+}
+function stripExtension(path2) {
+  return basename(toPosix(path2)).replace(/\.[^.]+$/, "");
+}
+function impactDocsCovering(docs, declared, candidates) {
+  const hits2 = [];
+  for (const doc of docs) {
+    const matches = [];
+    const seen = /* @__PURE__ */ new Set();
+    const add = (match) => {
+      seen.add(match.path);
+      if (matches.length < IMPACT_MATCHES_KEPT) matches.push(match);
+    };
+    for (const path2 of declared) {
+      if (stripExtension(path2) !== doc.name || seen.has(path2)) continue;
+      add({ path: path2, via: "the same file name" });
+    }
+    const matchers = doc.globs.map((glob) => ({ glob, matcher: globToRegex(glob) }));
+    for (const candidate of candidates) {
+      const path2 = candidate.length > 1 ? candidate.replace(/\/$/, "") : candidate;
+      if (seen.has(path2)) continue;
+      const match = matchers.find((m) => m.matcher.test(candidate));
+      if (match === void 0) continue;
+      add({ path: path2, via: `"Applies to" ${match.glob}` });
+    }
+    if (seen.size > 0) hits2.push({ doc, matches, total: seen.size });
+  }
+  return hits2;
+}
+function impactMark(doc) {
+  if (doc.working_unreadable) return " (unreadable in the working tree)";
+  if (!doc.in_working_tree) return " (deleted in the working tree)";
+  if (doc.added_since_head) return " (added since HEAD)";
+  if (doc.changed_since_head) return " (line removed or changed since HEAD)";
+  return "";
+}
+function impactMatchLines(hit) {
+  const lines2 = hit.matches.map((match) => `- ${specLabel(match.path, 200)} (${specLabel(match.via, 140)})`);
+  if (hit.total > hit.matches.length) lines2.push(`... and ${hit.total - hit.matches.length} more`);
+  return lines2.join("\n");
+}
+function impactHints(corpus, files) {
+  const hints = [];
+  const entries = corpus.docs.map((doc) => ({ label: doc.path, globs: doc.globs }));
+  const lines2 = [...files === null ? [] : unmatchedGlobs({ entries }, files), ...corpus.line_issues];
+  if (lines2.length > 0) {
+    const shown2 = lines2.slice(0, ISSUES_SHOWN2).join("; ");
+    const more = lines2.length > ISSUES_SHOWN2 ? ` \u2026 and ${lines2.length - ISSUES_SHOWN2} more` : "";
+    hints.push(
+      `"Applies to" problems in ${IMPACT_DIR} (${lines2.length}): ${shown2}${more}. A refused glob, or one that matches no file, is not used; the impact doc is still matched by its file name.`
+    );
+  }
+  if (files === null && corpus.docs.some((doc) => doc.globs.length > 0)) {
+    hints.push(`The project file list could not be read: the "Applies to" globs of ${IMPACT_DIR} were not checked against files, and declared folders were not expanded.`);
+  }
+  if (corpus.head === "unreadable") {
+    hints.push(`\u26A0 ${corpus.head_notes.join(" and ")} could not be read at HEAD: those impact docs come from the working tree only.`);
+  }
+  const unreadable = corpus.docs.filter((doc) => doc.working_unreadable && doc.in_working_tree).map((doc) => doc.path);
+  if (unreadable.length > 0) {
+    hints.push(`\u26A0 ${unreadable.join(" and ")} could not be read in the working tree: ${unreadable.length === 1 ? "its" : "their"} "Applies to" line comes from HEAD only.`);
+  }
+  if (corpus.working_listing_failed) {
+    hints.push(`\u26A0 ${IMPACT_DIR} could not be listed in the working tree: the impact docs come from HEAD only.`);
+  }
+  return hints;
+}
+function declaredImpactCoverage(projectRoot, declared, context) {
+  const corpus = readImpactCorpus(projectRoot, context.repo);
+  const bound = corpus.docs.some((doc) => doc.globs.length > 0);
+  const files = bound ? context.files() : [];
+  const hits2 = impactDocsCovering(corpus.docs, declared, bound ? declaredCandidates(declared, files ?? []) : []);
+  return {
+    hits: hits2,
+    hints: impactHints(corpus, bound ? files : []),
+    consulted: corpus.docs.length,
+    head_commit: corpus.head === "read" || corpus.head === "unreadable" ? context.repo?.headCommit ?? null : null
+  };
+}
+
 // src/tools/get-topology.ts
-var PATHS_DESCRIPTION = "Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A folder and a path outside the project root are reported as such, never as untouched.";
+var IMPORTERS_PER_PATH = 10;
+var IMPORTERS_LISTED_MAX = 200;
+var PATHS_DESCRIPTION = "Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. With impact: true the answer (paths_impact) also lists the importers of each file and the impact docs bound to the paths. A folder and a path outside the project root are reported as such, never as untouched.";
+var IMPACT_DESCRIPTION = 'Optional, used with paths. When true, paths_impact lists, for each file, the files that import it (the V-phase import walk, depth 2: first 10 per file, at most 200 in total, the rest counted) and the impact docs (documentation/impact/*.md, at HEAD and in the working tree) matched by file name or by their "Applies to" line, folders included (first 20 matched paths per doc, match_count has them all; truncated is true when any list was cut). It reads every source file of the project, so it is off by default. Nothing is written.';
 var getTopologyInputSchema = external_exports.object({
   project_root: external_exports.string().optional().describe("Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself \u2014 a subdirectory cannot present its own budget, lock or history for commits that land in the parent."),
-  paths: external_exports.array(external_exports.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION)
+  paths: external_exports.array(external_exports.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION),
+  impact: external_exports.boolean().optional().describe(IMPACT_DESCRIPTION)
 }).strict();
 var getTopologyTool = {
   name: "rsct_get_topology",
-  description: "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo \u2014 inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
+  description: "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo \u2014 inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them; add impact: true to also see the files that import them and the impact docs bound to them (paths_impact), outside any phase. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
   inputSchema: {
     type: "object",
     properties: {
@@ -31950,6 +32370,10 @@ var getTopologyTool = {
         items: { type: "string", minLength: 1 },
         maxItems: 500,
         description: PATHS_DESCRIPTION
+      },
+      impact: {
+        type: "boolean",
+        description: IMPACT_DESCRIPTION
       }
     },
     additionalProperties: false
@@ -32043,6 +32467,14 @@ async function getTopologyHandler(rawInput) {
   if (contracts.note) hints.push(`contracts.json: ${contracts.note}.`);
   const pathsCheck = input.paths === void 0 ? void 0 : checkPaths(resolution.root, resolution.config, input.paths);
   if (pathsCheck !== void 0) hints.push(describePathsCheck(pathsCheck));
+  if (pathsCheck !== void 0 && input.impact !== true) {
+    hints.push("Pass impact: true to also list the files that import these paths and the impact docs bound to them.");
+  }
+  const pathsImpact = input.impact === true && input.paths !== void 0 ? impactOfPaths(resolution.root, input.paths) : void 0;
+  if (input.impact === true && input.paths === void 0) {
+    hints.push("impact: true needs paths: pass the files you plan to change. No import walk ran.");
+  }
+  if (pathsImpact !== void 0) hints.push(describePathsImpact(pathsImpact));
   return {
     rsct_installed: resolution.rsct_installed,
     app_name: appName,
@@ -32053,14 +32485,69 @@ async function getTopologyHandler(rawInput) {
     produced,
     consumed,
     ...pathsCheck !== void 0 && { paths_check: pathsCheck },
+    ...pathsImpact !== void 0 && { paths_impact: pathsImpact },
     hints
   };
 }
-function checkPaths(root, config2, paths) {
+function sortPaths(root, paths) {
   const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))];
   const outside = rel.filter((p) => p === ".." || p.startsWith("../") || isAbsolute(p));
   const folders = rel.filter((p) => !outside.includes(p) && (p === "" || isFolder(resolve(root, p))));
   const files = rel.filter((p) => !outside.includes(p) && !folders.includes(p));
+  return { files, folders, outside };
+}
+function impactOfPaths(root, paths) {
+  const { files, folders } = sortPaths(root, paths);
+  const walk2 = walkReverseDeps({ projectRoot: root, seedPaths: files });
+  let remaining = IMPORTERS_LISTED_MAX;
+  let truncated = false;
+  const importers = walk2.by_seed.map((entry) => {
+    const shown2 = Math.min(entry.listed.length, IMPORTERS_PER_PATH, remaining);
+    remaining -= shown2;
+    if (shown2 < entry.count) truncated = true;
+    return {
+      path: entry.seed,
+      count: entry.count,
+      direct: entry.direct,
+      listed: entry.listed.slice(0, shown2).map((i2) => ({ file: i2.file, depth: i2.depth }))
+    };
+  });
+  const coverage = impactCoverageLine(walk2.uncovered_seeds, walk2.declared.length, walk2.stats.files_scanned);
+  const impact = declaredImpactCoverage(root, [...files, ...folders.map((p) => p === "" ? "." : p)], scopeContext(root));
+  return {
+    importers,
+    walk_coverage: walk2.coverage,
+    impact_docs: impact.hits.map((hit) => ({ doc: hit.doc.path, mark: impactMark(hit.doc).trim(), matches: hit.matches, match_count: hit.total })),
+    truncated: truncated || impact.hits.some((hit) => hit.total > hit.matches.length),
+    hints: [
+      ...walk2.hints,
+      ...coverage,
+      ...folders.length > 0 ? [`Importers are listed per file; the ${folders.length} folder(s) given were used only to match impact docs.`] : [],
+      ...impact.hints
+    ]
+  };
+}
+function impactCoverageLine(uncovered, declared, scanned) {
+  const lines2 = [];
+  if (uncovered.length > 0) {
+    lines2.push(
+      `${uncovered.length} of ${declared} file(s) are not files the import walk can key on (it reads ${DEFAULT_LANG_SUFFIXES} files inside the project root): ${uncovered.slice(0, 10).join(", ")}${uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : ""}. Their importers in other file types are not read: a listed set is a lower bound, an empty one is UNKNOWN.`
+    );
+  }
+  if (declared > 0 && scanned === 0) {
+    lines2.push("0 source files matched the import walk under the project root, so no import graph was built: an empty importer set here means UNKNOWN, not none.");
+  }
+  return lines2;
+}
+function describePathsImpact(impact) {
+  const listed2 = impact.importers.reduce((sum, entry) => sum + entry.listed.length, 0);
+  const total = impact.importers.reduce((sum, entry) => sum + entry.count, 0);
+  const more = impact.truncated ? ` (${listed2} listed, the rest counted)` : "";
+  const notes = impact.hints.length > 0 ? ` ${impact.hints.length} note(s) in paths_impact.hints.` : "";
+  return `paths_impact: ${total} importer(s) across ${impact.importers.length} file(s)${more}; ${impact.impact_docs.length} impact doc(s) bound to the paths. Walk coverage: ${impact.walk_coverage}.${notes}`;
+}
+function checkPaths(root, config2, paths) {
+  const { files, folders, outside } = sortPaths(root, paths);
   const facts = gatherContractFacts({
     projectRoot: root,
     config: config2,
@@ -32097,7 +32584,7 @@ function describePathsCheck(check) {
   if (check.app_names.length === 0) return `paths_check: no .rsct.json names an app.name, so no surface can match and whether these paths touch a contract is UNKNOWN.${unmatched}`;
   const ids = check.contracts_touched.map((c) => c.id).join(", ");
   const touched = check.contracts_touched.length > 0 ? `${check.contracts_touched.length} contract(s) touched (${ids}); declared consumers: ${check.consumers.join(", ") || "none listed"}.` : check.paths.length > 0 ? "No declared contract surface is touched by the files given." : "No file was given to match.";
-  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${unmatched}`;
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts.${unmatched}`;
 }
 
 // src/tools/detect-onboarding.ts
@@ -41221,7 +41708,7 @@ init_esm_shims();
 ]);
 
 // node_modules/parse5/dist/index.js
-function parse3(html, options) {
+function parse4(html, options) {
   return Parser.parse(html, options);
 }
 function parseFragment(fragmentContext, html, options) {
@@ -41279,7 +41766,7 @@ function walk(node2, out2) {
 }
 function scanHtml(source, asFragment = false) {
   const out2 = { comments: [], inline: [] };
-  const doc = asFragment ? parseFragment(source, { sourceCodeLocationInfo: true }) : parse3(source, { sourceCodeLocationInfo: true });
+  const doc = asFragment ? parseFragment(source, { sourceCodeLocationInfo: true }) : parse4(source, { sourceCodeLocationInfo: true });
   walk(doc, out2);
   return out2;
 }
@@ -54302,7 +54789,6 @@ function runVerificationChecklist(input) {
   stats.knowledge_categories_present = [...knowledge.categories_present];
   stats.knowledge_categories_missing = [...knowledge.categories_missing];
   stats.architecture_overview_present = architecture.exists;
-  stats.impact_docs_consulted = impactModules.files.length;
   const corpusUnread = [];
   const describeMiss = (file, miss) => {
     if (miss === "unreadable") corpusUnread.push(`${file} (exists, unreadable)`);
@@ -54383,40 +54869,49 @@ function runVerificationChecklist(input) {
     );
   }
   stats.categories_run.push("breakage");
-  if (input.discoveredImporters.length > 0) {
-    const grouped = /* @__PURE__ */ new Map();
-    for (const imp of input.discoveredImporters) {
-      const seed = imp.via_paths[0] ?? "<unknown-seed>";
-      let list = grouped.get(seed);
-      if (!list) {
-        list = [];
-        grouped.set(seed, list);
-      }
-      list.push(imp);
-    }
-    for (const [seed, importers] of grouped) {
-      const directCount = importers.filter((i2) => i2.depth === 1).length;
-      const transCount = importers.length - directCount;
-      const severity = directCount > 5 ? "address-now" : directCount > 0 ? "capture-as-issue" : "defer";
-      const head = importers.slice(0, 10).map((i2) => `  - ${i2.file} (depth ${i2.depth})`).join("\n");
-      const overflow = importers.length > 10 ? `
-  ... and ${importers.length - 10} more` : "";
-      findings.push({
-        id: nextId("breakage"),
-        category: "breakage",
-        severity,
-        title: `Edits to ${seed} affect ${importers.length} importer(s) (${directCount} direct, ${transCount} transitive)`,
-        detail: `Reverse-dep walk surfaced these files as candidates for breakage when ${seed} changes:
+  const importerFinding = (seed, shared, full) => {
+    const listed2 = full?.listed ?? shared.slice(0, 10);
+    const total = full?.count ?? shared.length;
+    const directCount = full?.direct ?? shared.filter((i2) => i2.depth === 1).length;
+    const transCount = total - directCount;
+    const severity = directCount > 5 ? "address-now" : directCount > 0 ? "capture-as-issue" : "defer";
+    const head = listed2.slice(0, 10).map((i2) => `  - ${i2.file} (depth ${i2.depth})`).join("\n");
+    const overflow = total > 10 ? `
+  ... and ${total - 10} more` : "";
+    return {
+      id: nextId("breakage"),
+      category: "breakage",
+      severity,
+      title: `Edits to ${seed} affect ${total} importer(s) (${directCount} direct, ${transCount} transitive)`,
+      detail: `Reverse-dep walk surfaced these files as candidates for breakage when ${seed} changes:
 ${head}${overflow}`,
-        affected_paths: [seed, ...importers.map((i2) => i2.file)],
-        source: "reverse-dep-walk"
-      });
+      affected_paths: [seed, .../* @__PURE__ */ new Set([...shared.map((i2) => i2.file), ...listed2.map((i2) => i2.file)])],
+      source: "reverse-dep-walk"
+    };
+  };
+  const fullLists = new Map((input.importersBySeed ?? []).map((entry) => [entry.seed, entry]));
+  const grouped = /* @__PURE__ */ new Map();
+  for (const imp of input.discoveredImporters) {
+    const seed = imp.via_paths[0] ?? "<unknown-seed>";
+    let list = grouped.get(seed);
+    if (!list) {
+      list = [];
+      grouped.set(seed, list);
     }
+    list.push(imp);
   }
+  for (const [seed, importers] of grouped) {
+    findings.push(importerFinding(seed, importers, fullLists.get(seed)));
+  }
+  const seedsFoundOnlyAlone = (input.importersBySeed ?? []).filter(
+    (entry) => entry.count > 0 && !grouped.has(entry.seed)
+  );
+  const raisedByName = /* @__PURE__ */ new Set();
   for (const declaredPath of input.declaredPaths) {
     const guess = stripExt(declaredPath);
     const impactDoc = impactModules.files.find((f) => f.name === guess);
     if (impactDoc) {
+      raisedByName.add(impactDoc.path);
       findings.push({
         id: nextId("breakage"),
         category: "breakage",
@@ -54510,7 +55005,8 @@ ${head}${overflow}`,
       source: "architecture-overview"
     });
   }
-  const scope = declaredDecisionCoverage(input.projectRoot, input.declaredPaths, { decisions, antiDecisions });
+  const context = scopeContext(input.projectRoot);
+  const scope = declaredDecisionCoverage(input.projectRoot, input.declaredPaths, { decisions, antiDecisions }, context);
   hints.push(...scope.hints);
   if (scope.hits.length > 0) {
     findings.push({
@@ -54523,6 +55019,29 @@ ${hitDetailLines(scope.hits)}`,
       affected_paths: [...new Set(scope.hits.map((hit) => hit.path))],
       source: "decision-scope"
     });
+  }
+  for (const entry of seedsFoundOnlyAlone) findings.push(importerFinding(entry.seed, [], entry));
+  const evidenceOverrides = /* @__PURE__ */ new Map();
+  const impact = declaredImpactCoverage(input.projectRoot, input.declaredPaths, context);
+  hints.push(...impact.hints);
+  stats.impact_docs_consulted = impact.consulted;
+  for (const hit of impact.hits) {
+    if (raisedByName.has(hit.doc.path)) continue;
+    const [first, ...rest] = hit.matches.map((match) => match.path);
+    const id = nextId("breakage");
+    findings.push({
+      id,
+      category: "breakage",
+      severity: "address-now",
+      title: `Impact doc bound to the declared paths: ${hit.doc.path}${impactMark(hit.doc)}`,
+      detail: `${hit.doc.path} covers ${hit.total} path(s) among the declared paths and the files under them. Read it for non-obvious couplings and pre-merge checklists before editing them:
+${impactMatchLines(hit)}`,
+      affected_paths: [first ?? hit.doc.path, hit.doc.path, ...rest],
+      source: "impact-doc"
+    });
+    if ((!hit.doc.in_working_tree || hit.doc.working_unreadable) && hit.doc.at_head && impact.head_commit !== null) {
+      evidenceOverrides.set(id, { kind: "reported", source: hit.doc.path, verified_against: "commit", commit_sha: impact.head_commit });
+    }
   }
   if (findings.length === 0) {
     if (!decisions.exists && !antiDecisions.exists && knowledge.categories_present.length === 0 && !architecture.exists) {
@@ -54537,7 +55056,7 @@ ${hitDetailLines(scope.hits)}`,
   }
   const classified = findings.map((f) => ({
     ...f,
-    evidence: evidenceForSource(f)
+    evidence: evidenceOverrides.get(f.id) ?? evidenceForSource(f)
   }));
   return { findings: classified, stats, hints, premise_audit: premiseAudit };
 }
@@ -54559,7 +55078,7 @@ var phaseVerificationStartInputSchema = external_exports.object({
 }).strict();
 var phaseVerificationStartTool = {
   name: "rsct_phase_verification_start",
-  description: 'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints. Decisions and anti-decisions whose optional "Applies to" line (read at HEAD and in the working tree) matches a declared path, or a file under a declared folder or glob, come back as ONE gap finding listing their ids, emitted after every other finding; "Applies to" globs that match no file and lines that bind nothing come back in hints.',
+  description: 'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active \u2014 close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given \u2014 omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints. Decisions and anti-decisions whose optional "Applies to" line (read at HEAD and in the working tree) matches a declared path, or a file under a declared folder or glob, come back as ONE gap finding listing their ids; "Applies to" globs that match no file and lines that bind nothing come back in hints. Each declared path lists every importer the walk reaches from it, even one shared with another declared path. Impact docs (documentation/impact/*.md) are read at HEAD and in the working tree: one matched by file name raises a finding as before, and one matched only through its optional "Applies to" line, or present only at HEAD, raises its own impact-doc finding at the end, marked when it was added, deleted, changed or is unreadable. Imports that reach a file only when letter case is ignored are counted (walk_stats.case_inexact_specifiers) and named in hints, the same on every system.',
   inputSchema: {
     type: "object",
     required: ["spec_ref"],
@@ -54635,6 +55154,7 @@ async function phaseVerificationStartHandler(rawInput) {
     projectRoot,
     declaredPaths: walk2.declared,
     discoveredImporters: walk2.discovered,
+    importersBySeed: walk2.by_seed,
     specTier: input.spec_tier,
     contractGraph,
     appNames: universe?.apps ?? (config2?.app?.name ? [config2.app.name] : []),
@@ -54846,6 +55366,7 @@ async function phaseVerificationStartHandler(rawInput) {
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk2.uncovered_seeds.length,
       unresolved_js_specifiers: walk2.stats.unresolved_js_specifiers,
+      case_inexact_specifiers: walk2.stats.case_inexact_specifiers,
       claims_count: input.spec_claims?.length ?? 0,
       findings_count: checklist.findings.length,
       evidence_mix: summarizeEvidence(checklist.findings),
