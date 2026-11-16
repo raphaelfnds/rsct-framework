@@ -222,12 +222,21 @@ describe('V adjustment 11 — every declared path lists every importer it reache
   })
 
   it('lists a shared importer under each declared path, and leaves the shared walk as it was', () => {
+    write('src/y2.ts', "import { y } from './y'\n")
     const out = walkReverseDeps({ projectRoot: root, seedPaths: ['src/a.ts', 'src/b.ts', 'src/c.ts'] })
-    expect(out.discovered.map((d) => `${d.file}<-${d.via_paths[0]}`)).toEqual(['src/x.ts<-src/a.ts', 'src/y.ts<-src/b.ts'])
+    expect(out.discovered.map((d) => `${d.file}<-${d.via_paths[0]}`)).toEqual(['src/x.ts<-src/a.ts', 'src/y.ts<-src/b.ts', 'src/y2.ts<-src/b.ts'])
+    expect(out.by_seed.map((s) => [s.seed, s.importers.map((i) => `${i.file}@${i.depth}`)])).toEqual([
+      ['src/a.ts', ['src/x.ts@1']],
+      ['src/b.ts', ['src/x.ts@1', 'src/y.ts@1', 'src/y2.ts@2']],
+      ['src/c.ts', ['src/x.ts@1']],
+    ])
+  })
+
+  it('never lists a declared path as an importer of another declared path', () => {
+    const out = walkReverseDeps({ projectRoot: root, seedPaths: ['src/b.ts', 'src/y.ts'] })
     expect(out.by_seed.map((s) => [s.seed, s.importers.map((i) => i.file)])).toEqual([
-      ['src/a.ts', ['src/x.ts']],
-      ['src/b.ts', ['src/x.ts', 'src/y.ts']],
-      ['src/c.ts', ['src/x.ts']],
+      ['src/b.ts', ['src/x.ts']],
+      ['src/y.ts', []],
     ])
   })
 
@@ -395,6 +404,11 @@ describe('8.3 — impact docs bound to code, read at HEAD and in the working tre
     git(root, 'commit', '-qm', 'link doc')
     expect(readImpactCorpus(root, openSweepRepo(root))).toMatchObject({ head: 'unreadable', head_notes: [`${IMPACT}/orders.md`] })
     expect(checklist(['src/billing/tax.ts']).hints).toContain(`${c(0x26a0)} ${IMPACT}/orders.md could not be read at HEAD: those impact docs come from the working tree only.`)
+    git(root, 'rm', '-rq', '--cached', IMPACT)
+    const impactLink = gitInput(root, 'real', 'hash-object', '-w', '--stdin').trim()
+    git(root, 'update-index', '--add', '--cacheinfo', `120000,${impactLink},${IMPACT}`)
+    git(root, 'commit', '-qm', 'link impact folder')
+    expect(readImpactCorpus(root, openSweepRepo(root))).toMatchObject({ head: 'unreadable', head_notes: [IMPACT] })
     git(root, 'rm', '-rq', '--cached', 'documentation')
     const folderLink = gitInput(root, 'real', 'hash-object', '-w', '--stdin').trim()
     git(root, 'update-index', '--add', '--cacheinfo', `120000,${folderLink},documentation`)
@@ -450,10 +464,11 @@ describe('8.4 — rsct_get_topology lists importers and impact docs outside a ph
   })
 
   it('with impact: importers per file, shared ones under each, and the impact docs of files and folders', async () => {
+    write('src/x2.ts', "import { x } from './x'\n")
     const out = await getTopologyHandler({ project_root: root, paths: ['src/a.ts', 'src/b.ts', 'src/billing'], impact: true })
     expect(out.paths_impact?.importers).toEqual([
-      { path: 'src/a.ts', count: 1, direct: 1, listed: [{ file: 'src/x.ts', depth: 1 }] },
-      { path: 'src/b.ts', count: 1, direct: 1, listed: [{ file: 'src/x.ts', depth: 1 }] },
+      { path: 'src/a.ts', count: 2, direct: 1, listed: [{ file: 'src/x.ts', depth: 1 }, { file: 'src/x2.ts', depth: 2 }] },
+      { path: 'src/b.ts', count: 2, direct: 1, listed: [{ file: 'src/x.ts', depth: 1 }, { file: 'src/x2.ts', depth: 2 }] },
     ])
     expect(out.paths_impact?.walk_coverage).toBe('analyzed')
     expect(out.paths_impact?.truncated).toBe(false)
@@ -461,7 +476,7 @@ describe('8.4 — rsct_get_topology lists importers and impact docs outside a ph
       { doc: `${IMPACT}/ledger.md`, mark: '', matches: [{ path: 'src/billing/tax.ts', via: '"Applies to" src/billing/*.ts' }] },
     ])
     expect(out.paths_impact?.hints).toContain('Importers are listed per file; the 1 folder(s) given were used only to match impact docs.')
-    expect(out.hints.join('\n')).toContain('paths_impact: 2 importer(s) across 2 file(s); 1 impact doc(s) bound to the paths. Walk coverage: analyzed.')
+    expect(out.hints.join('\n')).toContain('paths_impact: 4 importer(s) across 2 file(s); 1 impact doc(s) bound to the paths. Walk coverage: analyzed.')
   })
 
   it('impact without paths runs no walk and says why', async () => {
