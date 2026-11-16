@@ -572,19 +572,23 @@ describe('8.4 — rsct_get_topology lists importers and impact docs outside a ph
       { doc: `${IMPACT}/ledger.md`, mark: '', matches: [{ path: 'src/billing/tax.ts', via: '"Applies to" src/billing/*.ts' }], match_count: 1 },
     ])
     expect(out.paths_impact?.hints).toContain('Importers are listed per file; the 1 folder(s) given were used only to match impact docs.')
-    expect(out.hints.join('\n')).toContain('paths_impact: 4 importer(s) across 2 file(s); 1 impact doc(s) bound to the paths. Walk coverage: analyzed.')
+    expect(out.hints.join('\n')).toContain('paths_impact: 4 importer(s) across 2 file(s); 1 impact doc(s) bound to the paths. Walk coverage: analyzed. 1 note(s) in paths_impact.hints.')
   })
 
   it('marks the answer truncated when the ten-per-file cap cuts, and caps matched paths at twenty', async () => {
     for (let i = 0; i < 15; i++) write(`src/u${i}.ts`, "import { a } from './a'\n")
     for (let i = 0; i < 25; i++) write(`src/billing/g${i}.ts`, 'x\n')
-    const out = await getTopologyHandler({ project_root: root, paths: ['src/a.ts', 'src/billing'], impact: true })
-    expect(out.paths_impact?.importers[0]).toMatchObject({ path: 'src/a.ts', count: 16 })
-    expect(out.paths_impact?.importers[0]?.listed).toHaveLength(10)
-    expect(out.paths_impact?.impact_docs[0]?.matches).toHaveLength(20)
-    expect(out.paths_impact?.impact_docs[0]?.match_count).toBe(26)
-    expect(out.paths_impact?.truncated).toBe(true)
-    expect(out.hints.join('\n')).toContain('(10 listed, the rest counted)')
+    const importersCut = await getTopologyHandler({ project_root: root, paths: ['src/a.ts'], impact: true })
+    expect(importersCut.paths_impact?.importers[0]).toMatchObject({ path: 'src/a.ts', count: 16 })
+    expect(importersCut.paths_impact?.importers[0]?.listed).toHaveLength(10)
+    expect(importersCut.paths_impact?.impact_docs).toEqual([])
+    expect(importersCut.paths_impact?.truncated).toBe(true)
+    expect(importersCut.hints.join('\n')).toContain('(10 listed, the rest counted)')
+    const matchesCut = await getTopologyHandler({ project_root: root, paths: ['src/billing'], impact: true })
+    expect(matchesCut.paths_impact?.importers).toEqual([])
+    expect(matchesCut.paths_impact?.impact_docs[0]?.matches).toHaveLength(20)
+    expect(matchesCut.paths_impact?.impact_docs[0]?.match_count).toBe(26)
+    expect(matchesCut.paths_impact?.truncated).toBe(true)
   })
 
   it('impact without paths runs no walk and says why', async () => {
