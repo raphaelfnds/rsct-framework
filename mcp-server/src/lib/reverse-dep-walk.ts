@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 
 import { matchesAnyGlob, toPosix } from './phase-scope.js'
@@ -24,7 +24,7 @@ export const DEFAULT_EXCLUDE_GLOBS: readonly string[] = [
 
 const DEFAULT_MAX_DEPTH = 2
 
-const DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf('*') + 1)).join(', ')
+export const DEFAULT_LANG_SUFFIXES = DEFAULT_LANG_GLOBS.map((glob) => glob.slice(glob.lastIndexOf('*') + 1)).join(', ')
 
 const JS_RUNTIME_SUFFIX = /\.(?:js|mjs|cjs)$/
 
@@ -67,6 +67,7 @@ export interface ReverseDepInput {
   langGlobs?: readonly string[]
   excludeGlobs?: readonly string[]
   maxDepth?: number
+  probe?: ResolveProbe
 }
 
 export interface DiscoveredImporter {
@@ -75,12 +76,18 @@ export interface DiscoveredImporter {
   depth: number
 }
 
+export interface SeedImporters {
+  seed: string
+  importers: DiscoveredImporter[]
+}
+
 export interface ReverseDepStats {
   files_scanned: number
   files_parsed: number
   parse_errors: number
   cycles_skipped: number
   unresolved_js_specifiers: number
+  case_inexact_specifiers: number
 }
 
 export type WalkCoverage = 'analyzed' | 'partial' | 'uncovered' | 'not-run'
@@ -88,6 +95,7 @@ export type WalkCoverage = 'analyzed' | 'partial' | 'uncovered' | 'not-run'
 export interface ReverseDepResult {
   declared: string[]
   discovered: DiscoveredImporter[]
+  by_seed: SeedImporters[]
   stats: ReverseDepStats
   hints: string[]
   coverage: WalkCoverage
@@ -194,13 +202,18 @@ export interface ResolveProbe {
   hasExactPath(abs: string): boolean
 }
 
-function diskProbe(projectRoot: string, entries: Map<string, Set<string>>): ResolveProbe {
+export function diskProbe(projectRoot: string, entries: Map<string, Set<string>>): ResolveProbe {
+  const stats = new Map<string, ReturnType<typeof statSync> | null>()
   const stat = (abs: string): ReturnType<typeof statSync> | null => {
+    if (stats.has(abs)) return stats.get(abs) ?? null
+    let answer: ReturnType<typeof statSync> | null
     try {
-      return statSync(abs, { throwIfNoEntry: false }) ?? null
+      answer = statSync(abs, { throwIfNoEntry: false }) ?? null
     } catch {
-      return null
+      answer = null
     }
+    stats.set(abs, answer)
+    return answer
   }
   return {
     exists: (abs) => existsSync(abs),
@@ -209,6 +222,194 @@ function diskProbe(projectRoot: string, entries: Map<string, Set<string>>): Reso
     hasExactPath: (abs) => hasExactPath(projectRoot, abs, entries),
   }
 }
+
+export function memoProbe(probe: ResolveProbe): ResolveProbe {
+  const remember = (ask: (abs: string) => boolean): ((abs: string) => boolean) => {
+    const answers = new Map<string, boolean>()
+    return (abs) => {
+      const known = answers.get(abs)
+      if (known !== undefined) return known
+      const answer = ask(abs)
+      answers.set(abs, answer)
+      return answer
+    }
+  }
+  return {
+    exists: remember((abs) => probe.exists(abs)),
+    isFile: remember((abs) => probe.isFile(abs)),
+    isDirectory: remember((abs) => probe.isDirectory(abs)),
+    hasExactPath: (abs) => probe.hasExactPath(abs),
+  }
+}
+
+type EntryKind = 'file' | 'dir' | 'other'
+
+type WantedKind = 'file' | 'dir' | 'any'
+
+type CaseState = 'absent' | 'exact' | 'inexact' | 'unknown'
+
+interface Listing {
+  kinds: Map<string, EntryKind>
+  folded: Map<string, string[]>
+}
+
+interface FolderCase {
+  state: CaseState
+  real: string
+}
+
+interface CaseMemo {
+  rootSegments: string[]
+  listings: Map<string, Listing | null>
+  folders: Map<string, FolderCase>
+}
+
+function pathSegments(path: string): string[] {
+  return path.split(/[\\/]+/).filter((segment) => segment !== '')
+}
+
+function entryKind(entry: Dirent): EntryKind {
+  if (entry.isFile()) return 'file'
+  if (entry.isDirectory()) return 'dir'
+  return 'other'
+}
+
+function readListing(dir: string, memo: CaseMemo): Listing | null {
+  const known = memo.listings.get(dir)
+  if (known !== undefined) return known
+  let listing: Listing | null
+  try {
+    const kinds = new Map<string, EntryKind>()
+    const folded = new Map<string, string[]>()
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      kinds.set(entry.name, entryKind(entry))
+      const key = entry.name.toLowerCase()
+      const names = folded.get(key)
+      if (names) names.push(entry.name)
+      else folded.set(key, [entry.name])
+    }
+    listing = { kinds, folded }
+  } catch {
+    listing = null
+  }
+  memo.listings.set(dir, listing)
+  return listing
+}
+
+function kindFits(kind: EntryKind | undefined, wanted: WantedKind): boolean {
+  if (kind === undefined) return false
+  return wanted === 'any' || kind === 'other' || kind === wanted
+}
+
+function matchName(listing: Listing, name: string, wanted: WantedKind): { state: CaseState; name: string } {
+  if (kindFits(listing.kinds.get(name), wanted)) return { state: 'exact', name }
+  const other = (listing.folded.get(name.toLowerCase()) ?? []).find(
+    (candidate) => candidate !== name && kindFits(listing.kinds.get(candidate), wanted),
+  )
+  return other === undefined ? { state: 'absent', name } : { state: 'inexact', name: other }
+}
+
+function folderCase(folder: string, memo: CaseMemo): FolderCase {
+  const known = memo.folders.get(folder)
+  if (known !== undefined) return known
+  const segments = pathSegments(folder)
+  let shared = 0
+  while (shared < segments.length && shared < memo.rootSegments.length && segments[shared] === memo.rootSegments[shared]) shared++
+  shared = Math.max(shared, 1)
+  const names: string[] = []
+  let base = folder
+  for (let i = segments.length; i > shared; i--) {
+    names.unshift(basename(base))
+    base = dirname(base)
+  }
+  let result: FolderCase = { state: 'exact', real: base }
+  for (const name of names) {
+    const listing = readListing(result.real, memo)
+    if (listing === null) {
+      result = { state: 'unknown', real: result.real }
+      break
+    }
+    const match = matchName(listing, name, 'dir')
+    if (match.state === 'absent') {
+      result = { state: 'absent', real: result.real }
+      break
+    }
+    result = { state: match.state === 'inexact' ? 'inexact' : result.state, real: join(result.real, match.name) }
+  }
+  memo.folders.set(folder, result)
+  return result
+}
+
+function firstFolded(listing: Listing, names: readonly string[], wanted: WantedKind): CaseState {
+  for (const name of names) {
+    const match = matchName(listing, name, wanted)
+    if (match.state !== 'absent') return match.state
+  }
+  return 'absent'
+}
+
+function resolvesByCaseOnly(importerAbs: string, spec: string, memo: CaseMemo): boolean {
+  if (!spec.startsWith('.')) return false
+  const target = resolvePath(dirname(importerAbs), spec)
+  const directoryOnly = DIRECTORY_SPECIFIER.test(spec)
+  const parent = folderCase(dirname(target), memo)
+  if (parent.state !== 'exact' && parent.state !== 'inexact') return false
+  const listing = readListing(parent.real, memo)
+  if (listing === null) return false
+  const name = basename(target)
+  const folderInexact = parent.state === 'inexact'
+  if (!directoryOnly) {
+    const asFile = firstFolded(listing, [name], 'file')
+    if (asFile !== 'absent') return asFile === 'inexact' || folderInexact
+    const withExtension = firstFolded(listing, RESOLVE_EXTENSIONS.map((ext) => name + ext), 'any')
+    if (withExtension !== 'absent') return withExtension === 'inexact' || folderInexact
+  }
+  const asFolder = matchName(listing, name, 'dir')
+  if (asFolder.state !== 'absent') {
+    const inner = readListing(join(parent.real, asFolder.name), memo)
+    if (inner !== null) {
+      const index = firstFolded(inner, INDEX_RESOLUTIONS.map((idx) => idx.slice(1)), 'any')
+      if (index !== 'absent') return index === 'inexact' || asFolder.state === 'inexact' || folderInexact
+    }
+  }
+  const dot = name.lastIndexOf('.')
+  const sourceExtensions = directoryOnly || dot < 0 ? undefined : NODENEXT_SOURCE_EXTENSIONS.get(name.slice(dot))
+  if (sourceExtensions === undefined) return false
+  const source = firstFolded(listing, sourceExtensions.map((ext) => name.slice(0, dot) + ext), 'any')
+  return source !== 'absent' && (source === 'inexact' || folderInexact)
+}
+
+function byDepthThenFile(a: DiscoveredImporter, b: DiscoveredImporter): number {
+  if (a.depth !== b.depth) return a.depth - b.depth
+  return a.file.localeCompare(b.file)
+}
+
+function importersOfSeed(
+  seed: string,
+  declared: ReadonlySet<string>,
+  reverseDeps: ReadonlyMap<string, ReadonlySet<string>>,
+  maxDepth: number,
+): DiscoveredImporter[] {
+  const seen = new Set<string>(declared)
+  const found: DiscoveredImporter[] = []
+  const queue: BfsItem[] = [{ file: seed, depth: 0, via: [seed] }]
+  while (queue.length > 0) {
+    const item = queue.shift()!
+    if (item.depth >= maxDepth) continue
+    const importers = reverseDeps.get(item.file)
+    if (!importers) continue
+    for (const importer of importers) {
+      if (seen.has(importer)) continue
+      seen.add(importer)
+      const next: DiscoveredImporter = { file: importer, via_paths: [...item.via, importer], depth: item.depth + 1 }
+      found.push(next)
+      if (next.depth < maxDepth) queue.push({ file: importer, depth: next.depth, via: next.via_paths })
+    }
+  }
+  return found.sort(byDepthThenFile)
+}
+
+const CASE_EXAMPLES_SHOWN = 5
 
 function resolveNodeNextSource(target: string, probe: ResolveProbe): string | null {
   const sourceExtensions = NODENEXT_SOURCE_EXTENSIONS.get(target.slice(target.lastIndexOf('.')))
@@ -286,11 +487,13 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     parse_errors: 0,
     cycles_skipped: 0,
     unresolved_js_specifiers: 0,
+    case_inexact_specifiers: 0,
   }
 
   const notRun = (): ReverseDepResult => ({
     declared,
     discovered: [],
+    by_seed: [],
     stats,
     hints,
     coverage: 'not-run',
@@ -329,6 +532,13 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
 
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs)
   const directoryEntries = new Map<string, Set<string>>()
+  const probe = memoProbe(input.probe ?? diskProbe(projectRoot, directoryEntries))
+  const caseMemo: CaseMemo = {
+    rootSegments: pathSegments(resolvePath(projectRoot)),
+    listings: new Map(),
+    folders: new Map(),
+  }
+  const caseExamples: string[] = []
   stats.files_scanned = candidates.length
 
   const reverseDeps = new Map<string, Set<string>>()
@@ -344,7 +554,11 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     const candidateRel = relPosix(projectRoot, candidateAbs)
     const imports = extractImports(content)
     for (const spec of imports) {
-      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries)
+      if (resolvesByCaseOnly(candidateAbs, spec, caseMemo)) {
+        stats.case_inexact_specifiers++
+        if (caseExamples.length < CASE_EXAMPLES_SHOWN) caseExamples.push(`${candidateRel} -> '${spec}'`)
+      }
+      const resolvedAbs = resolveImport(projectRoot, candidateAbs, spec, directoryEntries, probe)
       if (!resolvedAbs) {
         if (spec.startsWith('.') && JS_RUNTIME_SUFFIX.test(spec)) {
           stats.unresolved_js_specifiers++
@@ -390,10 +604,12 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
     }
   }
 
-  const discovered = [...discoveredMap.values()].sort((a, b) => {
-    if (a.depth !== b.depth) return a.depth - b.depth
-    return a.file.localeCompare(b.file)
-  })
+  const discovered = [...discoveredMap.values()].sort(byDepthThenFile)
+  const declaredSet = new Set(declared)
+  const bySeed: SeedImporters[] = [...declaredSet].map((seed) => ({
+    seed,
+    importers: importersOfSeed(seed, declaredSet, reverseDeps, maxDepth),
+  }))
 
   const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs))
   const coverage: WalkCoverage =
@@ -420,6 +636,12 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
       `${stats.unresolved_js_specifiers} import statement(s) with a relative .js/.mjs/.cjs specifier resolved to nothing, so this import graph is INCOMPLETE — treat the importer set as a lower bound, never as a complete answer. Candidate causes: NodeNext/ESM style, where TypeScript source imports './x.js' for a file stored as x.ts (v1 does not remap it); a deleted or generated file; a case mismatch on a case-sensitive filesystem.`,
     )
   }
+  if (stats.case_inexact_specifiers > 0) {
+    const more = stats.case_inexact_specifiers > caseExamples.length ? `, and ${stats.case_inexact_specifiers - caseExamples.length} more` : ''
+    hints.push(
+      `${stats.case_inexact_specifiers} relative import(s) reach a file only when letter case is ignored, or reach a different file when it is not: ${caseExamples.join('; ')}${more}. Windows and macOS disks usually ignore letter case and Linux disks do not, so this import graph differs between systems. Treat the importer set as a lower bound on every system, and fix the spelling to match the file on disk.`,
+    )
+  }
   if (stats.parse_errors > 0) {
     hints.push(
       `${stats.parse_errors} file(s) failed to read and were excluded from the import graph.`,
@@ -434,6 +656,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
   return {
     declared,
     discovered,
+    by_seed: bySeed,
     stats,
     hints,
     coverage,
@@ -453,7 +676,7 @@ export function coverageHints(result: ReverseDepResult): string[] {
   const uncovered = result.uncovered_seeds
 
   if (uncovered.length > 0) {
-    const reached = new Set(result.discovered.map((d) => d.via_paths[0]))
+    const reached = new Set(result.by_seed.filter((s) => s.importers.length > 0).map((s) => s.seed))
     const found = uncovered.filter((seed) => reached.has(seed))
     const blind = uncovered.filter((seed) => !reached.has(seed))
     const whole =

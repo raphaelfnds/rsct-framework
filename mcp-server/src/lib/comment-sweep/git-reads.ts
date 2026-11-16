@@ -216,22 +216,60 @@ function headEntry(repo: SweepRepo, commit: string, path: string): { mode: strin
   return undefined
 }
 
+function absentAtHead(repo: SweepRepo, commit: string, path: string): 'missing' | 'failed' {
+  const parts = path.split('/')
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const parent = headEntry(repo, commit, parts.slice(0, i).join('/'))
+    if (parent === null || (parent !== undefined && parent.type !== 'tree')) return 'failed'
+    if (parent !== undefined) return 'missing'
+  }
+  return 'missing'
+}
+
 export function readHeadFile(repo: SweepRepo, path: string): HeadFile {
   if (!repo.headCommit) return { state: 'missing' }
   const entry = headEntry(repo, repo.headCommit, path)
   if (entry === null) return { state: 'failed' }
-  if (entry === undefined) {
-    const parts = path.split('/')
-    for (let i = parts.length - 1; i >= 1; i--) {
-      const parent = headEntry(repo, repo.headCommit, parts.slice(0, i).join('/'))
-      if (parent === null || (parent !== undefined && parent.type !== 'tree')) return { state: 'failed' }
-      if (parent !== undefined) return { state: 'missing' }
-    }
-    return { state: 'missing' }
-  }
+  if (entry === undefined) return { state: absentAtHead(repo, repo.headCommit, path) }
   if (entry.type !== 'blob' || (entry.mode !== '100644' && entry.mode !== '100755')) return { state: 'failed' }
   const content = readBlob(repo, entry.id)
   return content === null ? { state: 'failed' } : { state: 'present', text: content.toString('utf8') }
+}
+
+export interface HeadFolderEntry {
+  name: string
+  mode: string
+  type: string
+  id: string
+}
+
+export type HeadFolder = { state: 'present'; entries: HeadFolderEntry[] } | { state: 'missing' } | { state: 'failed' }
+
+export function readHeadFolder(repo: SweepRepo, path: string): HeadFolder {
+  if (!repo.headCommit) return { state: 'missing' }
+  const entry = headEntry(repo, repo.headCommit, path)
+  if (entry === null) return { state: 'failed' }
+  if (entry === undefined) return { state: absentAtHead(repo, repo.headCommit, path) }
+  if (entry.type !== 'tree') return { state: 'failed' }
+  const listed = nulList(safeGitBuffer(repo.toplevel, ['--literal-pathspecs', 'ls-tree', '-z', '--full-tree', repo.headCommit, '--', `${path}/`]))
+  if (listed === null) return { state: 'failed' }
+  const entries: HeadFolderEntry[] = []
+  for (const record of listed) {
+    const tab = record.indexOf('\t')
+    if (tab < 0) return { state: 'failed' }
+    const child = record.slice(tab + 1)
+    if (!child.startsWith(`${path}/`)) continue
+    const name = child.slice(path.length + 1)
+    if (name === '' || name.includes('/')) continue
+    const [mode, type, id] = record.slice(0, tab).split(' ')
+    if (!mode || !type || !id) return { state: 'failed' }
+    entries.push({ name, mode, type, id })
+  }
+  return { state: 'present', entries }
+}
+
+export function isRegularFileMode(mode: string): boolean {
+  return REGULAR_FILE_MODES.has(mode)
 }
 
 export function readFilesUnderPrefix(repo: SweepRepo): string[] | null {
