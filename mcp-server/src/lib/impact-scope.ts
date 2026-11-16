@@ -11,8 +11,6 @@ export const IMPACT_DIR = 'documentation/impact'
 
 const ISSUES_SHOWN = 10
 
-const DETAIL_LINES_SHOWN = 20
-
 export interface ImpactDoc {
   path: string
   name: string
@@ -40,7 +38,12 @@ export interface ImpactMatch {
 export interface ImpactHit {
   doc: ImpactDoc
   matches: ImpactMatch[]
+  total: number
 }
+
+export const IMPACT_MATCHES_KEPT = 20
+
+const STYLED_NEAR_MISS = /applies[\s_-]*to\s*(?::|\*\*|__)/i
 
 interface SideDoc {
   path: string
@@ -54,11 +57,12 @@ export function isImpactDocName(name: string): boolean {
 }
 
 function sideDoc(fileName: string, text: string | null): SideDoc {
+  const appliesTo = text === null ? undefined : collectAppliesTo(text)
   return {
     path: `${IMPACT_DIR}/${fileName}`,
     name: fileName.replace(/\.md$/i, ''),
     text,
-    appliesTo: text === null ? undefined : collectAppliesTo(text),
+    appliesTo: appliesTo === undefined ? undefined : { ...appliesTo, unread: appliesTo.unread.filter((line) => STYLED_NEAR_MISS.test(line)) },
   }
 }
 
@@ -91,7 +95,7 @@ function headSide(repo: SweepRepo | null): { side: HeadSide; docs: SideDoc[]; no
   const folder = readHeadFolder(repo, `${repo.prefix}${IMPACT_DIR}`)
   if (folder.state === 'failed') return { side: 'unreadable', docs: [], notes: [IMPACT_DIR] }
   if (folder.state === 'missing') return { side: 'read', docs: [], notes: [] }
-  const wanted = folder.entries.filter((entry) => isImpactDocName(entry.name))
+  const wanted = folder.entries.filter((entry) => isImpactDocName(entry.name) && entry.type !== 'tree')
   const regular = wanted.filter((entry) => entry.type === 'blob' && isRegularFileMode(entry.mode))
   const notes = wanted.filter((entry) => !regular.includes(entry)).map((entry) => `${IMPACT_DIR}/${entry.name}`)
   const blobs = regular.length > 0 ? readBlobTexts(repo, regular.map((entry) => entry.id)) : { texts: new Map<string, string>(), failed: new Set<string>() }
@@ -110,9 +114,10 @@ export function readImpactCorpus(projectRoot: string, repo: SweepRepo | null): I
   const head = headSide(repo)
   const issues = new Set<string>()
   const byPath = new Map<string, ImpactDoc>()
+  const key = (path: string): string => path.normalize('NFC')
   for (const doc of working.docs) {
     for (const issue of appliesToLineIssues(doc.path, doc.appliesTo)) issues.add(issue)
-    byPath.set(doc.path, {
+    byPath.set(key(doc.path), {
       path: doc.path,
       name: doc.name,
       globs: [...(doc.appliesTo?.globs ?? [])],
@@ -126,9 +131,9 @@ export function readImpactCorpus(projectRoot: string, repo: SweepRepo | null): I
   for (const doc of head.docs) {
     for (const issue of appliesToLineIssues(doc.path, doc.appliesTo)) issues.add(issue)
     const headGlobs = doc.appliesTo?.globs ?? []
-    const known = byPath.get(doc.path)
+    const known = byPath.get(key(doc.path))
     if (known === undefined) {
-      byPath.set(doc.path, {
+      byPath.set(key(doc.path), {
         path: doc.path,
         name: doc.name,
         globs: [...headGlobs],
@@ -145,10 +150,6 @@ export function readImpactCorpus(projectRoot: string, repo: SweepRepo | null): I
     known.changed_since_head = !known.working_unreadable && headGlobs.some((glob) => !known.globs.includes(glob))
     for (const glob of headGlobs) if (!known.globs.includes(glob)) known.globs.push(glob)
   }
-  for (const note of head.notes) {
-    const known = byPath.get(note)
-    if (known !== undefined) known.added_since_head = false
-  }
   const docs = [...byPath.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   return { docs, line_issues: [...issues], head: head.side, head_notes: head.notes, working_listing_failed: working.failed }
 }
@@ -162,10 +163,13 @@ export function impactDocsCovering(docs: readonly ImpactDoc[], declared: readonl
   for (const doc of docs) {
     const matches: ImpactMatch[] = []
     const seen = new Set<string>()
+    const add = (match: ImpactMatch): void => {
+      seen.add(match.path)
+      if (matches.length < IMPACT_MATCHES_KEPT) matches.push(match)
+    }
     for (const path of declared) {
       if (stripExtension(path) !== doc.name || seen.has(path)) continue
-      seen.add(path)
-      matches.push({ path, via: 'the same file name' })
+      add({ path, via: 'the same file name' })
     }
     const matchers = doc.globs.map((glob) => ({ glob, matcher: globToRegex(glob) }))
     for (const candidate of candidates) {
@@ -173,10 +177,9 @@ export function impactDocsCovering(docs: readonly ImpactDoc[], declared: readonl
       if (seen.has(path)) continue
       const match = matchers.find((m) => m.matcher.test(candidate))
       if (match === undefined) continue
-      seen.add(path)
-      matches.push({ path, via: `"Applies to" ${match.glob}` })
+      add({ path, via: `"Applies to" ${match.glob}` })
     }
-    if (matches.length > 0) hits.push({ doc, matches })
+    if (seen.size > 0) hits.push({ doc, matches, total: seen.size })
   }
   return hits
 }
@@ -190,10 +193,8 @@ export function impactMark(doc: ImpactDoc): string {
 }
 
 export function impactMatchLines(hit: ImpactHit): string {
-  const lines = hit.matches
-    .slice(0, DETAIL_LINES_SHOWN)
-    .map((match) => `- ${specLabel(match.path, 200)} (${specLabel(match.via, 140)})`)
-  if (hit.matches.length > DETAIL_LINES_SHOWN) lines.push(`... and ${hit.matches.length - DETAIL_LINES_SHOWN} more`)
+  const lines = hit.matches.map((match) => `- ${specLabel(match.path, 200)} (${specLabel(match.via, 140)})`)
+  if (hit.total > hit.matches.length) lines.push(`... and ${hit.total - hit.matches.length} more`)
   return lines.join('\n')
 }
 

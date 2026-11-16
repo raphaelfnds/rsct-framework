@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -80,7 +80,7 @@ describe('8.1 — the walk remembers what it asked the disk, within one walk', (
     expect(counts.size).toBeGreaterThan(0)
     expect(Math.max(...counts.values())).toBe(1)
     expect(remembered).toEqual(fresh)
-    expect(remembered.by_seed.map((s) => [s.seed, s.importers.length])).toEqual([
+    expect(remembered.by_seed.map((s) => [s.seed, s.count])).toEqual([
       ['src/shared.ts', 4],
       ['src/lib/index.ts', 4],
     ])
@@ -167,9 +167,14 @@ describe('8.2 — imports that resolve only by ignoring letter case, the same co
     write('src/a.ts', "import { b } from './b.js'\n", project)
     write('outside/o.ts', 'export const o = 1\n')
     write('src/c.ts', "import { o } from '../../outside/o.js'\n", project)
+    write('index.ts', 'export const i = 1\n', project)
+    write('top.ts', "import x from '.'\n", project)
+    write('src/up.ts', "import y from '..'\n", project)
+    write('src/sub/d.js', "import { b } from '../../../PROJ/src/b.js'\n", project)
     const respelled = join(root, 'PROJ')
     expect(existsSync(respelled)).toBe(true)
-    expect(caseCount(respelled, 'src/b.ts').count).toBe(0)
+    expect(caseCount(project, 'src/b.ts').count).toBe(1)
+    expect(caseCount(respelled, 'src/b.ts').count).toBe(1)
   })
 
   it('does not count exact imports, nor a name that differs only by Unicode normalisation', () => {
@@ -203,6 +208,26 @@ describe('8.2 — imports that resolve only by ignoring letter case, the same co
     expect(out.hints.some((h) => h.includes(CASE_HINT))).toBe(true)
   })
 
+  it('counts a wrongly cased index name and a wrongly cased NodeNext source in an exact folder', () => {
+    write('src/util/Index.ts', 'export const u = 1\n')
+    write('src/foo.ts', 'export const f = 1\n')
+    write('src/a.ts', "import { u } from './util'\nimport { f } from './Foo.js'\n")
+    expect(caseCount(root, 'src/foo.ts').count).toBe(2)
+  })
+
+  it('does not count a backslash specifier, which only Windows reads as a path', () => {
+    write('src/widget.ts', 'export const w = 1\n')
+    write('src/a.ts', "import { w } from '.\\Widget'\n")
+    expect(caseCount(root, 'src/widget.ts').count).toBe(0)
+  })
+
+  it('reads the real type behind a linked folder', () => {
+    write('src/libreal/Index.ts', 'export const l = 1\n')
+    symlinkSync(join(root, 'src', 'libreal'), join(root, 'src', 'lib'), 'junction')
+    write('src/a.ts', "import { l } from './lib'\n")
+    expect(caseCount(root, 'src/libreal/Index.ts').count).toBe(1)
+  })
+
   it('names five examples and counts the rest', () => {
     write('src/widget.ts', 'export const w = 1\n')
     for (let i = 0; i < 7; i++) write(`src/a${i}.ts`, "import { w } from './Widget'\n")
@@ -225,7 +250,7 @@ describe('V adjustment 11 — every declared path lists every importer it reache
     write('src/y2.ts', "import { y } from './y'\n")
     const out = walkReverseDeps({ projectRoot: root, seedPaths: ['src/a.ts', 'src/b.ts', 'src/c.ts'] })
     expect(out.discovered.map((d) => `${d.file}<-${d.via_paths[0]}`)).toEqual(['src/x.ts<-src/a.ts', 'src/y.ts<-src/b.ts', 'src/y2.ts<-src/b.ts'])
-    expect(out.by_seed.map((s) => [s.seed, s.importers.map((i) => `${i.file}@${i.depth}`)])).toEqual([
+    expect(out.by_seed.map((s) => [s.seed, s.listed.map((i) => `${i.file}@${i.depth}`)])).toEqual([
       ['src/a.ts', ['src/x.ts@1']],
       ['src/b.ts', ['src/x.ts@1', 'src/y.ts@1', 'src/y2.ts@2']],
       ['src/c.ts', ['src/x.ts@1']],
@@ -234,7 +259,7 @@ describe('V adjustment 11 — every declared path lists every importer it reache
 
   it('never lists a declared path as an importer of another declared path', () => {
     const out = walkReverseDeps({ projectRoot: root, seedPaths: ['src/b.ts', 'src/y.ts'] })
-    expect(out.by_seed.map((s) => [s.seed, s.importers.map((i) => i.file)])).toEqual([
+    expect(out.by_seed.map((s) => [s.seed, s.listed.map((i) => i.file)])).toEqual([
       ['src/b.ts', ['src/x.ts']],
       ['src/y.ts', []],
     ])
@@ -253,6 +278,29 @@ describe('V adjustment 11 — every declared path lists every importer it reache
       title: 'Edits to src/c.ts affect 1 importer(s) (1 direct, 0 transitive)',
       affected_paths: ['src/c.ts', 'src/x.ts'],
     })
+  })
+
+  it('keeps every count but lists ten per path, and every importer still appears in some finding', () => {
+    for (let i = 0; i < 15; i++) write(`src/m${i}.ts`, "import { a } from './a'\nimport { b } from './b'\n")
+    const walk = walkReverseDeps({ projectRoot: root, seedPaths: ['src/a.ts', 'src/b.ts'] })
+    expect(walk.by_seed.map((s) => [s.seed, s.count, s.direct, s.listed.length])).toEqual([
+      ['src/a.ts', 16, 16, 10],
+      ['src/b.ts', 17, 17, 10],
+    ])
+    expect(walk.by_seed[0]?.listed[0]).toEqual({ file: 'src/m0.ts', depth: 1 })
+    const r = runVerificationChecklist({
+      projectRoot: root,
+      declaredPaths: walk.declared,
+      discoveredImporters: walk.discovered,
+      importersBySeed: walk.by_seed,
+      specTier: 'complex',
+    })
+    const b = r.findings.find((f) => f.affected_paths[0] === 'src/b.ts')
+    expect(b?.title).toBe('Edits to src/b.ts affect 17 importer(s) (17 direct, 0 transitive)')
+    expect(b?.affected_paths).toHaveLength(12)
+    expect(b?.detail).toContain('... and 7 more')
+    const named = new Set(r.findings.flatMap((f) => f.affected_paths.slice(1)))
+    expect(walk.discovered.every((d) => named.has(d.file))).toBe(true)
   })
 
   it('the V start passes the full lists on and records the case count in its output and audit entry', async () => {
@@ -432,6 +480,54 @@ describe('8.3 — impact docs bound to code, read at HEAD and in the working tre
     write(`${IMPACT}/billing.md`, impactDoc('**Applies to**: src/billing/**'))
     expect(checklist(['src/billing/tax.ts'], 'small').findings).toEqual([])
   })
+
+  it('a folder of many files lists twenty matched paths and counts the rest', () => {
+    for (let i = 0; i < 25; i++) write(`src/big/f${i}.ts`, 'x\n')
+    write(`${IMPACT}/bulk.md`, impactDoc('**Applies to**: src/big/*.ts'))
+    const r = checklist(['src/big'])
+    const finding = r.findings.at(-1)!
+    expect(finding.title).toBe(`Impact doc bound to the declared paths: ${IMPACT}/bulk.md`)
+    expect(finding.affected_paths).toHaveLength(21)
+    expect(finding.detail).toContain('covers 25 path(s) among the declared paths and the files under them')
+    expect(finding.detail).toContain('... and 5 more')
+  })
+
+  it.skipIf(caseInsensitiveDisk)('a second doc whose name differs only by case keeps its own finding (a disk that keeps letter case)', () => {
+    write(`${IMPACT}/orders.md`, impactDoc(null))
+    write(`${IMPACT}/orders.MD`, impactDoc(null))
+    const impact = checklist(['src/orders.ts']).findings.filter((f) => f.source === 'impact-doc')
+    expect(impact).toHaveLength(2)
+    expect(impact[0]?.title).toBe('Impact doc exists for orders')
+  })
+
+  it('a folder named like a doc at HEAD is not a doc and leaves the HEAD side readable', () => {
+    write(`${IMPACT}/old.md/notes.txt`, 'x\n')
+    commitAll(root, 'folder')
+    write(`${IMPACT}/ledger.md`, impactDoc('**Applies to**: src/billing/tax.ts'))
+    expect(readImpactCorpus(root, openSweepRepo(root)).head).toBe('read')
+    expect(checklist(['src/billing/tax.ts']).findings.at(-1)?.title).toBe(`Impact doc bound to the declared paths: ${IMPACT}/ledger.md (added since HEAD)`)
+  })
+
+  it('prose and table rows that start with "applies to" are not reported; a styled near miss is', () => {
+    write(
+      `${IMPACT}/billing.md`,
+      impactDoc('| Applies to every tenant | High |\napplies to the billing export as well\n__Applies to__: src/billing/**'),
+    )
+    const hint = checklist(['src/billing/tax.ts']).hints.find((h) => h.startsWith(`"Applies to" problems in ${IMPACT}`)) ?? ''
+    expect(hint).toContain('__Applies to__: src/billing/**')
+    expect(hint).not.toContain('every tenant')
+    expect(hint).not.toContain('billing export')
+  })
+
+  it('joins a HEAD name and a working-tree name that differ only by Unicode normalisation', () => {
+    const blob = gitInput(root, impactDoc(null), 'hash-object', '-w', '--stdin').trim()
+    git(root, 'update-index', '--add', '--cacheinfo', `100644,${blob},${IMPACT}/cafe${c(0x301)}.md`)
+    git(root, 'commit', '-qm', 'decomposed name')
+    write(`${IMPACT}/caf${c(0xe9)}.md`, impactDoc(null))
+    const docs = readImpactCorpus(root, openSweepRepo(root)).docs
+    expect(docs).toHaveLength(1)
+    expect(docs[0]).toMatchObject({ in_working_tree: true, at_head: true, added_since_head: false })
+  })
 })
 
 describe('8.3 — without git', () => {
@@ -473,10 +569,22 @@ describe('8.4 — rsct_get_topology lists importers and impact docs outside a ph
     expect(out.paths_impact?.walk_coverage).toBe('analyzed')
     expect(out.paths_impact?.truncated).toBe(false)
     expect(out.paths_impact?.impact_docs).toEqual([
-      { doc: `${IMPACT}/ledger.md`, mark: '', matches: [{ path: 'src/billing/tax.ts', via: '"Applies to" src/billing/*.ts' }] },
+      { doc: `${IMPACT}/ledger.md`, mark: '', matches: [{ path: 'src/billing/tax.ts', via: '"Applies to" src/billing/*.ts' }], match_count: 1 },
     ])
     expect(out.paths_impact?.hints).toContain('Importers are listed per file; the 1 folder(s) given were used only to match impact docs.')
     expect(out.hints.join('\n')).toContain('paths_impact: 4 importer(s) across 2 file(s); 1 impact doc(s) bound to the paths. Walk coverage: analyzed.')
+  })
+
+  it('marks the answer truncated when the ten-per-file cap cuts, and caps matched paths at twenty', async () => {
+    for (let i = 0; i < 15; i++) write(`src/u${i}.ts`, "import { a } from './a'\n")
+    for (let i = 0; i < 25; i++) write(`src/billing/g${i}.ts`, 'x\n')
+    const out = await getTopologyHandler({ project_root: root, paths: ['src/a.ts', 'src/billing'], impact: true })
+    expect(out.paths_impact?.importers[0]).toMatchObject({ path: 'src/a.ts', count: 16 })
+    expect(out.paths_impact?.importers[0]?.listed).toHaveLength(10)
+    expect(out.paths_impact?.impact_docs[0]?.matches).toHaveLength(20)
+    expect(out.paths_impact?.impact_docs[0]?.match_count).toBe(26)
+    expect(out.paths_impact?.truncated).toBe(true)
+    expect(out.hints.join('\n')).toContain('(10 listed, the rest counted)')
   })
 
   it('impact without paths runs no walk and says why', async () => {

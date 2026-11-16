@@ -322,34 +322,36 @@ export function runVerificationChecklist(
   }
 
   stats.categories_run.push('breakage')
-  const importerFinding = (seed: string, importers: readonly DiscoveredImporterRef[]): RawFinding => {
-    const directCount = importers.filter((i) => i.depth === 1).length
-    const transCount = importers.length - directCount
+  const importerFinding = (seed: string, shared: readonly DiscoveredImporterRef[], full: SeedImporters | undefined): RawFinding => {
+    const listed = full?.listed ?? shared.slice(0, 10)
+    const total = full?.count ?? shared.length
+    const directCount = full?.direct ?? shared.filter((i) => i.depth === 1).length
+    const transCount = total - directCount
     const severity: FindingSeverity =
       directCount > 5
         ? 'address-now'
         : directCount > 0
           ? 'capture-as-issue'
           : 'defer'
-    const head = importers
+    const head = listed
       .slice(0, 10)
       .map((i) => `  - ${i.file} (depth ${i.depth})`)
       .join('\n')
     const overflow =
-      importers.length > 10
-        ? `\n  ... and ${importers.length - 10} more`
+      total > 10
+        ? `\n  ... and ${total - 10} more`
         : ''
     return {
       id: nextId('breakage'),
       category: 'breakage',
       severity,
-      title: `Edits to ${seed} affect ${importers.length} importer(s) (${directCount} direct, ${transCount} transitive)`,
+      title: `Edits to ${seed} affect ${total} importer(s) (${directCount} direct, ${transCount} transitive)`,
       detail: `Reverse-dep walk surfaced these files as candidates for breakage when ${seed} changes:\n${head}${overflow}`,
-      affected_paths: [seed, ...importers.map((i) => i.file)],
+      affected_paths: [seed, ...new Set([...shared.map((i) => i.file), ...listed.map((i) => i.file)])],
       source: 'reverse-dep-walk',
     }
   }
-  const fullLists = new Map((input.importersBySeed ?? []).map((entry) => [entry.seed, entry.importers]))
+  const fullLists = new Map((input.importersBySeed ?? []).map((entry) => [entry.seed, entry]))
   const grouped = new Map<string, DiscoveredImporterRef[]>()
   for (const imp of input.discoveredImporters) {
     const seed = imp.via_paths[0] ?? '<unknown-seed>'
@@ -361,16 +363,18 @@ export function runVerificationChecklist(
     list.push(imp)
   }
   for (const [seed, importers] of grouped) {
-    findings.push(importerFinding(seed, fullLists.get(seed) ?? importers))
+    findings.push(importerFinding(seed, importers, fullLists.get(seed)))
   }
   const seedsFoundOnlyAlone = (input.importersBySeed ?? []).filter(
-    (entry) => entry.importers.length > 0 && !grouped.has(entry.seed),
+    (entry) => entry.count > 0 && !grouped.has(entry.seed),
   )
 
+  const raisedByName = new Set<string>()
   for (const declaredPath of input.declaredPaths) {
     const guess = stripExt(declaredPath)
     const impactDoc = impactModules.files.find((f) => f.name === guess)
     if (impactDoc) {
+      raisedByName.add(impactDoc.path)
       findings.push({
         id: nextId('breakage'),
         category: 'breakage',
@@ -487,15 +491,12 @@ export function runVerificationChecklist(
     })
   }
 
-  for (const entry of seedsFoundOnlyAlone) findings.push(importerFinding(entry.seed, entry.importers))
+  for (const entry of seedsFoundOnlyAlone) findings.push(importerFinding(entry.seed, [], entry))
 
   const evidenceOverrides = new Map<string, FindingEvidence>()
   const impact = declaredImpactCoverage(input.projectRoot, input.declaredPaths, context)
   hints.push(...impact.hints)
   stats.impact_docs_consulted = impact.consulted
-  const raisedByName = new Set(
-    impactModules.files.filter((f) => input.declaredPaths.some((p) => stripExt(p) === f.name)).map((f) => f.path),
-  )
   for (const hit of impact.hits) {
     if (raisedByName.has(hit.doc.path)) continue
     const [first, ...rest] = hit.matches.map((match) => match.path)
@@ -505,7 +506,7 @@ export function runVerificationChecklist(
       category: 'breakage',
       severity: 'address-now',
       title: `Impact doc bound to the declared paths: ${hit.doc.path}${impactMark(hit.doc)}`,
-      detail: `${hit.doc.path} covers ${hit.matches.length} declared path(s). Read it for non-obvious couplings and pre-merge checklists before editing them:\n${impactMatchLines(hit)}`,
+      detail: `${hit.doc.path} covers ${hit.total} path(s) among the declared paths and the files under them. Read it for non-obvious couplings and pre-merge checklists before editing them:\n${impactMatchLines(hit)}`,
       affected_paths: [first ?? hit.doc.path, hit.doc.path, ...rest],
       source: 'impact-doc',
     })

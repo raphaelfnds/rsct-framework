@@ -30,7 +30,7 @@ const PATHS_DESCRIPTION =
   'Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. With impact: true the answer (paths_impact) also lists the importers of each file and the impact docs bound to the paths. A folder and a path outside the project root are reported as such, never as untouched.'
 
 const IMPACT_DESCRIPTION =
-  'Optional, used with paths. When true, paths_impact lists, for each file, the files that import it (the V-phase import walk, depth 2: first 10 per file, at most 200 in total, the rest counted) and the impact docs (documentation/impact/*.md, at HEAD and in the working tree) matched by file name or by their "Applies to" line, folders included. It reads every source file of the project, so it is off by default. Nothing is written.'
+  'Optional, used with paths. When true, paths_impact lists, for each file, the files that import it (the V-phase import walk, depth 2: first 10 per file, at most 200 in total, the rest counted) and the impact docs (documentation/impact/*.md, at HEAD and in the working tree) matched by file name or by their "Applies to" line, folders included (first 20 matched paths per doc, match_count has them all; truncated is true when any list was cut). It reads every source file of the project, so it is off by default. Nothing is written.'
 
 export const getTopologyInputSchema = z
   .object({
@@ -69,7 +69,7 @@ export interface PathImporters {
 export interface PathsImpact {
   importers: PathImporters[]
   walk_coverage: WalkCoverage
-  impact_docs: { doc: string; mark: string; matches: ImpactMatch[] }[]
+  impact_docs: { doc: string; mark: string; matches: ImpactMatch[]; match_count: number }[]
   truncated: boolean
   hints: string[]
 }
@@ -251,14 +251,14 @@ function impactOfPaths(root: string, paths: readonly string[]): PathsImpact {
   let remaining = IMPORTERS_LISTED_MAX
   let truncated = false
   const importers: PathImporters[] = walk.by_seed.map((entry) => {
-    const shown = Math.min(entry.importers.length, IMPORTERS_PER_PATH, remaining)
+    const shown = Math.min(entry.listed.length, IMPORTERS_PER_PATH, remaining)
     remaining -= shown
-    if (shown < Math.min(entry.importers.length, IMPORTERS_PER_PATH)) truncated = true
+    if (shown < entry.count) truncated = true
     return {
       path: entry.seed,
-      count: entry.importers.length,
-      direct: entry.importers.filter((i) => i.depth === 1).length,
-      listed: entry.importers.slice(0, shown).map((i) => ({ file: i.file, depth: i.depth })),
+      count: entry.count,
+      direct: entry.direct,
+      listed: entry.listed.slice(0, shown).map((i) => ({ file: i.file, depth: i.depth })),
     }
   })
   const coverage = impactCoverageLine(walk.uncovered_seeds, walk.declared.length, walk.stats.files_scanned)
@@ -266,8 +266,8 @@ function impactOfPaths(root: string, paths: readonly string[]): PathsImpact {
   return {
     importers,
     walk_coverage: walk.coverage,
-    impact_docs: impact.hits.map((hit) => ({ doc: hit.doc.path, mark: impactMark(hit.doc).trim(), matches: hit.matches })),
-    truncated,
+    impact_docs: impact.hits.map((hit) => ({ doc: hit.doc.path, mark: impactMark(hit.doc).trim(), matches: hit.matches, match_count: hit.total })),
+    truncated: truncated || impact.hits.some((hit) => hit.total > hit.matches.length),
     hints: [
       ...walk.hints,
       ...coverage,
@@ -294,7 +294,8 @@ function describePathsImpact(impact: PathsImpact): string {
   const listed = impact.importers.reduce((sum, entry) => sum + entry.listed.length, 0)
   const total = impact.importers.reduce((sum, entry) => sum + entry.count, 0)
   const more = impact.truncated ? ` (${listed} listed, the rest counted)` : ''
-  return `paths_impact: ${total} importer(s) across ${impact.importers.length} file(s)${more}; ${impact.impact_docs.length} impact doc(s) bound to the paths. Walk coverage: ${impact.walk_coverage}.`
+  const notes = impact.hints.length > 0 ? ` ${impact.hints.length} note(s) in paths_impact.hints.` : ''
+  return `paths_impact: ${total} importer(s) across ${impact.importers.length} file(s)${more}; ${impact.impact_docs.length} impact doc(s) bound to the paths. Walk coverage: ${impact.walk_coverage}.${notes}`
 }
 
 function checkPaths(root: string, config: RsctConfig | null, paths: readonly string[]): PathsCheck {

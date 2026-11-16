@@ -138,7 +138,7 @@ describe('evidenceForSource — a total table whose default is the weakest class
     expect(e.how_to_falsify).toMatch(/vocabulary coincidence/)
   })
 
-  it('T10d — doc-derived sources are REPORTED against a working tree, never a commit', () => {
+  it('T10d — doc-derived sources default to REPORTED against a working tree, never a commit (a doc read only at HEAD is set per finding, blast-radius.test.ts)', () => {
     for (const source of ['impact-doc', 'architecture-overview']) {
       const e = evidenceForSource({ ...raw, source })
       expect(e.kind).toBe('reported')

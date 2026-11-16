@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve as resolvePath } from 'node:path'
 
 import { matchesAnyGlob, toPosix } from './phase-scope.js'
 
@@ -76,10 +76,19 @@ export interface DiscoveredImporter {
   depth: number
 }
 
+export interface SeedImporter {
+  file: string
+  depth: number
+}
+
 export interface SeedImporters {
   seed: string
-  importers: DiscoveredImporter[]
+  count: number
+  direct: number
+  listed: SeedImporter[]
 }
+
+export const SEED_IMPORTERS_LISTED = 10
 
 export interface ReverseDepStats {
   files_scanned: number
@@ -242,7 +251,7 @@ export function memoProbe(probe: ResolveProbe): ResolveProbe {
   }
 }
 
-type EntryKind = 'file' | 'dir' | 'other'
+type EntryKind = 'file' | 'dir' | 'other' | 'missing'
 
 type WantedKind = 'file' | 'dir' | 'any'
 
@@ -268,10 +277,16 @@ function pathSegments(path: string): string[] {
   return path.split(/[\\/]+/).filter((segment) => segment !== '')
 }
 
-function entryKind(entry: Dirent): EntryKind {
+function entryKind(dir: string, entry: Dirent): EntryKind {
   if (entry.isFile()) return 'file'
   if (entry.isDirectory()) return 'dir'
-  return 'other'
+  if (!entry.isSymbolicLink()) return 'other'
+  try {
+    const target = statSync(join(dir, entry.name))
+    return target.isFile() ? 'file' : target.isDirectory() ? 'dir' : 'other'
+  } catch {
+    return 'missing'
+  }
 }
 
 function readListing(dir: string, memo: CaseMemo): Listing | null {
@@ -282,7 +297,7 @@ function readListing(dir: string, memo: CaseMemo): Listing | null {
     const kinds = new Map<string, EntryKind>()
     const folded = new Map<string, string[]>()
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      kinds.set(entry.name, entryKind(entry))
+      kinds.set(entry.name, entryKind(dir, entry))
       const key = entry.name.toLowerCase()
       const names = folded.get(key)
       if (names) names.push(entry.name)
@@ -297,8 +312,8 @@ function readListing(dir: string, memo: CaseMemo): Listing | null {
 }
 
 function kindFits(kind: EntryKind | undefined, wanted: WantedKind): boolean {
-  if (kind === undefined) return false
-  return wanted === 'any' || kind === 'other' || kind === wanted
+  if (kind === undefined || kind === 'missing') return false
+  return wanted === 'any' || kind === wanted
 }
 
 function matchName(listing: Listing, name: string, wanted: WantedKind): { state: CaseState; name: string } {
@@ -348,8 +363,20 @@ function firstFolded(listing: Listing, names: readonly string[], wanted: WantedK
   return 'absent'
 }
 
+function storedSpelling(path: string, memo: CaseMemo): string {
+  const absolute = resolvePath(path)
+  const top = parse(absolute).root
+  let spelled = top
+  for (const name of pathSegments(absolute.slice(top.length))) {
+    const listing = readListing(spelled, memo)
+    const match = listing === null ? null : matchName(listing, name, 'dir')
+    spelled = join(spelled, match === null || match.state === 'absent' ? name : match.name)
+  }
+  return spelled
+}
+
 function resolvesByCaseOnly(importerAbs: string, spec: string, memo: CaseMemo): boolean {
-  if (!spec.startsWith('.')) return false
+  if (!spec.startsWith('.') || spec.includes('\\')) return false
   const target = resolvePath(dirname(importerAbs), spec)
   const directoryOnly = DIRECTORY_SPECIFIER.test(spec)
   const parent = folderCase(dirname(target), memo)
@@ -379,7 +406,7 @@ function resolvesByCaseOnly(importerAbs: string, spec: string, memo: CaseMemo): 
   return source !== 'absent' && (source === 'inexact' || folderInexact)
 }
 
-function byDepthThenFile(a: DiscoveredImporter, b: DiscoveredImporter): number {
+function byDepthThenFile(a: SeedImporter, b: SeedImporter): number {
   if (a.depth !== b.depth) return a.depth - b.depth
   return a.file.localeCompare(b.file)
 }
@@ -389,10 +416,10 @@ function importersOfSeed(
   declared: ReadonlySet<string>,
   reverseDeps: ReadonlyMap<string, ReadonlySet<string>>,
   maxDepth: number,
-): DiscoveredImporter[] {
+): SeedImporters {
   const seen = new Set<string>(declared)
-  const found: DiscoveredImporter[] = []
-  const queue: BfsItem[] = [{ file: seed, depth: 0, via: [seed] }]
+  const found: SeedImporter[] = []
+  const queue: SeedImporter[] = [{ file: seed, depth: 0 }]
   while (queue.length > 0) {
     const item = queue.shift()!
     if (item.depth >= maxDepth) continue
@@ -401,12 +428,18 @@ function importersOfSeed(
     for (const importer of importers) {
       if (seen.has(importer)) continue
       seen.add(importer)
-      const next: DiscoveredImporter = { file: importer, via_paths: [...item.via, importer], depth: item.depth + 1 }
+      const next: SeedImporter = { file: importer, depth: item.depth + 1 }
       found.push(next)
-      if (next.depth < maxDepth) queue.push({ file: importer, depth: next.depth, via: next.via_paths })
+      if (next.depth < maxDepth) queue.push(next)
     }
   }
-  return found.sort(byDepthThenFile)
+  found.sort(byDepthThenFile)
+  return {
+    seed,
+    count: found.length,
+    direct: found.filter((importer) => importer.depth === 1).length,
+    listed: found.slice(0, SEED_IMPORTERS_LISTED),
+  }
 }
 
 const CASE_EXAMPLES_SHOWN = 5
@@ -533,11 +566,9 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
   const candidates = walkFiles(projectRoot, langGlobs, excludeGlobs)
   const directoryEntries = new Map<string, Set<string>>()
   const probe = memoProbe(input.probe ?? diskProbe(projectRoot, directoryEntries))
-  const caseMemo: CaseMemo = {
-    rootSegments: pathSegments(resolvePath(projectRoot)),
-    listings: new Map(),
-    folders: new Map(),
-  }
+  const caseMemo: CaseMemo = { rootSegments: [], listings: new Map(), folders: new Map() }
+  const caseRoot = storedSpelling(projectRoot, caseMemo)
+  caseMemo.rootSegments = pathSegments(caseRoot)
   const caseExamples: string[] = []
   stats.files_scanned = candidates.length
 
@@ -552,9 +583,10 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
       continue
     }
     const candidateRel = relPosix(projectRoot, candidateAbs)
+    const caseImporter = join(caseRoot, relative(projectRoot, candidateAbs))
     const imports = extractImports(content)
     for (const spec of imports) {
-      if (resolvesByCaseOnly(candidateAbs, spec, caseMemo)) {
+      if (resolvesByCaseOnly(caseImporter, spec, caseMemo)) {
         stats.case_inexact_specifiers++
         if (caseExamples.length < CASE_EXAMPLES_SHOWN) caseExamples.push(`${candidateRel} -> '${spec}'`)
       }
@@ -606,10 +638,7 @@ export function walkReverseDeps(input: ReverseDepInput): ReverseDepResult {
 
   const discovered = [...discoveredMap.values()].sort(byDepthThenFile)
   const declaredSet = new Set(declared)
-  const bySeed: SeedImporters[] = [...declaredSet].map((seed) => ({
-    seed,
-    importers: importersOfSeed(seed, declaredSet, reverseDeps, maxDepth),
-  }))
+  const bySeed: SeedImporters[] = [...declaredSet].map((seed) => importersOfSeed(seed, declaredSet, reverseDeps, maxDepth))
 
   const uncoveredSeeds = declared.filter((d) => !seedIsCoverable(d, langGlobs))
   const coverage: WalkCoverage =
@@ -676,7 +705,7 @@ export function coverageHints(result: ReverseDepResult): string[] {
   const uncovered = result.uncovered_seeds
 
   if (uncovered.length > 0) {
-    const reached = new Set(result.by_seed.filter((s) => s.importers.length > 0).map((s) => s.seed))
+    const reached = new Set(result.by_seed.filter((s) => s.count > 0).map((s) => s.seed))
     const found = uncovered.filter((seed) => reached.has(seed))
     const blind = uncovered.filter((seed) => !reached.has(seed))
     const whole =
