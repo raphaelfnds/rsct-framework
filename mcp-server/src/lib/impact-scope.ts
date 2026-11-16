@@ -7,7 +7,7 @@ import { appliesToLineIssues, declaredCandidates, unmatchedGlobs, type HeadSide,
 import { specLabel } from './dialog-text.js'
 import { globToRegex, toPosix } from './phase-scope.js'
 
-export const IMPACT_DIR = 'documentation/impact'
+const IMPACT_DIR = 'documentation/impact'
 
 const ISSUES_SHOWN = 10
 
@@ -41,7 +41,7 @@ export interface ImpactHit {
   total: number
 }
 
-export const IMPACT_MATCHES_KEPT = 20
+const IMPACT_MATCHES_KEPT = 20
 
 const STYLED_NEAR_MISS = /applies[\s_-]*to\s*(?::|\*\*|__)/i
 
@@ -52,7 +52,7 @@ interface SideDoc {
   appliesTo: AppliesTo | undefined
 }
 
-export function isImpactDocName(name: string): boolean {
+function isImpactDocName(name: string): boolean {
   return /\.md$/i.test(name) && !/^README\.md$/i.test(name)
 }
 
@@ -158,7 +158,7 @@ function stripExtension(path: string): string {
   return basename(toPosix(path)).replace(/\.[^.]+$/, '')
 }
 
-export function impactDocsCovering(docs: readonly ImpactDoc[], declared: readonly string[], candidates: readonly string[]): ImpactHit[] {
+function impactDocsCovering(docs: readonly ImpactDoc[], declared: readonly string[], candidates: readonly string[]): ImpactHit[] {
   const hits: ImpactHit[] = []
   for (const doc of docs) {
     const matches: ImpactMatch[] = []
@@ -198,7 +198,7 @@ export function impactMatchLines(hit: ImpactHit): string {
   return lines.join('\n')
 }
 
-export function impactHints(corpus: ImpactCorpus, files: readonly string[] | null): string[] {
+function impactHints(corpus: ImpactCorpus, files: readonly string[] | null): string[] {
   const hints: string[] = []
   const entries = corpus.docs.map((doc) => ({ label: doc.path, globs: doc.globs }))
   const lines = [...(files === null ? [] : unmatchedGlobs({ entries }, files)), ...corpus.line_issues]

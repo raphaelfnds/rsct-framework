@@ -88,7 +88,7 @@ export interface SeedImporters {
   listed: SeedImporter[]
 }
 
-export const SEED_IMPORTERS_LISTED = 10
+const SEED_IMPORTERS_LISTED = 10
 
 export interface ReverseDepStats {
   files_scanned: number
