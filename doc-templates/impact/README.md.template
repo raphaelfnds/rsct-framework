@@ -19,6 +19,11 @@ who depends on it, and what to check before merging.
 - Module signature changed → update the corresponding `impact/<name>.md`
 - New non-obvious coupling discovered → record it in the affected module's impact file under "Non-obvious couplings"
 - Change in risk assessment → update the risk table for the affected change types
+- Module spread over a folder, or a file whose name differs from the module → add one line under the
+  title of its impact file, with paths relative to the project root:
+  `**Applies to**: src/orders/**, src/billing/invoice.ts`. The V phase then raises the file when a
+  plan touches those paths, as well as when a planned file has its name. Adding or fixing the line is
+  metadata, not a rewrite.
 
 ## How to read an impact file
 
