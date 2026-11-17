@@ -85,14 +85,17 @@ function globsByKey(side: readonly SideEntry[]): Map<string, Set<string>> {
   return out
 }
 
-function lineIssues(entry: SideEntry): string[] {
-  const appliesTo = entry.appliesTo
+export function appliesToLineIssues(label: string, appliesTo: AppliesTo | undefined): string[] {
   if (appliesTo === undefined) return []
   return [
-    ...appliesTo.rejected.map((rejected) => `${entry.label}: ${specLabel(rejected, 120)} is refused`),
-    ...appliesTo.unbound.map((value) => `${entry.label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
-    ...appliesTo.unread.map((line) => `${entry.label}: "${specLabel(line, 80)}" is not read: write **Applies to**: <glob>, <glob>`),
+    ...appliesTo.rejected.map((rejected) => `${label}: ${specLabel(rejected, 120)} is refused`),
+    ...appliesTo.unbound.map((value) => `${label}: "${specLabel(value, 80)}" binds nothing: every item must be a path without spaces`),
+    ...appliesTo.unread.map((line) => `${label}: "${specLabel(line, 80)}" is not read: write **Applies to**: <glob>, <glob>`),
   ]
+}
+
+function lineIssues(entry: SideEntry): string[] {
+  return appliesToLineIssues(entry.label, entry.appliesTo)
 }
 
 function merge(working: readonly SideEntry[], head: readonly SideEntry[], side: HeadSide, headNotes: string[], workingNotes: string[]): BoundCorpus {
@@ -197,7 +200,7 @@ export function decisionsCovering(entries: readonly BoundDecision[], paths: read
   return hits
 }
 
-function unmatchedGlobs(corpus: BoundCorpus, files: readonly string[]): string[] {
+export function unmatchedGlobs(corpus: { entries: readonly { label: string; globs: readonly string[] }[] }, files: readonly string[]): string[] {
   const lines: string[] = []
   for (const entry of corpus.entries) {
     for (const glob of entry.globs) {
@@ -259,15 +262,32 @@ export interface DeclaredCoverage {
   hints: string[]
 }
 
+export interface ScopeContext {
+  repo: SweepRepo | null
+  files: () => string[] | null
+}
+
+export function scopeContext(projectRoot: string): ScopeContext {
+  const repo = openSweepRepo(projectRoot)
+  let files: string[] | null | undefined
+  return {
+    repo,
+    files: () => {
+      if (files === undefined) files = listProjectFiles(projectRoot, repo)
+      return files
+    },
+  }
+}
+
 export function declaredDecisionCoverage(
   projectRoot: string,
   declared: readonly string[],
   working: { decisions: DecisionsSnapshot; antiDecisions: AntiDecisionsSnapshot },
+  context: ScopeContext = scopeContext(projectRoot),
 ): DeclaredCoverage {
-  const repo = openSweepRepo(projectRoot)
-  const corpus = readBoundCorpus(projectRoot, { repo, ...working })
+  const corpus = readBoundCorpus(projectRoot, { repo: context.repo, ...working })
   if (corpus.entries.length === 0 && corpus.line_issues.length === 0 && corpus.head !== 'unreadable') return { hits: [], hints: [] }
-  const files = listProjectFiles(projectRoot, repo)
+  const files = context.files()
   const hits = decisionsCovering(corpus.entries, declaredCandidates(declared, files ?? []))
   return { hits, hints: appliesToHints(corpus, files) }
 }

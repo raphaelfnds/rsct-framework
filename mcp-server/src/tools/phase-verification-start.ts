@@ -114,7 +114,7 @@ export interface PhaseVerificationStartOutput {
 export const phaseVerificationStartTool: Tool = {
   name: 'rsct_phase_verification_start',
   description:
-    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given — omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints. Decisions and anti-decisions whose optional "Applies to" line (read at HEAD and in the working tree) matches a declared path, or a file under a declared folder or glob, come back as ONE gap finding listing their ids, emitted after every other finding; "Applies to" globs that match no file and lines that bind nothing come back in hints.',
+    'Start the V (Verification) phase between spec-approval and code-edit. Runs the reverse-dependency walk over declared_paths, executes the checklist (gap / breakage / redundancy / forgotten) against the project decisions + knowledge + architecture + impact docs, writes the verification block into .rsct/phase-state.json, and emits one audit event per finding. For spec_tier=trivial|small the phase is skipped (audit-only). Refuses with phase_already_active if a DIFFERENT phase is already active — close or abandon it first. The severity on each finding is a RECOMMENDATION, but answering is not optional: the dev sets an action on EVERY finding via rsct_phase_verification_complete, and leaving any unanswered rejects completion. Echo the returned findings_run_id back on that call. Note the checklist can only see what it is given — omitting spec_claims or existing_project_files shrinks the baseline it can raise. The contract check reads what the commit gate reads: every .rsct.json from the project folder to the repository top (working tree and HEAD, at their strictest) and, in each linked universe, its working tree, HEAD and fetched upstream; what changed since the last approved commit comes back in hints. Decisions and anti-decisions whose optional "Applies to" line (read at HEAD and in the working tree) matches a declared path, or a file under a declared folder or glob, come back as ONE gap finding listing their ids; "Applies to" globs that match no file and lines that bind nothing come back in hints. Each declared path lists every importer the walk reaches from it, even one shared with another declared path. Impact docs (documentation/impact/*.md) are read at HEAD and in the working tree: one matched by file name raises a finding as before, and one matched only through its optional "Applies to" line, or present only at HEAD, raises its own impact-doc finding at the end, marked when it was added, deleted, changed or is unreadable. Imports that reach a file only when letter case is ignored are counted (walk_stats.case_inexact_specifiers) and named in hints, the same on every system.',
   inputSchema: {
     type: 'object',
     required: ['spec_ref'],
@@ -200,6 +200,7 @@ export async function phaseVerificationStartHandler(
     projectRoot,
     declaredPaths: walk.declared,
     discoveredImporters: walk.discovered,
+    importersBySeed: walk.by_seed,
     specTier: input.spec_tier,
     contractGraph,
     appNames: universe?.apps ?? (config?.app?.name ? [config.app.name] : []),
@@ -422,6 +423,7 @@ export async function phaseVerificationStartHandler(
       contracts_scanned: checklist.stats.contracts_scanned,
       uncovered_seed_count: walk.uncovered_seeds.length,
       unresolved_js_specifiers: walk.stats.unresolved_js_specifiers,
+      case_inexact_specifiers: walk.stats.case_inexact_specifiers,
       claims_count: input.spec_claims?.length ?? 0,
       findings_count: checklist.findings.length,
       evidence_mix: summarizeEvidence(checklist.findings),

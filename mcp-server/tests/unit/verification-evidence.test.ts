@@ -45,7 +45,7 @@ function writeFile(rel: string, content: string): void {
 function seedFullCorpus(): void {
   writeFile(
     'documentation/decisions.md',
-    '## ADR-1 — Pessimistic lock closes the read-SUM-write race\n\nWe took a pessimistic lock on the stock record.\n',
+    '## ADR-1 — Pessimistic lock closes the read-SUM-write race\n\nWe took a pessimistic lock on the stock record.\n\n## ADR-2 — Module boundary\n**Applies to**: src/**\n\nEach module owns its folder.\n',
   )
   writeFile(
     'documentation/knowledge/anti-decisions.md',
@@ -138,7 +138,7 @@ describe('evidenceForSource — a total table whose default is the weakest class
     expect(e.how_to_falsify).toMatch(/vocabulary coincidence/)
   })
 
-  it('T10d — doc-derived sources are REPORTED against a working tree, never a commit', () => {
+  it('T10d — doc-derived sources default to REPORTED against a working tree, never a commit (a doc read only at HEAD is set per finding, blast-radius.test.ts)', () => {
     for (const source of ['impact-doc', 'architecture-overview']) {
       const e = evidenceForSource({ ...raw, source })
       expect(e.kind).toBe('reported')
@@ -173,6 +173,7 @@ describe('runVerificationChecklist — every emitted source is classified', () =
       'architecture-overview',
       'basename-overlap',
       'contract-surface',
+      'decision-scope',
       'impact-doc',
       'knowledge-category:*',
       'premise-check',

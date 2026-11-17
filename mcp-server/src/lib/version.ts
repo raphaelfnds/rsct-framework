@@ -1,1 +1,1 @@
-export const RSCT_MCP_VERSION = '2.26.0'
+export const RSCT_MCP_VERSION = '2.27.0'

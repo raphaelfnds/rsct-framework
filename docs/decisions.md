@@ -403,7 +403,7 @@ U+2029 outright. Both ends fail closed.
 scope glob relied on the wide match now sees `out_of_scope` — the stricter direction.
 
 ### ADR-016 — The walk resolves NodeNext specifiers, case-exactly, as a last resort (#77, 2.11.2)
-**Status**: active — the `.mjs`/`.cjs` gap named in the Decision was closed in 2.12.0 (#101 Part A, which added `.mts`/`.cts` and the mapping); candidates outside the project root are ADR-020
+**Status**: active — the `.mjs`/`.cjs` gap named in the Decision was closed in 2.12.0 (#101 Part A, which added `.mts`/`.cts` and the mapping); candidates outside the project root are ADR-020; a case difference on the main resolution path is counted and hinted on every system since 2.27.0 (ADR-049)
 **Tags**: v-phase, blast-radius, cross-os
 **Context**: under `"module": "NodeNext"` TypeScript source imports `'./x.js'` for a file stored as
 `x.ts`. The walk probed `target + ext` only, so the specifier resolved to nothing. MEASURED on this
@@ -718,7 +718,7 @@ active-phase block of `rsct_load_context` (which prints the parse warning elsewh
 the call each of those answers points to refuses and names it.
 
 ### ADR-020 — An import candidate outside the project root is matched on its file name only (#101)
-**Status**: active
+**Status**: active — the open consequence below is counted and hinted on every system since 2.27.0 (ADR-049)
 **Tags**: v-phase, blast-radius, cross-os
 **Context**: ADR-016 made the NodeNext case check walk every segment from the project root.
 `hasExactPath` hands a candidate OUTSIDE the root to `hasExactEntry` instead, and that branch had no
@@ -3333,6 +3333,101 @@ universe decisions do not take the line.
 **Consequences**: the server change reaches a machine through the installer; the template, §H and
 memory-entry text reach a project through `/rsct-setup`, for files and sections the project did not
 edit.
+
+### ADR-049 — Impact notes stay in the developer's files and bind to code; the walk is not persisted; every declared path lists all its importers; case-inexact imports are counted (#158, 2.27.0)
+**Status**: active
+**Tags**: v-phase, blast-radius, impact-docs, cross-os, topology
+
+**Context**: MEASURED on `main` @ `c691648` (2.26.0):
+- V raised an impact-doc finding only when `documentation/impact/<name>.md` had the base name of a
+  declared path, read from the working tree only; the folder pairs 1:1 with `modules/`, so a module
+  folder (`src/orders/service.ts`) never matched `orders.md`, and deleting the doc in the working
+  tree hid the finding;
+- the framework's own example (`examples/java-spring/documentation/impact/auth.md`) lists, under
+  "Who depends on this module", web and mobile clients of `/auth/*` that no import graph finds, so
+  even that section is not fully derivable;
+- the walk cost about 1.2-1.5 ms per scanned file on native Windows (2,000 synthetic files 2.8 s,
+  10,000 12 s, 30,000 36 s), 0.08-0.1 ms on a WSL Linux disk, and 20-24 s for this repository's
+  329-file `mcp-server` from WSL over `/mnt/c`; most of it was repeated `existsSync`/`stat` calls,
+  because `resolveImport` built a new probe for every import;
+- one walk shares a single "seen" set across declared paths and V grouped importers by the first
+  seed that reached them: an importer of two declared paths was listed under the first only, and a
+  declared path whose importers were all listed first got no finding;
+- `path.relative` ignores letter case on win32, and only the NodeNext branch checked case: an import
+  spelled `./Widget.js` for `widget.js`, or `../../Proj/...` for a folder named `proj`, gave
+  different importers and hints on Windows and on Linux (ADR-016's invariant, broken on the main
+  path; ADR-020's open consequence).
+
+**Decision**:
+1. This changes the #54 decision of 2026-08-15 ("the graph replaces `documentation/impact/*.md` as
+   the source of truth; the non-derivable parts migrate into the graph as annotations"), by the
+   maintainer's choice in the 2.27.0 R: the human notes stay in the developer's impact files, which
+   the framework reads and never writes; V lists the walk's importers beside them, and nothing in an
+   impact file is demoted. A second hand-written annotation store would be the second source of
+   truth that decision wanted to avoid.
+2. An impact doc may carry the ADR-048 `**Applies to**:` line (same reader, limits and refusals).
+   Impact docs are read at HEAD (at the project's prefix, the folder listed with `ls-tree`, not
+   recursive, folders skipped, blobs in one batch) and in the working tree, joined by the exact,
+   case-sensitive path in Unicode NFC form; `README.md` is never a doc. A doc matches when it has the
+   base name of a declared path or when one of its globs matches a declared path or a file under a
+   declared folder or glob. The base-name finding on a working-tree doc is unchanged, and only the
+   doc it actually raised is skipped afterwards; any other match raises one `breakage` /
+   `impact-doc` / `address-now` finding per doc, last of all (after the decision-scope finding and
+   the findings of point 4), docs in code-unit path order, listing the first 20 matched paths and the
+   count, marked "added since HEAD", "line removed or changed since HEAD", "deleted in the working
+   tree" or "unreadable in the working tree"; a doc read from HEAD only carries `reported` evidence
+   against the HEAD commit. A link or a non-tree on the way to the folder, or a doc that is a link at
+   HEAD, makes the HEAD side unreadable, said in a hint. In an impact doc a "not read" near miss is
+   reported only when `applies to` is followed by `:`, `**` or `__`, so prose and table rows that start
+   with those words stay quiet. `impact_docs_consulted` counts the joined docs.
+3. No dependency graph is persisted (this changes #158's stage 3, by the maintainer's choice): a
+   stale cache would list fewer importers. The walk keeps one probe per walk and remembers
+   `exists` / `isFile` / `isDirectory` per exact absolute path (`memoProbe`), never across walks;
+   MEASURED with identical output: this repository 290 → 128 ms, 10,000 files 12.7 → 8.5 s, WSL over
+   `/mnt/c` 20.0 → 4.8 s. Answers built from directory listings were not adopted (8.3 short names,
+   macOS Unicode and case folding, permission cases). The walk still runs before the tier skip, so
+   `walk_coverage` is audited on every return path.
+4. Each declared path gets its own breadth-first search over the same reverse index (`by_seed`), a
+   declared path never counted as an importer; each entry keeps the count, the direct count and the
+   first 10 importers, not the whole list (REVIEW MEASURED 668 MB and 55 MB of findings for 500
+   declared paths sharing 5,000 importers when the whole list was kept). `discovered` and
+   `cycles_skipped` are unchanged. V titles each importer finding with the full count and severity;
+   its `affected_paths` holds the importers the shared walk gave it, as before, plus the first 10 of
+   its own, so every importer still appears in some finding as in 2.26.0; a declared path that had no
+   finding gets one after the decision-scope finding, so no earlier id moves; the coverage hint
+   decides "found" from the counts.
+5. `case_inexact_specifiers` counts relative imports whose first candidate, in `resolveImport`'s
+   order, matches only when letter case is ignored, decided from memoised directory listings so the
+   same imports count on every system. The project root is first respelled as stored on disk (read
+   from the listings from the filesystem root down) and the importer paths are rebased onto it, so
+   the count does not depend on how the root was spelled; segments below the longest exact prefix
+   shared with that root are compared. A linked entry is judged by what it points to. A specifier
+   holding a backslash is skipped, because only Windows reads it as a path. Resolution and edges do
+   not change; a hint names up to five and says the importer set is a lower bound; the zero-importer
+   and incomplete hints keep their conditions. The count is audited on `verification.start`.
+   ADR-020's open consequence is now visible on every system instead of resolved one way.
+6. `rsct_get_topology` takes `impact: true` with `paths` and returns `paths_impact`: each file's
+   importers (first 10, at most 200 in total, the rest counted), the walk coverage and hints, and the
+   impact docs matched over files and folders (first 20 paths each, with `match_count`);
+   `truncated` is true when any list was cut, and the summary hint says how many notes sit in
+   `paths_impact.hints`. Without the flag the fields are unchanged and a hint names it; the tool
+   writes nothing.
+
+**Direction**: stricter or neutral. Every impact finding raised before is still raised with the same
+id; more docs match; a doc removed or changed in the working tree is still read from HEAD; importer
+lists only grow; the case hint is new on every system and removes nothing.
+
+**What is given up, by name**: V can raise more findings to answer (one per newly matched doc, one
+per declared path that only shared importers); the walk is still a full scan per V run, about 0.85
+ms per file on native Windows after the change; a doc's globs are hand-written and can go stale,
+which the no-match hint shows; a doc matched by name for two declared paths raises two findings while
+it is in the working tree and one finding listing both once it is gone from it; a folder listing
+that cannot be read leaves the case check silent for imports under it; the case count classifies, it does not make the importer lists equal
+across systems.
+
+**Consequences**: the server change reaches a machine through the installer; the impact README
+template reaches a project through `/rsct-setup`, for a file the project did not edit. The hook
+bundles do not contain the walk.
 
 ## Anti-decisions (tried, rejected, do not retry)
 

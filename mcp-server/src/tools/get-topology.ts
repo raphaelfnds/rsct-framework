@@ -18,9 +18,19 @@ import { FIRST_RECORD_LINE, gatherContractFacts } from '../lib/contract-facts.js
 import { defaultGitExecutor } from '../lib/git.js'
 import { toPosix } from '../lib/phase-scope.js'
 import type { RsctConfig } from '../lib/project-root.js'
+import { DEFAULT_LANG_SUFFIXES, walkReverseDeps, type WalkCoverage } from '../lib/reverse-dep-walk.js'
+import { scopeContext } from '../lib/decision-scope.js'
+import { declaredImpactCoverage, impactMark, type ImpactMatch } from '../lib/impact-scope.js'
+
+const IMPORTERS_PER_PATH = 10
+
+const IMPORTERS_LISTED_MAX = 200
 
 const PATHS_DESCRIPTION =
-  'Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. Importers and impact docs stay in the V phase (rsct_phase_verification_start). A folder and a path outside the project root are reported as such, never as untouched.'
+  'Optional files you plan to change, relative to the project root or absolute. The answer (paths_check) lists the contracts whose surface they touch and the declared consumers, read the way V and the commit gate read them: every .rsct.json app name, and in each linked universe its working tree, HEAD and fetched upstream. It never records the universe baseline. With impact: true the answer (paths_impact) also lists the importers of each file and the impact docs bound to the paths. A folder and a path outside the project root are reported as such, never as untouched.'
+
+const IMPACT_DESCRIPTION =
+  'Optional, used with paths. When true, paths_impact lists, for each file, the files that import it (the V-phase import walk, depth 2: first 10 per file, at most 200 in total, the rest counted) and the impact docs (documentation/impact/*.md, at HEAD and in the working tree) matched by file name or by their "Applies to" line, folders included (first 20 matched paths per doc, match_count has them all; truncated is true when any list was cut). It reads every source file of the project, so it is off by default. Nothing is written.'
 
 export const getTopologyInputSchema = z
   .object({
@@ -29,6 +39,7 @@ export const getTopologyInputSchema = z
       .optional()
       .describe('Optional absolute path to override project root detection. The SHARED anchors (audit log, approval anti-reuse store) resolve at the GIT REPOSITORY this path sits in, not at the path itself — a subdirectory cannot present its own budget, lock or history for commits that land in the parent.'),
     paths: z.array(z.string().min(1)).max(500).optional().describe(PATHS_DESCRIPTION),
+    impact: z.boolean().optional().describe(IMPACT_DESCRIPTION),
   })
   .strict()
 
@@ -44,6 +55,22 @@ export interface GetTopologyOutput {
   produced: Contract[]
   consumed: Contract[]
   paths_check?: PathsCheck
+  paths_impact?: PathsImpact
+  hints: string[]
+}
+
+export interface PathImporters {
+  path: string
+  count: number
+  direct: number
+  listed: { file: string; depth: number }[]
+}
+
+export interface PathsImpact {
+  importers: PathImporters[]
+  walk_coverage: WalkCoverage
+  impact_docs: { doc: string; mark: string; matches: ImpactMatch[]; match_count: number }[]
+  truncated: boolean
   hints: string[]
 }
 
@@ -62,7 +89,7 @@ export interface PathsCheck {
 export const getTopologyTool: Tool = {
   name: 'rsct_get_topology',
   description:
-    "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo — inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
+    "Reports the project's repo TOPOLOGY (mono / monorepo / multi-repo — inferred + dev-confirmed) and the org-level CONTRACT GRAPH from the linked universe's contracts.json: the contracts this app produces (its surfaces) and consumes (its dependencies). In multi-repo mode, rsct_request_commit BLOCKS a commit that touches a produced contract surface (listing the affected consumers) unless dev_approval.override_contract_surface is given. Call this when rsct_status reports topology multi-repo, before changing shared API/schema/event surfaces, to see who depends on them. Pass paths to see which contracts the files you plan to change touch (paths_check), read the way V and the commit gate read them; add impact: true to also see the files that import them and the impact docs bound to them (paths_impact), outside any phase. Always succeeds; degrades to a hint when no universe / no contracts.json is present.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -75,6 +102,10 @@ export const getTopologyTool: Tool = {
         items: { type: 'string', minLength: 1 },
         maxItems: 500,
         description: PATHS_DESCRIPTION,
+      },
+      impact: {
+        type: 'boolean',
+        description: IMPACT_DESCRIPTION,
       },
     },
     additionalProperties: false,
@@ -182,6 +213,14 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
 
   const pathsCheck = input.paths === undefined ? undefined : checkPaths(resolution.root, resolution.config, input.paths)
   if (pathsCheck !== undefined) hints.push(describePathsCheck(pathsCheck))
+  if (pathsCheck !== undefined && input.impact !== true) {
+    hints.push('Pass impact: true to also list the files that import these paths and the impact docs bound to them.')
+  }
+  const pathsImpact = input.impact === true && input.paths !== undefined ? impactOfPaths(resolution.root, input.paths) : undefined
+  if (input.impact === true && input.paths === undefined) {
+    hints.push('impact: true needs paths: pass the files you plan to change. No import walk ran.')
+  }
+  if (pathsImpact !== undefined) hints.push(describePathsImpact(pathsImpact))
 
   return {
     rsct_installed: resolution.rsct_installed,
@@ -193,15 +232,74 @@ export async function getTopologyHandler(rawInput: unknown): Promise<GetTopology
     produced,
     consumed,
     ...(pathsCheck !== undefined && { paths_check: pathsCheck }),
+    ...(pathsImpact !== undefined && { paths_impact: pathsImpact }),
     hints,
   }
 }
 
-function checkPaths(root: string, config: RsctConfig | null, paths: readonly string[]): PathsCheck {
+function sortPaths(root: string, paths: readonly string[]): { files: string[]; folders: string[]; outside: string[] } {
   const rel = [...new Set(paths.map((p) => toPosix(relative(root, isAbsolute(p) ? p : resolve(root, p)))))]
   const outside = rel.filter((p) => p === '..' || p.startsWith('../') || isAbsolute(p))
   const folders = rel.filter((p) => !outside.includes(p) && (p === '' || isFolder(resolve(root, p))))
   const files = rel.filter((p) => !outside.includes(p) && !folders.includes(p))
+  return { files, folders, outside }
+}
+
+function impactOfPaths(root: string, paths: readonly string[]): PathsImpact {
+  const { files, folders } = sortPaths(root, paths)
+  const walk = walkReverseDeps({ projectRoot: root, seedPaths: files })
+  let remaining = IMPORTERS_LISTED_MAX
+  let truncated = false
+  const importers: PathImporters[] = walk.by_seed.map((entry) => {
+    const shown = Math.min(entry.listed.length, IMPORTERS_PER_PATH, remaining)
+    remaining -= shown
+    if (shown < entry.count) truncated = true
+    return {
+      path: entry.seed,
+      count: entry.count,
+      direct: entry.direct,
+      listed: entry.listed.slice(0, shown).map((i) => ({ file: i.file, depth: i.depth })),
+    }
+  })
+  const coverage = impactCoverageLine(walk.uncovered_seeds, walk.declared.length, walk.stats.files_scanned)
+  const impact = declaredImpactCoverage(root, [...files, ...folders.map((p) => (p === '' ? '.' : p))], scopeContext(root))
+  return {
+    importers,
+    walk_coverage: walk.coverage,
+    impact_docs: impact.hits.map((hit) => ({ doc: hit.doc.path, mark: impactMark(hit.doc).trim(), matches: hit.matches, match_count: hit.total })),
+    truncated: truncated || impact.hits.some((hit) => hit.total > hit.matches.length),
+    hints: [
+      ...walk.hints,
+      ...coverage,
+      ...(folders.length > 0 ? [`Importers are listed per file; the ${folders.length} folder(s) given were used only to match impact docs.`] : []),
+      ...impact.hints,
+    ],
+  }
+}
+
+function impactCoverageLine(uncovered: readonly string[], declared: number, scanned: number): string[] {
+  const lines: string[] = []
+  if (uncovered.length > 0) {
+    lines.push(
+      `${uncovered.length} of ${declared} file(s) are not files the import walk can key on (it reads ${DEFAULT_LANG_SUFFIXES} files inside the project root): ${uncovered.slice(0, 10).join(', ')}${uncovered.length > 10 ? `, and ${uncovered.length - 10} more` : ''}. Their importers in other file types are not read: a listed set is a lower bound, an empty one is UNKNOWN.`,
+    )
+  }
+  if (declared > 0 && scanned === 0) {
+    lines.push('0 source files matched the import walk under the project root, so no import graph was built: an empty importer set here means UNKNOWN, not none.')
+  }
+  return lines
+}
+
+function describePathsImpact(impact: PathsImpact): string {
+  const listed = impact.importers.reduce((sum, entry) => sum + entry.listed.length, 0)
+  const total = impact.importers.reduce((sum, entry) => sum + entry.count, 0)
+  const more = impact.truncated ? ` (${listed} listed, the rest counted)` : ''
+  const notes = impact.hints.length > 0 ? ` ${impact.hints.length} note(s) in paths_impact.hints.` : ''
+  return `paths_impact: ${total} importer(s) across ${impact.importers.length} file(s)${more}; ${impact.impact_docs.length} impact doc(s) bound to the paths. Walk coverage: ${impact.walk_coverage}.${notes}`
+}
+
+function checkPaths(root: string, config: RsctConfig | null, paths: readonly string[]): PathsCheck {
+  const { files, folders, outside } = sortPaths(root, paths)
   const facts = gatherContractFacts({
     projectRoot: root,
     config,
@@ -245,5 +343,5 @@ function describePathsCheck(check: PathsCheck): string {
       : check.paths.length > 0
         ? 'No declared contract surface is touched by the files given.'
         : 'No file was given to match.'
-  return `paths_check: ${touched} Read the way V and the commit gate read contracts; importers and impact docs stay in the V phase.${unmatched}`
+  return `paths_check: ${touched} Read the way V and the commit gate read contracts.${unmatched}`
 }
